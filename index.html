@@ -807,6 +807,19 @@
             if (packs > 0 && singles > 0) res = `${packs} פאק' ו-${singles} יח'`; else if (packs > 0) res = `${packs} פאק'`; else res = `${singles} יח'`;
             return isNegative ? "+" + res + " (עודף)" : res;
         }
+        
+        // פונקציית עזר חדשה לעיצוב נקי עבור הריבועים של בדיקת החוסרים
+        const formatQtyClean = (units, perPack) => {
+            if (units === 0 || isNaN(units)) return "0";
+            let isNeg = units < 0;
+            let absU = Math.abs(units);
+            let p = Math.floor(absU / perPack);
+            let s = absU % perPack;
+            let txt = [];
+            if (p > 0) txt.push(`${p} פאק'`);
+            if (s > 0) txt.push(`${s} יח'`);
+            return (isNeg ? "-" : "") + txt.join(' ו-');
+        };
 
         function renderContacts() {
             const quickList = document.getElementById('contactsQuickList'); const managerList = document.getElementById('contactsManagerList');
@@ -1390,37 +1403,80 @@
                 let sold = salesData[p.id] || 0;
                 let manualPulls = window.APP_STATE.manualAdjustments[p.id] || 0;
                 
-                let expected = baseline - sold - manualPulls;
-                if (expected < 0) expected = 0; 
+                let totalDeducted = sold + manualPulls;
+                
+                // תוקן הבאג: הוסרה השורה שהגבילה את הצפי למינימום 0 כדי להציג חוסרים אמיתיים
+                let expected = baseline - totalDeducted;
                 
                 let actual = actualStocks[p.id] || 0;
                 let diff = expected - actual;
                 
-                if (diff > 0) { 
-                    totalShortagesFound++;
-                    window.tempShortagesData[p.id] = diff;
-                    
-                    html += `
-                    <div class="flex justify-between items-center p-3 mb-2 border border-red-200 rounded-lg bg-white shadow-sm">
-                        <span class="font-bold text-slate-800 text-sm">${p.name}</span>
-                        <div class="flex flex-col items-end text-left">
-                            <span class="text-[10px] text-slate-500 mb-0.5">צפי: ${expected} | נספר: ${actual}</span>
-                            <span class="text-red-700 font-black text-sm bg-red-100 px-2 py-0.5 rounded shadow-sm inline-block" dir="rtl">
-                                חסר: ${formatUnitsStringExplicit(diff, unitsPerPack)}
-                            </span>
-                        </div>
-                    </div>`;
-                } else if (diff < 0) { 
-                     html += `
-                    <div class="flex justify-between items-center p-3 mb-2 border border-blue-200 rounded-lg bg-white shadow-sm opacity-70">
-                        <span class="font-bold text-slate-800 text-sm">${p.name}</span>
-                        <div class="flex flex-col items-end text-left">
-                            <span class="text-[10px] text-slate-500 mb-0.5">צפי: ${expected} | נספר: ${actual}</span>
-                            <span class="text-blue-700 font-bold text-xs bg-blue-100 px-2 py-0.5 rounded shadow-sm inline-block" dir="rtl">
-                                עודף: ${formatUnitsStringExplicit(Math.abs(diff), unitsPerPack)}
-                            </span>
-                        </div>
-                    </div>`;
+                if (diff !== 0) { 
+                    let expectedText = formatQtyClean(expected, unitsPerPack);
+                    let baselineText = formatQtyClean(baseline, unitsPerPack);
+                    let deductedText = formatQtyClean(totalDeducted, unitsPerPack);
+                    let actualText = formatQtyClean(actual, unitsPerPack);
+
+                    if (diff > 0) { 
+                        totalShortagesFound++;
+                        window.tempShortagesData[p.id] = diff;
+                        
+                        html += `
+                        <div class="flex flex-col p-2 mb-3 border border-red-300 rounded-xl bg-white shadow-sm overflow-hidden">
+                            <div class="flex justify-between items-center bg-red-50 p-2 border-b border-red-100 -mt-2 -mx-2 mb-2">
+                                <span class="font-bold text-slate-800 text-sm">${p.name}</span>
+                                <span class="text-red-700 font-black text-xs bg-red-200 px-2 py-1 rounded-md shadow-sm" dir="rtl">
+                                    חסר: ${formatUnitsStringExplicit(diff, unitsPerPack)}
+                                </span>
+                            </div>
+                            <div class="grid grid-cols-4 gap-1 text-center">
+                                <div class="bg-slate-50 p-1.5 rounded border border-slate-200 flex flex-col justify-center">
+                                    <span class="text-[9px] text-slate-500 leading-tight mb-1">מלאי קודם</span>
+                                    <span class="font-bold text-slate-700 text-[11px]" dir="ltr">${baselineText}</span>
+                                </div>
+                                <div class="bg-slate-50 p-1.5 rounded border border-slate-200 flex flex-col justify-center">
+                                    <span class="text-[9px] text-slate-500 leading-tight mb-1">נמכר/פחת</span>
+                                    <span class="font-bold text-blue-600 text-[11px]" dir="ltr">${deductedText}</span>
+                                </div>
+                                <div class="bg-indigo-50 p-1.5 rounded border border-indigo-200 flex flex-col justify-center shadow-inner">
+                                    <span class="text-[9px] text-indigo-700 leading-tight mb-1 font-bold">מערכת ציפתה</span>
+                                    <span class="font-black text-indigo-800 text-[11px]" dir="ltr">${expectedText}</span>
+                                </div>
+                                <div class="bg-slate-50 p-1.5 rounded border border-slate-200 flex flex-col justify-center">
+                                    <span class="text-[9px] text-slate-500 leading-tight mb-1">אתה הזנת</span>
+                                    <span class="font-bold text-slate-700 text-[11px]" dir="ltr">${actualText}</span>
+                                </div>
+                            </div>
+                        </div>`;
+                    } else if (diff < 0) { 
+                         html += `
+                        <div class="flex flex-col p-2 mb-3 border border-blue-300 rounded-xl bg-white shadow-sm overflow-hidden opacity-90">
+                            <div class="flex justify-between items-center bg-blue-50 p-2 border-b border-blue-100 -mt-2 -mx-2 mb-2">
+                                <span class="font-bold text-slate-800 text-sm">${p.name}</span>
+                                <span class="text-blue-700 font-black text-xs bg-blue-200 px-2 py-1 rounded-md shadow-sm" dir="rtl">
+                                    עודף: ${formatUnitsStringExplicit(Math.abs(diff), unitsPerPack)}
+                                </span>
+                            </div>
+                            <div class="grid grid-cols-4 gap-1 text-center">
+                                <div class="bg-slate-50 p-1.5 rounded border border-slate-200 flex flex-col justify-center">
+                                    <span class="text-[9px] text-slate-500 leading-tight mb-1">מלאי קודם</span>
+                                    <span class="font-bold text-slate-700 text-[11px]" dir="ltr">${baselineText}</span>
+                                </div>
+                                <div class="bg-slate-50 p-1.5 rounded border border-slate-200 flex flex-col justify-center">
+                                    <span class="text-[9px] text-slate-500 leading-tight mb-1">נמכר/פחת</span>
+                                    <span class="font-bold text-blue-600 text-[11px]" dir="ltr">${deductedText}</span>
+                                </div>
+                                <div class="bg-indigo-50 p-1.5 rounded border border-indigo-200 flex flex-col justify-center shadow-inner">
+                                    <span class="text-[9px] text-indigo-700 leading-tight mb-1 font-bold">מערכת ציפתה</span>
+                                    <span class="font-black text-indigo-800 text-[11px]" dir="ltr">${expectedText}</span>
+                                </div>
+                                <div class="bg-slate-50 p-1.5 rounded border border-slate-200 flex flex-col justify-center">
+                                    <span class="text-[9px] text-slate-500 leading-tight mb-1">אתה הזנת</span>
+                                    <span class="font-bold text-slate-700 text-[11px]" dir="ltr">${actualText}</span>
+                                </div>
+                            </div>
+                        </div>`;
+                    }
                 }
             });
             
