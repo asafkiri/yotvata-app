@@ -141,19 +141,21 @@
 
         <main class="w-full flex-1 p-2 sm:p-4 space-y-3 max-w-4xl mx-auto">
             
-            <div id="contactEditArea" class="hidden bg-slate-100 p-3 rounded-lg border border-slate-300 mb-3 shadow-sm">
-                <div class="flex justify-between items-center mb-2">
-                    <h3 class="text-sm font-bold text-slate-800">ניהול אנשי קשר</h3>
-                    <div class="flex items-center gap-2 bg-white px-2 py-1 rounded border border-slate-200">
-                        <span class="text-[10px] font-bold text-slate-600">מס' לקוח:</span>
-                        <input type="text" id="customerNumberInput" class="w-20 text-xs font-bold text-center outline-none bg-transparent" dir="ltr">
+            <div id="contactEditArea" class="hidden bg-slate-100 p-4 rounded-xl border border-slate-300 mb-4 shadow-sm">
+                <div class="flex justify-between items-center mb-3">
+                    <h3 class="text-base font-bold text-slate-800">ניהול אנשי קשר</h3>
+                    <div class="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm">
+                        <span class="text-xs font-bold text-slate-600">מס' לקוח:</span>
+                        <input type="text" id="customerNumberInput" class="w-24 text-sm font-black text-center outline-none bg-transparent" dir="ltr">
                     </div>
                 </div>
-                <div id="contactsManagerList" class="flex flex-wrap gap-2 mb-3"></div>
-                <div class="flex gap-2">
-                    <input type="text" id="newContactName" placeholder="שם איש קשר" class="flex-1 text-xs p-2 rounded-md border border-slate-300 outline-none focus:border-blue-500">
-                    <input type="tel" id="newContactPhone" placeholder="מספר טלפון" class="flex-1 text-xs p-2 rounded-md border border-slate-300 outline-none text-left focus:border-blue-500" dir="ltr">
-                    <button id="btnAddContact" class="bg-blue-800 hover:bg-blue-900 text-white px-4 py-2 rounded-md text-xs font-bold transition-colors"><i class="fa-solid fa-plus"></i></button>
+                <div id="contactsManagerList" class="flex flex-col gap-2 mb-4"></div>
+                <div class="flex flex-col gap-2">
+                    <div class="flex gap-2">
+                        <input type="text" id="newContactName" placeholder="שם איש קשר" class="flex-1 text-sm p-3 rounded-lg border border-slate-300 outline-none focus:border-blue-500 shadow-sm">
+                        <input type="tel" id="newContactPhone" placeholder="מספר טלפון" class="flex-1 text-sm p-3 rounded-lg border border-slate-300 outline-none text-left focus:border-blue-500 shadow-sm" dir="ltr">
+                    </div>
+                    <button id="btnAddContact" class="bg-blue-800 hover:bg-blue-900 text-white px-4 py-3 rounded-lg text-sm font-bold transition-colors shadow-sm flex justify-center items-center gap-2 w-full"><i class="fa-solid fa-user-plus"></i> הוסף איש קשר</button>
                 </div>
             </div>
 
@@ -210,8 +212,8 @@
                 <div id="productsGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2"></div>
             </form>
 
-            <button id="hardResetBtn" class="hidden w-full mt-3 bg-red-50 text-red-600 border border-red-200 py-3 rounded-xl font-bold flex items-center justify-center gap-2 shadow-sm">
-                <i class="fa-solid fa-rotate-left text-lg"></i> איפוס כל ההתראות והיסטוריית הממוצעים
+            <button id="hardResetBtn" class="hidden w-full mt-5 bg-red-50 text-red-600 border-2 border-red-200 py-4 rounded-xl font-bold flex items-center justify-center gap-2 shadow-sm text-sm hover:bg-red-100 transition-colors">
+                <i class="fa-solid fa-triangle-exclamation text-lg"></i> מחיקת היסטוריה, ארכיון מלאי וממוצעים
             </button>
 
             <div id="noResults" class="hidden col-span-full text-center py-8 text-slate-500 bg-white rounded-lg border border-dashed border-slate-300 text-sm">
@@ -809,7 +811,18 @@
         function renderContacts() {
             const quickList = document.getElementById('contactsQuickList'); const managerList = document.getElementById('contactsManagerList');
             quickList.innerHTML = window.APP_STATE.contacts.map(c => `<button type="button" class="contact-btn shrink-0 bg-slate-100 text-slate-700 border border-slate-300 px-3 py-1.5 rounded-full text-xs font-bold ${window.APP_STATE.agentPhone === c.phone ? 'bg-blue-800 text-white' : ''}" data-phone="${c.phone}">${c.name}</button>`).join('');
-            managerList.innerHTML = window.APP_STATE.contacts.map((c, i) => `<div class="bg-white border border-slate-200 rounded px-2 py-1 flex items-center gap-2 text-xs font-bold shadow-sm"><span class="text-slate-800">${c.name}</span><span class="text-slate-400 text-[10px]">${c.phone}</span><button type="button" class="delete-contact-btn text-slate-400 hover:text-red-600 ml-1" data-index="${i}"><i class="fa-solid fa-xmark"></i></button></div>`).join('');
+            
+            // עיצוב אנשי קשר במצב עריכה - רחב וברור
+            managerList.innerHTML = window.APP_STATE.contacts.map((c, i) => `
+                <div class="bg-white border border-slate-200 rounded-lg px-3 py-2 flex items-center justify-between text-sm font-bold shadow-sm mb-1">
+                    <div class="flex items-center gap-2">
+                        <span class="text-slate-800">${c.name}</span>
+                        <span class="text-slate-400 text-xs" dir="ltr">${c.phone}</span>
+                    </div>
+                    <button type="button" class="delete-contact-btn text-red-400 hover:text-red-600 bg-red-50 p-2 rounded-md transition-colors" data-index="${i}">
+                        <i class="fa-solid fa-trash-can"></i>
+                    </button>
+                </div>`).join('');
         }
 
         function renderHistory() {
@@ -951,7 +964,6 @@
             debouncedSave(); document.getElementById('manualPullsModal').classList.add('hidden'); modalObj.show({ title: "נשמר", message: "המשיכות נשמרו ויחושבו בקליטת הדוח הבאה.", icon: "fa-solid fa-check text-green-500", showCancel: false });
         };
 
-
         // --- SHARED EXCEL PARSER ---
         async function readExcelFile(file) {
             return new Promise((resolve, reject) => {
@@ -1054,7 +1066,6 @@
                 reader.readAsArrayBuffer(file);
             });
         }
-
 
         // --- SCANNER LOGIC (POS) ---
 
@@ -1456,7 +1467,25 @@
             }
         };
 
-        window.delProd = (id) => { window.APP_STATE.products = window.APP_STATE.products.filter(p => p.id !== id); renderGrid(); debouncedSave(); };
+        // הוחלף מ- delProd למערכת מחיקה מאובטחת
+        window.triggerDeleteModal = (id) => {
+            const p = window.APP_STATE.products.find(x => x.id === id);
+            if (!p) return;
+            modalObj.show({
+                title: "מחיקת מוצר",
+                message: `האם אתה בטוח שברצונך למחוק את המוצר "${p.name}"?`,
+                icon: "fa-solid fa-triangle-exclamation text-red-500 text-2xl",
+                showCancel: true,
+                confirmText: "כן, מחק",
+                confirmColorClass: "bg-red-600 hover:bg-red-700",
+                onCancel: () => {}, // לא לעשות כלום בעת ביטול
+                onConfirm: () => {
+                    window.APP_STATE.products = window.APP_STATE.products.filter(prod => prod.id !== id);
+                    renderGrid();
+                    debouncedSave();
+                }
+            });
+        };
         
         window.delCat = (catId) => {
             modalObj.show({
@@ -1493,17 +1522,20 @@
                     let currentThreshold = (window.APP_STATE.categoryEmptyShelf && window.APP_STATE.categoryEmptyShelf[catId] !== undefined) ? window.APP_STATE.categoryEmptyShelf[catId] : '';
                     
                     const header = document.createElement('div');
-                    header.className = 'col-span-full flex justify-between items-center bg-blue-900 text-white p-2 rounded-lg mt-4 mb-2 shadow-sm flex-wrap gap-2';
+                    header.className = 'col-span-full bg-blue-900 text-white p-3 sm:p-4 rounded-xl mt-6 mb-3 shadow-md flex flex-col gap-3';
                     header.innerHTML = `
-                        <div class="flex items-center gap-2 flex-1 min-w-[200px]">
-                            <i class="fa-solid fa-folder text-blue-300"></i>
-                            <input type="text" data-action="renameCat" data-catid="${catId}" value="${catName}" class="bg-blue-800 text-white font-bold text-sm px-2 py-1.5 rounded outline-none focus:ring-1 focus:ring-blue-400 flex-1 border border-blue-700 min-w-[80px]">
-                            <div class="flex items-center gap-1 bg-blue-800 px-1.5 py-1 rounded border border-blue-700 whitespace-nowrap" title="סף מדף ריק (ביחידות)">
-                                <span class="text-[10px] text-blue-200">מדף ריק:</span>
-                                <input type="number" min="0" placeholder="רגיל" data-action="updateThreshold" data-catid="${catId}" value="${currentThreshold}" class="w-10 bg-transparent text-white text-xs font-bold text-center outline-none">
+                        <div class="flex justify-between items-center gap-2">
+                            <div class="flex items-center gap-2 flex-1">
+                                <i class="fa-solid fa-folder-open text-blue-300 text-lg"></i>
+                                <input type="text" data-action="renameCat" data-catid="${catId}" value="${catName}" class="bg-blue-800 text-white font-bold text-base px-3 py-2.5 rounded-lg outline-none focus:ring-2 focus:ring-blue-400 flex-1 border border-blue-700 w-full">
                             </div>
+                            <button type="button" class="text-red-400 hover:text-white hover:bg-red-600 bg-blue-800 border border-blue-700 w-12 h-12 rounded-lg transition-colors flex items-center justify-center shrink-0 shadow-sm" onclick="window.delCat('${catId}')" title="מחק קטגוריה ומוצריה"><i class="fa-solid fa-trash-can text-lg"></i></button>
                         </div>
-                        <button type="button" class="text-red-400 hover:text-red-300 px-3 py-1.5 bg-blue-800 rounded transition-colors" onclick="window.delCat('${catId}')" title="מחק קטגוריה ומוצריה"><i class="fa-solid fa-trash-can"></i></button>
+                        <div class="flex items-center gap-2 bg-blue-800 px-3 py-2.5 rounded-lg border border-blue-700">
+                            <i class="fa-solid fa-boxes-stacked text-blue-300"></i>
+                            <span class="text-sm font-semibold text-blue-100 flex-1">סף "מדף ריק" (ביחידות):</span>
+                            <input type="number" min="0" placeholder="רגיל" data-action="updateThreshold" data-catid="${catId}" value="${currentThreshold}" class="w-16 bg-blue-900 text-white text-sm font-bold text-center outline-none border border-blue-600 rounded-md p-1.5 focus:ring-2 focus:ring-blue-400">
+                        </div>
                     `;
                     grid.appendChild(header);
 
@@ -1512,34 +1544,56 @@
                     catProducts.forEach((p) => {
                         const card = document.createElement('div'); card.id = `card-${p.id}`; 
                         const isPredefinedCat = ['cat-pallmall', 'cat-winston', 'cat-ld', 'cat-camel', 'cat-kent', 'cat-vogue', 'cat-tobacco', 'cat-general'].includes(p.categoryClass);
-                        card.className = `product-card p-2.5 rounded-lg shadow-sm border border-solid transition-all flex flex-col justify-between relative overflow-hidden ${isPredefinedCat ? p.categoryClass : 'cat-general'}`;
+                        card.className = `product-card p-3 sm:p-4 rounded-xl shadow-sm border-2 transition-all flex flex-col gap-3 relative overflow-hidden bg-white ${isPredefinedCat ? p.categoryClass : 'cat-general'}`;
                         
                         let currentUnitsPerPack = p.unitsPerPack || (p.categoryClass === 'cat-tobacco' ? 5 : 10);
                         let currentPrice = p.price || '';
 
                         card.innerHTML = `
-                        <div class="flex justify-between items-center gap-2 mb-2">
-                            <input type="text" data-action="rename" data-id="${p.id}" value="${p.name}" class="font-bold text-xs bg-white/90 border rounded p-1.5 flex-1">
-                            <button type="button" onclick="window.delProd('${p.id}')" class="text-red-500 p-1 bg-red-50 rounded border border-red-100 hover:bg-red-100"><i class="fa-solid fa-trash-can"></i></button>
+                        <div class="flex justify-between items-center gap-3">
+                            <input type="text" data-action="rename" data-id="${p.id}" value="${p.name}" class="font-bold text-sm bg-slate-50 border border-slate-300 rounded-lg p-2.5 flex-1 focus:border-blue-500 focus:ring-1 outline-none text-slate-800 w-full shadow-sm inset-shadow">
+                            <!-- כפתור המחיקה הוחלף לעיצוב שמקבל לחיצה ארוכה -->
+                            <button type="button" class="delete-prod-btn text-red-500 bg-red-50 border border-red-200 transition-all duration-300 flex items-center justify-center shrink-0 w-11 h-11 rounded-lg shadow-sm select-none touch-manipulation" data-id="${p.id}" title="לחיצה ארוכה למחיקה">
+                                <i class="fa-solid fa-trash-can text-lg pointer-events-none"></i>
+                            </button>
                         </div>
-                        <div class="flex gap-1 mt-auto flex-wrap">
-                            <select data-action="changecat" data-id="${p.id}" class="text-[10px] flex-1 min-w-[70px] bg-white/90 border rounded p-1">${Object.entries(window.APP_STATE.categories).map(([k,v]) => `<option value="${k}" ${p.categoryClass===k?'selected':''}>${v}</option>`).join('')}</select>
-                            <select data-action="changeunit" data-id="${p.id}" class="text-[10px] w-14 bg-white/90 border rounded p-1"><option value="פאקטים" ${p.unitType==='פאקטים'?'selected':''}>פאק'</option><option value="יחידות" ${p.unitType==='יחידות'?'selected':''}>יח'</option></select>
-                            <div class="flex items-center justify-center gap-1 bg-white/90 border rounded p-1 w-12" title="יחידות בפקט">
-                                <i class="fa-solid fa-box-open text-[10px] text-slate-400"></i>
-                                <input type="number" min="1" data-action="changeUnitsPerPack" data-id="${p.id}" value="${currentUnitsPerPack}" class="w-full text-[10px] text-center font-bold bg-transparent outline-none">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="flex flex-col gap-1">
+                                <label class="text-[11px] font-bold text-slate-500 px-1">שיוך לקטגוריה</label>
+                                <select data-action="changecat" data-id="${p.id}" class="text-xs font-bold text-slate-700 bg-slate-50 border border-slate-300 rounded-lg p-2.5 focus:border-blue-500 outline-none shadow-sm">
+                                    ${Object.entries(window.APP_STATE.categories).map(([k,v]) => `<option value="${k}" ${p.categoryClass===k?'selected':''}>${v}</option>`).join('')}
+                                </select>
                             </div>
-                            <div class="flex items-center justify-center gap-1 bg-white/90 border rounded p-1 w-16" title="מחיר ליחידת הזמנה">
-                                <i class="fa-solid fa-shekel-sign text-[10px] text-slate-400"></i>
-                                <input type="number" min="0" step="0.1" data-action="changePrice" data-id="${p.id}" value="${currentPrice}" class="w-full text-[10px] text-center font-bold bg-transparent outline-none" placeholder="מחיר">
+                            <div class="flex flex-col gap-1">
+                                <label class="text-[11px] font-bold text-slate-500 px-1">סוג יחידת הזמנה</label>
+                                <select data-action="changeunit" data-id="${p.id}" class="text-xs font-bold text-slate-700 bg-slate-50 border border-slate-300 rounded-lg p-2.5 focus:border-blue-500 outline-none shadow-sm">
+                                    <option value="פאקטים" ${p.unitType==='פאקטים'?'selected':''}>פאקטים</option>
+                                    <option value="יחידות" ${p.unitType==='יחידות'?'selected':''}>יחידות</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3 mt-1">
+                            <div class="flex flex-col gap-1">
+                                <label class="text-[11px] font-bold text-slate-500 px-1">יחידות בפאקט</label>
+                                <div class="flex items-center bg-slate-50 border border-slate-300 rounded-lg p-1.5 focus-within:border-blue-500 focus-within:ring-1 shadow-sm">
+                                    <i class="fa-solid fa-box-open text-slate-400 mr-2 ml-1"></i>
+                                    <input type="number" min="1" data-action="changeUnitsPerPack" data-id="${p.id}" value="${currentUnitsPerPack}" class="w-full text-sm font-bold bg-transparent outline-none text-slate-700">
+                                </div>
+                            </div>
+                            <div class="flex flex-col gap-1">
+                                <label class="text-[11px] font-bold text-slate-500 px-1">מחיר יח' הזמנה</label>
+                                <div class="flex items-center bg-slate-50 border border-slate-300 rounded-lg p-1.5 focus-within:border-blue-500 focus-within:ring-1 shadow-sm">
+                                    <i class="fa-solid fa-shekel-sign text-slate-400 mr-2 ml-1"></i>
+                                    <input type="number" min="0" step="0.1" data-action="changePrice" data-id="${p.id}" value="${currentPrice}" class="w-full text-sm font-bold bg-transparent outline-none text-slate-700" placeholder="0.0">
+                                </div>
                             </div>
                         </div>`;
                         grid.appendChild(card);
                     });
 
                     const addBtn = document.createElement('button');
-                    addBtn.className = "col-span-full py-2.5 border-2 border-dashed border-slate-300 rounded-lg text-slate-500 text-xs font-bold bg-white mb-2 hover:bg-slate-50 transition-colors shadow-sm flex items-center justify-center gap-2";
-                    addBtn.innerHTML = `<i class="fa-solid fa-plus"></i> הוסף מוצר לקטגוריית ${catName}`;
+                    addBtn.className = "col-span-full py-4 border-2 border-dashed border-slate-300 rounded-xl text-slate-600 text-sm font-bold bg-white mb-2 hover:bg-slate-50 transition-colors shadow-sm flex items-center justify-center gap-2 mt-2";
+                    addBtn.innerHTML = `<i class="fa-solid fa-plus text-lg"></i> הוסף מוצר לקטגוריית ${catName}`;
                     addBtn.onclick = () => {
                         let insertIdx = window.APP_STATE.products.length;
                         for(let i = window.APP_STATE.products.length - 1; i >= 0; i--) {
@@ -1552,8 +1606,8 @@
                 });
 
                 const addCatBtn = document.createElement('button');
-                addCatBtn.className = "col-span-full py-3.5 mt-2 mb-8 border-2 border-dashed border-blue-400 rounded-xl text-blue-600 text-sm font-bold bg-blue-50 hover:bg-blue-100 transition-colors shadow-sm flex items-center justify-center gap-2";
-                addCatBtn.innerHTML = `<i class="fa-solid fa-folder-plus text-lg"></i> הוסף קטגוריה חדשה`;
+                addCatBtn.className = "col-span-full py-4 mt-4 mb-8 border-2 border-dashed border-blue-400 rounded-xl text-blue-700 text-base font-bold bg-blue-50 hover:bg-blue-100 transition-colors shadow-sm flex items-center justify-center gap-2";
+                addCatBtn.innerHTML = `<i class="fa-solid fa-folder-plus text-xl"></i> הוסף קטגוריה חדשה`;
                 addCatBtn.onclick = () => window.addNewCategory();
                 grid.appendChild(addCatBtn);
                 
@@ -1723,6 +1777,47 @@
         }
 
         function setupEventListeners() {
+            // מאזיני לחיצה ארוכה למחיקת מוצר
+            let deletePressTimer;
+            const gridEl = document.getElementById('productsGrid');
+
+            const startDeletePress = (e) => {
+                const btn = e.target.closest('.delete-prod-btn');
+                if (!btn) return;
+                // הוספת סגנון לכיווץ קל ושינוי צבע
+                btn.classList.add('scale-90', 'bg-red-200');
+                const id = btn.dataset.id;
+                deletePressTimer = setTimeout(() => {
+                    btn.classList.remove('scale-90', 'bg-red-200');
+                    window.triggerDeleteModal(id);
+                }, 700); // 700 מילישניות = לחיצה ארוכה
+            };
+
+            const cancelDeletePress = (e) => {
+                const btn = e.target.closest('.delete-prod-btn');
+                if (btn) btn.classList.remove('scale-90', 'bg-red-200');
+                clearTimeout(deletePressTimer);
+            };
+
+            gridEl.addEventListener('mousedown', startDeletePress);
+            gridEl.addEventListener('touchstart', startDeletePress, {passive: true});
+            gridEl.addEventListener('mouseup', cancelDeletePress);
+            gridEl.addEventListener('mouseleave', cancelDeletePress);
+            gridEl.addEventListener('touchend', cancelDeletePress);
+            gridEl.addEventListener('touchmove', cancelDeletePress, {passive: true});
+            gridEl.addEventListener('contextmenu', (e) => {
+                if (e.target.closest('.delete-prod-btn')) {
+                    e.preventDefault(); // חסימת תפריט קליק ימני בעת לחיצה ארוכה
+                }
+            });
+            // חסימת קליק רגיל כדי שלא יקרה כלום
+            gridEl.addEventListener('click', (e) => {
+                if (e.target.closest('.delete-prod-btn')) {
+                    e.preventDefault();
+                }
+            });
+
+
             document.getElementById('customerNumberInput').addEventListener('input', (e) => {
                 window.APP_STATE.customerNumber = e.target.value;
                 debouncedSave();
