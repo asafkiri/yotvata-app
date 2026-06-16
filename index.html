@@ -7,7 +7,7 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="גלוברנס">
-    <title>הזמנת מוצרים - גלוברנס V1.0</title>
+    <title>הזמנת מוצרים - גלוברנס V1.10</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -1486,15 +1486,14 @@
             let lastSnap = window.APP_STATE.snapshots[window.APP_STATE.snapshots.length - 1];
             let fixesApplied = 0;
             
+            let newStocks = { ...lastSnap.stocks }; 
+            let newStocksBefore = { ...lastSnap.stocks };
+
             for (let pid in window.tempShortagesData) {
                 let diff = window.tempShortagesData[pid];
-                if (lastSnap.stocks[pid] !== undefined) {
-                    // אם diff חיובי (חסר) - זה מפחית מהמלאי (כאילו נמכר/אבד)
-                    // אם diff שלילי (עודף) - מינוס מינוס הופך לפלוס וזה מוסיף למלאי השמור
-                    // אם שונה לאפס (עקב עריכת המשתמש) - לא יעשה כלום!
-                    lastSnap.stocks[pid] -= diff;
-                    
-                    if (lastSnap.stocks[pid] < 0) lastSnap.stocks[pid] = 0;
+                if (newStocks[pid] !== undefined) {
+                    newStocks[pid] -= diff;
+                    if (newStocks[pid] < 0) newStocks[pid] = 0;
                     fixesApplied++;
                 }
             }
@@ -1502,10 +1501,25 @@
             document.getElementById('missingResultModal').classList.add('hidden');
             
             if (fixesApplied > 0) {
+                let snapId = Date.now();
+                const nowSnap = new Date();
+                const dateStrSnap = nowSnap.toLocaleDateString('he-IL') + ' ' + nowSnap.toLocaleTimeString('he-IL', {hour: '2-digit', minute:'2-digit'});
+
+                window.APP_STATE.snapshots.push({
+                    id: snapId,
+                    date: dateStrSnap,
+                    stocksBefore: newStocksBefore,
+                    stocks: newStocks,
+                    actionLabel: "תיקון חוסרים/עודפים מספירה"
+                });
+
+                if(window.APP_STATE.snapshots.length > 50) window.APP_STATE.snapshots.shift();
+
                 debouncedSave();
+                
                 modalObj.show({ 
                     title: "תוקן בהצלחה", 
-                    message: "הפערים (חוסרים ועודפים) עודכנו במלאי השמור של האפליקציה.\nכעת אם תסרוק דוח קופה רגיל לביצוע הזמנה, המלאי יהיה מדויק.", 
+                    message: "הפערים עודכנו, ונוצרה נקודת מלאי מעודכנת (לפי השעה והתאריך של עכשיו).\nכעת המלאי מדויק להזמנה הבאה.", 
                     icon: "fa-solid fa-check-double text-emerald-500 text-2xl", 
                     showCancel: false 
                 });
@@ -2241,5 +2255,6 @@
     </script>
 </body>
 </html>
+
 
 ```
