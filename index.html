@@ -390,6 +390,11 @@
                         </div>
                     </div>
 
+                    <!-- New Preview Button for Missing Check -->
+                    <button id="btnPreviewMissingFile" class="hidden w-full mb-3 bg-white hover:bg-slate-50 text-indigo-700 border border-indigo-300 font-bold py-2 rounded-lg transition-all text-xs flex items-center justify-center gap-2 shadow-sm">
+                        <i class="fa-solid fa-eye text-sm"></i> תצוגה מקדימה לקובץ שהועלה
+                    </button>
+
                     <button id="btnProcessMissingCheck" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3.5 rounded-xl shadow-md transition-all text-sm flex items-center justify-center gap-2">
                         <i class="fa-solid fa-calculator"></i> בצע בדיקת חוסרים
                     </button>
@@ -399,22 +404,22 @@
 
         <!-- MISSING CHECK RESULT MODAL -->
         <div id="missingResultModal" class="hidden fixed inset-0 bg-slate-900/90 z-[110] flex items-center justify-center p-2 backdrop-blur-sm transition-opacity">
-            <div class="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden border-2 border-red-500">
-                <div class="p-3 border-b border-red-200 bg-red-50 flex justify-between items-center">
-                    <h3 class="font-bold text-red-900 text-sm flex items-center gap-2"><i class="fa-solid fa-triangle-exclamation"></i> תוצאות הבדיקה</h3>
-                    <button id="closeMissingResultBtn" class="text-red-400 hover:text-red-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+            <div class="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden border-2 border-slate-300">
+                <div class="p-3 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+                    <h3 class="font-bold text-slate-800 text-sm flex items-center gap-2"><i class="fa-solid fa-triangle-exclamation"></i> תוצאות הבדיקה</h3>
+                    <button id="closeMissingResultBtn" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-lg"></i></button>
                 </div>
                 
                 <div class="p-2 overflow-y-auto flex-1 bg-slate-50" id="missingResultsList"></div>
                 
                 <div class="p-4 bg-white border-t border-slate-200" id="missingResultActionArea">
-                    <div class="text-sm font-bold text-slate-800 text-center mb-3">האם לעדכן את החוסר באפליקציה?</div>
+                    <div class="text-sm font-bold text-slate-800 text-center mb-3">האם לעדכן את הפערים (חוסרים/עודפים) במלאי?</div>
                     <div class="flex gap-3">
                         <button id="btnCancelMissingFix" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3 rounded-xl transition-colors text-sm border border-slate-300">
                             לא
                         </button>
-                        <button id="btnConfirmMissingFix" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-xl shadow-md transition-colors text-sm">
-                            כן, לעדכן
+                        <button id="btnConfirmMissingFix" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-md transition-colors text-sm">
+                            כן, לעדכן מלאי
                         </button>
                     </div>
                 </div>
@@ -534,6 +539,8 @@
                 </div>
                 <div class="flex-1 bg-slate-200 p-2 w-full h-full relative flex items-center justify-center overflow-hidden">
                     <iframe id="docPreviewFrame" class="w-full h-full rounded border border-slate-300 bg-white hidden"></iframe>
+                    <!-- Container for Excel previews -->
+                    <div id="excelPreviewContainer" class="w-full h-full bg-white overflow-auto p-2 hidden text-xs text-right border border-slate-300 rounded shadow-inner" dir="rtl"></div>
                 </div>
             </div>
         </div>
@@ -646,6 +653,7 @@
         
         let currentScannerMode = 'excel'; 
         let currentMissingScannerMode = 'excel'; 
+        window.currentMissingFile = null;
 
         function isAnyModalOpen() { const modals = ['customModal', 'orderEditModal', 'manualPullsModal', 'baselineModal', 'posUploadModal', 'posReviewModal', 'salesModal', 'missingResultModal', 'stockHistoryModal', 'pdfPreviewModal', 'historyModal']; return modals.some(id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); }); }
 
@@ -795,8 +803,8 @@
             }
         }
 
-        // תוקן: אין יותר "ו-0 יחידות", ומותאם לכיווניות מימין-לשמאל עברית
         function formatUnitsStringExplicit(units, unitsPerPack) {
+            if (units === 0) return "0 יחידות";
             let isNegative = units < 0; let absUnits = Math.abs(units);
             let packs = Math.floor(absUnits / unitsPerPack); let singles = absUnits % unitsPerPack;
             let txt = [];
@@ -813,7 +821,6 @@
             return isNegative ? "+" + res + " (עודף)" : res;
         }
         
-        // עריכה מדויקת של הטקסט, תוך הסרת ה-dir="ltr" שיצר את הבלבול בסדר המילים.
         const formatQtyClean = (units, perPack) => {
             if (units === 0 || isNaN(units)) return "0";
             let isNeg = units < 0;
@@ -1329,6 +1336,8 @@
                 </div>`;
             }).join('');
             
+            window.currentMissingFile = null;
+            document.getElementById('btnPreviewMissingFile').classList.add('hidden');
             document.getElementById('excelMissingInput').value = '';
             document.getElementById('pdfMissingInput').value = '';
             document.getElementById('salesModal').classList.remove('hidden');
@@ -1393,8 +1402,8 @@
         function evaluateShortages(salesData, actualStocks) {
             let lastSnap = window.APP_STATE.snapshots[window.APP_STATE.snapshots.length - 1];
             let html = '';
-            let totalShortagesFound = 0;
-            window.tempShortagesData = {};
+            let totalDiscrepanciesFound = 0;
+            window.tempShortagesData = {}; 
             
             window.APP_STATE.products.forEach(p => {
                 let unitsPerPack = (p.unitsPerPack || (p.categoryClass === 'cat-tobacco' ? 5 : 10));
@@ -1408,83 +1417,62 @@
                 let diff = expected - actual;
                 
                 if (diff !== 0) { 
+                    totalDiscrepanciesFound++;
+                    window.tempShortagesData[p.id] = diff;
+
                     let expectedText = formatQtyClean(expected, unitsPerPack);
                     let baselineText = formatQtyClean(baseline, unitsPerPack);
                     let deductedText = formatQtyClean(totalDeducted, unitsPerPack);
-                    let actualText = formatQtyClean(actual, unitsPerPack);
 
-                    // מרובעים גדולים בגריד של 2 על 2 (במקום 4 בשורה) ללא בעיות ltr
-                    if (diff > 0) { 
-                        totalShortagesFound++;
-                        window.tempShortagesData[p.id] = diff;
-                        
-                        html += `
-                        <div class="flex flex-col p-3 mb-4 border-2 border-red-300 rounded-xl bg-white shadow-md overflow-hidden">
-                            <div class="flex justify-between items-center bg-red-50 p-3 border-b border-red-200 -mt-3 -mx-3 mb-3">
-                                <span class="font-bold text-slate-800 text-base">${p.name}</span>
-                                <span class="text-red-700 font-black text-sm bg-red-200 px-3 py-1.5 rounded-lg shadow-sm" dir="rtl">
-                                    חסר: ${formatUnitsStringExplicit(diff, unitsPerPack)}
-                                </span>
+                    let actualPacks = Math.floor(actual / unitsPerPack);
+                    let actualSingles = actual % unitsPerPack;
+
+                    let colorClass = diff > 0 ? 'red' : 'blue';
+                    let titleText = diff > 0 ? `חסר: ${formatUnitsStringExplicit(diff, unitsPerPack)}` : `עודף: ${formatUnitsStringExplicit(Math.abs(diff), unitsPerPack)}`;
+
+                    html += `
+                    <div class="result-card flex flex-col p-3 mb-4 border-2 border-${colorClass}-300 rounded-xl bg-white shadow-md overflow-hidden transition-colors" data-pid="${p.id}" id="result-card-${p.id}">
+                        <div class="result-header flex justify-between items-center bg-${colorClass}-50 p-3 border-b border-${colorClass}-200 -mt-3 -mx-3 mb-3 transition-colors">
+                            <span class="font-bold text-slate-800 text-base">${p.name}</span>
+                            <span class="result-badge text-${colorClass}-700 font-black text-sm bg-${colorClass}-200 px-3 py-1.5 rounded-lg shadow-sm transition-colors" dir="rtl">
+                                ${titleText}
+                            </span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2 text-center">
+                            <div class="bg-slate-50 p-2 rounded-xl border border-slate-200 flex flex-col justify-center items-center shadow-sm">
+                                <span class="text-xs text-slate-500 font-bold mb-1">מלאי קודם</span>
+                                <span class="font-black text-slate-700 text-base" dir="rtl">${baselineText}</span>
                             </div>
-                            <div class="grid grid-cols-2 gap-2 text-center">
-                                <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 flex flex-col justify-center items-center shadow-sm">
-                                    <span class="text-xs text-slate-500 font-bold mb-1">מלאי קודם</span>
-                                    <span class="font-black text-slate-700 text-base" dir="rtl">${baselineText}</span>
-                                </div>
-                                <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 flex flex-col justify-center items-center shadow-sm">
-                                    <span class="text-xs text-slate-500 font-bold mb-1">נמכר / פחת</span>
-                                    <span class="font-black text-blue-600 text-base" dir="rtl">${deductedText}</span>
-                                </div>
-                                <div class="bg-indigo-50 p-3 rounded-xl border-2 border-indigo-200 flex flex-col justify-center items-center shadow-inner relative">
-                                    <span class="text-xs text-indigo-700 font-bold mb-1">המערכת ציפתה</span>
-                                    <span class="font-black text-indigo-900 text-lg" dir="rtl">${expectedText}</span>
-                                </div>
-                                <div class="bg-slate-50 p-3 rounded-xl border-2 border-slate-300 flex flex-col justify-center items-center shadow-sm">
-                                    <span class="text-xs text-slate-600 font-bold mb-1">אתה הזנת</span>
-                                    <span class="font-black text-slate-800 text-lg" dir="rtl">${actualText}</span>
-                                </div>
+                            <div class="bg-slate-50 p-2 rounded-xl border border-slate-200 flex flex-col justify-center items-center shadow-sm">
+                                <span class="text-xs text-slate-500 font-bold mb-1">נמכר / פחת</span>
+                                <span class="font-black text-blue-600 text-base" dir="rtl">${deductedText}</span>
                             </div>
-                        </div>`;
-                    } else if (diff < 0) { 
-                         html += `
-                        <div class="flex flex-col p-3 mb-4 border-2 border-blue-300 rounded-xl bg-white shadow-md overflow-hidden opacity-90">
-                            <div class="flex justify-between items-center bg-blue-50 p-3 border-b border-blue-200 -mt-3 -mx-3 mb-3">
-                                <span class="font-bold text-slate-800 text-base">${p.name}</span>
-                                <span class="text-blue-700 font-black text-sm bg-blue-200 px-3 py-1.5 rounded-lg shadow-sm" dir="rtl">
-                                    עודף: ${formatUnitsStringExplicit(Math.abs(diff), unitsPerPack)}
-                                </span>
+                            <div class="bg-indigo-50 p-2 rounded-xl border-2 border-indigo-200 flex flex-col justify-center items-center shadow-inner relative">
+                                <span class="text-xs text-indigo-700 font-bold mb-1">המערכת ציפתה</span>
+                                <span class="font-black text-indigo-900 text-lg" dir="rtl">${expectedText}</span>
                             </div>
-                            <div class="grid grid-cols-2 gap-2 text-center">
-                                <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 flex flex-col justify-center items-center shadow-sm">
-                                    <span class="text-xs text-slate-500 font-bold mb-1">מלאי קודם</span>
-                                    <span class="font-black text-slate-700 text-base" dir="rtl">${baselineText}</span>
-                                </div>
-                                <div class="bg-slate-50 p-3 rounded-xl border border-slate-200 flex flex-col justify-center items-center shadow-sm">
-                                    <span class="text-xs text-slate-500 font-bold mb-1">נמכר / פחת</span>
-                                    <span class="font-black text-blue-600 text-base" dir="rtl">${deductedText}</span>
-                                </div>
-                                <div class="bg-indigo-50 p-3 rounded-xl border-2 border-indigo-200 flex flex-col justify-center items-center shadow-inner relative">
-                                    <span class="text-xs text-indigo-700 font-bold mb-1">המערכת ציפתה</span>
-                                    <span class="font-black text-indigo-900 text-lg" dir="rtl">${expectedText}</span>
-                                </div>
-                                <div class="bg-slate-50 p-3 rounded-xl border-2 border-slate-300 flex flex-col justify-center items-center shadow-sm">
-                                    <span class="text-xs text-slate-600 font-bold mb-1">אתה הזנת</span>
-                                    <span class="font-black text-slate-800 text-lg" dir="rtl">${actualText}</span>
+                            <div class="bg-slate-50 p-2 rounded-xl border-2 border-slate-300 flex flex-col justify-center items-center shadow-sm">
+                                <span class="text-[10px] text-slate-600 font-bold mb-1">תקן ספירה (אם טעית)</span>
+                                <div class="flex gap-1" data-pid="${p.id}" data-expected="${expected}" data-unitsperpack="${unitsPerPack}">
+                                    <div class="flex flex-col items-center">
+                                        <span class="text-[8px] text-slate-400">פאק'</span>
+                                        <input type="number" min="0" class="edit-actual-packs w-12 p-1 text-center font-bold border rounded outline-none bg-white focus:border-blue-500 shadow-sm" value="${actualPacks}">
+                                    </div>
+                                    <div class="flex flex-col items-center">
+                                        <span class="text-[8px] text-slate-400">יח'</span>
+                                        <input type="number" min="0" class="edit-actual-units w-12 p-1 text-center font-bold border rounded outline-none bg-white focus:border-blue-500 shadow-sm" value="${actualSingles}">
+                                    </div>
                                 </div>
                             </div>
-                        </div>`;
-                    }
+                        </div>
+                    </div>`;
                 }
             });
             
             const actionArea = document.getElementById('missingResultActionArea');
             
-            if (totalShortagesFound === 0) {
-                if (html === '') {
-                    html = '<div class="text-center p-6 text-emerald-600 font-bold"><i class="fa-solid fa-check-circle text-4xl mb-2"></i><br>המלאי מדויק לחלוטין! אין חוסרים.</div>';
-                } else {
-                    html = '<div class="text-center p-6 text-emerald-600 font-bold"><i class="fa-solid fa-check-circle text-4xl mb-2"></i><br>אין חוסרים! (נמצאו רק עודפים)</div>' + html;
-                }
+            if (totalDiscrepanciesFound === 0) {
+                html = '<div class="text-center p-6 text-emerald-600 font-bold"><i class="fa-solid fa-check-circle text-4xl mb-2"></i><br>המלאי מדויק לחלוטין! אין חוסרים או עודפים.</div>';
                 actionArea.classList.add('hidden'); 
             } else {
                 actionArea.classList.remove('hidden');
@@ -1499,9 +1487,13 @@
             let fixesApplied = 0;
             
             for (let pid in window.tempShortagesData) {
-                let shortage = window.tempShortagesData[pid];
+                let diff = window.tempShortagesData[pid];
                 if (lastSnap.stocks[pid] !== undefined) {
-                    lastSnap.stocks[pid] -= shortage;
+                    // אם diff חיובי (חסר) - זה מפחית מהמלאי (כאילו נמכר/אבד)
+                    // אם diff שלילי (עודף) - מינוס מינוס הופך לפלוס וזה מוסיף למלאי השמור
+                    // אם שונה לאפס (עקב עריכת המשתמש) - לא יעשה כלום!
+                    lastSnap.stocks[pid] -= diff;
+                    
                     if (lastSnap.stocks[pid] < 0) lastSnap.stocks[pid] = 0;
                     fixesApplied++;
                 }
@@ -1513,7 +1505,7 @@
                 debouncedSave();
                 modalObj.show({ 
                     title: "תוקן בהצלחה", 
-                    message: "החוסרים הופחתו מהמלאי השמור של האפליקציה.\nכעת אם תסרוק דוח קופה רגיל לביצוע הזמנה, האפליקציה לא תפספס את החוסרים שגילית.", 
+                    message: "הפערים (חוסרים ועודפים) עודכנו במלאי השמור של האפליקציה.\nכעת אם תסרוק דוח קופה רגיל לביצוע הזמנה, המלאי יהיה מדויק.", 
                     icon: "fa-solid fa-check-double text-emerald-500 text-2xl", 
                     showCancel: false 
                 });
@@ -1929,6 +1921,108 @@
             document.getElementById('btnCancelMissingFix').addEventListener('click', () => document.getElementById('missingResultModal').classList.add('hidden'));
             document.getElementById('btnConfirmMissingFix').addEventListener('click', confirmMissingFix);
 
+            // דינמיות של חישוב החוסרים מחדש כשמשנים ידנית במודל תוצאות
+            document.getElementById('missingResultsList').addEventListener('input', (e) => {
+                if (e.target.classList.contains('edit-actual-packs') || e.target.classList.contains('edit-actual-units')) {
+                    const wrapper = e.target.closest('[data-pid]');
+                    if (!wrapper) return;
+                    const pid = wrapper.dataset.pid;
+                    const expected = parseInt(wrapper.dataset.expected, 10);
+                    const unitsPerPack = parseInt(wrapper.dataset.unitsperpack, 10);
+
+                    const packsInput = wrapper.querySelector('.edit-actual-packs').value;
+                    const unitsInput = wrapper.querySelector('.edit-actual-units').value;
+
+                    let packs = parseInt(packsInput) || 0;
+                    let units = parseInt(unitsInput) || 0;
+
+                    let actual = (packs * unitsPerPack) + units;
+                    let diff = expected - actual;
+
+                    // Update global state for when the user clicks 'save'
+                    window.tempShortagesData[pid] = diff;
+
+                    // Update UI Elements dynamically
+                    const card = document.getElementById(`result-card-${pid}`);
+                    const header = card.querySelector('.result-header');
+                    const badge = card.querySelector('.result-badge');
+
+                    // Reset classes completely to override older ones
+                    card.className = `result-card flex flex-col p-3 mb-4 border-2 rounded-xl bg-white shadow-md overflow-hidden transition-colors`;
+                    header.className = `result-header flex justify-between items-center p-3 border-b -mt-3 -mx-3 mb-3 transition-colors`;
+                    badge.className = `result-badge font-black text-sm px-3 py-1.5 rounded-lg shadow-sm transition-colors`;
+
+                    if (diff > 0) {
+                        card.classList.add('border-red-300');
+                        header.classList.add('bg-red-50', 'border-red-200');
+                        badge.classList.add('text-red-700', 'bg-red-200');
+                        badge.innerText = `חסר: ${formatUnitsStringExplicit(diff, unitsPerPack)}`;
+                    } else if (diff < 0) {
+                        card.classList.add('border-blue-300');
+                        header.classList.add('bg-blue-50', 'border-blue-200');
+                        badge.classList.add('text-blue-700', 'bg-blue-200');
+                        badge.innerText = `עודף: ${formatUnitsStringExplicit(Math.abs(diff), unitsPerPack)}`;
+                    } else {
+                        card.classList.add('border-green-300');
+                        header.classList.add('bg-green-50', 'border-green-200');
+                        badge.classList.add('text-green-700', 'bg-green-200');
+                        badge.innerText = `תקין! (אין פער)`;
+                    }
+                }
+            });
+
+            // פונקציונליות הצגת כפתור "תצוגה מקדימה" בבדיקת חוסרים
+            const handleMissingFileChange = (e) => {
+                if (e.target.files && e.target.files.length > 0) {
+                    window.currentMissingFile = e.target.files[0];
+                    document.getElementById('btnPreviewMissingFile').classList.remove('hidden');
+                } else {
+                    window.currentMissingFile = null;
+                    document.getElementById('btnPreviewMissingFile').classList.add('hidden');
+                }
+            };
+            document.getElementById('excelMissingInput').addEventListener('change', handleMissingFileChange);
+            document.getElementById('pdfMissingInput').addEventListener('change', handleMissingFileChange);
+
+            document.getElementById('btnPreviewMissingFile').addEventListener('click', async () => {
+                if (!window.currentMissingFile) return;
+                const file = window.currentMissingFile;
+                const isPdf = file.type === 'application/pdf';
+
+                const frame = document.getElementById('docPreviewFrame');
+                const excelContainer = document.getElementById('excelPreviewContainer');
+
+                if (isPdf) {
+                    frame.src = URL.createObjectURL(file);
+                    frame.classList.remove('hidden');
+                    excelContainer.classList.add('hidden');
+                } else {
+                    frame.classList.add('hidden');
+                    excelContainer.classList.remove('hidden');
+                    excelContainer.innerHTML = '<div class="flex flex-col justify-center items-center h-full gap-2"><i class="fa-solid fa-spinner fa-spin text-3xl text-slate-400"></i><span class="text-slate-500 font-bold">טוען נתונים מאקסל...</span></div>';
+
+                    try {
+                        const data = new Uint8Array(await file.arrayBuffer());
+                        const workbook = XLSX.read(data, {type: 'array'});
+                        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                        const htmlString = XLSX.utils.sheet_to_html(firstSheet);
+                        excelContainer.innerHTML = htmlString;
+                        
+                        // עיצוב טבלת האקסל שנוצרה מSheetJS
+                        const table = excelContainer.querySelector('table');
+                        if(table) {
+                            table.classList.add('w-full', 'border-collapse', 'text-right', 'font-sans');
+                            table.querySelectorAll('td, th').forEach(cell => cell.classList.add('border', 'border-slate-300', 'p-1', 'whitespace-nowrap'));
+                            table.querySelectorAll('tr:nth-child(even)').forEach(row => row.classList.add('bg-slate-50'));
+                        }
+                    } catch(e) {
+                        excelContainer.innerHTML = '<div class="text-red-500 font-bold text-center mt-10">אירעה שגיאה בטעינת התצוגה המקדימה לקובץ האקסל. ודא שהקובץ תקין.</div>';
+                    }
+                }
+                document.getElementById('pdfPreviewModal').classList.remove('hidden');
+            });
+
+
             const tabExcelMissing = document.getElementById('tabBtnExcelMissing');
             const tabPdfMissing = document.getElementById('tabBtnPdfMissing');
             const areaExcelMissing = document.getElementById('areaExcelMissing');
@@ -2026,16 +2120,18 @@
             document.getElementById('btnShowOriginalDoc').addEventListener('click', () => {
                 if (window.currentUploadedFileURL && window.currentUploadedFileType) {
                     const frame = document.getElementById('docPreviewFrame');
+                    const excelContainer = document.getElementById('excelPreviewContainer');
                     if (window.currentUploadedFileType === 'application/pdf') { 
                         frame.src = window.currentUploadedFileURL; 
                         frame.classList.remove('hidden'); 
+                        excelContainer.classList.add('hidden');
                     }
                     document.getElementById('pdfPreviewModal').classList.remove('hidden');
                 } else {
-                    alert('לא רלוונטי לקובץ אקסל.');
+                    alert('לא רלוונטי לקובץ אקסל במצב זה.');
                 }
             });
-            document.getElementById('closePdfPreviewBtn').addEventListener('click', () => { document.getElementById('pdfPreviewModal').classList.add('hidden'); setTimeout(() => { document.getElementById('docPreviewFrame').src = ''; }, 300); });
+            document.getElementById('closePdfPreviewBtn').addEventListener('click', () => { document.getElementById('pdfPreviewModal').classList.add('hidden'); setTimeout(() => { document.getElementById('docPreviewFrame').src = ''; document.getElementById('excelPreviewContainer').innerHTML = ''; }, 300); });
             
             document.getElementById('searchEditOrder').addEventListener('input', e => { document.querySelectorAll('.product-edit-item').forEach(item => { item.style.display = item.dataset.name.includes(e.target.value) ? 'flex' : 'none'; }); });
             document.getElementById('searchPulls').addEventListener('input', e => { document.querySelectorAll('.pulls-item').forEach(item => { item.style.display = item.dataset.name.includes(e.target.value) ? 'flex' : 'none'; }); });
@@ -2145,6 +2241,5 @@
     </script>
 </body>
 </html>
-
 
 ```
