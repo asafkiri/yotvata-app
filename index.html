@@ -8,6 +8,13 @@
     <meta name="apple-mobile-web-app-title" content="גלוברנס">
     <title>הזמנת מוצרים - גלוברנס V2.0</title>
 
+    <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#312e81">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+
     <!-- החלת מצב כהה מוקדם כדי למנוע הבהוב -->
     <script>try{if(localStorage.getItem('gb_dark')==='1')document.documentElement.classList.add('dark-mode');}catch(e){}</script>
 
@@ -2098,6 +2105,14 @@
             };
         }
 
+    </script>
+    <!-- רישום Service Worker (דרוש לפתיחה כאפליקציה במסך מלא באנדרואיד) -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('sw.js').catch(function () {});
+        });
+      }
     </script>
 </body>
 </html>
