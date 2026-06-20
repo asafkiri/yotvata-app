@@ -372,15 +372,27 @@ function setAmount(id, val) {
 function visibleAmountInputs() {
   return [...app.querySelectorAll('input[data-role="amount"]')].filter(x => { const r = x.closest('[data-id]'); return r && !r.classList.contains('hidden'); });
 }
-function advanceFrom(id) {
+function nextAmountInput(id) {
   const inputs = visibleAmountInputs();
   const cur = app.querySelector('input[data-role="amount"][data-id="' + id + '"]');
   const idx = inputs.indexOf(cur);
-  if (idx >= 0 && inputs[idx + 1]) {
-    const nxt = inputs[idx + 1];
+  return (idx >= 0 && inputs[idx + 1]) ? inputs[idx + 1] : null;
+}
+// קפיצה עם מיקוד (משאירה מקלדת פתוחה) - להקלדה ידנית
+function advanceFrom(id) {
+  const nxt = nextAmountInput(id);
+  if (nxt) {
     nxt.focus(); nxt.select();
     const row = nxt.closest('[data-id]'); if (row) row.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  } else if (cur) { cur.blur(); }
+  } else {
+    const cur = app.querySelector('input[data-role="amount"][data-id="' + id + '"]'); if (cur) cur.blur();
+  }
+}
+// קפיצה בלי מקלדת (סוגרת מקלדת אם פתוחה, רק גוללת) - ללחיצה על "מומלץ"
+function advanceScroll(id) {
+  const ae = document.activeElement; if (ae && ae.blur && app.contains(ae)) ae.blur();
+  const nxt = nextAmountInput(id);
+  if (nxt) { const row = nxt.closest('[data-id]'); if (row) row.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
 }
 
 function updateCart() {
@@ -687,7 +699,7 @@ app.addEventListener('click', (e) => {
   const recBtn = e.target.closest('[data-role="rec"]');
   if (recBtn && !recBtn.disabled) {
     const id = recBtn.dataset.id; const p = products.find(x => x.id === id); const rec = parseInt(p && p.average, 10) || 0;
-    if (rec > 0) { setAmount(id, rec); buzz(12); advanceFrom(id); }
+    if (rec > 0) { setAmount(id, rec); buzz(12); advanceScroll(id); }
     return;
   }
   const unitBtn = e.target.closest('[data-role="unit"]');
