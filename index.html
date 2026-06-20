@@ -35,6 +35,10 @@
       .btn-tap { transition: transform .08s ease; }
       .btn-tap:active { transform: scale(.93); }
       .row-card { transition: background-color .15s ease, border-color .15s ease; }
+      details > summary { list-style: none; cursor: pointer; }
+      details > summary::-webkit-details-marker { display: none; }
+      .hist-chevron { transition: transform .2s ease; }
+      details[open] .hist-chevron { transform: rotate(180deg); }
 
       /* ===== מצב כהה ===== */
       html.dark body, html.dark .bg-slate-50 { background-color:#0f172a !important; }
@@ -564,8 +568,9 @@ function setupDrag() {
 function onDragStart(e) {
   const item = e.currentTarget.closest('.prod-item'); if (!item) return;
   e.preventDefault();
+  try { e.currentTarget.setPointerCapture(e.pointerId); } catch (_) {}
   isDragging = true;
-  dragState = { item, container: item.parentElement, startY: e.clientY };
+  dragState = { item, container: item.parentElement, startY: e.clientY, handle: e.currentTarget, pointerId: e.pointerId };
   item.style.position = 'relative'; item.style.zIndex = '50';
   item.classList.add('shadow-xl', 'opacity-90', 'ring-2', 'ring-blue-300');
   document.addEventListener('pointermove', onDragMove, { passive: false });
@@ -599,7 +604,8 @@ async function onDragEnd() {
   document.removeEventListener('pointerup', onDragEnd);
   document.removeEventListener('pointercancel', onDragEnd);
   if (!dragState) { isDragging = false; return; }
-  const { item, container } = dragState;
+  const { item, container, handle, pointerId } = dragState;
+  if (handle) { try { handle.releasePointerCapture(pointerId); } catch (_) {} }
   item.style.transform = ''; item.style.zIndex = ''; item.style.position = '';
   item.classList.remove('shadow-xl', 'opacity-90', 'ring-2', 'ring-blue-300');
   const ids = [...container.querySelectorAll('.prod-item')].map(el => el.dataset.id);
@@ -647,16 +653,22 @@ function renderHistory() {
   app.innerHTML = '<div class="flex items-center justify-between px-1 py-2"><h2 class="font-black text-2xl text-slate-800">היסטוריית הזמנות</h2><button data-role="clear-history" class="btn-tap text-xs font-bold text-red-500 bg-red-50 px-3 py-2 rounded-lg flex items-center gap-1.5"><i class="fa-solid fa-trash-can"></i> נקה הכל</button></div>' +
     history.map(o => {
       const d = new Date(o.timestamp);
+      const dateStr = d.toLocaleDateString('he-IL', { weekday: 'short', day: 'numeric', month: 'numeric', year: 'numeric' });
+      const timeStr = d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
       const items = (o.items || []).map(it => '<li class="flex justify-between items-center text-sm border-b border-slate-100 pb-2 last:border-0"><span class="font-medium text-slate-700">' + it.name + '</span><span class="font-black bg-slate-100 px-2 rounded">' + it.amount + ' ' + it.unit + '</span></li>').join('');
-      return '<div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mb-4">' +
-        '<div class="bg-slate-50 p-4 border-b border-slate-200 flex justify-between items-center">' +
-          '<div><div class="font-black text-slate-800">' + d.toLocaleDateString('he-IL') + ' · ' + d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) + '</div>' +
-          '<div class="text-sm text-slate-500 flex items-center gap-1"><i class="fa-solid fa-check text-green-500"></i> נשלח אל: <b>' + (o.sentTo || '') + '</b></div></div>' +
-          '<div class="bg-blue-100 text-blue-800 font-black px-3 py-1 rounded-full text-sm">' + ((o.items || []).length) + ' פריטים</div>' +
+      return '<details class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden mb-3">' +
+        '<summary class="select-none p-4 flex items-center justify-between gap-2">' +
+          '<div class="flex items-center gap-3 min-w-0">' +
+            '<i class="hist-chevron fa-solid fa-chevron-down text-slate-400 text-sm"></i>' +
+            '<div class="min-w-0"><div class="font-black text-slate-800">' + dateStr + ' · ' + timeStr + '</div>' +
+            '<div class="text-sm text-slate-500 truncate"><i class="fa-solid fa-check text-green-500"></i> נשלח אל: ' + (o.sentTo || '') + '</div></div>' +
+          '</div>' +
+          '<div class="bg-blue-100 text-blue-800 font-black px-3 py-1 rounded-full text-sm shrink-0">' + ((o.items || []).length) + ' פריטים</div>' +
+        '</summary>' +
+        '<div class="px-4 pb-4"><ul class="space-y-2 border-t border-slate-100 pt-3">' + items + '</ul>' +
+          '<button data-role="resend" data-id="' + o.id + '" class="btn-tap mt-3 w-full bg-green-50 text-green-700 font-black py-2.5 rounded-xl flex items-center justify-center gap-2"><i class="fa-brands fa-whatsapp"></i> שלח שוב</button>' +
         '</div>' +
-        '<div class="p-4"><ul class="space-y-2">' + items + '</ul></div>' +
-        '<div class="p-3 border-t border-slate-100"><button data-role="resend" data-id="' + o.id + '" class="btn-tap w-full bg-green-50 text-green-700 font-black py-2.5 rounded-xl flex items-center justify-center gap-2"><i class="fa-brands fa-whatsapp"></i> שלח שוב</button></div>' +
-      '</div>';
+      '</details>';
     }).join('');
 }
 
