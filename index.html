@@ -533,9 +533,12 @@ function clearOrder() {
 
 // ===== מסך הגדרות (גרירה לסידור) =====
 function renderSettings() {
-  const rows = products.map((p) =>
+  const rows = products.map((p, i) =>
     '<div class="prod-item flex items-center gap-2 p-2.5 ' + (p.hidden ? 'bg-slate-50 opacity-70' : 'bg-white') + ' border border-slate-100 rounded-xl" data-id="' + p.id + '">' +
-      '<div class="drag-handle shrink-0 w-9 h-11 flex items-center justify-center text-slate-300 cursor-grab" data-id="' + p.id + '" style="touch-action:none"><i class="fa-solid fa-grip-vertical text-lg"></i></div>' +
+      '<div class="shrink-0 flex flex-col gap-0.5">' +
+        '<button data-role="move-up" data-id="' + p.id + '" ' + (i === 0 ? 'disabled' : '') + ' class="btn-tap w-8 h-6 rounded-md flex items-center justify-center ' + (i === 0 ? 'text-slate-200' : 'bg-slate-100 text-slate-600') + '"><i class="fa-solid fa-chevron-up text-xs"></i></button>' +
+        '<button data-role="move-down" data-id="' + p.id + '" ' + (i === products.length - 1 ? 'disabled' : '') + ' class="btn-tap w-8 h-6 rounded-md flex items-center justify-center ' + (i === products.length - 1 ? 'text-slate-200' : 'bg-slate-100 text-slate-600') + '"><i class="fa-solid fa-chevron-down text-xs"></i></button>' +
+      '</div>' +
       '<div class="flex-1 min-w-0 font-bold text-sm ' + (p.hidden ? 'text-slate-400 line-through' : 'text-slate-800') + ' leading-tight">' + p.name + (p.hidden ? ' <span class="text-[10px] text-amber-500 font-black no-underline">(אזל)</span>' : '') + '</div>' +
       '<input data-role="avg-set" data-id="' + p.id + '" type="text" inputmode="numeric" value="' + (p.average || '') + '" placeholder="0" class="w-14 bg-slate-100 rounded-lg p-1.5 text-center font-bold text-sm outline-none">' +
       '<button data-role="toggle-hidden" data-id="' + p.id + '" class="btn-tap shrink-0 p-2 ' + (p.hidden ? 'text-amber-500' : 'text-slate-300') + '" title="' + (p.hidden ? 'הצג מוצר' : 'הסתר (אזל במלאי)') + '"><i class="fa-solid ' + (p.hidden ? 'fa-eye-slash' : 'fa-eye') + '"></i></button>' +
@@ -621,6 +624,17 @@ async function persistOrder(ids) {
   const batch = writeBatch(db);
   ids.forEach((id, i) => batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'products', id), { orderIndex: i }));
   await batch.commit().catch(console.error);
+}
+function moveProduct(id, dir) {
+  const idx = products.findIndex(p => p.id === id);
+  if (idx < 0) return;
+  const j = idx + dir;
+  if (j < 0 || j >= products.length) return;
+  const arr = products.slice();
+  const t = arr[idx]; arr[idx] = arr[j]; arr[j] = t;
+  buzz(12);
+  persistOrder(arr.map(p => p.id));
+  renderSettings();
 }
 
 // ===== מסך אנשי קשר =====
@@ -1209,6 +1223,8 @@ app.addEventListener('click', (e) => {
   else if (role === 'add-product') addProduct();
   else if (role === 'del-product') { const p = products.find(x => x.id === id); showConfirm('מחיקת מוצר', 'למחוק את "' + (p ? p.name : '') + '"?', 'מחק', () => delProduct(id)); }
   else if (role === 'toggle-hidden') toggleHidden(id);
+  else if (role === 'move-up') moveProduct(id, -1);
+  else if (role === 'move-down') moveProduct(id, 1);
   else if (role === 'add-contact') addContact();
   else if (role === 'del-contact') { const c = contacts.find(x => x.id === id); showConfirm('מחיקת איש קשר', 'למחוק את "' + (c ? c.name : '') + '"?', 'מחק', () => delContact(id)); }
   else if (role === 'resend') { const o = history.find(x => x.id === id); if (o) openResend(o); }
