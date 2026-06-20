@@ -59,20 +59,29 @@
     <!-- כותרת -->
     <header class="sticky top-0 z-30 bg-gradient-to-l from-blue-700 to-blue-500 text-white shadow-lg">
       <div class="max-w-3xl mx-auto px-4 h-16 flex items-center justify-between">
-        <div class="flex items-center gap-2.5 cursor-pointer" id="brandHome">
-          <div class="w-10 h-10 rounded-xl bg-white/15 border border-white/25 flex items-center justify-center font-black text-2xl">י</div>
-          <div class="flex flex-col">
-            <h1 class="text-lg font-black leading-none">הזמנות יטבתה</h1>
+        <div class="flex items-center gap-2.5 cursor-pointer min-w-0" id="brandHome">
+          <div class="w-10 h-10 rounded-xl bg-white/15 border border-white/25 flex items-center justify-center font-black text-2xl shrink-0">י</div>
+          <div class="flex flex-col min-w-0">
+            <h1 class="text-lg font-black leading-none truncate">הזמנות יטבתה</h1>
             <div class="flex items-center gap-1.5 mt-1">
               <span id="onlineDot" class="inline-flex rounded-full h-2.5 w-2.5 bg-green-400 shadow-[0_0_6px_rgba(74,222,128,.8)]"></span>
               <span id="onlineText" class="text-[10px] text-blue-50/90 font-medium">מחובר</span>
             </div>
           </div>
         </div>
-        <div class="flex gap-1">
-          <button id="btnDark" class="btn-tap w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center border border-white/15" title="מצב כהה"><i id="darkIcon" class="fa-solid fa-moon"></i></button>
-          <button id="btnHistory" class="btn-tap w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center border border-white/15" title="היסטוריה"><i class="fa-solid fa-clock-rotate-left"></i></button>
-          <button id="btnSettings" class="btn-tap w-10 h-10 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center border border-white/15" title="הגדרות"><i class="fa-solid fa-gear"></i></button>
+        <div class="flex gap-1 shrink-0">
+          <button id="btnDark" class="btn-tap w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center border border-white/15" title="מצב כהה"><i id="darkIcon" class="fa-solid fa-moon"></i></button>
+          <button id="btnNotes" class="btn-tap relative w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center border border-white/15" title="הערות ותזכורות"><i class="fa-solid fa-note-sticky"></i><span id="notesBadge" class="hidden absolute -top-1.5 -left-1.5 min-w-[18px] h-[18px] px-1 bg-red-500 text-white text-[10px] font-black rounded-full flex items-center justify-center border-2 border-blue-600">0</span></button>
+          <button id="btnHistory" class="btn-tap w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center border border-white/15" title="היסטוריה"><i class="fa-solid fa-clock-rotate-left"></i></button>
+          <button id="btnSettings" class="btn-tap w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center border border-white/15" title="הגדרות"><i class="fa-solid fa-gear"></i></button>
+        </div>
+      </div>
+
+      <!-- לשוניות מצב -->
+      <div id="modeTabs" class="max-w-3xl mx-auto px-4 pb-2">
+        <div class="flex bg-white/10 rounded-xl p-1 border border-white/15">
+          <button id="segOrder" class="flex-1 py-2 rounded-lg text-sm font-black flex items-center justify-center gap-1.5"><i class="fa-solid fa-cart-shopping text-xs"></i> הזמנה</button>
+          <button id="segReturns" class="flex-1 py-2 rounded-lg text-sm font-black flex items-center justify-center gap-1.5"><i class="fa-solid fa-rotate-left text-xs"></i> חזרות</button>
         </div>
       </div>
 
@@ -93,7 +102,7 @@
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
       <button id="cartBtn" class="btn-tap pointer-events-auto hidden items-center gap-3 px-8 py-4 rounded-full shadow-2xl bg-blue-600 text-white">
         <i class="fa-solid fa-paper-plane text-lg"></i>
-        <span class="font-black text-lg">סיום הזמנה (<span id="cartCount">0</span>)</span>
+        <span class="font-black text-lg"><span id="cartLabel">סיום הזמנה</span> (<span id="cartCount">0</span>)</span>
       </button>
     </div>
 
@@ -127,6 +136,20 @@
         <div class="flex gap-2 p-4 pt-0">
           <button id="confirmCancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">ביטול</button>
           <button id="confirmOk" class="btn-tap flex-1 py-3 rounded-xl font-black bg-red-600 text-white">מחק</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="promptModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm items-center justify-center p-4 z-50">
+      <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
+        <div class="p-5">
+          <div class="flex items-center gap-2 mb-1"><i class="fa-solid fa-barcode text-blue-600 text-xl"></i><h3 id="promptTitle" class="font-black text-lg text-slate-800">הוספת ברקוד</h3></div>
+          <p id="promptSub" class="text-slate-500 text-sm mb-3"></p>
+          <input id="promptInput" type="text" inputmode="numeric" autocomplete="off" class="w-full p-3 rounded-xl border-2 border-slate-200 outline-none text-center font-bold tracking-widest focus:border-blue-500" placeholder="הקלד או סרוק ברקוד">
+        </div>
+        <div class="flex gap-2 p-4 pt-0">
+          <button id="promptCancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">ביטול</button>
+          <button id="promptOk" class="btn-tap flex-1 py-3 rounded-xl font-black bg-blue-600 text-white">שמור</button>
         </div>
       </div>
     </div>
@@ -210,14 +233,20 @@ const INITIAL_PRODUCTS = RAW_PRODUCTS.map((raw, index) => {
 });
 
 // ===== מצב =====
-let products = [], contacts = [], history = [];
+let products = [], contacts = [], history = [], notes = [];
 let orderState = {};
 let currentView = 'order';
+let mainMode = 'order';
+let returnsList = [];
+let returns = [];
+let pendingBarcodeProductId = null, pendingBarcodeEdit = false;
 let isOnline = navigator.onLine;
 let seeded = false, draftReady = false, isDragging = false;
+let sendCtx = null;
 const avgTimers = {};
 let advanceTimer = null;
 let dragState = null;
+const RETURNS_DRAFT_KEY = 'yt_returns_draft';
 
 const $ = (id) => document.getElementById(id);
 const app = $('app');
@@ -232,9 +261,12 @@ function saveDraft() {
 function restoreDraft() {
   try { const s = localStorage.getItem(ORDER_DRAFT_KEY); if (s) { const o = JSON.parse(s); if (o && typeof o === 'object') orderState = { ...orderState, ...o }; } } catch (e) {}
 }
+function saveReturnsDraft() { try { localStorage.setItem(RETURNS_DRAFT_KEY, JSON.stringify(returnsList)); } catch (e) {} }
+function restoreReturnsDraft() { try { const s = localStorage.getItem(RETURNS_DRAFT_KEY); if (s) { const a = JSON.parse(s); if (Array.isArray(a)) returnsList = a; } } catch (e) {} }
 
 // ===== התחברות =====
 restoreDraft();
+restoreReturnsDraft();
 app.innerHTML = '<div class="text-center text-slate-500 font-bold py-20 animate-pulse">טוען נתונים...</div>';
 if (auth) {
   signInAnonymously(auth).catch(err => { console.error("Auth:", err); fallbackLocal(); });
@@ -286,6 +318,21 @@ function startListeners() {
     history = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     if (currentView === 'history') rerender();
   }, console.error);
+
+  const nRef = collection(db, 'artifacts', appId, 'public', 'data', 'notes');
+  const nQ = query(nRef, orderBy('timestamp', 'desc'));
+  onSnapshot(nQ, (snap) => {
+    notes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    updateNotesBadge();
+    if (currentView === 'notes') rerender();
+  }, console.error);
+
+  const retRef = collection(db, 'artifacts', appId, 'public', 'data', 'returns');
+  const retQ = query(retRef, orderBy('timestamp', 'desc'), limit(50));
+  onSnapshot(retQ, (snap) => {
+    returns = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (currentView === 'returnsHistory') rerender();
+  }, console.error);
 }
 
 function rerender() {
@@ -296,24 +343,44 @@ function rerender() {
 }
 
 // ===== ניווט =====
-function setView(v) { currentView = v; renderView(); window.scrollTo({ top: 0 }); }
+function setView(v) {
+  currentView = v;
+  if (v === 'order' || v === 'returns') mainMode = v;
+  renderView();
+  window.scrollTo({ top: 0 });
+}
+function updateModeTabs() {
+  const o = $('segOrder'), r = $('segReturns'); if (!o || !r) return;
+  const base = 'flex-1 py-2 rounded-lg text-sm font-black flex items-center justify-center gap-1.5 ';
+  const onR = mainMode === 'returns';
+  o.className = base + (!onR ? 'bg-white text-blue-700 shadow' : 'text-white/75');
+  r.className = base + (onR ? 'bg-white text-blue-700 shadow' : 'text-white/75');
+}
 function renderView() {
-  $('searchWrap').style.display = (currentView === 'order') ? '' : 'none';
-  $('backBar').classList.toggle('hidden', currentView === 'order');
-  if (currentView === 'order') renderOrder();
+  const isOrder = currentView === 'order';
+  const isReturns = currentView === 'returns';
+  $('searchWrap').style.display = isOrder ? '' : 'none';
+  $('modeTabs').style.display = (isOrder || isReturns) ? '' : 'none';
+  $('backBar').classList.toggle('hidden', isOrder || isReturns);
+  updateModeTabs();
+  if (isOrder) renderOrder();
+  else if (isReturns) renderReturns();
   else if (currentView === 'settings') renderSettings();
   else if (currentView === 'contacts') renderContacts();
   else if (currentView === 'history') renderHistory();
+  else if (currentView === 'returnsHistory') renderReturnsHistory();
+  else if (currentView === 'notes') renderNotes();
   updateCart();
 }
 
 // ===== מסך הזמנה =====
 function renderOrder() {
-  if (!products.length) {
-    app.innerHTML = '<div class="text-center p-10 text-slate-500">אין מוצרים כרגע. עבור להגדרות כדי להוסיף.</div>';
+  const visible = products.filter(p => !p.hidden);
+  if (!visible.length) {
+    app.innerHTML = '<div class="text-center p-10 text-slate-500">אין מוצרים להצגה. הוסף או הצג מוצרים בהגדרות.</div>';
     updateCart(); return;
   }
-  const rows = products.map(buildOrderRow).join('');
+  const rows = visible.map(buildOrderRow).join('');
   app.innerHTML =
     '<div class="flex items-center justify-between gap-2 mb-3 px-1">' +
       '<div class="text-[11px] text-slate-400 font-medium leading-tight">טפו על <b class="text-blue-500">מומלץ</b> כדי להזמין את הכמות, או הקלידו כמות אחרת</div>' +
@@ -396,9 +463,16 @@ function advanceScroll(id) {
 }
 
 function updateCart() {
-  const n = products.reduce((a, p) => a + (parseInt(orderState[p.id] && orderState[p.id].amount, 10) > 0 ? 1 : 0), 0);
+  let n, label;
+  if (mainMode === 'returns') {
+    n = returnsList.length; label = 'סיים חזרות';
+  } else {
+    n = products.reduce((a, p) => a + ((!p.hidden && parseInt(orderState[p.id] && orderState[p.id].amount, 10) > 0) ? 1 : 0), 0);
+    label = 'סיום הזמנה';
+  }
   $('cartCount').textContent = n;
-  const show = currentView === 'order' && n > 0;
+  const lbl = $('cartLabel'); if (lbl) lbl.textContent = label;
+  const show = (currentView === 'order' || currentView === 'returns') && n > 0;
   $('cartBtn').classList.toggle('hidden', !show);
   $('cartBtn').classList.toggle('flex', show);
 }
@@ -426,10 +500,11 @@ function clearOrder() {
 // ===== מסך הגדרות (גרירה לסידור) =====
 function renderSettings() {
   const rows = products.map((p) =>
-    '<div class="prod-item flex items-center gap-2 p-2.5 bg-white border border-slate-100 rounded-xl" data-id="' + p.id + '">' +
+    '<div class="prod-item flex items-center gap-2 p-2.5 ' + (p.hidden ? 'bg-slate-50 opacity-70' : 'bg-white') + ' border border-slate-100 rounded-xl" data-id="' + p.id + '">' +
       '<div class="drag-handle shrink-0 w-9 h-11 flex items-center justify-center text-slate-300 cursor-grab" data-id="' + p.id + '" style="touch-action:none"><i class="fa-solid fa-grip-vertical text-lg"></i></div>' +
-      '<div class="flex-1 min-w-0 font-bold text-sm text-slate-800 leading-tight">' + p.name + '</div>' +
+      '<div class="flex-1 min-w-0 font-bold text-sm ' + (p.hidden ? 'text-slate-400 line-through' : 'text-slate-800') + ' leading-tight">' + p.name + (p.hidden ? ' <span class="text-[10px] text-amber-500 font-black no-underline">(אזל)</span>' : '') + '</div>' +
       '<input data-role="avg-set" data-id="' + p.id + '" type="text" inputmode="numeric" value="' + (p.average || '') + '" placeholder="0" class="w-14 bg-slate-100 rounded-lg p-1.5 text-center font-bold text-sm outline-none">' +
+      '<button data-role="toggle-hidden" data-id="' + p.id + '" class="btn-tap shrink-0 p-2 ' + (p.hidden ? 'text-amber-500' : 'text-slate-300') + '" title="' + (p.hidden ? 'הצג מוצר' : 'הסתר (אזל במלאי)') + '"><i class="fa-solid ' + (p.hidden ? 'fa-eye-slash' : 'fa-eye') + '"></i></button>' +
       '<button data-role="del-product" data-id="' + p.id + '" class="btn-tap shrink-0 p-2 text-red-500"><i class="fa-solid fa-trash-can"></i></button>' +
     '</div>'
   ).join('');
@@ -550,8 +625,186 @@ function renderHistory() {
           '<div class="bg-blue-100 text-blue-800 font-black px-3 py-1 rounded-full text-sm">' + ((o.items || []).length) + ' פריטים</div>' +
         '</div>' +
         '<div class="p-4"><ul class="space-y-2">' + items + '</ul></div>' +
+        '<div class="p-3 border-t border-slate-100"><button data-role="resend" data-id="' + o.id + '" class="btn-tap w-full bg-green-50 text-green-700 font-black py-2.5 rounded-xl flex items-center justify-center gap-2"><i class="fa-brands fa-whatsapp"></i> שלח שוב</button></div>' +
       '</div>';
     }).join('');
+}
+
+// ===== הערות ותזכורות =====
+function updateNotesBadge() {
+  const b = $('notesBadge'); if (!b) return;
+  b.textContent = notes.length;
+  b.classList.toggle('hidden', notes.length === 0);
+}
+function renderNotes() {
+  const rows = notes.length ? notes.map(nt => {
+    const d = nt.timestamp ? new Date(nt.timestamp) : null;
+    const when = d ? (d.toLocaleDateString('he-IL') + ' · ' + d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })) : '';
+    return '<div class="flex items-start gap-2 p-3 bg-white border border-slate-100 rounded-xl">' +
+      '<button data-role="done-note" data-id="' + nt.id + '" class="btn-tap shrink-0 w-9 h-9 rounded-lg border-2 border-green-500 text-green-500 flex items-center justify-center mt-0.5" title="בוצע"><i class="fa-solid fa-check"></i></button>' +
+      '<div class="flex-1 min-w-0"><div class="font-bold text-slate-800 text-sm break-words">' + (nt.text || '') + '</div>' + (when ? '<div class="text-[11px] text-slate-400 mt-0.5">' + when + '</div>' : '') + '</div>' +
+    '</div>';
+  }).join('') : '<div class="text-center py-10 text-slate-400"><i class="fa-regular fa-note-sticky text-4xl mb-3"></i><div class="font-bold">אין הערות פתוחות</div></div>';
+  app.innerHTML =
+    '<h2 class="font-black text-2xl px-1 py-1 text-slate-800">הערות ותזכורות</h2>' +
+    '<div class="text-xs text-slate-400 px-1 mb-3">למשל: "אסף חייב זיכוי על חלב". ההערה נשארת עד שתסמנו <i class="fa-solid fa-check text-green-500"></i> בוצע.</div>' +
+    '<div class="flex gap-2 mb-4">' +
+      '<input id="newNote" type="text" placeholder="כתוב הערה..." class="flex-1 p-3 rounded-xl border border-slate-200 outline-none bg-white">' +
+      '<button data-role="add-note" class="btn-tap bg-blue-600 text-white px-4 rounded-xl font-black"><i class="fa-solid fa-plus"></i></button>' +
+    '</div>' +
+    '<div class="space-y-2">' + rows + '</div>';
+}
+async function addNote() {
+  const el = $('newNote'); if (!el) return;
+  const text = el.value.trim(); if (!text || !db) return;
+  el.value = ''; el.blur();
+  await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'notes'), { text, timestamp: Date.now() }).catch(console.error);
+}
+async function doneNote(id) { if (db) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'notes', id)).catch(console.error); }
+async function toggleHidden(id) {
+  const p = products.find(x => x.id === id); if (!p || !db) return;
+  await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', id), { hidden: !p.hidden }).catch(console.error);
+}
+
+// ===== מרחב חזרות =====
+function emptyReturnsHtml() {
+  return '<div class="text-center py-8 text-slate-400"><i class="fa-solid fa-rotate-left text-3xl mb-2"></i><div class="font-bold">הרשימה ריקה</div><div class="text-xs mt-1">חפש מוצר למעלה והוסף לרשימת החזרות</div></div>';
+}
+function buildReturnRow(it) {
+  return '<div class="flex items-center gap-2 p-2.5 bg-white border border-slate-100 rounded-2xl shadow-sm" data-rid="' + it.productId + '">' +
+    '<div class="flex-1 min-w-0">' +
+      '<div class="font-bold text-slate-800 text-sm leading-tight">' + it.name + '</div>' +
+      '<button data-role="edit-barcode" data-id="' + it.productId + '" class="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1"><i class="fa-solid fa-barcode"></i> ' + (it.barcode || 'ללא ברקוד') + ' <i class="fa-solid fa-pen text-[9px] opacity-60"></i></button>' +
+    '</div>' +
+    '<div class="flex items-center gap-1 shrink-0">' +
+      '<button data-role="ret-minus" data-id="' + it.productId + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center"><i class="fa-solid fa-minus text-xs"></i></button>' +
+      '<span class="w-8 text-center font-black text-slate-800" id="retqty-' + it.productId + '">' + it.qty + '</span>' +
+      '<button data-role="ret-plus" data-id="' + it.productId + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center"><i class="fa-solid fa-plus text-xs"></i></button>' +
+    '</div>' +
+    '<button data-role="ret-remove" data-id="' + it.productId + '" class="btn-tap shrink-0 p-2 text-red-500"><i class="fa-solid fa-trash-can"></i></button>' +
+  '</div>';
+}
+function renderReturns() {
+  app.innerHTML =
+    '<div class="relative mb-2">' +
+      '<i class="fa-solid fa-magnifying-glass absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>' +
+      '<input id="returnsSearch" type="text" inputmode="search" autocomplete="off" placeholder="חפש מוצר להוספה לחזרות..." class="w-full bg-white border border-slate-200 rounded-xl py-3 pr-9 pl-3 text-sm font-bold outline-none focus:border-blue-500">' +
+    '</div>' +
+    '<div id="returnsResults" class="bg-white border border-slate-200 rounded-xl overflow-hidden mb-3 hidden"></div>' +
+    '<div class="flex items-center justify-between px-1 mb-2"><div class="font-black text-slate-800">רשימת חזרות</div><div id="returnsCount" class="text-xs text-slate-400">' + returnsList.length + ' פריטים</div></div>' +
+    '<div id="returnsListEl" class="space-y-2.5 pb-6">' + (returnsList.length ? returnsList.map(buildReturnRow).join('') : emptyReturnsHtml()) + '</div>';
+}
+function refreshReturnsList() {
+  const el = $('returnsListEl'); if (el) el.innerHTML = returnsList.length ? returnsList.map(buildReturnRow).join('') : emptyReturnsHtml();
+  const cnt = $('returnsCount'); if (cnt) cnt.textContent = returnsList.length + ' פריטים';
+}
+function renderReturnsResults(q) {
+  const box = $('returnsResults'); if (!box) return;
+  q = (q || '').trim();
+  if (!q) { box.classList.add('hidden'); box.innerHTML = ''; return; }
+  const matches = products.filter(p => (p.name || '').includes(q) || (p.barcode || '').includes(q)).slice(0, 8);
+  box.innerHTML = matches.length ? matches.map(p =>
+    '<button data-role="ret-add" data-id="' + p.id + '" class="w-full text-right p-3 border-b border-slate-100 last:border-0 flex items-center justify-between gap-2">' +
+      '<span class="font-bold text-slate-800 text-sm truncate">' + p.name + '</span>' +
+      (p.barcode ? '<span class="text-[11px] text-slate-400 shrink-0"><i class="fa-solid fa-barcode"></i> ' + p.barcode + '</span>' : '<span class="text-[11px] text-amber-500 font-bold shrink-0">+ ברקוד</span>') +
+    '</button>'
+  ).join('') : '<div class="p-3 text-sm text-slate-400 text-center">לא נמצא מוצר</div>';
+  box.classList.remove('hidden');
+}
+function addReturn(productId) {
+  const p = products.find(x => x.id === productId); if (!p) return;
+  if (!p.barcode) { openBarcodePrompt(productId, false); return; }
+  const existing = returnsList.find(it => it.productId === productId);
+  if (existing) existing.qty += 1;
+  else returnsList.push({ productId, name: p.name, barcode: p.barcode, qty: 1 });
+  saveReturnsDraft();
+  const s = $('returnsSearch'); if (s) s.value = '';
+  const box = $('returnsResults'); if (box) { box.classList.add('hidden'); box.innerHTML = ''; }
+  refreshReturnsList();
+  updateCart();
+}
+function changeReturnQty(id, d) {
+  const it = returnsList.find(x => x.productId === id); if (!it) return;
+  it.qty = Math.max(1, (it.qty || 1) + d);
+  const span = $('retqty-' + id); if (span) span.textContent = it.qty;
+  saveReturnsDraft();
+}
+function removeReturn(id) {
+  returnsList = returnsList.filter(x => x.productId !== id);
+  saveReturnsDraft();
+  refreshReturnsList();
+  updateCart();
+}
+function openBarcodePrompt(productId, isEdit) {
+  const p = products.find(x => x.id === productId); if (!p) return;
+  pendingBarcodeProductId = productId; pendingBarcodeEdit = !!isEdit;
+  $('promptTitle').textContent = isEdit ? 'עריכת ברקוד' : 'הוספת ברקוד';
+  $('promptSub').textContent = p.name;
+  $('promptInput').value = p.barcode || '';
+  const m = $('promptModal'); m.classList.remove('hidden'); m.classList.add('flex');
+  setTimeout(() => { const i = $('promptInput'); if (i) { i.focus(); i.select(); } }, 60);
+}
+function hidePrompt() { const m = $('promptModal'); m.classList.add('hidden'); m.classList.remove('flex'); pendingBarcodeProductId = null; }
+async function savePrompt() {
+  const id = pendingBarcodeProductId;
+  const wasEdit = pendingBarcodeEdit;
+  if (!id) { hidePrompt(); return; }
+  const val = ($('promptInput').value || '').trim();
+  if (!val) { hidePrompt(); return; }
+  const p = products.find(x => x.id === id); if (p) p.barcode = val;
+  if (db) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', id), { barcode: val }).catch(console.error);
+  const entry = returnsList.find(it => it.productId === id); if (entry) { entry.barcode = val; saveReturnsDraft(); }
+  hidePrompt();
+  if (!wasEdit) addReturn(id);
+  else refreshReturnsList();
+}
+function openReturnsSend() {
+  if (!returnsList.length) return;
+  const items = returnsList.map(it => ({ name: it.name, barcode: it.barcode, qty: it.qty }));
+  sendCtx = { type: 'returns', items, resetCurrent: false };
+  renderSendModal(items, 'רשימת חזרות', 'returns');
+}
+function buildReturnsMessage(items, note) {
+  const d = new Date();
+  const dateStr = d.toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const line = '━━━━━━━━━━━━━━';
+  let m = '↩️ *חזרות / זיכוי — יטבתה*\n📅 ' + dateStr + '\n' + line + '\n\n';
+  items.forEach(i => { m += '🔹 ' + i.name + '\n   📦 ברקוד: ' + (i.barcode || '—') + ' · כמות: *' + i.qty + '*\n'; });
+  m += '\n' + line + '\n📦 סה״כ: *' + items.length + '* פריטים';
+  if (note && note.trim()) m += '\n\n📝 ' + note.trim();
+  return m;
+}
+function renderReturnsHistory() {
+  if (!returns.length) {
+    app.innerHTML = '<div class="text-center py-16 text-slate-400"><i class="fa-solid fa-rotate-left text-5xl mb-4"></i><h3 class="font-black text-xl text-slate-600">אין חזרות</h3></div>';
+    return;
+  }
+  const pending = returns.filter(r => !r.credited).length;
+  app.innerHTML =
+    '<h2 class="font-black text-2xl px-1 py-1 text-slate-800">היסטוריית חזרות</h2>' +
+    (pending ? '<div class="px-1 mb-3 text-sm font-bold text-amber-600"><i class="fa-solid fa-clock"></i> ' + pending + ' ממתינים לזיכוי</div>' : '<div class="px-1 mb-3 text-sm font-bold text-green-600"><i class="fa-solid fa-circle-check"></i> כל הזיכויים התקבלו</div>') +
+    returns.map(r => {
+      const d = new Date(r.timestamp);
+      const items = (r.items || []).map(it => '<li class="flex justify-between items-center text-sm border-b border-slate-100 pb-2 last:border-0"><div class="min-w-0"><span class="font-medium text-slate-700">' + it.name + '</span><span class="block text-[11px] text-slate-400"><i class="fa-solid fa-barcode"></i> ' + (it.barcode || '—') + '</span></div><span class="font-black bg-slate-100 px-2 rounded shrink-0">' + (it.qty != null ? it.qty + ' יח׳' : '') + '</span></li>').join('');
+      const credited = !!r.credited;
+      return '<div class="bg-white rounded-2xl shadow-sm border ' + (credited ? 'border-green-200' : 'border-amber-200') + ' overflow-hidden mb-4">' +
+        '<div class="' + (credited ? 'bg-green-50' : 'bg-amber-50') + ' p-4 border-b border-slate-100 flex justify-between items-center">' +
+          '<div><div class="font-black text-slate-800">' + d.toLocaleDateString('he-IL') + ' · ' + d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) + '</div>' +
+          '<div class="text-sm text-slate-500">נשלח אל: <b>' + (r.sentTo || '') + '</b></div></div>' +
+          (credited ? '<span class="bg-green-100 text-green-700 font-black px-3 py-1 rounded-full text-xs"><i class="fa-solid fa-check"></i> זוכה</span>' : '<span class="bg-amber-100 text-amber-700 font-black px-3 py-1 rounded-full text-xs">ממתין</span>') +
+        '</div>' +
+        '<div class="p-4"><ul class="space-y-2">' + items + '</ul></div>' +
+        '<div class="p-3 border-t border-slate-100">' +
+          (credited
+            ? '<button data-role="uncredit" data-id="' + r.id + '" class="btn-tap w-full bg-slate-100 text-slate-500 font-bold py-2.5 rounded-xl text-sm">בטל סימון זיכוי</button>'
+            : '<button data-role="credit" data-id="' + r.id + '" class="btn-tap w-full bg-green-600 text-white font-black py-2.5 rounded-xl flex items-center justify-center gap-2"><i class="fa-solid fa-check"></i> סמן שהזיכוי בוצע</button>') +
+        '</div>' +
+      '</div>';
+    }).join('');
+}
+async function markCredited(id, val) {
+  if (!db) return;
+  await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'returns', id), { credited: val, creditedAt: val ? Date.now() : null }).catch(console.error);
 }
 
 // ===== פעולות מוצרים/אנשי קשר =====
@@ -596,18 +849,19 @@ function toggleUnit(id, btn) {
 
 // ===== שליחה =====
 function orderedItems() {
-  return products.filter(p => parseInt(orderState[p.id] && orderState[p.id].amount, 10) > 0).map(p => ({
+  return products.filter(p => !p.hidden && parseInt(orderState[p.id] && orderState[p.id].amount, 10) > 0).map(p => ({
     name: p.name, amount: parseInt(orderState[p.id].amount, 10),
     unit: (orderState[p.id].unit === 'unit') ? 'יחידות' : 'ארגזים'
   }));
 }
-function buildMessage(items) {
+function buildMessage(items, note) {
   const d = new Date();
   const dateStr = d.toLocaleDateString('he-IL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   const line = '━━━━━━━━━━━━━━';
   let m = '🥛 *הזמנת יטבתה*\n📅 ' + dateStr + '\n' + line + '\n\n';
   items.forEach(i => { m += '🔹 ' + i.name + ' — *' + i.amount + '* ' + i.unit + '\n'; });
   m += '\n' + line + '\n📦 סה״כ: *' + items.length + '* מוצרים';
+  if (note && note.trim()) m += '\n\n📝 ' + note.trim();
   return m;
 }
 function renderContactPicker() {
@@ -621,32 +875,63 @@ function renderContactPicker() {
     '</button>'
   ).join('');
 }
-function openSend() {
-  const items = orderedItems();
-  if (!items.length) return;
-  const list = items.map(i => '<div class="flex justify-between items-center text-sm py-1.5 border-b border-slate-100 last:border-0"><span class="font-bold text-slate-700">' + i.name + '</span><span class="font-black text-blue-700 whitespace-nowrap">' + i.amount + ' ' + i.unit + '</span></div>').join('');
+function renderSendModal(items, titleNote, type) {
+  const list = items.map(i => {
+    if (type === 'returns') {
+      return '<div class="flex justify-between items-center text-sm py-1.5 border-b border-slate-100 last:border-0"><div class="min-w-0 pl-2"><span class="font-bold text-slate-700">' + i.name + '</span><span class="block text-[11px] text-slate-400"><i class="fa-solid fa-barcode"></i> ' + (i.barcode || '—') + '</span></div><span class="font-black text-blue-700 whitespace-nowrap">' + i.qty + ' יח׳</span></div>';
+    }
+    return '<div class="flex justify-between items-center text-sm py-1.5 border-b border-slate-100 last:border-0"><span class="font-bold text-slate-700">' + i.name + '</span><span class="font-black text-blue-700 whitespace-nowrap">' + i.amount + ' ' + i.unit + '</span></div>';
+  }).join('');
   $('sendSummary').innerHTML =
-    '<div class="mb-2 font-black text-slate-800">סיכום הזמנה · ' + items.length + ' מוצרים</div>' +
-    '<div class="bg-slate-50 rounded-xl p-3 max-h-44 overflow-y-auto border border-slate-100 mb-3">' + list + '</div>' +
+    '<div class="mb-2 font-black text-slate-800">' + (titleNote || 'סיכום הזמנה') + ' · ' + items.length + ' פריטים</div>' +
+    '<div class="bg-slate-50 rounded-xl p-3 max-h-40 overflow-y-auto border border-slate-100 mb-3">' + list + '</div>' +
+    '<div class="mb-3"><input id="orderNote" type="text" placeholder="הערה (לא חובה)..." class="w-full p-2.5 rounded-xl border border-slate-200 outline-none text-sm bg-white"></div>' +
     '<div class="text-xs text-slate-400 mb-1 font-bold">בחר/י איש קשר לשליחה:</div>';
   renderContactPicker();
   const m = $('sendModal'); m.classList.remove('hidden'); m.classList.add('flex');
 }
-function hideSend() { const m = $('sendModal'); m.classList.add('hidden'); m.classList.remove('flex'); }
-async function sendOrder(contact) {
+function openSendCurrent() {
   const items = orderedItems();
   if (!items.length) return;
+  sendCtx = { type: 'order', items, resetCurrent: true };
+  renderSendModal(items, 'סיכום הזמנה', 'order');
+}
+function openResend(order) {
+  const items = (order.items || []).map(i => ({ name: i.name, amount: i.amount, unit: i.unit }));
+  if (!items.length) return;
+  sendCtx = { type: 'order', items, resetCurrent: false };
+  renderSendModal(items, 'שליחה חוזרת', 'order');
+}
+function hideSend() { const m = $('sendModal'); m.classList.add('hidden'); m.classList.remove('flex'); }
+async function performSend(contact) {
+  if (!sendCtx || !sendCtx.items.length) return;
+  const { type, items, resetCurrent } = sendCtx;
+  const note = ($('orderNote') ? $('orderNote').value.trim() : '');
+  let phone = (contact.phone || '').replace(/[-+\s]/g, '');
+  if (phone.startsWith('0')) phone = '972' + phone.substring(1);
+  if (type === 'returns') {
+    if (db) {
+      const sp = addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'returns'), { timestamp: Date.now(), sentTo: contact.name, items, credited: false }).catch(console.error);
+      await Promise.race([sp, new Promise(r => setTimeout(r, 1500))]);
+    }
+    const msg = buildReturnsMessage(items, note);
+    const url = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg);
+    returnsList = []; saveReturnsDraft();
+    sendCtx = null; hideSend(); setView('returnsHistory'); window.location.href = url;
+    return;
+  }
   if (db) {
     const sp = addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'history'), { timestamp: Date.now(), sentTo: contact.name, items }).catch(console.error);
     await Promise.race([sp, new Promise(r => setTimeout(r, 1500))]);
   }
-  const msg = buildMessage(items);
-  let phone = (contact.phone || '').replace(/[-+\s]/g, '');
-  if (phone.startsWith('0')) phone = '972' + phone.substring(1);
+  const msg = buildMessage(items, note);
   const url = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg);
-  orderState = {};
-  products.forEach(p => orderState[p.id] = { amount: '', unit: p.defaultUnit });
-  try { localStorage.removeItem(ORDER_DRAFT_KEY); } catch (e) {}
+  if (resetCurrent) {
+    orderState = {};
+    products.forEach(p => orderState[p.id] = { amount: '', unit: p.defaultUnit });
+    try { localStorage.removeItem(ORDER_DRAFT_KEY); } catch (e) {}
+  }
+  sendCtx = null;
   hideSend();
   setView('history');
   window.location.href = url;
@@ -665,17 +950,24 @@ function hideConfirm() { const m = $('confirmModal'); m.classList.add('hidden');
 $('confirmCancel').addEventListener('click', hideConfirm);
 $('confirmOk').addEventListener('click', () => { const cb = confirmCb; hideConfirm(); if (cb) cb(); });
 $('brandHome').addEventListener('click', () => setView('order'));
-$('btnHistory').addEventListener('click', () => setView('history'));
+$('btnHistory').addEventListener('click', () => setView(mainMode === 'returns' ? 'returnsHistory' : 'history'));
+$('segOrder').addEventListener('click', () => setView('order'));
+$('segReturns').addEventListener('click', () => setView('returns'));
 $('btnSettings').addEventListener('click', () => setView('settings'));
-$('backToOrder').addEventListener('click', () => setView('order'));
-$('cartBtn').addEventListener('click', openSend);
+$('btnNotes').addEventListener('click', () => setView('notes'));
+$('backToOrder').addEventListener('click', () => setView(mainMode));
+$('cartBtn').addEventListener('click', () => { if (mainMode === 'returns') openReturnsSend(); else openSendCurrent(); });
+$('promptCancel').addEventListener('click', hidePrompt);
+$('promptOk').addEventListener('click', savePrompt);
+$('promptInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); savePrompt(); } });
 $('closeSend').addEventListener('click', hideSend);
 $('searchInput').addEventListener('input', (e) => { $('clearSearch').classList.toggle('hidden', !e.target.value); applySearch(e.target.value); });
 $('clearSearch').addEventListener('click', () => { $('searchInput').value = ''; $('clearSearch').classList.add('hidden'); applySearch(''); });
-$('contactList').addEventListener('click', (e) => { const b = e.target.closest('[data-role="send-to"]'); if (!b) return; const ct = contacts.find(x => x.id === b.dataset.id); if (ct) sendOrder(ct); });
+$('contactList').addEventListener('click', (e) => { const b = e.target.closest('[data-role="send-to"]'); if (!b) return; const ct = contacts.find(x => x.id === b.dataset.id); if (ct) performSend(ct); });
 
 app.addEventListener('input', (e) => {
   const t = e.target; const role = t.getAttribute && t.getAttribute('data-role');
+  if (t.id === 'returnsSearch') { renderReturnsResults(t.value); return; }
   if (role === 'amount') {
     const id = t.dataset.id; let v = t.value.replace(/[^0-9]/g, ''); if (v !== t.value) t.value = v;
     (orderState[id] = orderState[id] || { amount: '', unit: 'carton' }).amount = (v === '0' ? '' : v);
@@ -691,6 +983,7 @@ app.addEventListener('input', (e) => {
 
 app.addEventListener('keydown', (e) => {
   const t = e.target;
+  if (t.id === 'newNote' && e.key === 'Enter') { e.preventDefault(); addNote(); return; }
   if (!(t.getAttribute && t.getAttribute('data-role') === 'amount')) return;
   if (e.key === 'Enter') { e.preventDefault(); clearTimeout(advanceTimer); advanceFrom(t.dataset.id); }
 });
@@ -711,8 +1004,19 @@ app.addEventListener('click', (e) => {
   else if (role === 'go-settings') setView('settings');
   else if (role === 'add-product') addProduct();
   else if (role === 'del-product') { const p = products.find(x => x.id === id); showConfirm('מחיקת מוצר', 'למחוק את "' + (p ? p.name : '') + '"?', 'מחק', () => delProduct(id)); }
+  else if (role === 'toggle-hidden') toggleHidden(id);
   else if (role === 'add-contact') addContact();
   else if (role === 'del-contact') { const c = contacts.find(x => x.id === id); showConfirm('מחיקת איש קשר', 'למחוק את "' + (c ? c.name : '') + '"?', 'מחק', () => delContact(id)); }
+  else if (role === 'resend') { const o = history.find(x => x.id === id); if (o) openResend(o); }
+  else if (role === 'add-note') addNote();
+  else if (role === 'done-note') doneNote(id);
+  else if (role === 'ret-add') addReturn(id);
+  else if (role === 'ret-plus') changeReturnQty(id, 1);
+  else if (role === 'ret-minus') changeReturnQty(id, -1);
+  else if (role === 'ret-remove') removeReturn(id);
+  else if (role === 'edit-barcode') openBarcodePrompt(id, true);
+  else if (role === 'credit') markCredited(id, true);
+  else if (role === 'uncredit') markCredited(id, false);
 });
 
 // ===== מצב כהה =====
