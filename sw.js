@@ -1,8 +1,8 @@
-// Service Worker לאפליקציית גלוברנס
+// Service Worker לאפליקציית יטבתה
 // מאפשר התקנה כאפליקציה (PWA) באנדרואיד + עבודה בסיסית גם ללא אינטרנט.
-// כשתעדכן את index.html, פשוט שנה את המספר ב-CACHE_NAME (למשל v3) כדי לרענן את המטמון.
+// בעת עדכון index.html — שנה את המספר ב-CACHE_NAME (למשל yotvata-v2) כדי לרענן.
 
-const CACHE_NAME = 'globrands-v2';
+const CACHE_NAME = 'yotvata-v1';
 const APP_SHELL = [
   './',
   './index.html',
@@ -12,7 +12,6 @@ const APP_SHELL = [
   './apple-touch-icon.png'
 ];
 
-// התקנה: שמירת קבצי הבסיס למטמון
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
@@ -22,7 +21,6 @@ self.addEventListener('install', (event) => {
   );
 });
 
-// הפעלה: ניקוי מטמונים ישנים
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
@@ -31,12 +29,11 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// בקשות רשת
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
 
-  // ניווט (טעינת הדף): קודם רשת (כדי לקבל עדכונים), ואם אין אינטרנט - מהמטמון
+  // ניווט (טעינת הדף): קודם רשת, ואם אין אינטרנט - מהמטמון
   if (req.mode === 'navigate') {
     event.respondWith(
       fetch(req)
@@ -50,7 +47,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // שאר הקבצים: קודם מהמטמון (מהיר), אחרת מהרשת ושמירה למטמון
+  // שאר הקבצים: קודם מהמטמון, אחרת מהרשת ושמירה
   event.respondWith(
     caches.match(req).then((cached) => {
       if (cached) return cached;
