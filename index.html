@@ -160,7 +160,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebas
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import {
   initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager,
-  collection, onSnapshot, doc, deleteDoc, addDoc, updateDoc, writeBatch, query, orderBy, limit
+  collection, onSnapshot, doc, deleteDoc, addDoc, updateDoc, writeBatch, query, orderBy, limit, getDocs
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -270,7 +270,7 @@ restoreReturnsDraft();
 app.innerHTML = '<div class="text-center text-slate-500 font-bold py-20 animate-pulse">טוען נתונים...</div>';
 if (auth) {
   signInAnonymously(auth).catch(err => { console.error("Auth:", err); fallbackLocal(); });
-  onAuthStateChanged(auth, (u) => { if (u) startListeners(); });
+  onAuthStateChanged(auth, (u) => { if (u) { startListeners(); pruneOnLoad(); } });
 } else { fallbackLocal(); }
 
 function fallbackLocal() {
@@ -313,7 +313,7 @@ function startListeners() {
   }, console.error);
 
   const hRef = collection(db, 'artifacts', appId, 'public', 'data', 'history');
-  const hQ = query(hRef, orderBy('timestamp', 'desc'), limit(50));
+  const hQ = query(hRef, orderBy('timestamp', 'desc'), limit(20));
   onSnapshot(hQ, (snap) => {
     history = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     if (currentView === 'history') rerender();
@@ -328,7 +328,7 @@ function startListeners() {
   }, console.error);
 
   const retRef = collection(db, 'artifacts', appId, 'public', 'data', 'returns');
-  const retQ = query(retRef, orderBy('timestamp', 'desc'), limit(50));
+  const retQ = query(retRef, orderBy('timestamp', 'desc'), limit(20));
   onSnapshot(retQ, (snap) => {
     returns = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     if (currentView === 'returnsHistory') rerender();
@@ -614,7 +614,7 @@ function renderHistory() {
     app.innerHTML = '<div class="text-center py-16 text-slate-400"><i class="fa-solid fa-clock-rotate-left text-5xl mb-4"></i><h3 class="font-black text-xl text-slate-600">אין היסטוריה</h3></div>';
     return;
   }
-  app.innerHTML = '<h2 class="font-black text-2xl px-1 py-2 text-slate-800">היסטוריית הזמנות</h2>' +
+  app.innerHTML = '<div class="flex items-center justify-between px-1 py-2"><h2 class="font-black text-2xl text-slate-800">היסטוריית הזמנות</h2><button data-role="clear-history" class="btn-tap text-xs font-bold text-red-500 bg-red-50 px-3 py-2 rounded-lg flex items-center gap-1.5"><i class="fa-solid fa-trash-can"></i> נקה הכל</button></div>' +
     history.map(o => {
       const d = new Date(o.timestamp);
       const items = (o.items || []).map(it => '<li class="flex justify-between items-center text-sm border-b border-slate-100 pb-2 last:border-0"><span class="font-medium text-slate-700">' + it.name + '</span><span class="font-black bg-slate-100 px-2 rounded">' + it.amount + ' ' + it.unit + '</span></li>').join('');
@@ -781,30 +781,72 @@ function renderReturnsHistory() {
   }
   const pending = returns.filter(r => !r.credited).length;
   app.innerHTML =
-    '<h2 class="font-black text-2xl px-1 py-1 text-slate-800">היסטוריית חזרות</h2>' +
+    '<div class="flex items-center justify-between px-1 py-1"><h2 class="font-black text-2xl text-slate-800">היסטוריית חזרות</h2><button data-role="clear-returns-history" class="btn-tap text-xs font-bold text-red-500 bg-red-50 px-3 py-2 rounded-lg flex items-center gap-1.5"><i class="fa-solid fa-trash-can"></i> נקה הכל</button></div>' +
     (pending ? '<div class="px-1 mb-3 text-sm font-bold text-amber-600"><i class="fa-solid fa-clock"></i> ' + pending + ' ממתינים לזיכוי</div>' : '<div class="px-1 mb-3 text-sm font-bold text-green-600"><i class="fa-solid fa-circle-check"></i> כל הזיכויים התקבלו</div>') +
     returns.map(r => {
       const d = new Date(r.timestamp);
       const items = (r.items || []).map(it => '<li class="flex justify-between items-center text-sm border-b border-slate-100 pb-2 last:border-0"><div class="min-w-0"><span class="font-medium text-slate-700">' + it.name + '</span><span class="block text-[11px] text-slate-400"><i class="fa-solid fa-barcode"></i> ' + (it.barcode || '—') + '</span></div><span class="font-black bg-slate-100 px-2 rounded shrink-0">' + (it.qty != null ? it.qty + ' יח׳' : '') + '</span></li>').join('');
       const credited = !!r.credited;
-      return '<div class="bg-white rounded-2xl shadow-sm border ' + (credited ? 'border-green-200' : 'border-amber-200') + ' overflow-hidden mb-4">' +
-        '<div class="' + (credited ? 'bg-green-50' : 'bg-amber-50') + ' p-4 border-b border-slate-100 flex justify-between items-center">' +
+      const credDate = r.creditedAt ? new Date(r.creditedAt).toLocaleDateString('he-IL') : '';
+      const statusBar = credited
+        ? '<div class="bg-green-500 text-white px-4 py-2.5 flex items-center gap-2 font-black"><i class="fa-solid fa-circle-check"></i> הזיכוי בוצע' + (credDate ? ' · ' + credDate : '') + '</div>'
+        : '<div class="bg-amber-400 text-amber-900 px-4 py-2.5 flex items-center gap-2 font-black"><i class="fa-solid fa-hourglass-half"></i> ממתין לזיכוי</div>';
+      return '<div class="bg-white rounded-2xl shadow-sm border ' + (credited ? 'border-green-300' : 'border-amber-300') + ' overflow-hidden mb-4">' +
+        statusBar +
+        '<div class="p-4 border-b border-slate-100 flex justify-between items-center">' +
           '<div><div class="font-black text-slate-800">' + d.toLocaleDateString('he-IL') + ' · ' + d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) + '</div>' +
           '<div class="text-sm text-slate-500">נשלח אל: <b>' + (r.sentTo || '') + '</b></div></div>' +
-          (credited ? '<span class="bg-green-100 text-green-700 font-black px-3 py-1 rounded-full text-xs"><i class="fa-solid fa-check"></i> זוכה</span>' : '<span class="bg-amber-100 text-amber-700 font-black px-3 py-1 rounded-full text-xs">ממתין</span>') +
+          '<div class="bg-blue-100 text-blue-800 font-black px-3 py-1 rounded-full text-xs">' + ((r.items || []).length) + ' פריטים</div>' +
         '</div>' +
         '<div class="p-4"><ul class="space-y-2">' + items + '</ul></div>' +
         '<div class="p-3 border-t border-slate-100">' +
           (credited
-            ? '<button data-role="uncredit" data-id="' + r.id + '" class="btn-tap w-full bg-slate-100 text-slate-500 font-bold py-2.5 rounded-xl text-sm">בטל סימון זיכוי</button>'
-            : '<button data-role="credit" data-id="' + r.id + '" class="btn-tap w-full bg-green-600 text-white font-black py-2.5 rounded-xl flex items-center justify-center gap-2"><i class="fa-solid fa-check"></i> סמן שהזיכוי בוצע</button>') +
+            ? '<button data-role="uncredit" data-id="' + r.id + '" class="btn-tap w-full bg-slate-100 text-slate-500 font-bold py-2.5 rounded-xl text-sm"><i class="fa-solid fa-rotate-left"></i> בטל סימון — חזור ל״ממתין״</button>'
+            : '<button data-role="credit" data-id="' + r.id + '" class="btn-tap w-full bg-green-600 text-white font-black py-3 rounded-xl flex items-center justify-center gap-2 text-base"><i class="fa-solid fa-check"></i> סמן שהזיכוי בוצע</button>') +
         '</div>' +
       '</div>';
     }).join('');
 }
 async function markCredited(id, val) {
+  const r = returns.find(x => x.id === id);
+  if (r) { r.credited = val; r.creditedAt = val ? Date.now() : null; }
+  if (currentView === 'returnsHistory') renderReturnsHistory();
+  buzz(val ? 18 : 8);
+  if (db) {
+    try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'returns', id), { credited: val, creditedAt: val ? Date.now() : null }); }
+    catch (e) { console.error(e); }
+  }
+}
+async function pruneCollection(name, keep) {
   if (!db) return;
-  await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'returns', id), { credited: val, creditedAt: val ? Date.now() : null }).catch(console.error);
+  try {
+    const snap = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', name), orderBy('timestamp', 'desc')));
+    const docs = snap.docs;
+    if (docs.length <= keep) return;
+    for (let i = keep; i < docs.length; i += 400) {
+      const batch = writeBatch(db);
+      docs.slice(i, i + 400).forEach(dd => batch.delete(dd.ref));
+      await batch.commit();
+    }
+  } catch (e) { console.error(e); }
+}
+let prunedOnce = false;
+function pruneOnLoad() {
+  if (prunedOnce) return; prunedOnce = true;
+  pruneCollection('history', 20);
+  pruneCollection('returns', 20);
+}
+async function clearAllDocs(name) {
+  if (!db) return;
+  try {
+    const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', name));
+    const docs = snap.docs;
+    for (let i = 0; i < docs.length; i += 400) {
+      const batch = writeBatch(db);
+      docs.slice(i, i + 400).forEach(dd => batch.delete(dd.ref));
+      await batch.commit();
+    }
+  } catch (e) { console.error(e); }
 }
 
 // ===== פעולות מוצרים/אנשי קשר =====
@@ -1017,6 +1059,8 @@ app.addEventListener('click', (e) => {
   else if (role === 'edit-barcode') openBarcodePrompt(id, true);
   else if (role === 'credit') markCredited(id, true);
   else if (role === 'uncredit') markCredited(id, false);
+  else if (role === 'clear-history') showConfirm('ניקוי היסטוריה', 'למחוק את כל היסטוריית ההזמנות? פעולה זו אינה הפיכה.', 'מחק הכל', () => clearAllDocs('history'));
+  else if (role === 'clear-returns-history') showConfirm('ניקוי היסטוריה', 'למחוק את כל היסטוריית החזרות? פעולה זו אינה הפיכה.', 'מחק הכל', () => clearAllDocs('returns'));
 });
 
 // ===== מצב כהה =====
