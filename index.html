@@ -146,11 +146,37 @@
           <div class="flex items-center gap-2 mb-1"><i class="fa-solid fa-barcode text-blue-600 text-xl"></i><h3 id="promptTitle" class="font-black text-lg text-slate-800">הוספת ברקוד</h3></div>
           <p id="promptSub" class="text-slate-500 text-sm mb-3"></p>
           <input id="promptInput" type="text" inputmode="numeric" autocomplete="off" class="w-full p-3 rounded-xl border-2 border-slate-200 outline-none text-center font-bold tracking-widest focus:border-blue-500" placeholder="הקלד או סרוק ברקוד">
+          <button id="promptScan" class="btn-tap mt-3 w-full py-2.5 rounded-xl font-black bg-blue-50 text-blue-700 flex items-center justify-center gap-2"><i class="fa-solid fa-camera"></i> סרוק עם מצלמה</button>
         </div>
         <div class="flex gap-2 p-4 pt-0">
           <button id="promptCancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">ביטול</button>
           <button id="promptOk" class="btn-tap flex-1 py-3 rounded-xl font-black bg-blue-600 text-white">שמור</button>
         </div>
+      </div>
+    </div>
+
+    <!-- מסך סריקת מצלמה -->
+    <div id="scanModal" class="hidden fixed inset-0 bg-black z-[55] flex-col">
+      <div class="relative flex-1 overflow-hidden">
+        <video id="scanVideo" class="w-full h-full object-cover" playsinline muted></video>
+        <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div class="w-72 h-44 border-4 border-white/90 rounded-2xl" style="box-shadow:0 0 0 9999px rgba(0,0,0,0.45)"></div>
+        </div>
+        <div class="absolute top-0 inset-x-0 p-4 flex items-center justify-between">
+          <span class="text-white font-black text-lg" style="text-shadow:0 1px 3px rgba(0,0,0,.6)">סריקת ברקוד</span>
+          <button id="scanClose" class="btn-tap w-11 h-11 rounded-full bg-black/50 text-white flex items-center justify-center"><i class="fa-solid fa-xmark text-xl"></i></button>
+        </div>
+        <div class="absolute bottom-0 inset-x-0 p-8 text-center">
+          <p class="text-white font-bold" style="text-shadow:0 1px 3px rgba(0,0,0,.6)">כוון את הברקוד אל תוך המסגרת</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- הודעת ביטול (Undo) -->
+    <div id="toast" class="hidden fixed bottom-24 inset-x-0 justify-center px-4 z-[60] pointer-events-none">
+      <div class="pointer-events-auto bg-slate-900 text-white rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-3 max-w-sm w-full">
+        <span id="toastMsg" class="flex-1 text-sm font-bold"></span>
+        <button id="toastBtn" class="hidden btn-tap text-blue-300 font-black text-sm px-3 py-1 rounded-lg">בטל</button>
       </div>
     </div>
 
@@ -491,10 +517,14 @@ function applySearch(q) {
 }
 
 function clearOrder() {
+  const prev = {};
+  products.forEach(p => { const st = orderState[p.id] || {}; prev[p.id] = { amount: st.amount || '', unit: st.unit || p.defaultUnit }; });
   orderState = {};
   products.forEach(p => orderState[p.id] = { amount: '', unit: p.defaultUnit });
   saveDraft();
   renderOrder();
+  updateCart();
+  showToast('ההזמנה נוקתה', 'בטל', () => { orderState = prev; saveDraft(); if (currentView === 'order') renderOrder(); updateCart(); });
 }
 
 // ===== מסך הגדרות (גרירה לסידור) =====
@@ -660,7 +690,12 @@ async function addNote() {
   el.value = ''; el.blur();
   await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'notes'), { text, timestamp: Date.now() }).catch(console.error);
 }
-async function doneNote(id) { if (db) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'notes', id)).catch(console.error); }
+async function doneNote(id) {
+  const n = notes.find(x => x.id === id);
+  const backup = n ? { text: n.text, timestamp: n.timestamp || Date.now() } : null;
+  if (db) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'notes', id)).catch(console.error);
+  if (backup) showToast('ההערה סומנה כבוצעה', 'בטל', () => { if (db) addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'notes'), backup).catch(console.error); });
+}
 async function toggleHidden(id) {
   const p = products.find(x => x.id === id); if (!p || !db) return;
   await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', id), { hidden: !p.hidden }).catch(console.error);
@@ -730,10 +765,19 @@ function changeReturnQty(id, d) {
   saveReturnsDraft();
 }
 function removeReturn(id) {
-  returnsList = returnsList.filter(x => x.productId !== id);
+  const idx = returnsList.findIndex(x => x.productId === id);
+  if (idx < 0) return;
+  const removed = returnsList[idx];
+  returnsList.splice(idx, 1);
   saveReturnsDraft();
   refreshReturnsList();
   updateCart();
+  showToast('הוסר מהחזרות', 'בטל', () => {
+    returnsList.splice(Math.min(idx, returnsList.length), 0, removed);
+    saveReturnsDraft();
+    if (currentView === 'returns') refreshReturnsList();
+    updateCart();
+  });
 }
 function openBarcodePrompt(productId, isEdit) {
   const p = products.find(x => x.id === productId); if (!p) return;
@@ -741,6 +785,7 @@ function openBarcodePrompt(productId, isEdit) {
   $('promptTitle').textContent = isEdit ? 'עריכת ברקוד' : 'הוספת ברקוד';
   $('promptSub').textContent = p.name;
   $('promptInput').value = p.barcode || '';
+  $('promptScan').classList.toggle('hidden', !scannerSupported());
   const m = $('promptModal'); m.classList.remove('hidden'); m.classList.add('flex');
   setTimeout(() => { const i = $('promptInput'); if (i) { i.focus(); i.select(); } }, 60);
 }
@@ -867,14 +912,24 @@ async function addProduct() {
   nameEl.value = ''; $('npAvg').value = '';
   await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'products'), { name, average: avg, defaultUnit: unit, orderIndex: maxIdx + 1 }).catch(console.error);
 }
-async function delProduct(id) { if (db) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', id)).catch(console.error); }
+async function delProduct(id) {
+  const p = products.find(x => x.id === id);
+  const backup = p ? { ...p } : null;
+  if (db) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', id)).catch(console.error);
+  if (backup) showToast('המוצר נמחק', 'בטל', () => restoreDoc('products', backup));
+}
 async function addContact() {
   const nEl = $('ncName'), pEl = $('ncPhone'); if (!nEl || !pEl) return;
   const name = nEl.value.trim(), phone = pEl.value.trim(); if (!name || !phone || !db) return;
   nEl.value = ''; pEl.value = '';
   await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'contacts'), { name, phone, orderIndex: contacts.length }).catch(console.error);
 }
-async function delContact(id) { if (db) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'contacts', id)).catch(console.error); }
+async function delContact(id) {
+  const c = contacts.find(x => x.id === id);
+  const backup = c ? { ...c } : null;
+  if (db) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'contacts', id)).catch(console.error);
+  if (backup) showToast('איש הקשר נמחק', 'בטל', () => restoreDoc('contacts', backup));
+}
 
 // ===== החלפת יחידה =====
 function toggleUnit(id, btn) {
@@ -988,6 +1043,62 @@ function showConfirm(title, msg, okText, cb) {
 }
 function hideConfirm() { const m = $('confirmModal'); m.classList.add('hidden'); m.classList.remove('flex'); confirmCb = null; }
 
+// ===== סריקת ברקוד במצלמה =====
+let scanStream = null, scanTimer = null, barcodeDetector = null;
+function scannerSupported() { return typeof window.BarcodeDetector !== 'undefined'; }
+async function openScanner() {
+  if (!scannerSupported()) { showToast('המכשיר לא תומך בסריקת מצלמה — אפשר להקליד ידנית', null, null, 3500); return; }
+  try {
+    if (!barcodeDetector) barcodeDetector = new window.BarcodeDetector();
+    scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+    const v = $('scanVideo'); v.srcObject = scanStream; await v.play();
+    const m = $('scanModal'); m.classList.remove('hidden'); m.classList.add('flex');
+    scanTimer = setTimeout(scanTick, 400);
+  } catch (e) { console.error(e); showToast('לא ניתן לפתוח את המצלמה (בדוק הרשאה)', null, null, 3500); closeScanner(); }
+}
+function scanTick() {
+  if (!scanStream || !barcodeDetector) return;
+  const v = $('scanVideo');
+  if (!v || v.readyState < 2) { scanTimer = setTimeout(scanTick, 200); return; }
+  barcodeDetector.detect(v).then(codes => {
+    if (!scanStream) return;
+    if (codes && codes.length && codes[0].rawValue) onScanned(codes[0].rawValue);
+    else scanTimer = setTimeout(scanTick, 200);
+  }).catch(() => { if (scanStream) scanTimer = setTimeout(scanTick, 300); });
+}
+function onScanned(val) {
+  buzz(40);
+  const inp = $('promptInput'); if (inp) inp.value = (val || '').toString().trim();
+  closeScanner();
+}
+function closeScanner() {
+  if (scanTimer) { clearTimeout(scanTimer); scanTimer = null; }
+  if (scanStream) { try { scanStream.getTracks().forEach(tr => tr.stop()); } catch (e) {} scanStream = null; }
+  const v = $('scanVideo'); if (v) { try { v.pause(); v.srcObject = null; } catch (e) {} }
+  const m = $('scanModal'); if (m) { m.classList.add('hidden'); m.classList.remove('flex'); }
+}
+
+// ===== Undo (toast) =====
+let undoAction = null, toastTimer = null;
+function showToast(msg, actionLabel, actionFn, duration) {
+  const t = $('toast'); if (!t) return;
+  $('toastMsg').textContent = msg;
+  const btn = $('toastBtn');
+  if (actionLabel && actionFn) { btn.textContent = actionLabel; btn.classList.remove('hidden'); undoAction = actionFn; }
+  else { btn.classList.add('hidden'); undoAction = null; }
+  t.classList.remove('hidden'); t.classList.add('flex');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(hideToast, duration || 5000);
+}
+function hideToast() { const t = $('toast'); if (t) { t.classList.add('hidden'); t.classList.remove('flex'); } undoAction = null; clearTimeout(toastTimer); }
+function doUndo() { const fn = undoAction; hideToast(); if (fn) fn(); }
+function restoreDoc(name, obj) {
+  if (!db || !obj || !obj.id) return;
+  const batch = writeBatch(db);
+  batch.set(doc(db, 'artifacts', appId, 'public', 'data', name, obj.id), obj);
+  batch.commit().catch(console.error);
+}
+
 // ===== חיווט אירועים =====
 $('confirmCancel').addEventListener('click', hideConfirm);
 $('confirmOk').addEventListener('click', () => { const cb = confirmCb; hideConfirm(); if (cb) cb(); });
@@ -1002,6 +1113,9 @@ $('cartBtn').addEventListener('click', () => { if (mainMode === 'returns') openR
 $('promptCancel').addEventListener('click', hidePrompt);
 $('promptOk').addEventListener('click', savePrompt);
 $('promptInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); savePrompt(); } });
+$('promptScan').addEventListener('click', openScanner);
+$('scanClose').addEventListener('click', closeScanner);
+$('toastBtn').addEventListener('click', doUndo);
 $('closeSend').addEventListener('click', hideSend);
 $('searchInput').addEventListener('input', (e) => { $('clearSearch').classList.toggle('hidden', !e.target.value); applySearch(e.target.value); });
 $('clearSearch').addEventListener('click', () => { $('searchInput').value = ''; $('clearSearch').classList.add('hidden'); applySearch(''); });
