@@ -273,6 +273,7 @@ let pendingBarcodeProductId = null, pendingBarcodeEdit = false;
 let isOnline = navigator.onLine;
 let seeded = false, draftReady = false, isDragging = false;
 let sendCtx = null;
+let movingId = null;
 const avgTimers = {};
 let advanceTimer = null;
 let dragState = null;
@@ -375,6 +376,7 @@ function rerender() {
 // ===== ניווט =====
 function setView(v) {
   currentView = v;
+  movingId = null;
   if (v === 'order' || v === 'returns') mainMode = v;
   renderView();
   window.scrollTo({ top: 0 });
@@ -533,12 +535,10 @@ function clearOrder() {
 
 // ===== מסך הגדרות (גרירה לסידור) =====
 function renderSettings() {
+  if (movingId) { renderMoveMode(); return; }
   const rows = products.map((p, i) =>
     '<div class="prod-item flex items-center gap-2 p-2.5 ' + (p.hidden ? 'bg-slate-50 opacity-70' : 'bg-white') + ' border border-slate-100 rounded-xl" data-id="' + p.id + '">' +
-      '<div class="shrink-0 flex flex-col gap-0.5">' +
-        '<button data-role="move-up" data-id="' + p.id + '" ' + (i === 0 ? 'disabled' : '') + ' class="btn-tap w-8 h-6 rounded-md flex items-center justify-center ' + (i === 0 ? 'text-slate-200' : 'bg-slate-100 text-slate-600') + '"><i class="fa-solid fa-chevron-up text-xs"></i></button>' +
-        '<button data-role="move-down" data-id="' + p.id + '" ' + (i === products.length - 1 ? 'disabled' : '') + ' class="btn-tap w-8 h-6 rounded-md flex items-center justify-center ' + (i === products.length - 1 ? 'text-slate-200' : 'bg-slate-100 text-slate-600') + '"><i class="fa-solid fa-chevron-down text-xs"></i></button>' +
-      '</div>' +
+      '<button data-role="move" data-id="' + p.id + '" class="btn-tap shrink-0 w-9 h-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center" title="העבר מוצר"><i class="fa-solid fa-up-down text-sm"></i></button>' +
       '<div class="flex-1 min-w-0 font-bold text-sm ' + (p.hidden ? 'text-slate-400 line-through' : 'text-slate-800') + ' leading-tight">' + p.name + (p.hidden ? ' <span class="text-[10px] text-amber-500 font-black no-underline">(אזל)</span>' : '') + '</div>' +
       '<input data-role="avg-set" data-id="' + p.id + '" type="text" inputmode="numeric" value="' + (p.average || '') + '" placeholder="0" class="w-14 bg-slate-100 rounded-lg p-1.5 text-center font-bold text-sm outline-none">' +
       '<button data-role="toggle-hidden" data-id="' + p.id + '" class="btn-tap shrink-0 p-2 ' + (p.hidden ? 'text-amber-500' : 'text-slate-300') + '" title="' + (p.hidden ? 'הצג מוצר' : 'הסתר (אזל במלאי)') + '"><i class="fa-solid ' + (p.hidden ? 'fa-eye-slash' : 'fa-eye') + '"></i></button>' +
@@ -551,7 +551,7 @@ function renderSettings() {
       '<span class="font-black text-slate-700 text-lg">אנשי קשר (וואטסאפ)</span>' +
     '</button>' +
     '<div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">' +
-      '<div class="bg-slate-100 p-4 border-b border-slate-200 flex items-center justify-between gap-2"><h2 class="font-black text-lg text-slate-800">עריכת מוצרים</h2><span class="text-[11px] text-slate-500 font-medium flex items-center gap-1"><i class="fa-solid fa-grip-vertical"></i> גררו לסידור</span></div>' +
+      '<div class="bg-slate-100 p-4 border-b border-slate-200 flex items-center justify-between gap-2"><h2 class="font-black text-lg text-slate-800">עריכת מוצרים</h2><span class="text-[11px] text-slate-500 font-medium flex items-center gap-1"><i class="fa-solid fa-up-down"></i> לחץ ⬍ להעברה</span></div>' +
       '<div class="p-4 bg-blue-50 border-b border-slate-200 flex flex-wrap gap-2 items-end">' +
         '<div class="flex-1 min-w-[150px]"><label class="block text-xs font-bold text-slate-500 mb-1">שם</label><input id="npName" type="text" class="w-full p-2 rounded-lg border border-slate-200 outline-none bg-white"></div>' +
         '<div class="w-16"><label class="block text-xs font-bold text-slate-500 mb-1">מומלץ</label><input id="npAvg" type="text" inputmode="numeric" class="w-full p-2 rounded-lg border border-slate-200 outline-none text-center bg-white"></div>' +
@@ -625,16 +625,43 @@ async function persistOrder(ids) {
   ids.forEach((id, i) => batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'products', id), { orderIndex: i }));
   await batch.commit().catch(console.error);
 }
-function moveProduct(id, dir) {
-  const idx = products.findIndex(p => p.id === id);
-  if (idx < 0) return;
-  const j = idx + dir;
-  if (j < 0 || j >= products.length) return;
-  const arr = products.slice();
-  const t = arr[idx]; arr[idx] = arr[j]; arr[j] = t;
-  buzz(12);
-  persistOrder(arr.map(p => p.id));
+function startMove(id) { movingId = id; buzz(10); renderSettings(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
+function cancelMove() { movingId = null; renderSettings(); }
+function applyMove(targetId, atEnd) {
+  const moving = products.find(p => p.id === movingId);
+  if (!moving) { movingId = null; renderSettings(); return; }
+  const without = products.filter(p => p.id !== movingId);
+  let insertAt;
+  if (atEnd) insertAt = without.length;
+  else { const ti = without.findIndex(p => p.id === targetId); insertAt = ti < 0 ? without.length : ti; }
+  without.splice(insertAt, 0, moving);
+  buzz(18);
+  persistOrder(without.map(p => p.id));
+  movingId = null;
   renderSettings();
+  showToast('"' + moving.name + '" הועבר', null, null, 2000);
+}
+function renderMoveMode() {
+  const moving = products.find(p => p.id === movingId);
+  const name = moving ? moving.name : '';
+  const banner =
+    '<div class="bg-blue-600 text-white rounded-2xl p-3 mb-3 flex items-center justify-between gap-2 shadow-sm">' +
+      '<div class="font-black text-sm min-w-0 truncate"><i class="fa-solid fa-arrows-up-down"></i> מעבירים: ' + name + '</div>' +
+      '<button data-role="cancel-move" class="btn-tap bg-white/20 px-3 py-1.5 rounded-lg font-black text-sm shrink-0">ביטול</button>' +
+    '</div>' +
+    '<div class="text-xs text-slate-400 px-1 mb-2">לחץ על מוצר כדי להניח את "' + name + '" מעליו, או על הכפתור למטה כדי להניח בסוף:</div>';
+  const rows = products.map(p => {
+    if (p.id === movingId) {
+      return '<div class="flex items-center gap-2 p-3 bg-blue-50 border-2 border-blue-500 rounded-xl"><i class="fa-solid fa-hand-pointer text-blue-500"></i><div class="flex-1 font-black text-blue-700 truncate">' + p.name + '</div><span class="text-xs text-blue-500 font-bold shrink-0">המוצר שמועבר</span></div>';
+    }
+    return '<button data-role="place-before" data-id="' + p.id + '" class="btn-tap w-full text-right flex items-center gap-2 p-3 bg-white border border-slate-100 rounded-xl">' +
+      '<i class="fa-solid fa-arrow-up text-slate-300"></i>' +
+      '<span class="flex-1 font-bold text-slate-700 truncate">' + p.name + '</span>' +
+      '<span class="text-[11px] text-blue-500 font-bold shrink-0">הנח מעל</span>' +
+    '</button>';
+  }).join('');
+  const endBtn = '<button data-role="place-end" class="btn-tap w-full p-3 mt-1 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl text-slate-600 font-bold text-sm flex items-center justify-center gap-2"><i class="fa-solid fa-arrow-down"></i> הנח בסוף הרשימה</button>';
+  app.innerHTML = banner + '<div class="space-y-2">' + rows + endBtn + '</div>';
 }
 
 // ===== מסך אנשי קשר =====
@@ -1223,8 +1250,10 @@ app.addEventListener('click', (e) => {
   else if (role === 'add-product') addProduct();
   else if (role === 'del-product') { const p = products.find(x => x.id === id); showConfirm('מחיקת מוצר', 'למחוק את "' + (p ? p.name : '') + '"?', 'מחק', () => delProduct(id)); }
   else if (role === 'toggle-hidden') toggleHidden(id);
-  else if (role === 'move-up') moveProduct(id, -1);
-  else if (role === 'move-down') moveProduct(id, 1);
+  else if (role === 'move') startMove(id);
+  else if (role === 'place-before') applyMove(id, false);
+  else if (role === 'place-end') applyMove(null, true);
+  else if (role === 'cancel-move') cancelMove();
   else if (role === 'add-contact') addContact();
   else if (role === 'del-contact') { const c = contacts.find(x => x.id === id); showConfirm('מחיקת איש קשר', 'למחוק את "' + (c ? c.name : '') + '"?', 'מחק', () => delContact(id)); }
   else if (role === 'resend') { const o = history.find(x => x.id === id); if (o) openResend(o); }
