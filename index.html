@@ -208,36 +208,13 @@
     </div>
 
     <!-- חלון מבצע -->
-    <div id="promoModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm items-center justify-center p-4 z-[70]">
+    <div id="promoInfoModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm items-center justify-center p-4 z-[70]">
       <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
         <div class="p-5">
-          <div class="flex items-center gap-2 mb-1"><i class="fa-solid fa-percent text-rose-600 text-xl"></i><h3 class="font-black text-lg text-slate-800">מבצע למוצר</h3></div>
-          <p id="promoName" class="text-slate-500 text-sm mb-3"></p>
-          <label class="text-[11px] text-slate-400 font-bold block mb-1">אחוז הנחה</label>
-          <div class="flex items-center gap-2 mb-3"><input id="promoPct" type="text" inputmode="decimal" class="flex-1 p-3 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-rose-500" placeholder="10"><span class="text-slate-400 font-black text-lg">%</span></div>
-          <div class="flex gap-2">
-            <div class="flex-1"><label class="text-[11px] text-slate-400 font-bold block mb-1">מתאריך</label><input id="promoStart" type="date" class="w-full p-2.5 rounded-xl border-2 border-slate-200 outline-none text-sm font-bold focus:border-rose-500"></div>
-            <div class="flex-1"><label class="text-[11px] text-slate-400 font-bold block mb-1">עד תאריך</label><input id="promoEnd" type="date" class="w-full p-2.5 rounded-xl border-2 border-slate-200 outline-none text-sm font-bold focus:border-rose-500"></div>
-          </div>
-          <label class="text-[11px] text-slate-400 font-bold block mb-1 mt-3">כמות מינימלית למבצע</label>
-          <div class="flex gap-2 items-stretch">
-            <input id="promoMin" type="text" inputmode="numeric" class="w-20 p-2.5 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-rose-500" placeholder="1">
-            <div class="flex-1 flex bg-slate-100 rounded-xl p-1">
-              <button id="promoUnitU" class="flex-1 py-2 rounded-lg text-sm font-black">יחידות</button>
-              <button id="promoUnitC" class="flex-1 py-2 rounded-lg text-sm font-black">ארגזים</button>
-            </div>
-          </div>
-          <div id="promoCartonWrap" class="hidden mt-2">
-            <label class="text-[11px] text-slate-400 font-bold block mb-1">כמה יחידות יש בארגז אחד?</label>
-            <input id="promoCarton" type="text" inputmode="numeric" class="w-full p-2.5 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-rose-500" placeholder="לדוגמה 12">
-          </div>
-          <div id="promoUnitsHint" class="text-[11px] text-slate-500 font-bold mt-1.5 min-h-[16px]"></div>
-          <button id="promoRemove" class="btn-tap hidden mt-3 w-full py-2.5 rounded-xl font-black bg-rose-50 text-rose-600 flex items-center justify-center gap-2"><i class="fa-solid fa-ban"></i> בטל מבצע</button>
+          <div class="flex items-center gap-2 mb-3"><i class="fa-solid fa-tag text-rose-600 text-xl"></i><h3 id="piTitle" class="font-black text-lg text-slate-800 truncate">מבצע</h3></div>
+          <div id="piBody"></div>
         </div>
-        <div class="flex gap-2 p-4 pt-0">
-          <button id="promo_cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">ביטול</button>
-          <button id="promo_ok" class="btn-tap flex-1 py-3 rounded-xl font-black bg-rose-600 text-white">שמור מבצע</button>
-        </div>
+        <div class="p-4 pt-0"><button id="piClose" class="btn-tap w-full py-3 rounded-xl font-black bg-slate-100 text-slate-700">סגור</button></div>
       </div>
     </div>
 
@@ -406,6 +383,12 @@ const RETURNS_DRAFT_KEY = 'yt_returns_draft';
 let receiptList = [];            // שורות התעודה הנוכחית: {productId,name,barcode,qty}
 let receipts = [];               // היסטוריית תעודות
 let pendingReceipt = null;       // תעודה הממתינה לאישור בסיכום
+let receiptNoteTotal = null;     // סכום התעודה מהספק (כולל מע"מ) — סכום כל התעודות
+let receiptNotes = [];           // פירוט סכומי תעודות הספק (למקרה שהמשלוח מחולק)
+let editingNotes = false;        // עריכת סכומי התעודות במסך פתוח
+let receiptOpened = false;       // האם נפתחה תעודה (שער לפני סריקה)
+let reconcileData = null;        // נתוני מסך השוואת תעודה
+let receiptFix = null;           // תיקון תעודה פתוחה מההיסטוריה
 const RECEIPT_DRAFT_KEY = 'yt_receipt_draft';
 const VAT = 0.18;                // מע"מ (קל לשינוי אם ישתנה)
 let scanPurpose = 'field';       // 'field' = מילוי שדה ברקוד | 'receiving' = סריקה רציפה לקליטה
@@ -417,6 +400,8 @@ let promoEditId = null;          // מוצר בעריכת מבצע
 let qtyProduct = null, qtyTarget = 'receipt'; // חלון כמות בסריקה
 let priceEditId = null, priceFromScan = false, priceQuery = ''; // עדכון מחירים
 let promoUnitMode = 'unit'; // יחידת סף המבצע: 'unit' | 'carton'
+let promos = [], promoEdit = null, promoSearch = ''; // מבצעי סל
+let promoType = 'receipt'; // סוג מבצע בעורך: 'receipt' (בתעודה) | 'monthEnd' (מרכזת)
 const priceTimers = {};
 
 const $ = (id) => document.getElementById(id);
@@ -434,8 +419,39 @@ function restoreDraft() {
 }
 function saveReturnsDraft() { try { localStorage.setItem(RETURNS_DRAFT_KEY, JSON.stringify(returnsList)); } catch (e) {} }
 function restoreReturnsDraft() { try { const s = localStorage.getItem(RETURNS_DRAFT_KEY); if (s) { const a = JSON.parse(s); if (Array.isArray(a)) returnsList = a; } } catch (e) {} }
-function saveReceiptDraft() { try { localStorage.setItem(RECEIPT_DRAFT_KEY, JSON.stringify(receiptList)); } catch (e) {} }
-function restoreReceiptDraft() { try { const s = localStorage.getItem(RECEIPT_DRAFT_KEY); if (s) { const a = JSON.parse(s); if (Array.isArray(a)) receiptList = a; } } catch (e) {} }
+function parseNoteVal(v) { const n = parseFloat((v || '').toString().replace(/[^0-9.]/g, '')); return isFinite(n) && n > 0 ? r2(n) : null; }
+function noteSum() { return r2(receiptNotes.reduce((a, x) => a + (Number(x) || 0), 0)); }
+function recomputeNoteTotal() { receiptNoteTotal = receiptNotes.length ? noteSum() : null; }
+function noteEditorBodyHtml() {
+  const chips = receiptNotes.map((amt, i) =>
+    '<div class="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 mb-1.5">' +
+      '<span class="font-bold text-slate-700 text-sm">תעודה ' + (i + 1) + '</span>' +
+      '<div class="flex items-center gap-2"><span class="font-black text-slate-800">₪' + fmtMoney(Number(amt) || 0) + '</span>' +
+      '<button data-role="rc-note-remove" data-idx="' + i + '" class="btn-tap text-red-500 px-1"><i class="fa-solid fa-xmark"></i></button></div>' +
+    '</div>'
+  ).join('');
+  const total = receiptNotes.length ? '<div class="flex items-center justify-between mt-2 pt-2 border-t border-slate-200"><span class="font-bold text-slate-500 text-sm">סה"כ ' + receiptNotes.length + ' תעודות</span><span class="font-black text-blue-600 text-lg">₪' + fmtMoney(noteSum()) + '</span></div>' : '';
+  return chips +
+    '<div class="flex gap-2 items-stretch">' +
+      '<div class="flex-1 flex items-center gap-1 border-2 border-slate-200 rounded-xl px-2 focus-within:border-blue-500"><span class="text-slate-400 font-black">₪</span><input id="rcNoteInput" type="text" inputmode="decimal" placeholder="סכום תעודה" class="w-full h-11 text-center text-base font-black outline-none bg-transparent"></div>' +
+      '<button data-role="rc-note-add" class="btn-tap px-4 rounded-xl font-black bg-slate-100 text-slate-700 flex items-center gap-1"><i class="fa-solid fa-plus"></i> הוסף</button>' +
+    '</div>' +
+    total;
+}
+function saveReceiptDraft() { try { localStorage.setItem(RECEIPT_DRAFT_KEY, JSON.stringify({ items: receiptList, notes: receiptNotes, opened: receiptOpened })); } catch (e) {} }
+function restoreReceiptDraft() {
+  try {
+    const s = localStorage.getItem(RECEIPT_DRAFT_KEY); if (!s) return;
+    const o = JSON.parse(s);
+    if (Array.isArray(o)) { receiptList = o; receiptOpened = o.length > 0; }
+    else if (o && typeof o === 'object') {
+      receiptList = Array.isArray(o.items) ? o.items : [];
+      receiptNotes = Array.isArray(o.notes) ? o.notes : (o.noteTotal != null ? [o.noteTotal] : []);
+      receiptOpened = !!o.opened || receiptList.length > 0;
+    }
+    recomputeNoteTotal();
+  } catch (e) {}
+}
 
 // ===== התחברות =====
 restoreDraft();
@@ -514,6 +530,12 @@ function startListeners() {
     receipts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     if (currentView === 'receiptsHistory') rerender();
   }, console.error);
+
+  const prmRef = collection(db, 'artifacts', appId, 'public', 'data', 'promos');
+  onSnapshot(prmRef, (snap) => {
+    promos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    rerender();
+  }, console.error);
 }
 
 function rerender() {
@@ -557,6 +579,10 @@ function renderView() {
   else if (currentView === 'returnsHistory') renderReturnsHistory();
   else if (currentView === 'receiptsHistory') renderReceiptsHistory();
   else if (currentView === 'prices') renderPrices();
+  else if (currentView === 'promos') renderPromos();
+  else if (currentView === 'promoEdit') renderPromoEdit();
+  else if (currentView === 'reconcile') renderReconcile();
+  else if (currentView === 'receiptFix') renderReceiptFix();
   else if (currentView === 'notes') renderNotes();
   updateCart();
   updateBackBarLabel();
@@ -593,7 +619,8 @@ function buildOrderRow(p) {
   const rec = parseInt(p.average, 10) || 0;
   const recOff = rec <= 0;
   const safeName = (p.name || '').replace(/"/g, '&quot;');
-  const promoNote = isPromoActive(p) ? ('<div class="text-[10px] font-black text-rose-600 mt-0.5 flex items-center gap-1"><i class="fa-solid fa-tag"></i> מבצע ' + (Number(p.promo.pct) || 0) + '%' + (promoMinUnits(p) > 1 ? ' · מ-' + promoMinLabel(p) : '') + '</div>') : '';
+  const _op = productActivePromo(p);
+  const promoNote = _op ? ('<button data-role="promo-info" data-id="' + _op.id + '" class="btn-tap text-[10px] font-black text-rose-600 mt-0.5 flex items-center gap-1"><i class="fa-solid fa-tag"></i> מבצע ' + (Number(_op.pct) || 0) + '%' + (promoMinUnitsP(_op) > 1 ? ' · מ-' + promoMinLabelP(_op) + ' מהסל' : '') + ' <i class="fa-solid fa-circle-info opacity-70"></i></button>') : '';
   return (
     '<div id="row-' + p.id + '" data-id="' + p.id + '" data-name="' + safeName + '" class="row-card flex items-center gap-2 p-2.5 rounded-2xl border shadow-sm ' +
       (sel ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-100') + '">' +
@@ -1382,35 +1409,97 @@ function restoreDoc(name, obj) {
 function todayStr() { return new Date().toLocaleDateString('en-CA'); }
 function r2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
 function fmtMoney(n) { return r2(n).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-function isPromoActive(p, dateStr) {
-  dateStr = dateStr || todayStr();
-  const pr = p && p.promo;
-  return !!(pr && pr.pct != null && pr.pct > 0 && pr.start && pr.end && dateStr >= pr.start && dateStr <= pr.end);
+function isPromoActive(p, dateStr) { return promoActive(promoForProduct(p && p.id), dateStr); }
+function promoMinUnits(p) { return promoMinUnitsP(promoForProduct(p && p.id)); }
+function promoMinLabel(p) { return promoMinLabelP(promoForProduct(p && p.id)); }
+function effectivePrice(p, qty, dateStr) {
+  if (!p) return 0;
+  const base = Number(p.price) || 0;
+  const pr = promoForProduct(p.id);
+  if (promoTriggered(pr, dateStr)) return r2(base * (1 - (Number(pr.pct) || 0) / 100));
+  return r2(base);
 }
-function promoMinUnits(p) {
-  const pr = p && p.promo; if (!pr) return 1;
+// ===== מבצעי סל (ישויות נפרדות באוסף promos) =====
+function promoForProduct(pid) {
+  if (!pid) return null;
+  return promos.find(pr => (pr.type !== 'monthEnd') && Array.isArray(pr.productIds) && pr.productIds.indexOf(pid) !== -1) || null;
+}
+function promoActive(pr, dateStr) {
+  if (!pr) return false;
+  dateStr = dateStr || todayStr();
+  return !!(pr.pct > 0 && pr.start && pr.end && dateStr >= pr.start && dateStr <= pr.end);
+}
+function promoMinUnitsP(pr) {
+  if (!pr) return 1;
   const q = Number(pr.minQty) || 1;
   if (pr.minUnit === 'carton') { const cs = Number(pr.cartonSize) || 0; return cs > 0 ? Math.max(1, q * cs) : Math.max(1, q); }
   return Math.max(1, q);
 }
-function promoMinLabel(p) {
-  const pr = p && p.promo; if (!pr) return '';
-  const mu = promoMinUnits(p); if (mu <= 1) return '';
-  if (pr.minUnit === 'carton' && (Number(pr.cartonSize) || 0) > 0) return (Number(pr.minQty) || 1) + ' ארגז';
+function promoMinLabelP(pr) {
+  if (!pr) return '';
+  const mu = promoMinUnitsP(pr); if (mu <= 1) return '';
+  if (pr.minUnit === 'carton' && (Number(pr.cartonSize) || 0) > 0) return (Number(pr.minQty) || 1) + ' ארגז (' + mu + ' יח׳)';
   return mu + ' יח׳';
 }
-function effectivePrice(p, qty, dateStr) {
-  if (!p) return 0;
-  const base = Number(p.price) || 0;
-  if (isPromoActive(p, dateStr) && (Number(qty) || 0) >= promoMinUnits(p)) return r2(base * (1 - (Number(p.promo.pct) || 0) / 100));
-  return r2(base);
+// סכום היחידות בתעודה הנוכחית עבור כל מוצרי הסל של המבצע
+function basketQty(pr) {
+  if (!pr || !Array.isArray(pr.productIds)) return 0;
+  let s = 0; receiptList.forEach(it => { if (pr.productIds.indexOf(it.productId) !== -1) s += (Number(it.qty) || 0); });
+  return s;
+}
+// סכום במחיר מלא של מוצרי הסל בתעודה
+function basketRegularTotal(pr) {
+  if (!pr || !Array.isArray(pr.productIds)) return 0;
+  let s = 0; receiptList.forEach(it => { if (pr.productIds.indexOf(it.productId) !== -1) { const p = products.find(x => x.id === it.productId); s += (Number(p && p.price) || 0) * (Number(it.qty) || 0); } });
+  return r2(s);
+}
+// המבצע מופעל רק כשסך הסל עבר את הסף
+function promoTriggered(pr, dateStr) { return promoActive(pr, dateStr) && basketQty(pr) >= promoMinUnitsP(pr); }
+function promoDiscountAmount(pr, dateStr) { return promoTriggered(pr, dateStr) ? r2(basketRegularTotal(pr) * (Number(pr.pct) || 0) / 100) : 0; }
+function receiptSavings() {
+  const day = todayStr(); let s = 0;
+  receiptList.forEach(it => { const p = products.find(x => x.id === it.productId); const reg = Number(p && p.price) || 0; const eff = effectivePrice(p, it.qty, day); s += (reg - eff) * (Number(it.qty) || 0); });
+  return r2(s);
+}
+// סטטוס כל מבצע פעיל שיש לו מוצרים בתעודה
+function receiptPromoStatuses() {
+  const day = todayStr(); const seen = {}; const out = [];
+  receiptList.forEach(it => {
+    const pr = promoForProduct(it.productId);
+    if (pr && promoActive(pr, day) && !seen[pr.id]) {
+      seen[pr.id] = 1;
+      const bq = basketQty(pr), need = promoMinUnitsP(pr), triggered = bq >= need;
+      out.push({ name: pr.name || ('מבצע ' + pr.pct + '%'), pct: pr.pct, triggered, remaining: Math.max(0, need - bq), discount: triggered ? promoDiscountAmount(pr, day) : 0 });
+    }
+  });
+  return out;
+}
+function productActivePromo(p, dateStr) { const pr = promoForProduct(p && p.id); return promoActive(pr, dateStr) ? pr : null; }
+// ===== מבצעי מרכזת (סוף חודש) — לא בתעודה, מחושב בדוח החודשי =====
+function monthEndPromoForProduct(pid, dateStr) {
+  if (!pid) return null;
+  return promos.find(pr => pr.type === 'monthEnd' && promoActive(pr, dateStr) && Array.isArray(pr.productIds) && pr.productIds.indexOf(pid) !== -1) || null;
+}
+// סטטוס הנחות מרכזת בתעודה הנוכחית (לתצוגה בלבד — לא משפיע על סכום התעודה)
+function receiptMonthEndStatuses() {
+  const day = todayStr(); const seen = {}; const out = [];
+  receiptList.forEach(it => {
+    const pr = monthEndPromoForProduct(it.productId, day);
+    if (pr && !seen[pr.id]) {
+      seen[pr.id] = 1;
+      let base = 0;
+      receiptList.forEach(x => { if (pr.productIds.indexOf(x.productId) !== -1) { const p = products.find(z => z.id === x.productId); base += effectivePrice(p, x.qty, day) * (Number(x.qty) || 0); } });
+      out.push({ name: pr.name || ('מבצע ' + pr.pct + '%'), pct: pr.pct, rebate: r2(base * (Number(pr.pct) || 0) / 100) });
+    }
+  });
+  return out;
 }
 function receiptTotals() {
   const day = todayStr();
   let ex = 0;
   receiptList.forEach(it => { const p = products.find(x => x.id === it.productId); ex += effectivePrice(p, it.qty, day) * it.qty; });
   ex = r2(ex);
-  return { ex, inc: r2(ex * (1 + VAT)) };
+  return { ex, inc: r2(ex * (1 + VAT)), savings: receiptSavings() };
 }
 function returnTotals(r) {
   if (r && (r.totalIncVat != null || r.totalExVat != null)) {
@@ -1521,11 +1610,33 @@ function commitQty(again) {
 // --- מסך התעודה הנוכחית ---
 function renderReceiving() {
   const t = receiptTotals();
-  app.innerHTML =
+  const opened = receiptOpened || receiptList.length > 0;
+  const topButtons =
     '<div class="flex gap-2 mb-3">' +
-      '<button data-role="rc-prices" class="btn-tap flex-1 bg-white border border-slate-200 rounded-xl py-2.5 font-black text-slate-700 text-sm flex items-center justify-center gap-2"><i class="fa-solid fa-tags text-blue-600"></i> עדכון מחירים</button>' +
-      '<button data-role="rc-history" class="btn-tap flex-1 bg-white border border-slate-200 rounded-xl py-2.5 font-black text-slate-700 text-sm flex items-center justify-center gap-2"><i class="fa-solid fa-folder-open text-blue-600"></i> תעודות ודוח</button>' +
-    '</div>' +
+      '<button data-role="rc-prices" class="btn-tap flex-1 bg-white border border-slate-200 rounded-xl py-2.5 font-black text-slate-700 text-xs flex items-center justify-center gap-1.5"><i class="fa-solid fa-tags text-blue-600"></i> מחירים</button>' +
+      '<button data-role="rc-promos" class="btn-tap flex-1 bg-white border border-slate-200 rounded-xl py-2.5 font-black text-slate-700 text-xs flex items-center justify-center gap-1.5"><i class="fa-solid fa-percent text-rose-600"></i> מבצעים</button>' +
+      '<button data-role="rc-history" class="btn-tap flex-1 bg-white border border-slate-200 rounded-xl py-2.5 font-black text-slate-700 text-xs flex items-center justify-center gap-1.5"><i class="fa-solid fa-folder-open text-blue-600"></i> תעודות</button>' +
+    '</div>';
+  if (!opened) {
+    app.innerHTML = topButtons +
+      '<div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm mt-2">' +
+        '<div class="text-center mb-3"><i class="fa-solid fa-file-invoice text-blue-600 text-4xl mb-2"></i><div class="font-black text-slate-800 text-lg">תעודה חדשה</div><div class="text-sm text-slate-500">הזן את סכום התעודה מהספק. מחולק לכמה תעודות? הוסף כל אחת ונסכם.</div></div>' +
+        noteEditorBodyHtml() +
+        '<button data-role="rc-open" class="btn-tap w-full bg-blue-600 text-white rounded-2xl py-3.5 font-black text-base flex items-center justify-center gap-2 mt-4"><i class="fa-solid fa-barcode"></i> פתח והתחל סריקה</button>' +
+        '<button data-role="rc-open-skip" class="btn-tap mt-3 w-full text-xs font-bold text-slate-400">דלג — ללא אימות סכום</button>' +
+      '</div>';
+    return;
+  }
+  const noteBar = editingNotes
+    ? '<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm mb-3">' +
+        '<div class="flex items-center justify-between mb-2"><span class="font-black text-slate-800 text-sm"><i class="fa-solid fa-file-invoice text-blue-600"></i> תעודות ספק</span><button data-role="rc-notes-done" class="btn-tap text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg">סיום</button></div>' +
+        noteEditorBodyHtml() +
+      '</div>'
+    : '<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm mb-3 flex items-center justify-between gap-2">' +
+        '<div class="flex items-center gap-2 min-w-0"><i class="fa-solid fa-file-invoice text-blue-600"></i><div class="min-w-0"><div class="text-[11px] text-slate-400 font-bold">סכום התעודה מהספק' + (receiptNotes.length > 1 ? ' · ' + receiptNotes.length + ' תעודות' : '') + '</div><div class="font-black text-slate-800">' + (receiptNoteTotal != null ? '₪' + fmtMoney(receiptNoteTotal) : 'ללא אימות') + '</div></div></div>' +
+        '<div class="flex items-center gap-1.5 shrink-0"><button data-role="rc-notes-edit" class="btn-tap text-xs font-bold text-blue-600 bg-blue-50 px-2.5 py-2 rounded-lg"><i class="fa-solid fa-pen"></i> ערוך</button><button data-role="rc-cancel" class="btn-tap text-xs font-bold text-red-500 bg-red-50 px-2.5 py-2 rounded-lg"><i class="fa-solid fa-xmark"></i></button></div>' +
+      '</div>';
+  app.innerHTML = topButtons + noteBar +
     '<button data-role="rc-scan" class="btn-tap w-full bg-blue-600 text-white rounded-2xl py-4 font-black text-lg flex items-center justify-center gap-3 shadow-lg mb-4"><i class="fa-solid fa-barcode text-2xl"></i> סרוק פריט לתעודה</button>' +
     '<div class="flex items-center justify-between px-1 mb-2"><div class="font-black text-slate-800">פריטים בתעודה</div><div id="rcCount" class="text-xs text-slate-400">' + receiptList.length + ' שורות</div></div>' +
     '<div id="rcListEl" class="space-y-2.5">' + (receiptList.length ? receiptList.map(buildReceiptRow).join('') : emptyReceiptHtml()) + '</div>' +
@@ -1536,29 +1647,45 @@ function emptyReceiptHtml() {
 }
 function receiptTotalsHtml(t) {
   if (!receiptList.length) return '<div id="rcTotals"></div>';
+  const statuses = receiptPromoStatuses();
+  let promoHtml = '';
+  statuses.forEach(s => {
+    if (s.triggered) promoHtml += '<div class="flex items-center justify-between text-rose-600 font-bold text-xs mt-1.5"><span class="truncate"><i class="fa-solid fa-circle-check"></i> ' + s.name + ' ' + s.pct + '%</span><span class="shrink-0">חסכת ₪' + fmtMoney(s.discount) + '</span></div>';
+    else promoHtml += '<div class="flex items-center justify-between text-amber-600 font-bold text-xs mt-1.5"><span class="truncate"><i class="fa-solid fa-hourglass-half"></i> ' + s.name + ' ' + s.pct + '%</span><span class="shrink-0">עוד ' + s.remaining + ' יח׳ להנחה</span></div>';
+  });
+  const me = receiptMonthEndStatuses();
+  let meHtml = '';
+  if (me.length) {
+    const meTotInc = r2(me.reduce((a, s) => a + s.rebate, 0) * (1 + VAT));
+    meHtml = '<div class="mt-2 pt-2 border-t border-dashed border-slate-200 text-[11px] text-slate-400">' +
+      '<div class="font-bold text-slate-500 mb-0.5"><i class="fa-solid fa-clock-rotate-left"></i> מרכזת — לא בתעודה זו, יחושב בסוף החודש:</div>' +
+      me.map(s => '<div class="flex justify-between pr-1"><span>(' + s.name + ' ' + s.pct + '%)</span><span>(−₪' + fmtMoney(s.rebate) + ')</span></div>').join('') +
+      '<div class="flex justify-between font-bold text-slate-500 mt-0.5"><span>(צפי כולל מע"מ אחרי מרכזת)</span><span>(₪' + fmtMoney(r2(t.inc - meTotInc)) + ')</span></div>' +
+    '</div>';
+  }
   return '<div id="rcTotals" class="mt-4 mb-24 bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">' +
-    '<div class="flex items-center justify-between text-slate-600 font-bold mb-1"><span>סה"כ ללא מע"מ</span><span id="rcEx">₪' + fmtMoney(t.ex) + '</span></div>' +
-    '<div class="flex items-center justify-between text-slate-800 font-black text-lg pt-2 border-t border-slate-100"><span>כולל מע"מ (' + Math.round(VAT * 100) + '%)</span><span id="rcInc">₪' + fmtMoney(t.inc) + '</span></div>' +
+    '<div class="flex items-center justify-between text-slate-600 font-bold"><span>סה"כ ללא מע"מ</span><span id="rcEx">₪' + fmtMoney(t.ex) + '</span></div>' +
+    promoHtml +
+    '<div class="flex items-center justify-between text-slate-800 font-black text-lg pt-2 mt-2 border-t border-slate-100"><span>כולל מע"מ (' + Math.round(VAT * 100) + '%)</span><span id="rcInc">₪' + fmtMoney(t.inc) + '</span></div>' +
+    meHtml +
   '</div>';
 }
 function refreshReceipt() { if (currentView === 'receiving') renderReceiving(); }
 function refreshReceiptTotals() {
-  const t = receiptTotals();
-  const ex = $('rcEx'), inc = $('rcInc');
-  if (ex) ex.textContent = '₪' + fmtMoney(t.ex);
-  if (inc) inc.textContent = '₪' + fmtMoney(t.inc);
+  const wrap = $('rcTotals');
+  if (wrap) wrap.outerHTML = receiptTotalsHtml(receiptTotals());
 }
 function buildReceiptRow(it) {
   const p = products.find(x => x.id === it.productId);
   const day = todayStr();
   const unit = p ? effectivePrice(p, it.qty, day) : 0;
-  const promoDate = p ? isPromoActive(p, day) : false;
-  const minQ = promoMinUnits(p);
-  const applied = promoDate && it.qty >= minQ;
+  const pr = p ? promoForProduct(p.id) : null;
+  const active = promoActive(pr, day);
+  const triggered = promoTriggered(pr, day);
   const lineTotal = r2(unit * it.qty);
   let promoTag = '';
-  if (applied) promoTag = '<span class="text-rose-600 font-bold">· מבצע ' + (Number(p.promo.pct) || 0) + '%</span>';
-  else if (promoDate) promoTag = '<span class="text-amber-600 font-bold">· מבצע ' + (Number(p.promo.pct) || 0) + '% מ-' + promoMinLabel(p) + '</span>';
+  if (triggered) promoTag = '<span class="text-rose-600 font-bold">· מבצע ' + (Number(pr.pct) || 0) + '%</span>';
+  else if (active) promoTag = '<span class="text-amber-600 font-bold">· מבצע ' + (Number(pr.pct) || 0) + '% (' + promoMinLabelP(pr) + ' מהסל)</span>';
   return '<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm" data-id="' + it.productId + '">' +
     '<div class="flex items-start gap-2">' +
       '<div class="flex-1 min-w-0">' +
@@ -1665,11 +1792,13 @@ function finishReceipt() {
   const lines = receiptList.map(it => {
     const p = products.find(x => x.id === it.productId);
     const unit = effectivePrice(p, it.qty, day);
-    const applied = isPromoActive(p, day) && it.qty >= promoMinUnits(p);
-    return { productId: it.productId, name: it.name || (p ? p.name : ''), barcode: it.barcode || (p ? p.barcode : '') || '', qty: it.qty, unitPrice: unit, lineTotal: r2(unit * it.qty), promoPct: (applied ? (Number(p.promo.pct) || 0) : 0) };
+    const pr = promoForProduct(it.productId);
+    const applied = promoTriggered(pr, day);
+    return { productId: it.productId, name: it.name || (p ? p.name : ''), barcode: it.barcode || (p ? p.barcode : '') || '', qty: it.qty, unitPrice: unit, lineTotal: r2(unit * it.qty), promoPct: (applied ? (Number(pr.pct) || 0) : 0) };
   });
   const ex = r2(lines.reduce((a, l) => a + l.lineTotal, 0));
   const inc = r2(ex * (1 + VAT));
+  if (receiptNoteTotal != null && Math.abs(inc - receiptNoteTotal) > 1) { openReconcile(); return; }
   const listHtml = lines.map(l =>
     '<div class="flex items-center justify-between gap-2 py-1.5 border-b border-slate-100 last:border-0">' +
       '<div class="min-w-0"><div class="font-bold text-slate-800 text-sm truncate">' + l.name + '</div>' +
@@ -1677,22 +1806,240 @@ function finishReceipt() {
       '<div class="font-black text-slate-700 text-sm shrink-0">₪' + fmtMoney(l.lineTotal) + '</div>' +
     '</div>'
   ).join('');
+  const me = receiptMonthEndStatuses();
+  let meBlock = '';
+  if (me.length) {
+    const meTotInc = r2(me.reduce((a, s) => a + s.rebate, 0) * (1 + VAT));
+    meBlock = '<div class="mt-3 pt-2 border-t border-dashed border-slate-200 text-[11px] text-slate-400">' +
+      '<div class="font-bold text-slate-500 mb-0.5"><i class="fa-solid fa-clock-rotate-left"></i> מרכזת — יחושב בדוח סוף החודש:</div>' +
+      me.map(s => '<div class="flex justify-between pr-1"><span>(' + s.name + ' ' + s.pct + '%)</span><span>(−₪' + fmtMoney(s.rebate) + ')</span></div>').join('') +
+      '<div class="flex justify-between font-bold text-slate-500 mt-0.5"><span>(צפי כולל מע"מ אחרי מרכזת)</span><span>(₪' + fmtMoney(r2(inc - meTotInc)) + ')</span></div>' +
+    '</div>';
+  }
   $('rsBody').innerHTML =
     '<div class="bg-slate-50 rounded-xl p-3 max-h-56 overflow-y-auto border border-slate-100 mb-3">' + listHtml + '</div>' +
     '<div class="flex items-center justify-between text-slate-600 font-bold"><span>סה"כ ללא מע"מ</span><span>₪' + fmtMoney(ex) + '</span></div>' +
+    (receiptSavings() > 0 ? '<div class="flex items-center justify-between text-rose-600 font-bold mt-1"><span><i class="fa-solid fa-tag"></i> כולל הנחת מבצע</span><span>₪' + fmtMoney(receiptSavings()) + '</span></div>' : '') +
     '<div class="flex items-center justify-between text-slate-600 font-bold mt-1"><span>מע"מ ' + Math.round(VAT * 100) + '%</span><span>₪' + fmtMoney(r2(inc - ex)) + '</span></div>' +
-    '<div class="flex items-center justify-between text-slate-900 font-black text-xl mt-2 pt-2 border-t border-slate-200"><span>סה"כ לתשלום</span><span>₪' + fmtMoney(inc) + '</span></div>';
-  pendingReceipt = { lines, ex, inc };
+    '<div class="flex items-center justify-between text-slate-900 font-black text-xl mt-2 pt-2 border-t border-slate-200"><span>סה"כ לתשלום</span><span>₪' + fmtMoney(inc) + '</span></div>' + meBlock;
+  pendingReceipt = { lines, ex, inc, noteTotal: receiptNoteTotal, status: 'ok', noteParts: receiptNotes.slice() };
   const m = $('receiptSummaryModal'); m.classList.remove('hidden'); m.classList.add('flex');
 }
 function hideReceiptSummary() { const m = $('receiptSummaryModal'); m.classList.add('hidden'); m.classList.remove('flex'); }
+// ===== מסך השוואת תעודה (חוסר/עודף) =====
+function openReconcile() {
+  const day = todayStr();
+  reconcileData = receiptList.map(it => {
+    const p = products.find(x => x.id === it.productId);
+    return { productId: it.productId, name: it.name || (p ? p.name : ''), barcode: it.barcode || (p ? p.barcode : '') || '', received: Number(it.qty) || 0, noteQty: Number(it.qty) || 0, price: effectivePrice(p, it.qty, day) };
+  });
+  setView('reconcile');
+}
+function reconcileReceivedInc() { let ex = 0; (reconcileData || []).forEach(l => ex += (Number(l.price) || 0) * (Number(l.received) || 0)); return r2(r2(ex) * (1 + VAT)); }
+function reconcileNoteInc() { let ex = 0; (reconcileData || []).forEach(l => ex += (Number(l.price) || 0) * (Number(l.noteQty) || 0)); return r2(r2(ex) * (1 + VAT)); }
+function reconcileGap() { return r2((receiptNoteTotal || 0) - reconcileNoteInc()); }
+function refreshReconcile() { if (currentView === 'reconcile') renderReconcile(); }
+function refreshReconcileHeader() {
+  const g = reconcileGap();
+  const rn = $('rcReconNote'); if (rn) rn.textContent = '₪' + fmtMoney(reconcileNoteInc());
+  const gp = $('rcGap'); if (gp) gp.textContent = (g > 0 ? 'חסר ' : (g < 0 ? 'עודף ' : '')) + '₪' + fmtMoney(Math.abs(g));
+  const rv = $('rcRecvInc'); if (rv) rv.textContent = '₪' + fmtMoney(reconcileReceivedInc());
+}
+function reconcileRowHtml(l) {
+  const received = Number(l.received) || 0, noteQty = Number(l.noteQty) || 0;
+  const diff = noteQty - received;
+  let tag = '<span class="text-emerald-600 text-[11px] font-bold">תואם</span>';
+  if (diff > 0) tag = '<span class="text-rose-600 font-black text-[11px]">חסר ' + diff + '</span>';
+  else if (diff < 0) tag = '<span class="text-amber-600 font-black text-[11px]">עודף ' + (-diff) + '</span>';
+  return '<div class="bg-white rounded-2xl border ' + (diff !== 0 ? 'border-rose-200' : 'border-slate-200') + ' p-3 shadow-sm" data-id="' + l.productId + '">' +
+    '<div class="flex items-center justify-between gap-2 mb-2"><div class="min-w-0"><div class="font-black text-slate-800 text-sm truncate">' + l.name + '</div>' +
+      '<div class="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">₪<input data-role="rc-recon-price" data-id="' + l.productId + '" type="text" inputmode="decimal" value="' + (l.price != null ? l.price : '') + '" class="w-14 text-center border border-slate-200 rounded px-1 py-0.5 outline-none focus:border-blue-500"> ליח׳</div>' +
+    '</div>' + tag + '</div>' +
+    '<div class="flex items-center justify-between gap-2">' +
+      '<div class="text-sm text-slate-500 font-bold">התקבל: <span class="text-slate-800 font-black">' + received + '</span></div>' +
+      '<div class="flex items-center gap-1.5"><span class="text-slate-500 font-bold text-xs">בתעודה:</span>' +
+        '<button data-role="rc-recon-minus" data-id="' + l.productId + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-minus text-xs"></i></button>' +
+        '<input data-role="rc-recon-note" data-id="' + l.productId + '" type="text" inputmode="numeric" value="' + noteQty + '" class="w-12 h-8 text-center font-black border-2 ' + (diff !== 0 ? 'border-rose-300' : 'border-slate-200') + ' rounded-lg outline-none focus:border-blue-500">' +
+        '<button data-role="rc-recon-plus" data-id="' + l.productId + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-plus text-xs"></i></button>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+}
+function renderReconcile() {
+  if (!reconcileData) { setView('receiving'); return; }
+  const note = receiptNoteTotal;
+  const gap = reconcileGap();
+  app.innerHTML =
+    '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">השוואת תעודה</h2><div class="text-xs text-slate-400 mt-0.5">הסכום לא תאם — סמן מה התעודה אומרת בשורות החריגות</div></div>' +
+    '<div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-sm mb-3">' +
+      '<div class="flex justify-between text-sm font-bold text-amber-900"><span>סכום התעודה מהספק</span><span>₪' + fmtMoney(note || 0) + '</span></div>' +
+      '<div class="flex justify-between text-sm font-bold text-amber-900 mt-1"><span>שוחזר מהשורות</span><span id="rcReconNote">₪' + fmtMoney(reconcileNoteInc()) + '</span></div>' +
+      '<div class="flex justify-between text-lg font-black mt-1.5 pt-1.5 border-t border-amber-200 ' + (Math.abs(gap) <= 1 ? 'text-emerald-700' : 'text-rose-700') + '"><span>הפרש שנותר</span><span id="rcGap">' + (gap > 0 ? 'חסר ' : (gap < 0 ? 'עודף ' : '')) + '₪' + fmtMoney(Math.abs(gap)) + '</span></div>' +
+      '<div class="text-[11px] text-amber-900/70 mt-1">תשלם בפועל (מה שהתקבל): <span id="rcRecvInc">₪' + fmtMoney(reconcileReceivedInc()) + '</span></div>' +
+    '</div>' +
+    '<div class="space-y-2 mb-3">' + reconcileData.map(reconcileRowHtml).join('') + '</div>' +
+    '<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm mb-24">' +
+      '<div class="text-xs font-bold text-slate-500 mb-1.5"><i class="fa-solid fa-circle-plus"></i> פריט שבתעודה אך לא הגיע?</div>' +
+      '<div class="relative"><i class="fa-solid fa-magnifying-glass absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i><input id="rcAddSearch" type="text" placeholder="חפש מוצר להוספה..." class="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 pr-8 pl-3 text-sm font-bold outline-none focus:border-blue-500"></div>' +
+      '<div id="rcAddList" class="mt-2 space-y-1"></div>' +
+    '</div>' +
+    '<div class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 p-3 flex gap-2 z-40">' +
+      '<button data-role="rc-recon-cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">חזור לסריקה</button>' +
+      '<button data-role="rc-recon-save" class="btn-tap flex-1 py-3 rounded-xl font-black bg-blue-600 text-white">שמור עם הפרשים</button>' +
+    '</div>';
+}
+function refreshReconcileAddList(q) {
+  const box = $('rcAddList'); if (!box) return;
+  q = (q || '').trim();
+  if (!q) { box.innerHTML = ''; return; }
+  const have = {}; (reconcileData || []).forEach(l => have[l.productId] = 1);
+  const list = products.filter(p => !have[p.id] && ((p.name || '').includes(q) || (p.barcode || '').includes(q))).slice(0, 8);
+  box.innerHTML = list.map(p => '<button data-role="rc-add-item" data-id="' + p.id + '" class="btn-tap w-full flex items-center justify-between gap-2 p-2 rounded-lg border border-slate-100 bg-slate-50"><span class="font-bold text-slate-700 text-sm truncate">' + (p.name || '(ללא שם)') + '</span><i class="fa-solid fa-plus text-blue-600"></i></button>').join('') || '<div class="text-center text-slate-400 py-2 text-xs">לא נמצא</div>';
+}
+function reconcileAddItem(pid) {
+  if (!reconcileData || reconcileData.find(l => l.productId === pid)) return;
+  const p = products.find(x => x.id === pid); if (!p) return;
+  reconcileData.push({ productId: p.id, name: p.name, barcode: p.barcode || '', received: 0, noteQty: 1, price: r2(Number(p.price) || 0) });
+  renderReconcile();
+}
+function reconcileSetNoteLive(productId, val) {
+  const l = (reconcileData || []).find(x => x.productId === productId); if (!l) return;
+  let q = parseInt((val || '').toString().replace(/[^0-9]/g, ''), 10); if (isNaN(q) || q < 0) q = 0;
+  l.noteQty = q; refreshReconcileHeader();
+}
+function reconcileStepNote(productId, delta) {
+  const l = (reconcileData || []).find(x => x.productId === productId); if (!l) return;
+  l.noteQty = Math.max(0, (Number(l.noteQty) || 0) + delta); refreshReconcile();
+}
+function reconcileSetPriceLive(productId, val) {
+  const l = (reconcileData || []).find(x => x.productId === productId); if (!l) return;
+  const n = parseFloat((val || '').toString().replace(/[^0-9.]/g, '')); l.price = isFinite(n) ? n : 0; refreshReconcileHeader();
+}
+function saveReconciledReceipt() {
+  if (!reconcileData) return;
+  reconcileData.forEach(l => {
+    const p = products.find(x => x.id === l.productId);
+    const np = r2(Number(l.price) || 0);
+    if (p && np > 0 && r2(Number(p.price) || 0) !== np) { p.price = np; if (db) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', l.productId), { price: np }).catch(console.error); }
+  });
+  const lines = reconcileData.filter(l => (Number(l.received) || 0) > 0 || (Number(l.noteQty) || 0) > 0).map(l => {
+    const received = Number(l.received) || 0, noteQty = Number(l.noteQty) || 0, price = r2(Number(l.price) || 0);
+    const line = { productId: l.productId, name: l.name, barcode: l.barcode || '', qty: received, unitPrice: price, lineTotal: r2(price * received), promoPct: 0 };
+    if (noteQty !== received) line.noteQty = noteQty;
+    return line;
+  });
+  if (!lines.length) { showToast('אין פריטים לשמירה', null, null, 2000); return; }
+  const ex = r2(lines.reduce((a, l) => a + l.lineTotal, 0));
+  const inc = r2(ex * (1 + VAT));
+  const open = lines.some(l => l.noteQty != null && l.noteQty !== l.qty);
+  pendingReceipt = { lines, ex, inc, noteTotal: receiptNoteTotal, status: open ? 'open' : 'ok', noteParts: receiptNotes.slice() };
+  presentReconcileSummary(lines, ex, inc, open);
+}
+function presentReconcileSummary(lines, ex, inc, open) {
+  const listHtml = lines.map(l => {
+    const diff = (l.noteQty != null ? l.noteQty : l.qty) - l.qty;
+    const tag = diff > 0 ? ' · <span class="text-rose-600 font-bold">חסר ' + diff + '</span>' : (diff < 0 ? ' · <span class="text-amber-600 font-bold">עודף ' + (-diff) + '</span>' : '');
+    return '<div class="flex items-center justify-between gap-2 py-1.5 border-b border-slate-100 last:border-0">' +
+      '<div class="min-w-0"><div class="font-bold text-slate-800 text-sm truncate">' + l.name + '</div>' +
+      '<div class="text-[11px] text-slate-400">התקבל ' + l.qty + ' × ₪' + fmtMoney(l.unitPrice) + tag + '</div></div>' +
+      '<div class="font-black text-slate-700 text-sm shrink-0">₪' + fmtMoney(l.lineTotal) + '</div>' +
+    '</div>';
+  }).join('');
+  $('rsBody').innerHTML =
+    (open ? '<div class="bg-rose-50 border border-rose-200 rounded-xl p-2.5 mb-3 text-xs font-bold text-rose-700"><i class="fa-solid fa-triangle-exclamation"></i> נשמר עם הפרשים — התעודה תסומן כפתוחה עד שתתוקן</div>' : '') +
+    '<div class="bg-slate-50 rounded-xl p-3 max-h-56 overflow-y-auto border border-slate-100 mb-3">' + listHtml + '</div>' +
+    '<div class="flex items-center justify-between text-slate-600 font-bold"><span>סה"כ שהתקבל ללא מע"מ</span><span>₪' + fmtMoney(ex) + '</span></div>' +
+    '<div class="flex items-center justify-between text-slate-600 font-bold mt-1"><span>מע"מ ' + Math.round(VAT * 100) + '%</span><span>₪' + fmtMoney(r2(inc - ex)) + '</span></div>' +
+    '<div class="flex items-center justify-between text-slate-900 font-black text-xl mt-2 pt-2 border-t border-slate-200"><span>לתשלום (מה שהתקבל)</span><span>₪' + fmtMoney(inc) + '</span></div>' +
+    (receiptNoteTotal != null ? '<div class="text-[11px] text-slate-400 mt-1">סכום התעודה מהספק: ₪' + fmtMoney(receiptNoteTotal) + '</div>' : '');
+  const m = $('receiptSummaryModal'); m.classList.remove('hidden'); m.classList.add('flex');
+}
+// ===== תיקון תעודה פתוחה (מההיסטוריה) =====
+function openReceiptFix(id) {
+  const rc = receipts.find(x => x.id === id); if (!rc) return;
+  receiptFix = { id: rc.id, noteTotalInc: (rc.noteTotalInc != null ? rc.noteTotalInc : null), items: (rc.items || []).map(l => ({ productId: l.productId, name: l.name, barcode: l.barcode || '', qty: Number(l.qty) || 0, noteQty: (l.noteQty != null ? Number(l.noteQty) : (Number(l.qty) || 0)), unitPrice: Number(l.unitPrice) || 0, promoPct: l.promoPct || 0 })) };
+  setView('receiptFix');
+}
+function receiptFixTotals() {
+  let ex = 0; (receiptFix.items || []).forEach(l => ex += (Number(l.unitPrice) || 0) * (Number(l.qty) || 0)); ex = r2(ex);
+  return { ex, inc: r2(ex * (1 + VAT)) };
+}
+function receiptFixOpenLines() { return (receiptFix.items || []).filter(l => (Number(l.noteQty) || 0) !== (Number(l.qty) || 0)); }
+function receiptFixRowHtml(l) {
+  const qty = Number(l.qty) || 0, noteQty = Number(l.noteQty) || 0;
+  const d = noteQty - qty;
+  let tag = '<span class="text-emerald-600 text-[11px] font-bold">תואם</span>';
+  if (d > 0) tag = '<span class="text-rose-600 font-black text-[11px]">חסר ' + d + '</span>';
+  else if (d < 0) tag = '<span class="text-amber-600 font-black text-[11px]">עודף ' + (-d) + '</span>';
+  return '<div class="bg-white rounded-2xl border ' + (d !== 0 ? 'border-rose-200' : 'border-slate-200') + ' p-3 shadow-sm" data-id="' + l.productId + '">' +
+    '<div class="flex items-center justify-between gap-2 mb-2"><div class="font-black text-slate-800 text-sm truncate min-w-0">' + l.name + '</div>' + tag + '</div>' +
+    '<div class="flex items-center justify-between gap-2">' +
+      '<div class="text-sm text-slate-500 font-bold">בתעודה: <span class="text-slate-800 font-black">' + noteQty + '</span></div>' +
+      '<div class="flex items-center gap-1.5"><span class="text-slate-500 font-bold text-xs">התקבל:</span>' +
+        '<button data-role="rc-fix-minus" data-id="' + l.productId + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-minus text-xs"></i></button>' +
+        '<input data-role="rc-fix-qty" data-id="' + l.productId + '" type="text" inputmode="numeric" value="' + qty + '" class="w-12 h-8 text-center font-black border-2 ' + (d !== 0 ? 'border-rose-300' : 'border-slate-200') + ' rounded-lg outline-none focus:border-blue-500">' +
+        '<button data-role="rc-fix-plus" data-id="' + l.productId + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-plus text-xs"></i></button>' +
+      '</div>' +
+    '</div>' +
+  '</div>';
+}
+function renderReceiptFix() {
+  if (!receiptFix) { setView('receiptsHistory'); return; }
+  const t = receiptFixTotals();
+  const open = receiptFixOpenLines().length;
+  app.innerHTML =
+    '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">תיקון הפרשים</h2><div class="text-xs text-slate-400 mt-0.5">עדכן את הכמות שהתקבלה בפועל (למשל אחרי שהספק השלים את החוסר)</div></div>' +
+    '<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm mb-3">' +
+      (receiptFix.noteTotalInc != null ? '<div class="flex justify-between text-sm font-bold text-slate-600"><span>סכום התעודה מהספק</span><span>₪' + fmtMoney(receiptFix.noteTotalInc) + '</span></div>' : '') +
+      '<div class="flex justify-between text-sm font-bold text-slate-800 mt-1"><span>סה"כ שהתקבל (כולל מע"מ)</span><span id="rfInc">₪' + fmtMoney(t.inc) + '</span></div>' +
+      '<div id="rfStatus" class="mt-1.5 pt-1.5 border-t border-slate-100 text-sm font-black ' + (open ? 'text-rose-600' : 'text-emerald-600') + '">' + (open ? '<i class="fa-solid fa-triangle-exclamation"></i> ' + open + ' שורות עם הפרש' : '<i class="fa-solid fa-circle-check"></i> הכל תואם — אפשר לסגור') + '</div>' +
+    '</div>' +
+    '<div class="space-y-2 mb-24">' + (receiptFix.items || []).map(receiptFixRowHtml).join('') + '</div>' +
+    '<div class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 p-3 flex gap-2 z-40">' +
+      '<button data-role="rc-fix-cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">ביטול</button>' +
+      '<button data-role="rc-fix-save" class="btn-tap flex-1 py-3 rounded-xl font-black bg-blue-600 text-white">שמור תיקון</button>' +
+    '</div>';
+}
+function refreshReceiptFixHeader() {
+  const t = receiptFixTotals();
+  const inc = $('rfInc'); if (inc) inc.textContent = '₪' + fmtMoney(t.inc);
+  const open = receiptFixOpenLines().length;
+  const st = $('rfStatus');
+  if (st) { st.className = 'mt-1.5 pt-1.5 border-t border-slate-100 text-sm font-black ' + (open ? 'text-rose-600' : 'text-emerald-600'); st.innerHTML = open ? '<i class="fa-solid fa-triangle-exclamation"></i> ' + open + ' שורות עם הפרש' : '<i class="fa-solid fa-circle-check"></i> הכל תואם — אפשר לסגור'; }
+}
+function receiptFixStepQty(productId, delta) {
+  const l = (receiptFix.items || []).find(x => x.productId === productId); if (!l) return;
+  l.qty = Math.max(0, (Number(l.qty) || 0) + delta); renderReceiptFix();
+}
+function receiptFixSetQtyLive(productId, val) {
+  const l = (receiptFix.items || []).find(x => x.productId === productId); if (!l) return;
+  let q = parseInt((val || '').toString().replace(/[^0-9]/g, ''), 10); if (isNaN(q) || q < 0) q = 0;
+  l.qty = q; refreshReceiptFixHeader();
+}
+async function saveReceiptFix() {
+  if (!receiptFix) return;
+  const items = receiptFix.items.map(l => {
+    const qty = Number(l.qty) || 0, noteQty = Number(l.noteQty) || 0, price = Number(l.unitPrice) || 0;
+    const line = { productId: l.productId, name: l.name, barcode: l.barcode || '', qty, unitPrice: price, lineTotal: r2(price * qty), promoPct: l.promoPct || 0 };
+    if (noteQty !== qty) line.noteQty = noteQty;
+    return line;
+  }).filter(l => (Number(l.qty) || 0) > 0 || l.noteQty != null);
+  const ex = r2(items.reduce((a, l) => a + l.lineTotal, 0));
+  const inc = r2(ex * (1 + VAT));
+  const open = items.some(l => l.noteQty != null && l.noteQty !== l.qty);
+  const id = receiptFix.id;
+  receiptFix = null;
+  if (db) { try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'receipts', id), { items, count: items.length, totalExVat: ex, totalIncVat: inc, status: open ? 'open' : 'ok' }); } catch (e) { console.error(e); } }
+  setView('receiptsHistory');
+  showToast(open ? 'נשמר — עדיין נותר הפרש' : 'התעודה תוקנה ✓', null, null, 2000);
+}
 async function confirmReceipt() {
   if (!pendingReceipt) { hideReceiptSummary(); return; }
-  const { lines, ex, inc } = pendingReceipt;
-  const data = { timestamp: Date.now(), date: todayStr(), items: lines, count: lines.length, totalExVat: ex, totalIncVat: inc };
+  const { lines, ex, inc, noteTotal, status, noteParts } = pendingReceipt;
+  const data = { timestamp: Date.now(), date: todayStr(), items: lines, count: lines.length, totalExVat: ex, totalIncVat: inc, noteTotalInc: (noteTotal != null ? noteTotal : null), noteParts: (Array.isArray(noteParts) ? noteParts : []), status: status || 'ok' };
   hideReceiptSummary();
   if (db) { try { await Promise.race([addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'receipts'), data), new Promise(r => setTimeout(r, 1500))]); } catch (e) { console.error(e); } }
-  receiptList = []; pendingReceipt = null; saveReceiptDraft();
+  receiptList = []; pendingReceipt = null; receiptNoteTotal = null; receiptNotes = []; receiptOpened = false; editingNotes = false; reconcileData = null; saveReceiptDraft();
   setView('receiptsHistory');
   showToast('התעודה נקלטה ✓', null, null, 2200);
 }
@@ -1715,6 +2062,16 @@ function receiptsRangeHtml() {
       '<div id="rcRangeResult" class="hidden mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3"></div>' +
     '</div>';
 }
+function receiptDiscrepancyInfo(rc) {
+  const shortItems = [], overItems = []; let shortVal = 0, overVal = 0;
+  (rc.items || []).forEach(l => {
+    if (l.noteQty == null) return;
+    const d = (Number(l.noteQty) || 0) - (Number(l.qty) || 0);
+    if (d > 0) { shortItems.push({ name: l.name, n: d }); shortVal += d * (Number(l.unitPrice) || 0); }
+    else if (d < 0) { overItems.push({ name: l.name, n: -d }); overVal += (-d) * (Number(l.unitPrice) || 0); }
+  });
+  return { open: !!(shortItems.length || overItems.length), shortItems, overItems, shortVal: r2(shortVal), overVal: r2(overVal) };
+}
 function renderReceiptsHistory() {
   const head = '<div class="flex items-center justify-between px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">תעודות קליטה</h2>' +
     (receipts.length ? '<button data-role="clear-receipts" class="btn-tap text-xs font-bold text-red-500 bg-red-50 px-3 py-2 rounded-lg flex items-center gap-1.5"><i class="fa-solid fa-trash-can"></i> נקה הכל</button>' : '') +
@@ -1723,6 +2080,7 @@ function renderReceiptsHistory() {
   const items = receipts.map(rc => {
     const d = new Date(rc.timestamp);
     const dateStr = d.toLocaleDateString('he-IL') + ' · ' + d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+    const di = receiptDiscrepancyInfo(rc);
     const rows = (rc.items || []).map(l =>
       '<div class="flex items-center justify-between gap-2 py-1 border-b border-slate-100 last:border-0">' +
         '<div class="min-w-0"><div class="text-sm font-bold text-slate-700 truncate">' + l.name + '</div><div class="text-[11px] text-slate-400">' + l.qty + ' × ₪' + fmtMoney(l.unitPrice) + (l.promoPct ? ' · מבצע ' + l.promoPct + '%' : '') + '</div></div>' +
@@ -1731,12 +2089,19 @@ function renderReceiptsHistory() {
     ).join('');
     return '<details class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">' +
       '<summary class="cursor-pointer p-4 flex items-center justify-between gap-2">' +
-        '<div class="min-w-0"><div class="font-black text-slate-800 text-sm">' + dateStr + '</div><div class="text-xs text-slate-400 mt-0.5">' + (rc.count || (rc.items || []).length) + ' פריטים</div></div>' +
+        '<div class="min-w-0"><div class="font-black text-slate-800 text-sm">' + dateStr + '</div><div class="text-xs text-slate-400 mt-0.5">' + (rc.count || (rc.items || []).length) + ' פריטים' + (di.open ? ' · <span class="text-rose-600 font-black">הפרש פתוח</span>' : '') + '</div></div>' +
         '<div class="flex items-center gap-2 shrink-0"><div class="text-left"><div class="text-[11px] text-slate-400">כולל מע"מ</div><div class="font-black text-slate-800">₪' + fmtMoney(rc.totalIncVat) + '</div></div><i class="fa-solid fa-chevron-down hist-chevron text-slate-400 transition-transform"></i></div>' +
       '</summary>' +
       '<div class="px-4 pb-4">' +
         '<div class="bg-slate-50 rounded-xl p-3 border border-slate-100">' + rows + '</div>' +
         '<div class="flex items-center justify-between mt-2 text-xs text-slate-500 font-bold px-1"><span>ללא מע"מ: ₪' + fmtMoney(rc.totalExVat) + '</span><span>כולל מע"מ: ₪' + fmtMoney(rc.totalIncVat) + '</span></div>' +
+        (di.open ? '<div class="mt-2 bg-rose-50 border border-rose-200 rounded-xl p-2.5 text-xs">' +
+          '<div class="font-black text-rose-700 mb-1"><i class="fa-solid fa-triangle-exclamation"></i> הפרשים מול התעודה</div>' +
+          di.shortItems.map(s => '<div class="flex justify-between text-rose-600"><span>חסר: ' + s.name + '</span><span>' + s.n + ' יח׳</span></div>').join('') +
+          di.overItems.map(s => '<div class="flex justify-between text-amber-600"><span>עודף: ' + s.name + '</span><span>' + s.n + ' יח׳</span></div>').join('') +
+          (rc.noteTotalInc != null ? '<div class="mt-1 pt-1 border-t border-rose-200 text-rose-700/80">תעודת ספק ₪' + fmtMoney(rc.noteTotalInc) + (rc.noteParts && rc.noteParts.length > 1 ? ' (' + rc.noteParts.map(x => '₪' + fmtMoney(x)).join(' + ') + ')' : '') + ' · שולם בפועל ₪' + fmtMoney(rc.totalIncVat) + '</div>' : '') +
+        '</div>' : '') +
+        (di.open ? '<button data-role="rc-fix-open" data-id="' + rc.id + '" class="btn-tap mt-2 w-full bg-blue-600 text-white font-black py-2.5 rounded-xl text-sm flex items-center justify-center gap-2"><i class="fa-solid fa-wrench"></i> תקן הפרשים</button>' : '') +
         '<button data-role="del-receipt" data-id="' + rc.id + '" class="btn-tap mt-2 w-full bg-red-50 text-red-600 font-bold py-2 rounded-xl text-sm flex items-center justify-center gap-2"><i class="fa-solid fa-trash-can"></i> מחק תעודה</button>' +
       '</div>' +
     '</details>';
@@ -1756,23 +2121,48 @@ function calcReceiptRange() {
   let retEx = 0, retInc = 0;
   rets.forEach(r => { const t = returnTotals(r); retEx += t.ex; retInc += t.inc; });
   retEx = r2(retEx); retInc = r2(retInc);
-  const netEx = r2(recEx - retEx), netInc = r2(recInc - retInc);
+  // הנחות מרכזת — צפי לפי מבצעי סוף חודש שחלים על מוצרי התעודות
+  const meMap = {}; let meEx = 0;
+  recs.forEach(r => {
+    (r.items || []).forEach(l => {
+      const pr = monthEndPromoForProduct(l.productId, r.date);
+      if (pr) {
+        const reb = r2((Number(l.lineTotal) || 0) * (Number(pr.pct) || 0) / 100);
+        meEx += reb;
+        if (!meMap[pr.id]) meMap[pr.id] = { name: pr.name || ('מבצע ' + pr.pct + '%'), pct: pr.pct, ex: 0 };
+        meMap[pr.id].ex = r2(meMap[pr.id].ex + reb);
+      }
+    });
+  });
+  meEx = r2(meEx);
+  let openShortEx = 0, openOverEx = 0, openCnt = 0;
+  recs.forEach(r => { const di = receiptDiscrepancyInfo(r); if (di.open) { openCnt++; openShortEx += di.shortVal; openOverEx += di.overVal; } });
+  openShortEx = r2(openShortEx); openOverEx = r2(openOverEx);
+  const meInc = r2(meEx * (1 + VAT));
+  const meList = Object.values(meMap);
+  const meHtml = meInc > 0
+    ? '<div class="flex items-center justify-between text-sm font-bold text-rose-700 mt-1"><span><i class="fa-solid fa-clock-rotate-left"></i> הנחות מרכזת (צפי)</span><span>− ₪' + fmtMoney(meInc) + '</span></div>' +
+      meList.map(s => '<div class="flex items-center justify-between text-[11px] text-rose-600/80 pr-3"><span>· ' + s.name + ' ' + s.pct + '%</span><span>− ₪' + fmtMoney(r2(s.ex * (1 + VAT))) + '</span></div>').join('')
+    : '';
+  const netEx = r2(recEx - retEx - meEx), netInc = r2(recInc - retInc - meInc);
   out.innerHTML =
     '<div class="text-[11px] font-bold text-amber-900/70 mb-2">' + recs.length + ' תעודות קליטה · ' + rets.length + ' תעודות חזרה</div>' +
     '<div class="flex items-center justify-between text-sm font-bold text-amber-900"><span>קליטה (כולל מע"מ)</span><span>₪' + fmtMoney(recInc) + '</span></div>' +
     '<div class="flex items-center justify-between text-sm font-bold text-emerald-700 mt-1"><span>חזרות / זיכוי</span><span>− ₪' + fmtMoney(retInc) + '</span></div>' +
+    meHtml +
     '<div class="flex items-center justify-between text-lg font-black text-amber-900 mt-1.5 pt-1.5 border-t border-amber-200"><span>נטו לתשלום</span><span>₪' + fmtMoney(netInc) + '</span></div>' +
-    '<div class="text-[11px] text-amber-900/60 mt-1.5">ללא מע"מ — קליטה ₪' + fmtMoney(recEx) + ' · חזרות ₪' + fmtMoney(retEx) + ' · נטו ₪' + fmtMoney(netEx) + '</div>';
+    '<div class="text-[11px] text-amber-900/60 mt-1.5">ללא מע"מ — קליטה ₪' + fmtMoney(recEx) + ' · חזרות ₪' + fmtMoney(retEx) + (meEx > 0 ? ' · מרכזת ₪' + fmtMoney(meEx) : '') + ' · נטו ₪' + fmtMoney(netEx) + '</div>' +
+    (meInc > 0 ? '<div class="text-[11px] text-rose-700/80 font-bold mt-2 bg-rose-50 rounded-lg p-2"><i class="fa-solid fa-triangle-exclamation"></i> הנחות מרכזת הן צפי — ודא שהספק זיכה אותן בחשבון החודשי</div>' : '') +
+    (openCnt ? '<div class="text-[11px] text-rose-700/80 font-bold mt-2 bg-rose-50 rounded-lg p-2"><i class="fa-solid fa-clipboard-question"></i> ' + openCnt + ' תעודות עם הפרש פתוח · חוסר ₪' + fmtMoney(r2(openShortEx * (1 + VAT))) + (openOverEx > 0 ? ' · עודף ₪' + fmtMoney(r2(openOverEx * (1 + VAT))) : '') + ' (לא משולם — הספק חייב להשלים/לזכות)</div>' : '');
   out.classList.remove('hidden');
 }
 
 // --- עדכון מחירים ---
 function priceRowHtml(p) {
-  const day = todayStr();
-  const promoOn = isPromoActive(p, day);
-  const hasPromo = !!(p.promo && p.promo.pct != null && p.promo.pct > 0);
-  const promoUnit = r2((Number(p.price) || 0) * (1 - (Number(p.promo && p.promo.pct) || 0) / 100));
-  const minQ = promoMinUnits(p);
+  const op = promoForProduct(p.id);
+  const onNow = promoActive(op, todayStr());
+  const mop = promos.find(pr => pr.type === 'monthEnd' && Array.isArray(pr.productIds) && pr.productIds.indexOf(p.id) !== -1) || null;
+  const mOn = promoActive(mop, todayStr());
   return '<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm" data-id="' + p.id + '">' +
     '<div class="flex items-center gap-2">' +
       '<button data-role="edit-prod" data-id="' + p.id + '" class="btn-tap flex-1 min-w-0 text-right">' +
@@ -1781,12 +2171,12 @@ function priceRowHtml(p) {
       '</button>' +
       '<div class="shrink-0 flex items-center gap-1"><span class="text-slate-400 text-sm font-bold">₪</span><input data-role="price-set" data-id="' + p.id + '" type="text" inputmode="decimal" value="' + (p.price != null ? p.price : '') + '" placeholder="0.00" class="w-20 h-9 text-center font-black border-2 border-slate-200 rounded-lg outline-none focus:border-blue-500"></div>' +
     '</div>' +
-    '<div class="flex items-center justify-between mt-2.5 pt-2.5 border-t border-slate-100">' +
-      (hasPromo
-        ? '<div class="text-xs min-w-0"><span class="font-black ' + (promoOn ? 'text-rose-600' : 'text-slate-400') + '">מבצע ' + p.promo.pct + '%' + (minQ > 1 ? ' · מ-' + promoMinLabel(p) : '') + '</span> <span class="text-slate-400">' + p.promo.start + '←' + p.promo.end + '</span>' + (promoOn ? ' <span class="text-rose-600 font-bold">₪' + fmtMoney(promoUnit) + '</span>' : ' <span class="text-slate-300">(לא פעיל)</span>') + '</div>'
-        : '<div class="text-xs text-slate-400">אין מבצע</div>') +
-      '<button data-role="edit-promo" data-id="' + p.id + '" class="btn-tap shrink-0 text-blue-600 font-black text-sm flex items-center gap-1.5"><i class="fa-solid fa-percent"></i> ' + (hasPromo ? 'ערוך' : 'הוסף') + ' מבצע</button>' +
-    '</div>' +
+    ((op || mop)
+      ? '<div class="mt-2.5 pt-2.5 border-t border-slate-100 text-xs space-y-0.5">' +
+          (op ? '<div><span class="font-black ' + (onNow ? 'text-rose-600' : 'text-slate-400') + '"><i class="fa-solid fa-tag"></i> ' + (op.name || ('מבצע ' + op.pct + '%')) + ' · ' + op.pct + '%' + (promoMinUnitsP(op) > 1 ? ' · מ-' + promoMinLabelP(op) + ' מהסל' : '') + '</span>' + (onNow ? '' : ' <span class="text-slate-300">(לא פעיל)</span>') + '</div>' : '') +
+          (mop ? '<div><span class="font-black ' + (mOn ? 'text-rose-600' : 'text-slate-400') + '"><i class="fa-solid fa-clock-rotate-left"></i> מרכזת: ' + (mop.name || ('מבצע ' + mop.pct + '%')) + ' · ' + mop.pct + '%</span>' + (mOn ? '' : ' <span class="text-slate-300">(לא פעיל)</span>') + '</div>' : '') +
+        '</div>'
+      : '') +
   '</div>';
 }
 function renderPrices() {
@@ -1883,20 +2273,14 @@ function delProdFromModal() {
 }
 
 // --- עורך מבצע ---
-function openPromoEditor(id) {
-  const p = products.find(x => x.id === id); if (!p) return;
-  promoEditId = id;
-  $('promoName').textContent = p.name;
-  const pr = p.promo || {};
-  $('promoPct').value = (pr.pct != null ? pr.pct : '');
-  $('promoStart').value = pr.start || todayStr();
-  $('promoEnd').value = pr.end || '';
-  $('promoMin').value = (pr.minQty != null && pr.minQty > 1) ? pr.minQty : '';
-  $('promoCarton').value = (pr.cartonSize != null && pr.cartonSize > 0) ? pr.cartonSize : '';
-  setPromoUnitMode(pr.minUnit === 'carton' ? 'carton' : 'unit');
-  $('promoRemove').classList.toggle('hidden', !(pr.pct != null && pr.pct > 0));
-  const m = $('promoModal'); m.classList.remove('hidden'); m.classList.add('flex');
-  setTimeout(() => { const i = $('promoPct'); if (i) i.focus(); }, 80);
+function setPromoType(type) {
+  promoType = (type === 'monthEnd') ? 'monthEnd' : 'receipt';
+  const r = $('peTypeReceipt'), m = $('peTypeMonth');
+  const base = 'flex-1 py-2.5 rounded-lg text-sm font-black ';
+  if (r) r.className = base + (promoType === 'receipt' ? 'bg-white text-blue-600 shadow' : 'text-slate-500');
+  if (m) m.className = base + (promoType === 'monthEnd' ? 'bg-white text-rose-600 shadow' : 'text-slate-500');
+  const wrap = $('promoMinWrap'); if (wrap) wrap.classList.toggle('hidden', promoType === 'monthEnd');
+  const note = $('peTypeNote'); if (note) note.textContent = promoType === 'monthEnd' ? 'הנחת מרכזת — לא מופיעה בתעודה, מחושבת בדוח סוף החודש' : 'הנחה שחלה בתעודה כשהסל עובר את הסף';
 }
 function setPromoUnitMode(mode) {
   promoUnitMode = (mode === 'carton') ? 'carton' : 'unit';
@@ -1918,36 +2302,144 @@ function updatePromoHint() {
     hint.textContent = 'המבצע חל מ-' + q + ' יחידות';
   }
 }
-function hidePromo() { const m = $('promoModal'); m.classList.add('hidden'); m.classList.remove('flex'); promoEditId = null; }
-function savePromo() {
-  const id = promoEditId; if (!id) { hidePromo(); return; }
+function renderPromos() {
+  const day = todayStr();
+  const head = '<div class="flex items-center justify-between px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">מבצעים</h2></div>' +
+    '<button data-role="promo-new" class="btn-tap w-full bg-rose-600 text-white rounded-2xl py-3.5 font-black text-base flex items-center justify-center gap-2 mb-3"><i class="fa-solid fa-plus"></i> מבצע חדש</button>';
+  if (!promos.length) { app.innerHTML = head + '<div class="text-center text-slate-400 py-10"><i class="fa-solid fa-percent text-4xl mb-2 opacity-30"></i><div class="font-bold">אין מבצעים עדיין</div></div>'; return; }
+  const rows = promos.slice().sort((a, b) => (b.start || '').localeCompare(a.start || '')).map(pr => {
+    const active = promoActive(pr, day);
+    const cnt = (pr.productIds || []).length;
+    return '<button data-role="promo-open" data-id="' + pr.id + '" class="btn-tap block w-full bg-white rounded-2xl border border-slate-200 p-4 shadow-sm text-right">' +
+      '<div class="flex items-center justify-between gap-2">' +
+        '<div class="min-w-0"><div class="font-black text-slate-800 truncate">' + (pr.name || ('מבצע ' + pr.pct + '%')) + '</div>' +
+        '<div class="text-xs text-slate-400 mt-0.5">' + (pr.type === 'monthEnd' ? '<span class="text-rose-600 font-black">מרכזת</span> · ' : '') + cnt + ' מוצרים · ' + (pr.start || '?') + ' ← ' + (pr.end || '?') + '</div></div>' +
+        '<div class="shrink-0 text-left"><div class="bg-rose-100 text-rose-700 font-black px-2.5 py-1 rounded-full text-sm">' + pr.pct + '%</div>' + (active ? '<div class="text-[10px] text-emerald-600 font-bold mt-1">פעיל</div>' : '<div class="text-[10px] text-slate-400 font-bold mt-1">לא פעיל</div>') + '</div>' +
+      '</div>' +
+      (promoMinUnitsP(pr) > 1 ? '<div class="text-[11px] text-slate-500 font-bold mt-1"><i class="fa-solid fa-layer-group"></i> מינימום ' + promoMinLabelP(pr) + ' מהסל</div>' : '') +
+    '</button>';
+  }).join('');
+  app.innerHTML = head + '<div class="space-y-2.5 pb-6">' + rows + '</div>';
+}
+function renderPromoEdit() {
+  const pe = promoEdit || {};
+  const isNew = !pe.id;
+  const ids = pe.productIds || [];
+  const esc = s => (s == null ? '' : String(s)).replace(/"/g, '&quot;');
+  app.innerHTML =
+    '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">' + (isNew ? 'מבצע חדש' : 'עריכת מבצע') + '</h2></div>' +
+    '<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm space-y-3 mb-3">' +
+      '<div><label class="text-[11px] text-slate-400 font-bold block mb-1">סוג מבצע</label>' +
+        '<div class="flex bg-slate-100 rounded-xl p-1"><button data-role="pe-type-receipt" id="peTypeReceipt" class="flex-1 py-2.5 rounded-lg text-sm font-black">בתעודה</button><button data-role="pe-type-month" id="peTypeMonth" class="flex-1 py-2.5 rounded-lg text-sm font-black">מרכזת (סוף חודש)</button></div>' +
+        '<div id="peTypeNote" class="text-[11px] text-slate-500 font-bold mt-1"></div>' +
+      '</div>' +
+      '<div><label class="text-[11px] text-slate-400 font-bold block mb-1">שם המבצע</label><input id="promoName" type="text" value="' + esc(pe.name) + '" class="w-full p-2.5 rounded-xl border-2 border-slate-200 outline-none font-bold focus:border-rose-500" placeholder="לדוגמה: מבצע יוגורט"></div>' +
+      '<div><label class="text-[11px] text-slate-400 font-bold block mb-1">אחוז הנחה</label><div class="flex items-center gap-2"><input id="promoPct" type="text" inputmode="decimal" value="' + (pe.pct != null ? pe.pct : '') + '" class="flex-1 p-2.5 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-rose-500" placeholder="10"><span class="text-slate-400 font-black text-lg">%</span></div></div>' +
+      '<div class="flex gap-2"><div class="flex-1"><label class="text-[11px] text-slate-400 font-bold block mb-1">מתאריך</label><input id="promoStart" type="date" value="' + (pe.start || '') + '" class="w-full p-2.5 rounded-xl border-2 border-slate-200 outline-none text-sm font-bold focus:border-rose-500"></div><div class="flex-1"><label class="text-[11px] text-slate-400 font-bold block mb-1">עד תאריך</label><input id="promoEnd" type="date" value="' + (pe.end || '') + '" class="w-full p-2.5 rounded-xl border-2 border-slate-200 outline-none text-sm font-bold focus:border-rose-500"></div></div>' +
+      '<div id="promoMinWrap"><label class="text-[11px] text-slate-400 font-bold block mb-1">מינימום להפעלה — סך כל הסל</label>' +
+        '<div class="flex gap-2 items-stretch"><input id="promoMin" type="text" inputmode="numeric" value="' + (pe.minQty != null && pe.minQty > 1 ? pe.minQty : '') + '" class="w-20 p-2.5 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-rose-500" placeholder="1">' +
+          '<div class="flex-1 flex bg-slate-100 rounded-xl p-1"><button data-role="pe-unit-u" id="promoUnitU" class="flex-1 py-2 rounded-lg text-sm font-black">יחידות</button><button data-role="pe-unit-c" id="promoUnitC" class="flex-1 py-2 rounded-lg text-sm font-black">ארגזים</button></div></div>' +
+        '<div id="promoCartonWrap" class="hidden mt-2"><label class="text-[11px] text-slate-400 font-bold block mb-1">כמה יחידות יש בארגז אחד?</label><input id="promoCarton" type="text" inputmode="numeric" value="' + (pe.cartonSize != null && pe.cartonSize > 0 ? pe.cartonSize : '') + '" class="w-full p-2.5 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-rose-500" placeholder="לדוגמה 12"></div>' +
+        '<div id="promoUnitsHint" class="text-[11px] text-slate-500 font-bold mt-1.5 min-h-[16px]"></div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm mb-24">' +
+      '<div class="font-black text-slate-800 mb-2">מוצרי הסל <span id="peCount" class="text-rose-600">(' + ids.length + ')</span></div>' +
+      '<div class="relative mb-2"><i class="fa-solid fa-magnifying-glass absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i><input id="promoSearch" type="text" value="' + esc(promoSearch) + '" placeholder="חפש מוצר להוספה..." class="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 pr-8 pl-3 text-sm font-bold outline-none focus:border-rose-500"></div>' +
+      '<div id="promoProdList" class="space-y-1.5 max-h-72 overflow-y-auto"></div>' +
+    '</div>' +
+    '<div class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 p-3 flex gap-2 z-40">' +
+      (isNew ? '' : '<button data-role="pe-delete" class="btn-tap px-4 py-3 rounded-xl font-black bg-red-50 text-red-600"><i class="fa-solid fa-trash-can"></i></button>') +
+      '<button data-role="pe-cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">ביטול</button>' +
+      '<button data-role="pe-save" class="btn-tap flex-1 py-3 rounded-xl font-black bg-rose-600 text-white">שמור מבצע</button>' +
+    '</div>';
+  setPromoType(pe.type === 'monthEnd' ? 'monthEnd' : 'receipt');
+  setPromoUnitMode(pe.minUnit === 'carton' ? 'carton' : 'unit');
+  refreshPromoProdList(promoSearch);
+}
+function refreshPromoProdList(q) {
+  const box = $('promoProdList'); if (!box) return;
+  q = (q || '').trim();
+  const ids = (promoEdit && promoEdit.productIds) || [];
+  let list = products.slice().sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+  if (q) list = list.filter(p => (p.name || '').includes(q) || (p.barcode || '').includes(q));
+  box.innerHTML = list.map(p => {
+    const inIt = ids.indexOf(p.id) !== -1;
+    return '<button data-role="pe-toggle" data-id="' + p.id + '" class="btn-tap w-full flex items-center justify-between gap-2 p-2.5 rounded-xl border-2 ' + (inIt ? 'border-rose-500 bg-rose-50' : 'border-slate-100 bg-white') + '">' +
+      '<div class="min-w-0 text-right"><div class="font-bold text-slate-800 text-sm truncate">' + (p.name || '(ללא שם)') + '</div><div class="text-[10px] text-slate-400">' + (p.barcode || 'ללא ברקוד') + '</div></div>' +
+      '<i class="fa-solid ' + (inIt ? 'fa-circle-check text-rose-600' : 'fa-circle-plus text-slate-300') + ' text-xl shrink-0"></i>' +
+    '</button>';
+  }).join('') || '<div class="text-center text-slate-400 py-6 text-sm">לא נמצא מוצר</div>';
+}
+function newPromo() {
+  promoEdit = { id: null, name: '', pct: '', start: todayStr(), end: '', minQty: 1, minUnit: 'unit', cartonSize: null, productIds: [], type: 'receipt' };
+  promoSearch = '';
+  setView('promoEdit');
+}
+function openPromoEdit(id) {
+  const pr = promos.find(x => x.id === id); if (!pr) { newPromo(); return; }
+  promoEdit = { id: pr.id, name: pr.name || '', pct: pr.pct, start: pr.start || todayStr(), end: pr.end || '', minQty: pr.minQty || 1, minUnit: pr.minUnit || 'unit', cartonSize: pr.cartonSize || null, productIds: (pr.productIds || []).slice(), type: pr.type === 'monthEnd' ? 'monthEnd' : 'receipt' };
+  promoSearch = '';
+  setView('promoEdit');
+}
+function togglePromoProduct(pid) {
+  if (!promoEdit) return;
+  const arr = promoEdit.productIds || (promoEdit.productIds = []);
+  const i = arr.indexOf(pid);
+  if (i === -1) arr.push(pid); else arr.splice(i, 1);
+  const cnt = $('peCount'); if (cnt) cnt.textContent = '(' + arr.length + ')';
+  refreshPromoProdList(promoSearch);
+}
+function savePromoEntity() {
+  if (!promoEdit) return;
+  const name = ($('promoName').value || '').trim();
   const pct = parseFloat(($('promoPct').value || '').toString().replace(',', '.'));
   const start = $('promoStart').value || '';
   const end = $('promoEnd').value || '';
   if (!(pct > 0) || !start || !end) { showToast('מלא אחוז, תאריך התחלה ותאריך סיום', null, null, 2600); return; }
   if (end < start) { showToast('תאריך הסיום חייב להיות אחרי ההתחלה', null, null, 2600); return; }
-  const qty = parseInt(($('promoMin').value || '').replace(/[^0-9]/g, ''), 10) || 1;
-  const minUnit = (promoUnitMode === 'carton') ? 'carton' : 'unit';
-  let cartonSize = null;
-  if (minUnit === 'carton') {
-    cartonSize = parseInt(($('promoCarton').value || '').replace(/[^0-9]/g, ''), 10) || 0;
-    if (qty > 1 && !(cartonSize > 0)) { showToast('הזן כמה יחידות יש בארגז', null, null, 2600); return; }
+  const type = (promoType === 'monthEnd') ? 'monthEnd' : 'receipt';
+  let qty = 1, minUnit = 'unit', cartonSize = null;
+  if (type === 'receipt') {
+    qty = parseInt(($('promoMin').value || '').replace(/[^0-9]/g, ''), 10) || 1;
+    minUnit = (promoUnitMode === 'carton') ? 'carton' : 'unit';
+    if (minUnit === 'carton') { cartonSize = parseInt(($('promoCarton').value || '').replace(/[^0-9]/g, ''), 10) || 0; if (qty > 1 && !(cartonSize > 0)) { showToast('הזן כמה יחידות יש בארגז', null, null, 2600); return; } }
   }
-  const promo = { pct: r2(pct), start, end, minQty: Math.max(1, qty), minUnit, cartonSize };
-  const p = products.find(x => x.id === id); if (p) p.promo = promo;
-  hidePromo();
-  if (db) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', id), { promo }).catch(console.error);
-  if (currentView === 'prices') renderPrices();
+  const productIds = ((promoEdit.productIds) || []).slice();
+  if (!productIds.length) { showToast('הוסף לפחות מוצר אחד לסל המבצע', null, null, 2600); return; }
+  const data = { name: name || ('מבצע ' + r2(pct) + '%'), pct: r2(pct), start, end, minQty: Math.max(1, qty), minUnit, cartonSize, productIds, type };
+  const id = promoEdit.id;
+  promoEdit = null;
+  if (id) { if (db) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'promos', id), data).catch(console.error); }
+  else if (db) addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'promos'), data).catch(console.error);
+  setView('promos');
   showToast('המבצע נשמר', null, null, 1800);
 }
-function removePromo() {
-  const id = promoEditId; if (!id) { hidePromo(); return; }
-  const p = products.find(x => x.id === id); if (p) p.promo = null;
-  hidePromo();
-  if (db) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', id), { promo: null }).catch(console.error);
-  if (currentView === 'prices') renderPrices();
-  showToast('המבצע בוטל', null, null, 1800);
+function deletePromoEntity() {
+  const id = promoEdit && promoEdit.id; if (!id) { promoEdit = null; setView('promos'); return; }
+  const nm = (promoEdit.name) || 'המבצע';
+  showConfirm('מחיקת מבצע', 'למחוק את "' + nm + '"? פעולה זו אינה הפיכה.', 'מחק', () => {
+    promoEdit = null;
+    if (db) deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'promos', id)).catch(console.error);
+    setView('promos');
+    showToast('המבצע נמחק', null, null, 1800);
+  });
 }
+function openPromoPopup(promoId) {
+  const pr = promos.find(x => x.id === promoId); if (!pr) return;
+  const active = promoActive(pr, todayStr());
+  const prods = (pr.productIds || []).map(id => { const p = products.find(x => x.id === id); return p ? p.name : null; }).filter(Boolean);
+  $('piTitle').textContent = pr.name || ('מבצע ' + pr.pct + '%');
+  $('piBody').innerHTML =
+    '<div class="flex items-center justify-center gap-2 mb-3"><span class="bg-rose-100 text-rose-700 font-black px-3 py-1.5 rounded-full">' + pr.pct + '% הנחה</span>' + (active ? '<span class="bg-emerald-100 text-emerald-700 font-bold px-3 py-1.5 rounded-full text-sm">פעיל</span>' : '<span class="bg-slate-100 text-slate-500 font-bold px-3 py-1.5 rounded-full text-sm">לא פעיל</span>') + '</div>' +
+    '<div class="space-y-1.5 text-sm bg-slate-50 rounded-xl p-3">' +
+      '<div class="flex justify-between"><span class="text-slate-500 font-bold">תוקף</span><span class="font-bold text-slate-800">' + (pr.start || '?') + ' ← ' + (pr.end || '?') + '</span></div>' +
+      '<div class="flex justify-between"><span class="text-slate-500 font-bold">כמה להזמין</span><span class="font-black text-rose-600">' + (promoMinUnitsP(pr) > 1 ? promoMinLabelP(pr) + ' מהסל' : 'ללא מינימום') + '</span></div>' +
+    '</div>' +
+    '<div class="mt-3"><div class="text-[11px] text-slate-400 font-bold mb-1.5">מוצרים בסל (' + prods.length + ')</div><div class="flex flex-wrap gap-1.5">' + (prods.map(n => '<span class="bg-slate-100 text-slate-700 text-xs font-bold px-2 py-1 rounded-lg">' + n + '</span>').join('') || '<span class="text-slate-400 text-xs">—</span>') + '</div></div>';
+  const m = $('promoInfoModal'); m.classList.remove('hidden'); m.classList.add('flex');
+}
+function hidePromoInfo() { const m = $('promoInfoModal'); m.classList.add('hidden'); m.classList.remove('flex'); }
 
 // ===== חיווט אירועים =====
 $('confirmCancel').addEventListener('click', hideConfirm);
@@ -1967,13 +2459,7 @@ $('promptInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e
 $('promptScan').addEventListener('click', () => { scanPurpose = 'field'; openScanner(); });
 $('npr_cancel').addEventListener('click', hideNewProduct);
 $('npr_ok').addEventListener('click', saveNewProduct);
-$('promo_cancel').addEventListener('click', hidePromo);
-$('promo_ok').addEventListener('click', savePromo);
-$('promoRemove').addEventListener('click', removePromo);
-$('promoUnitU').addEventListener('click', () => setPromoUnitMode('unit'));
-$('promoUnitC').addEventListener('click', () => setPromoUnitMode('carton'));
-$('promoMin').addEventListener('input', updatePromoHint);
-$('promoCarton').addEventListener('input', updatePromoHint);
+$('piClose').addEventListener('click', hidePromoInfo);
 $('rs_cancel').addEventListener('click', hideReceiptSummary);
 $('rs_ok').addEventListener('click', confirmReceipt);
 $('qty_minus').addEventListener('click', () => qtyStep(-1));
@@ -2000,7 +2486,13 @@ app.addEventListener('input', (e) => {
   const t = e.target; const role = t.getAttribute && t.getAttribute('data-role');
   if (t.id === 'returnsSearch') { renderReturnsResults(t.value); return; }
   if (t.id === 'priceSearch') { priceQuery = t.value; refreshPricesList(priceQuery); return; }
+  if (t.id === 'promoSearch') { promoSearch = t.value; refreshPromoProdList(promoSearch); return; }
+  if (t.id === 'promoMin' || t.id === 'promoCarton') { updatePromoHint(); return; }
   if (role === 'rc-qty') { setReceiptQty(t.dataset.id, t.value); return; }
+  if (t.id === 'rcAddSearch') { refreshReconcileAddList(t.value); return; }
+  if (role === 'rc-recon-note') { reconcileSetNoteLive(t.dataset.id, t.value); return; }
+  if (role === 'rc-recon-price') { reconcileSetPriceLive(t.dataset.id, t.value); return; }
+  if (role === 'rc-fix-qty') { receiptFixSetQtyLive(t.dataset.id, t.value); return; }
   if (role === 'price-set') { savePrice(t.dataset.id, t.value); return; }
   if (role === 'amount') {
     const id = t.dataset.id; let v = t.value.replace(/[^0-9]/g, ''); if (v !== t.value) t.value = v;
@@ -2059,7 +2551,25 @@ app.addEventListener('click', (e) => {
   else if (role === 'clear-history') showConfirm('ניקוי היסטוריה', 'למחוק את כל היסטוריית ההזמנות? פעולה זו אינה הפיכה.', 'מחק הכל', () => clearAllDocs('history'));
   else if (role === 'clear-returns-history') showConfirm('ניקוי היסטוריה', 'למחוק את כל היסטוריית החזרות? פעולה זו אינה הפיכה.', 'מחק הכל', () => clearAllDocs('returns'));
   else if (role === 'rc-scan') openReceivingScanner();
+  else if (role === 'rc-open') { const v = parseNoteVal(($('rcNoteInput') || {}).value); if (v != null) receiptNotes.push(v); recomputeNoteTotal(); receiptOpened = true; saveReceiptDraft(); refreshReceipt(); openReceivingScanner(); }
+  else if (role === 'rc-open-skip') { receiptNotes = []; recomputeNoteTotal(); receiptOpened = true; saveReceiptDraft(); refreshReceipt(); openReceivingScanner(); }
+  else if (role === 'rc-cancel') { showConfirm('ביטול תעודה', 'לבטל את התעודה הנוכחית? כל הפריטים שנסרקו יימחקו.', 'בטל תעודה', () => { receiptList = []; receiptNotes = []; receiptNoteTotal = null; receiptOpened = false; editingNotes = false; reconcileData = null; saveReceiptDraft(); setView('receiving'); }); }
+  else if (role === 'rc-note-add') { const v = parseNoteVal(($('rcNoteInput') || {}).value); if (v != null) { receiptNotes.push(v); recomputeNoteTotal(); saveReceiptDraft(); } refreshReceipt(); const inp = $('rcNoteInput'); if (inp) inp.focus(); }
+  else if (role === 'rc-note-remove') { const i = parseInt(t.dataset.idx, 10); if (i >= 0) { receiptNotes.splice(i, 1); recomputeNoteTotal(); saveReceiptDraft(); refreshReceipt(); } }
+  else if (role === 'rc-notes-edit') { editingNotes = true; refreshReceipt(); }
+  else if (role === 'rc-notes-done') { const v = parseNoteVal(($('rcNoteInput') || {}).value); if (v != null) receiptNotes.push(v); recomputeNoteTotal(); editingNotes = false; saveReceiptDraft(); refreshReceipt(); }
+  else if (role === 'rc-recon-minus') reconcileStepNote(id, -1);
+  else if (role === 'rc-recon-plus') reconcileStepNote(id, 1);
+  else if (role === 'rc-add-item') reconcileAddItem(id);
+  else if (role === 'rc-recon-cancel') { reconcileData = null; setView('receiving'); }
+  else if (role === 'rc-recon-save') saveReconciledReceipt();
+  else if (role === 'rc-fix-open') openReceiptFix(id);
+  else if (role === 'rc-fix-minus') receiptFixStepQty(id, -1);
+  else if (role === 'rc-fix-plus') receiptFixStepQty(id, 1);
+  else if (role === 'rc-fix-cancel') { receiptFix = null; setView('receiptsHistory'); }
+  else if (role === 'rc-fix-save') saveReceiptFix();
   else if (role === 'rc-prices') setView('prices');
+  else if (role === 'rc-promos') setView('promos');
   else if (role === 'pr-scan') openPriceScanner();
   else if (role === 'pr-create') openProdModal(null, false, t.dataset.code);
   else if (role === 'edit-prod') { const p = products.find(x => x.id === id); if (p) openProdModal(p, false); }
@@ -2068,7 +2578,17 @@ app.addEventListener('click', (e) => {
   else if (role === 'rc-minus') changeReceiptQty(id, -1);
   else if (role === 'rc-remove') removeReceiptLine(id);
   else if (role === 'rc-calc') calcReceiptRange();
-  else if (role === 'edit-promo') openPromoEditor(id);
+  else if (role === 'promo-new') newPromo();
+  else if (role === 'promo-open') openPromoEdit(id);
+  else if (role === 'promo-info') openPromoPopup(id);
+  else if (role === 'pe-toggle') togglePromoProduct(id);
+  else if (role === 'pe-unit-u') setPromoUnitMode('unit');
+  else if (role === 'pe-unit-c') setPromoUnitMode('carton');
+  else if (role === 'pe-type-receipt') setPromoType('receipt');
+  else if (role === 'pe-type-month') setPromoType('monthEnd');
+  else if (role === 'pe-save') savePromoEntity();
+  else if (role === 'pe-cancel') { promoEdit = null; setView('promos'); }
+  else if (role === 'pe-delete') deletePromoEntity();
   else if (role === 'del-receipt') { const rc = receipts.find(x => x.id === id); showConfirm('מחיקת תעודה', 'למחוק את התעודה' + (rc ? ' מ-' + new Date(rc.timestamp).toLocaleDateString('he-IL') : '') + '?', 'מחק', () => delReceipt(id)); }
   else if (role === 'clear-receipts') showConfirm('ניקוי תעודות', 'למחוק את כל תעודות הקליטה? פעולה זו אינה הפיכה.', 'מחק הכל', () => clearAllDocs('receipts'));
 });
