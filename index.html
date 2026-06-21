@@ -518,14 +518,14 @@ function startListeners() {
   }, console.error);
 
   const retRef = collection(db, 'artifacts', appId, 'public', 'data', 'returns');
-  const retQ = query(retRef, orderBy('timestamp', 'desc'), limit(200));
+  const retQ = query(retRef, orderBy('timestamp', 'desc'), limit(20));
   onSnapshot(retQ, (snap) => {
     returns = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     if (currentView === 'returnsHistory') rerender();
   }, console.error);
 
   const rcRef = collection(db, 'artifacts', appId, 'public', 'data', 'receipts');
-  const rcQ = query(rcRef, orderBy('timestamp', 'desc'), limit(500));
+  const rcQ = query(rcRef, orderBy('timestamp', 'desc'), limit(100));
   onSnapshot(rcQ, (snap) => {
     receipts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     if (currentView === 'receiptsHistory') rerender();
