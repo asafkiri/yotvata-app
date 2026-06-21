@@ -389,6 +389,7 @@ let editingNotes = false;        // עריכת סכומי התעודות במס�
 let receiptOpened = false;       // האם נפתחה תעודה (שער לפני סריקה)
 let reconcileData = null;        // נתוני מסך השוואת תעודה
 let receiptFix = null;           // תיקון תעודה פתוחה מההיסטוריה
+let receiptDupConfirmed = false; // אישור שמירה למרות חשד לכפילות
 const RECEIPT_DRAFT_KEY = 'yt_receipt_draft';
 const VAT = 0.18;                // מע"מ (קל לשינוי אם ישתנה)
 let scanPurpose = 'field';       // 'field' = מילוי שדה ברקוד | 'receiving' = סריקה רציפה לקליטה
@@ -422,6 +423,7 @@ function restoreReturnsDraft() { try { const s = localStorage.getItem(RETURNS_DR
 function parseNoteVal(v) { const n = parseFloat((v || '').toString().replace(/[^0-9.]/g, '')); return isFinite(n) && n > 0 ? r2(n) : null; }
 function noteSum() { return r2(receiptNotes.reduce((a, x) => a + (Number(x) || 0), 0)); }
 function recomputeNoteTotal() { receiptNoteTotal = receiptNotes.length ? noteSum() : null; }
+function dDisp(d) { try { return new Date(d + 'T12:00:00').toLocaleDateString('he-IL'); } catch (e) { return d || ''; } }
 function noteEditorBodyHtml() {
   const chips = receiptNotes.map((amt, i) =>
     '<div class="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 mb-1.5">' +
@@ -1611,6 +1613,8 @@ function commitQty(again) {
 function renderReceiving() {
   const t = receiptTotals();
   const opened = receiptOpened || receiptList.length > 0;
+  const openRecs = receipts.filter(r => receiptDiscrepancyInfo(r).open);
+  const banner = openRecs.length ? '<button data-role="rc-history" class="btn-tap w-full bg-rose-50 border border-rose-200 text-rose-700 rounded-xl py-2.5 px-3 font-bold text-sm flex items-center justify-between gap-2 mb-3"><span><i class="fa-solid fa-clipboard-question"></i> ' + openRecs.length + ' תעודות עם הפרש פתוח</span><span class="text-xs font-black bg-rose-100 px-2 py-0.5 rounded-lg">לטיפול ←</span></button>' : '';
   const topButtons =
     '<div class="flex gap-2 mb-3">' +
       '<button data-role="rc-prices" class="btn-tap flex-1 bg-white border border-slate-200 rounded-xl py-2.5 font-black text-slate-700 text-xs flex items-center justify-center gap-1.5"><i class="fa-solid fa-tags text-blue-600"></i> מחירים</button>' +
@@ -1618,7 +1622,7 @@ function renderReceiving() {
       '<button data-role="rc-history" class="btn-tap flex-1 bg-white border border-slate-200 rounded-xl py-2.5 font-black text-slate-700 text-xs flex items-center justify-center gap-1.5"><i class="fa-solid fa-folder-open text-blue-600"></i> תעודות</button>' +
     '</div>';
   if (!opened) {
-    app.innerHTML = topButtons +
+    app.innerHTML = banner + topButtons +
       '<div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm mt-2">' +
         '<div class="text-center mb-3"><i class="fa-solid fa-file-invoice text-blue-600 text-4xl mb-2"></i><div class="font-black text-slate-800 text-lg">תעודה חדשה</div><div class="text-sm text-slate-500">הזן את סכום התעודה מהספק. מחולק לכמה תעודות? הוסף כל אחת ונסכם.</div></div>' +
         noteEditorBodyHtml() +
@@ -1636,7 +1640,7 @@ function renderReceiving() {
         '<div class="flex items-center gap-2 min-w-0"><i class="fa-solid fa-file-invoice text-blue-600"></i><div class="min-w-0"><div class="text-[11px] text-slate-400 font-bold">סכום התעודה מהספק' + (receiptNotes.length > 1 ? ' · ' + receiptNotes.length + ' תעודות' : '') + '</div><div class="font-black text-slate-800">' + (receiptNoteTotal != null ? '₪' + fmtMoney(receiptNoteTotal) : 'ללא אימות') + '</div></div></div>' +
         '<div class="flex items-center gap-1.5 shrink-0"><button data-role="rc-notes-edit" class="btn-tap text-xs font-bold text-blue-600 bg-blue-50 px-2.5 py-2 rounded-lg"><i class="fa-solid fa-pen"></i> ערוך</button><button data-role="rc-cancel" class="btn-tap text-xs font-bold text-red-500 bg-red-50 px-2.5 py-2 rounded-lg"><i class="fa-solid fa-xmark"></i></button></div>' +
       '</div>';
-  app.innerHTML = topButtons + noteBar +
+  app.innerHTML = banner + topButtons + noteBar +
     '<button data-role="rc-scan" class="btn-tap w-full bg-blue-600 text-white rounded-2xl py-4 font-black text-lg flex items-center justify-center gap-3 shadow-lg mb-4"><i class="fa-solid fa-barcode text-2xl"></i> סרוק פריט לתעודה</button>' +
     '<div class="flex items-center justify-between px-1 mb-2"><div class="font-black text-slate-800">פריטים בתעודה</div><div id="rcCount" class="text-xs text-slate-400">' + receiptList.length + ' שורות</div></div>' +
     '<div id="rcListEl" class="space-y-2.5">' + (receiptList.length ? receiptList.map(buildReceiptRow).join('') : emptyReceiptHtml()) + '</div>' +
@@ -1798,7 +1802,15 @@ function finishReceipt() {
   });
   const ex = r2(lines.reduce((a, l) => a + l.lineTotal, 0));
   const inc = r2(ex * (1 + VAT));
-  if (receiptNoteTotal != null && Math.abs(inc - receiptNoteTotal) > 1) { openReconcile(); return; }
+  if (!receiptDupConfirmed) {
+    const dup = receipts.find(r => r.date === day && (Number(r.count) || 0) === lines.length && Math.abs((Number(r.totalIncVat) || 0) - inc) <= 1);
+    if (dup) { showConfirm('אולי כפילות', 'כבר קיימת תעודה מ-' + dDisp(day) + ' בסכום דומה (₪' + fmtMoney(inc) + ' · ' + lines.length + ' שורות). ייתכן שכבר קלטת אותה — לשמור בכל זאת?', 'כן, שמור בכל זאת', function () { receiptDupConfirmed = true; finishReceipt(); }); return; }
+  }
+  if (receiptNoteTotal != null && Math.abs(inc - receiptNoteTotal) > 1) {
+    const big = Math.max(inc, receiptNoteTotal), small = Math.min(inc, receiptNoteTotal);
+    if (big >= 50 && big >= small * 2) { showConfirm('הפרש חריג', 'סכום התעודה מהספק ₪' + fmtMoney(receiptNoteTotal) + ', אבל מהסריקה שוחזר ₪' + fmtMoney(inc) + '. הפרש גדול במיוחד — ייתכן שסכום התעודה הוקלד לא נכון (או שבאמת חסר הרבה). להמשיך לבדיקת ההפרשים?', 'המשך לבדיקה', openReconcile); return; }
+    openReconcile(); return;
+  }
   const listHtml = lines.map(l =>
     '<div class="flex items-center justify-between gap-2 py-1.5 border-b border-slate-100 last:border-0">' +
       '<div class="min-w-0"><div class="font-bold text-slate-800 text-sm truncate">' + l.name + '</div>' +
@@ -1915,8 +1927,12 @@ function reconcileSetPriceLive(productId, val) {
   const l = (reconcileData || []).find(x => x.productId === productId); if (!l) return;
   const n = parseFloat((val || '').toString().replace(/[^0-9.]/g, '')); l.price = isFinite(n) ? n : 0; refreshReconcileHeader();
 }
-function saveReconciledReceipt() {
+function saveReconciledReceipt(force) {
   if (!reconcileData) return;
+  if (!force && receiptNoteTotal != null) {
+    const g = reconcileGap();
+    if (Math.abs(g) > 1) { showConfirm('הפרש לא מוסבר', 'עדיין נשאר הפרש של ₪' + fmtMoney(Math.abs(g)) + ' (' + (g > 0 ? 'חסר' : 'עודף') + ') שלא שובץ לאף פריט. אם פריט לא הגיע — הוסף אותו למטה. לשמור בכל זאת?', 'שמור בכל זאת', function () { saveReconciledReceipt(true); }); return; }
+  }
   reconcileData.forEach(l => {
     const p = products.find(x => x.id === l.productId);
     const np = r2(Number(l.price) || 0);
@@ -2039,7 +2055,7 @@ async function confirmReceipt() {
   const data = { timestamp: Date.now(), date: todayStr(), items: lines, count: lines.length, totalExVat: ex, totalIncVat: inc, noteTotalInc: (noteTotal != null ? noteTotal : null), noteParts: (Array.isArray(noteParts) ? noteParts : []), status: status || 'ok' };
   hideReceiptSummary();
   if (db) { try { await Promise.race([addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'receipts'), data), new Promise(r => setTimeout(r, 1500))]); } catch (e) { console.error(e); } }
-  receiptList = []; pendingReceipt = null; receiptNoteTotal = null; receiptNotes = []; receiptOpened = false; editingNotes = false; reconcileData = null; saveReceiptDraft();
+  receiptList = []; pendingReceipt = null; receiptNoteTotal = null; receiptNotes = []; receiptOpened = false; editingNotes = false; reconcileData = null; receiptDupConfirmed = false; saveReceiptDraft();
   setView('receiptsHistory');
   showToast('התעודה נקלטה ✓', null, null, 2200);
 }
@@ -2551,9 +2567,9 @@ app.addEventListener('click', (e) => {
   else if (role === 'clear-history') showConfirm('ניקוי היסטוריה', 'למחוק את כל היסטוריית ההזמנות? פעולה זו אינה הפיכה.', 'מחק הכל', () => clearAllDocs('history'));
   else if (role === 'clear-returns-history') showConfirm('ניקוי היסטוריה', 'למחוק את כל היסטוריית החזרות? פעולה זו אינה הפיכה.', 'מחק הכל', () => clearAllDocs('returns'));
   else if (role === 'rc-scan') openReceivingScanner();
-  else if (role === 'rc-open') { const v = parseNoteVal(($('rcNoteInput') || {}).value); if (v != null) receiptNotes.push(v); recomputeNoteTotal(); receiptOpened = true; saveReceiptDraft(); refreshReceipt(); openReceivingScanner(); }
-  else if (role === 'rc-open-skip') { receiptNotes = []; recomputeNoteTotal(); receiptOpened = true; saveReceiptDraft(); refreshReceipt(); openReceivingScanner(); }
-  else if (role === 'rc-cancel') { showConfirm('ביטול תעודה', 'לבטל את התעודה הנוכחית? כל הפריטים שנסרקו יימחקו.', 'בטל תעודה', () => { receiptList = []; receiptNotes = []; receiptNoteTotal = null; receiptOpened = false; editingNotes = false; reconcileData = null; saveReceiptDraft(); setView('receiving'); }); }
+  else if (role === 'rc-open') { const v = parseNoteVal(($('rcNoteInput') || {}).value); if (v != null) receiptNotes.push(v); recomputeNoteTotal(); receiptOpened = true; receiptDupConfirmed = false; saveReceiptDraft(); refreshReceipt(); openReceivingScanner(); }
+  else if (role === 'rc-open-skip') { receiptNotes = []; recomputeNoteTotal(); receiptOpened = true; receiptDupConfirmed = false; saveReceiptDraft(); refreshReceipt(); openReceivingScanner(); }
+  else if (role === 'rc-cancel') { showConfirm('ביטול תעודה', 'לבטל את התעודה הנוכחית? כל הפריטים שנסרקו יימחקו.', 'בטל תעודה', () => { receiptList = []; receiptNotes = []; receiptNoteTotal = null; receiptOpened = false; editingNotes = false; reconcileData = null; receiptDupConfirmed = false; saveReceiptDraft(); setView('receiving'); }); }
   else if (role === 'rc-note-add') { const v = parseNoteVal(($('rcNoteInput') || {}).value); if (v != null) { receiptNotes.push(v); recomputeNoteTotal(); saveReceiptDraft(); } refreshReceipt(); const inp = $('rcNoteInput'); if (inp) inp.focus(); }
   else if (role === 'rc-note-remove') { const i = parseInt(t.dataset.idx, 10); if (i >= 0) { receiptNotes.splice(i, 1); recomputeNoteTotal(); saveReceiptDraft(); refreshReceipt(); } }
   else if (role === 'rc-notes-edit') { editingNotes = true; refreshReceipt(); }
