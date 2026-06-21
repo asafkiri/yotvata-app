@@ -86,6 +86,7 @@
         <div class="flex bg-white/10 rounded-xl p-1 border border-white/15">
           <button id="segOrder" class="flex-1 py-2 rounded-lg text-sm font-black flex items-center justify-center gap-1.5"><i class="fa-solid fa-cart-shopping text-xs"></i> הזמנה</button>
           <button id="segReturns" class="flex-1 py-2 rounded-lg text-sm font-black flex items-center justify-center gap-1.5"><i class="fa-solid fa-rotate-left text-xs"></i> חזרות</button>
+          <button id="segReceiving" class="flex-1 py-2 rounded-lg text-sm font-black flex items-center justify-center gap-1.5"><i class="fa-solid fa-truck-ramp-box text-xs"></i> קליטה</button>
         </div>
       </div>
 
@@ -170,6 +171,10 @@
           <span class="text-white font-black text-lg" style="text-shadow:0 1px 3px rgba(0,0,0,.6)">סריקת ברקוד</span>
           <button id="scanClose" class="btn-tap w-11 h-11 rounded-full bg-black/50 text-white flex items-center justify-center"><i class="fa-solid fa-xmark text-xl"></i></button>
         </div>
+        <div id="scanOverlay" class="hidden absolute top-16 inset-x-0 px-4 flex flex-col items-center gap-1 pointer-events-none">
+          <div class="bg-blue-600/90 text-white rounded-full px-4 py-1.5 font-black text-sm shadow-lg">פריטים: <span id="scanOverlayCount">0</span></div>
+          <div id="scanOverlayName" class="text-white text-xs font-bold" style="text-shadow:0 1px 3px rgba(0,0,0,.7)"></div>
+        </div>
         <div class="absolute bottom-0 inset-x-0 p-8 text-center">
           <p id="scanHint" class="text-white font-bold" style="text-shadow:0 1px 3px rgba(0,0,0,.6)">כוון את הברקוד אל תוך המסגרת</p>
         </div>
@@ -181,6 +186,104 @@
       <div class="pointer-events-auto bg-slate-900 text-white rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-3 max-w-sm w-full">
         <span id="toastMsg" class="flex-1 text-sm font-bold"></span>
         <button id="toastBtn" class="hidden btn-tap text-blue-300 font-black text-sm px-3 py-1 rounded-lg">בטל</button>
+      </div>
+    </div>
+
+    <!-- חלון מוצר חדש / מחיר -->
+    <div id="newProductModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm items-center justify-center p-4 z-[70]">
+      <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
+        <div class="p-5">
+          <div class="flex items-center gap-2 mb-1"><i class="fa-solid fa-plus text-blue-600 text-xl"></i><h3 class="font-black text-lg text-slate-800">מוצר חדש</h3></div>
+          <p class="text-slate-500 text-sm mb-3">ברקוד: <span id="npr_code" class="font-bold text-slate-700"></span></p>
+          <label class="text-[11px] text-slate-400 font-bold block mb-1">שם המוצר</label>
+          <input id="npr_name" type="text" autocomplete="off" class="w-full p-3 rounded-xl border-2 border-slate-200 outline-none font-bold focus:border-blue-500 mb-3 disabled:bg-slate-100 disabled:text-slate-500" placeholder="שם המוצר">
+          <label class="text-[11px] text-slate-400 font-bold block mb-1">מחיר ליחידה (ללא מע"מ)</label>
+          <div class="flex items-center gap-2"><span class="text-slate-400 font-bold text-lg">₪</span><input id="npr_price" type="text" inputmode="decimal" class="flex-1 p-3 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-blue-500" placeholder="0.00"></div>
+        </div>
+        <div class="flex gap-2 p-4 pt-0">
+          <button id="npr_cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">ביטול</button>
+          <button id="npr_ok" class="btn-tap flex-1 py-3 rounded-xl font-black bg-blue-600 text-white">שמור והוסף</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- חלון מבצע -->
+    <div id="promoModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm items-center justify-center p-4 z-[70]">
+      <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
+        <div class="p-5">
+          <div class="flex items-center gap-2 mb-1"><i class="fa-solid fa-percent text-rose-600 text-xl"></i><h3 class="font-black text-lg text-slate-800">מבצע למוצר</h3></div>
+          <p id="promoName" class="text-slate-500 text-sm mb-3"></p>
+          <label class="text-[11px] text-slate-400 font-bold block mb-1">אחוז הנחה</label>
+          <div class="flex items-center gap-2 mb-3"><input id="promoPct" type="text" inputmode="decimal" class="flex-1 p-3 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-rose-500" placeholder="10"><span class="text-slate-400 font-black text-lg">%</span></div>
+          <div class="flex gap-2">
+            <div class="flex-1"><label class="text-[11px] text-slate-400 font-bold block mb-1">מתאריך</label><input id="promoStart" type="date" class="w-full p-2.5 rounded-xl border-2 border-slate-200 outline-none text-sm font-bold focus:border-rose-500"></div>
+            <div class="flex-1"><label class="text-[11px] text-slate-400 font-bold block mb-1">עד תאריך</label><input id="promoEnd" type="date" class="w-full p-2.5 rounded-xl border-2 border-slate-200 outline-none text-sm font-bold focus:border-rose-500"></div>
+          </div>
+          <label class="text-[11px] text-slate-400 font-bold block mb-1 mt-3">כמות מינ׳ למבצע (ארגזים)</label>
+          <input id="promoMin" type="text" inputmode="numeric" class="w-full p-2.5 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-rose-500" placeholder="1 = ללא תנאי כמות">
+          <button id="promoRemove" class="btn-tap hidden mt-3 w-full py-2.5 rounded-xl font-black bg-rose-50 text-rose-600 flex items-center justify-center gap-2"><i class="fa-solid fa-ban"></i> בטל מבצע</button>
+        </div>
+        <div class="flex gap-2 p-4 pt-0">
+          <button id="promo_cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">ביטול</button>
+          <button id="promo_ok" class="btn-tap flex-1 py-3 rounded-xl font-black bg-rose-600 text-white">שמור מבצע</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- חלון סיכום תעודה -->
+    <div id="receiptSummaryModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm items-center justify-center p-4 z-[65]">
+      <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col max-h-[88vh]">
+        <div class="p-5 pb-2"><div class="flex items-center gap-2"><i class="fa-solid fa-file-invoice text-blue-600 text-xl"></i><h3 class="font-black text-lg text-slate-800">סיכום תעודה</h3></div><p class="text-slate-500 text-sm mt-1">השווה לתעודת הספק ואשר</p></div>
+        <div id="rsBody" class="px-5 overflow-y-auto"></div>
+        <div class="flex gap-2 p-4">
+          <button id="rs_cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">חזרה</button>
+          <button id="rs_ok" class="btn-tap flex-1 py-3 rounded-xl font-black bg-green-600 text-white flex items-center justify-center gap-2"><i class="fa-solid fa-check"></i> אשר וקלוט</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- חלון כמות בסריקה -->
+    <div id="qtyModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm items-center justify-center p-4 z-[70]">
+      <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
+        <div class="p-5 text-center">
+          <div class="flex items-center justify-center gap-2 mb-1"><i class="fa-solid fa-cubes text-blue-600 text-xl"></i><h3 class="font-black text-lg text-slate-800">כמות</h3></div>
+          <p id="qtyName" class="text-slate-700 font-bold text-sm"></p>
+          <p id="qtyExisting" class="hidden text-[11px] text-amber-600 font-bold mt-1"></p>
+          <div class="flex items-center justify-center gap-3 mt-4">
+            <button id="qty_minus" class="btn-tap w-14 h-14 rounded-2xl bg-slate-100 text-slate-700 flex items-center justify-center text-2xl"><i class="fa-solid fa-minus"></i></button>
+            <input id="qtyVal" type="text" inputmode="numeric" value="1" class="w-24 h-16 text-center text-3xl font-black border-2 border-slate-200 rounded-2xl outline-none focus:border-blue-500">
+            <button id="qty_plus" class="btn-tap w-14 h-14 rounded-2xl bg-slate-100 text-slate-700 flex items-center justify-center text-2xl"><i class="fa-solid fa-plus"></i></button>
+          </div>
+        </div>
+        <div class="px-4 pb-2"><button id="qty_again" class="btn-tap w-full py-3.5 rounded-xl font-black bg-blue-600 text-white flex items-center justify-center gap-2 text-base"><i class="fa-solid fa-barcode"></i> אישור וסרוק הבא</button></div>
+        <div class="flex gap-2 p-4 pt-2">
+          <button id="qty_cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-500">ביטול</button>
+          <button id="qty_done" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-800 text-white">סיום</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- חלון עריכת מוצר (עדכון מחירים) -->
+    <div id="prodModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm items-center justify-center p-4 z-[70]">
+      <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
+        <div class="p-5">
+          <div class="flex items-center gap-2 mb-3"><i class="fa-solid fa-tag text-blue-600 text-xl"></i><h3 id="prodTitle" class="font-black text-lg text-slate-800">עדכון מוצר</h3></div>
+          <label class="text-[11px] text-slate-400 font-bold block mb-1">שם המוצר</label>
+          <input id="prod_name" type="text" autocomplete="off" class="w-full p-3 rounded-xl border-2 border-slate-200 outline-none font-bold focus:border-blue-500 mb-3" placeholder="שם המוצר">
+          <label class="text-[11px] text-slate-400 font-bold block mb-1">ברקוד</label>
+          <div class="flex items-center gap-2 mb-3">
+            <input id="prod_barcode" type="text" inputmode="numeric" autocomplete="off" class="flex-1 p-3 rounded-xl border-2 border-slate-200 outline-none font-bold tracking-wide text-center focus:border-blue-500" placeholder="ללא ברקוד">
+            <button id="pr_scanbc" class="btn-tap shrink-0 px-4 py-3 rounded-xl font-black bg-blue-50 text-blue-700 flex items-center gap-2"><i class="fa-solid fa-camera"></i></button>
+          </div>
+          <label class="text-[11px] text-slate-400 font-bold block mb-1">מחיר ליחידה (ללא מע"מ)</label>
+          <div class="flex items-center gap-2"><span class="text-slate-400 font-bold text-lg">₪</span><input id="prod_price" type="text" inputmode="decimal" class="flex-1 p-3 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-blue-500" placeholder="0.00"></div>
+          <button id="prod_del" class="btn-tap hidden mt-3 w-full py-2.5 rounded-xl font-black bg-red-50 text-red-600 flex items-center justify-center gap-2"><i class="fa-solid fa-trash-can"></i> מחק מוצר</button>
+        </div>
+        <div class="px-4 pb-2"><button id="prod_again" class="btn-tap hidden w-full py-3.5 rounded-xl font-black bg-blue-600 text-white flex items-center justify-center gap-2 text-base"><i class="fa-solid fa-barcode"></i> שמור וסרוק הבא</button></div>
+        <div class="flex gap-2 p-4 pt-2">
+          <button id="prod_cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">ביטול</button>
+          <button id="prod_save" class="btn-tap flex-1 py-3 rounded-xl font-black bg-green-600 text-white">שמור</button>
+        </div>
       </div>
     </div>
 
@@ -279,6 +382,22 @@ let advanceTimer = null;
 let dragState = null;
 const RETURNS_DRAFT_KEY = 'yt_returns_draft';
 
+// ===== מצב קליטת תעודות =====
+let receiptList = [];            // שורות התעודה הנוכחית: {productId,name,barcode,qty}
+let receipts = [];               // היסטוריית תעודות
+let pendingReceipt = null;       // תעודה הממתינה לאישור בסיכום
+const RECEIPT_DRAFT_KEY = 'yt_receipt_draft';
+const VAT = 0.18;                // מע"מ (קל לשינוי אם ישתנה)
+let scanPurpose = 'field';       // 'field' = מילוי שדה ברקוד | 'receiving' = סריקה רציפה לקליטה
+let scanCount = 0;               // מונה פריטים בסשן סריקה נוכחי
+let lastScanCode = '', lastScanTime = 0; // מניעת ספירה כפולה של אותו ברקוד
+let pendingScanBarcode = null;   // ברקוד חדש שממתין ליצירת מוצר
+let npMode = 'create', npProductId = null, npTarget = 'receipt'; // מצב + יעד חלון מוצר חדש
+let promoEditId = null;          // מוצר בעריכת מבצע
+let qtyProduct = null, qtyTarget = 'receipt'; // חלון כמות בסריקה
+let priceEditId = null, priceFromScan = false, priceQuery = ''; // עדכון מחירים
+const priceTimers = {};
+
 const $ = (id) => document.getElementById(id);
 const app = $('app');
 
@@ -294,10 +413,13 @@ function restoreDraft() {
 }
 function saveReturnsDraft() { try { localStorage.setItem(RETURNS_DRAFT_KEY, JSON.stringify(returnsList)); } catch (e) {} }
 function restoreReturnsDraft() { try { const s = localStorage.getItem(RETURNS_DRAFT_KEY); if (s) { const a = JSON.parse(s); if (Array.isArray(a)) returnsList = a; } } catch (e) {} }
+function saveReceiptDraft() { try { localStorage.setItem(RECEIPT_DRAFT_KEY, JSON.stringify(receiptList)); } catch (e) {} }
+function restoreReceiptDraft() { try { const s = localStorage.getItem(RECEIPT_DRAFT_KEY); if (s) { const a = JSON.parse(s); if (Array.isArray(a)) receiptList = a; } } catch (e) {} }
 
 // ===== התחברות =====
 restoreDraft();
 restoreReturnsDraft();
+restoreReceiptDraft();
 app.innerHTML = '<div class="text-center text-slate-500 font-bold py-20 animate-pulse">טוען נתונים...</div>';
 if (auth) {
   signInAnonymously(auth).catch(err => { console.error("Auth:", err); fallbackLocal(); });
@@ -359,10 +481,17 @@ function startListeners() {
   }, console.error);
 
   const retRef = collection(db, 'artifacts', appId, 'public', 'data', 'returns');
-  const retQ = query(retRef, orderBy('timestamp', 'desc'), limit(20));
+  const retQ = query(retRef, orderBy('timestamp', 'desc'), limit(200));
   onSnapshot(retQ, (snap) => {
     returns = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     if (currentView === 'returnsHistory') rerender();
+  }, console.error);
+
+  const rcRef = collection(db, 'artifacts', appId, 'public', 'data', 'receipts');
+  const rcQ = query(rcRef, orderBy('timestamp', 'desc'), limit(500));
+  onSnapshot(rcQ, (snap) => {
+    receipts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (currentView === 'receiptsHistory') rerender();
   }, console.error);
 }
 
@@ -377,32 +506,44 @@ function rerender() {
 function setView(v) {
   currentView = v;
   movingId = null;
-  if (v === 'order' || v === 'returns') mainMode = v;
+  if (v === 'order' || v === 'returns' || v === 'receiving') mainMode = v;
   renderView();
   window.scrollTo({ top: 0 });
 }
 function updateModeTabs() {
-  const o = $('segOrder'), r = $('segReturns'); if (!o || !r) return;
+  const o = $('segOrder'), r = $('segReturns'), c = $('segReceiving'); if (!o || !r || !c) return;
   const base = 'flex-1 py-2 rounded-lg text-sm font-black flex items-center justify-center gap-1.5 ';
-  const onR = mainMode === 'returns';
-  o.className = base + (!onR ? 'bg-white text-blue-700 shadow' : 'text-white/75');
-  r.className = base + (onR ? 'bg-white text-blue-700 shadow' : 'text-white/75');
+  const act = 'bg-white text-blue-700 shadow', off = 'text-white/75';
+  o.className = base + (mainMode === 'order' ? act : off);
+  r.className = base + (mainMode === 'returns' ? act : off);
+  c.className = base + (mainMode === 'receiving' ? act : off);
 }
 function renderView() {
   const isOrder = currentView === 'order';
   const isReturns = currentView === 'returns';
+  const isReceiving = currentView === 'receiving';
+  const isMain = isOrder || isReturns || isReceiving;
   $('searchWrap').style.display = isOrder ? '' : 'none';
-  $('modeTabs').style.display = (isOrder || isReturns) ? '' : 'none';
-  $('backBar').classList.toggle('hidden', isOrder || isReturns);
+  $('modeTabs').style.display = isMain ? '' : 'none';
+  $('backBar').classList.toggle('hidden', isMain);
   updateModeTabs();
   if (isOrder) renderOrder();
   else if (isReturns) renderReturns();
+  else if (isReceiving) renderReceiving();
   else if (currentView === 'settings') renderSettings();
   else if (currentView === 'contacts') renderContacts();
   else if (currentView === 'history') renderHistory();
   else if (currentView === 'returnsHistory') renderReturnsHistory();
+  else if (currentView === 'receiptsHistory') renderReceiptsHistory();
+  else if (currentView === 'prices') renderPrices();
   else if (currentView === 'notes') renderNotes();
   updateCart();
+  updateBackBarLabel();
+}
+function updateBackBarLabel() {
+  const b = $('backToOrder'); if (!b) return;
+  const txt = mainMode === 'returns' ? 'חזרה לחזרות' : (mainMode === 'receiving' ? 'חזרה לקליטה' : 'חזרה להזמנה');
+  b.innerHTML = '<i class="fa-solid fa-chevron-right"></i> ' + txt;
 }
 
 // ===== מסך הזמנה =====
@@ -431,6 +572,7 @@ function buildOrderRow(p) {
   const rec = parseInt(p.average, 10) || 0;
   const recOff = rec <= 0;
   const safeName = (p.name || '').replace(/"/g, '&quot;');
+  const promoNote = isPromoActive(p) ? ('<div class="text-[10px] font-black text-rose-600 mt-0.5 flex items-center gap-1"><i class="fa-solid fa-tag"></i> מבצע ' + (Number(p.promo.pct) || 0) + '%' + (promoMinQty(p) > 1 ? ' · הזמן ' + promoMinQty(p) + '+ ארגז' : '') + '</div>') : '';
   return (
     '<div id="row-' + p.id + '" data-id="' + p.id + '" data-name="' + safeName + '" class="row-card flex items-center gap-2 p-2.5 rounded-2xl border shadow-sm ' +
       (sel ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-100') + '">' +
@@ -438,7 +580,7 @@ function buildOrderRow(p) {
         (recOff ? 'bg-slate-100 text-slate-300' : 'bg-blue-600 text-white shadow-md shadow-blue-500/20') + '">' +
         '<span class="text-[9px] font-bold opacity-80">מומלץ</span><span class="text-lg font-black">' + (recOff ? '—' : rec) + '</span>' +
       '</button>' +
-      '<div class="flex-1 min-w-0 font-bold text-slate-800 text-sm leading-tight">' + p.name + '</div>' +
+      '<div class="flex-1 min-w-0"><div class="font-bold text-slate-800 text-sm leading-tight">' + p.name + '</div>' + promoNote + '</div>' +
       '<input data-role="amount" data-id="' + p.id + '" type="text" inputmode="numeric" enterkeyhint="next" value="' + st.amount + '" placeholder="0" class="shrink-0 w-12 h-12 text-center text-lg font-black border-2 border-slate-200 rounded-xl focus:border-blue-500 outline-none bg-white">' +
       '<button data-role="unit" data-id="' + p.id + '" class="btn-tap shrink-0 w-14 h-12 rounded-xl font-black flex flex-col items-center justify-center gap-0.5 ' +
         (isCarton ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800') + '">' +
@@ -498,13 +640,15 @@ function updateCart() {
   let n, label;
   if (mainMode === 'returns') {
     n = returnsList.length; label = 'סיים חזרות';
+  } else if (mainMode === 'receiving') {
+    n = receiptList.length; label = 'סיים תעודה';
   } else {
     n = products.reduce((a, p) => a + ((!p.hidden && parseInt(orderState[p.id] && orderState[p.id].amount, 10) > 0) ? 1 : 0), 0);
     label = 'סיום הזמנה';
   }
   $('cartCount').textContent = n;
   const lbl = $('cartLabel'); if (lbl) lbl.textContent = label;
-  const show = (currentView === 'order' || currentView === 'returns') && n > 0;
+  const show = (currentView === 'order' || currentView === 'returns' || currentView === 'receiving') && n > 0;
   $('cartBtn').classList.toggle('hidden', !show);
   $('cartBtn').classList.toggle('flex', show);
 }
@@ -778,6 +922,7 @@ function renderReturns() {
       '<i class="fa-solid fa-magnifying-glass absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>' +
       '<input id="returnsSearch" type="text" inputmode="search" autocomplete="off" placeholder="חפש מוצר להוספה לחזרות..." class="w-full bg-white border border-slate-200 rounded-xl py-3 pr-9 pl-3 text-sm font-bold outline-none focus:border-blue-500">' +
     '</div>' +
+    '<button data-role="ret-scan" class="btn-tap w-full bg-blue-600 text-white rounded-xl py-3 font-black flex items-center justify-center gap-2 mb-3"><i class="fa-solid fa-barcode"></i> סרוק פריט לחזרה</button>' +
     '<div id="returnsResults" class="bg-white border border-slate-200 rounded-xl overflow-hidden mb-3 hidden"></div>' +
     '<div class="flex items-center justify-between px-1 mb-2"><div class="font-black text-slate-800">רשימת חזרות</div><div id="returnsCount" class="text-xs text-slate-400">' + returnsList.length + ' פריטים</div></div>' +
     '<div id="returnsListEl" class="space-y-2.5 pb-6">' + (returnsList.length ? returnsList.map(buildReturnRow).join('') : emptyReturnsHtml()) + '</div>';
@@ -858,8 +1003,10 @@ async function savePrompt() {
 }
 function openReturnsSend() {
   if (!returnsList.length) return;
-  const items = returnsList.map(it => ({ name: it.name, barcode: it.barcode, qty: it.qty }));
-  sendCtx = { type: 'returns', items, resetCurrent: false };
+  const items = returnsList.map(it => { const p = products.find(x => x.id === it.productId); const unit = r2(Number(p && p.price) || 0); return { name: it.name, barcode: it.barcode, qty: it.qty, unitPrice: unit, lineTotal: r2(unit * it.qty) }; });
+  const ex = r2(items.reduce((a, l) => a + l.lineTotal, 0));
+  const inc = r2(ex * (1 + VAT));
+  sendCtx = { type: 'returns', items, resetCurrent: false, totalExVat: ex, totalIncVat: inc };
   renderSendModal(items, 'רשימת חזרות', 'returns');
 }
 function buildReturnsMessage(items, note) {
@@ -883,7 +1030,8 @@ function renderReturnsHistory() {
     (pending ? '<div class="px-1 mb-3 text-sm font-bold text-amber-600"><i class="fa-solid fa-clock"></i> ' + pending + ' ממתינים לזיכוי</div>' : '<div class="px-1 mb-3 text-sm font-bold text-green-600"><i class="fa-solid fa-circle-check"></i> כל הזיכויים התקבלו</div>') +
     returns.map(r => {
       const d = new Date(r.timestamp);
-      const items = (r.items || []).map(it => '<li class="flex justify-between items-center text-sm border-b border-slate-100 pb-2 last:border-0"><div class="min-w-0"><span class="font-medium text-slate-700">' + it.name + '</span><span class="block text-[11px] text-slate-400"><i class="fa-solid fa-barcode"></i> ' + (it.barcode || '—') + '</span></div><span class="font-black bg-slate-100 px-2 rounded shrink-0">' + (it.qty != null ? it.qty + ' יח׳' : '') + '</span></li>').join('');
+      const rt = returnTotals(r);
+      const items = (r.items || []).map(it => '<li class="flex justify-between items-center text-sm border-b border-slate-100 pb-2 last:border-0"><div class="min-w-0"><span class="font-medium text-slate-700">' + it.name + '</span><span class="block text-[11px] text-slate-400"><i class="fa-solid fa-barcode"></i> ' + (it.barcode || '—') + '</span></div><span class="text-left shrink-0"><span class="font-black bg-slate-100 px-2 rounded">' + (it.qty != null ? it.qty + ' יח׳' : '') + '</span>' + (it.unitPrice != null ? '<span class="block text-[11px] text-slate-400 mt-0.5">₪' + fmtMoney(it.lineTotal != null ? it.lineTotal : it.unitPrice * (it.qty || 0)) + '</span>' : '') + '</span></li>').join('');
       const credited = !!r.credited;
       const credDate = r.creditedAt ? new Date(r.creditedAt).toLocaleDateString('he-IL') : '';
       const statusBar = credited
@@ -894,7 +1042,7 @@ function renderReturnsHistory() {
         '<div class="p-4 border-b border-slate-100 flex justify-between items-center">' +
           '<div><div class="font-black text-slate-800">' + d.toLocaleDateString('he-IL') + ' · ' + d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' }) + '</div>' +
           '<div class="text-sm text-slate-500">נשלח אל: <b>' + (r.sentTo || '') + '</b></div></div>' +
-          '<div class="bg-blue-100 text-blue-800 font-black px-3 py-1 rounded-full text-xs">' + ((r.items || []).length) + ' פריטים</div>' +
+          '<div class="text-left shrink-0"><span class="bg-blue-100 text-blue-800 font-black px-3 py-1 rounded-full text-xs inline-block">' + ((r.items || []).length) + ' פריטים</span><div class="text-xs font-black text-emerald-700 mt-1">זיכוי ₪' + fmtMoney(rt.inc) + '</div></div>' +
         '</div>' +
         '<div class="p-4"><ul class="space-y-2">' + items + '</ul></div>' +
         '<div class="p-3 border-t border-slate-100">' +
@@ -1061,7 +1209,7 @@ async function performSend(contact) {
   if (phone.startsWith('0')) phone = '972' + phone.substring(1);
   if (type === 'returns') {
     if (db) {
-      const sp = addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'returns'), { timestamp: Date.now(), sentTo: contact.name, items, credited: false }).catch(console.error);
+      const sp = addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'returns'), { timestamp: Date.now(), sentTo: contact.name, items, credited: false, totalExVat: (sendCtx && sendCtx.totalExVat) || 0, totalIncVat: (sendCtx && sendCtx.totalIncVat) || 0 }).catch(console.error);
       await Promise.race([sp, new Promise(r => setTimeout(r, 1500))]);
     }
     const msg = buildReturnsMessage(items, note);
@@ -1103,18 +1251,21 @@ function nativeScanSupported() { return typeof window.BarcodeDetector !== 'undef
 function setScanHint(t) { const h = $('scanHint'); if (h) h.textContent = t; }
 async function openScanner() {
   const m = $('scanModal'); m.classList.remove('hidden'); m.classList.add('flex');
-  setScanHint('מבקש גישה למצלמה...');
+  const continuous = (scanPurpose === 'receiving' || scanPurpose === 'returns');
+  const ov = $('scanOverlay'); if (ov) ov.classList.toggle('hidden', !continuous);
+  const readyHint = continuous ? 'סרוק פריטים — לחץ ✕ לסיום' : 'כוון את הברקוד אל תוך המסגרת';
+  setScanHint(continuous ? readyHint : 'מבקש גישה למצלמה...');
   try {
     if (nativeScanSupported()) {
       if (!barcodeDetector) barcodeDetector = new window.BarcodeDetector();
       scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
       const v = $('scanVideo'); v.srcObject = scanStream; await v.play();
-      setScanHint('כוון את הברקוד אל תוך המסגרת');
+      setScanHint(readyHint);
       scanTimer = setTimeout(scanTick, 400);
     } else {
       setScanHint('טוען מנוע סריקה...');
       await ensureZxing();
-      setScanHint('כוון את הברקוד אל תוך המסגרת');
+      setScanHint(readyHint);
       await startZxing();
     }
   } catch (e) {
@@ -1154,8 +1305,24 @@ async function startZxing() {
   );
 }
 function onScanned(val) {
+  val = (val || '').toString().trim();
+  if (!val) { if (barcodeDetector && scanStream) scanTimer = setTimeout(scanTick, 250); return; }
+  if (scanPurpose === 'price') { buzz(40); handlePriceScan(val); return; }
+  if (scanPurpose === 'prodbarcode') { buzz(40); const b = $('prod_barcode'); if (b) b.value = val; closeScanner(); const pm = $('prodModal'); if (pm) { pm.classList.remove('hidden'); pm.classList.add('flex'); } return; }
+  if (scanPurpose === 'receiving' || scanPurpose === 'returns') {
+    const now = Date.now();
+    if (val === lastScanCode && (now - lastScanTime) < 1400) {
+      if (barcodeDetector && scanStream) scanTimer = setTimeout(scanTick, 250);
+      return;
+    }
+    lastScanCode = val; lastScanTime = now;
+    buzz(50);
+    if (scanPurpose === 'returns') handleReturnsScan(val); else handleReceivingScan(val);
+    if (barcodeDetector && scanStream) scanTimer = setTimeout(scanTick, 350);
+    return;
+  }
   buzz(40);
-  const inp = $('promptInput'); if (inp) inp.value = (val || '').toString().trim();
+  const inp = $('promptInput'); if (inp) inp.value = val;
   closeScanner();
 }
 function closeScanner() {
@@ -1164,7 +1331,9 @@ function closeScanner() {
   if (zxingReader) { try { zxingReader.reset(); } catch (e) {} }
   if (scanStream) { try { scanStream.getTracks().forEach(tr => tr.stop()); } catch (e) {} scanStream = null; }
   const v = $('scanVideo'); if (v) { try { v.pause(); v.srcObject = null; } catch (e) {} }
+  const ov = $('scanOverlay'); if (ov) ov.classList.add('hidden');
   const m = $('scanModal'); if (m) { m.classList.add('hidden'); m.classList.remove('flex'); }
+  scanPurpose = 'field';
 }
 
 // ===== Undo (toast) =====
@@ -1188,21 +1357,562 @@ function restoreDoc(name, obj) {
   batch.commit().catch(console.error);
 }
 
+// ===== קליטת תעודות =====
+function todayStr() { return new Date().toLocaleDateString('en-CA'); }
+function r2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
+function fmtMoney(n) { return r2(n).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function isPromoActive(p, dateStr) {
+  dateStr = dateStr || todayStr();
+  const pr = p && p.promo;
+  return !!(pr && pr.pct != null && pr.pct > 0 && pr.start && pr.end && dateStr >= pr.start && dateStr <= pr.end);
+}
+function promoMinQty(p) { const m = p && p.promo && p.promo.minQty; return (m && m > 1) ? m : 1; }
+function effectivePrice(p, qty, dateStr) {
+  if (!p) return 0;
+  const base = Number(p.price) || 0;
+  if (isPromoActive(p, dateStr) && (Number(qty) || 0) >= promoMinQty(p)) return r2(base * (1 - (Number(p.promo.pct) || 0) / 100));
+  return r2(base);
+}
+function receiptTotals() {
+  const day = todayStr();
+  let ex = 0;
+  receiptList.forEach(it => { const p = products.find(x => x.id === it.productId); ex += effectivePrice(p, it.qty, day) * it.qty; });
+  ex = r2(ex);
+  return { ex, inc: r2(ex * (1 + VAT)) };
+}
+function returnTotals(r) {
+  if (r && (r.totalIncVat != null || r.totalExVat != null)) {
+    const ex = r2(Number(r.totalExVat) || (Number(r.totalIncVat) || 0) / (1 + VAT));
+    return { ex, inc: r2(r.totalIncVat != null ? r.totalIncVat : ex * (1 + VAT)) };
+  }
+  let ex = 0;
+  ((r && r.items) || []).forEach(it => {
+    let unit = Number(it.unitPrice);
+    if (!(unit > 0)) { const p = products.find(x => (it.barcode && x.barcode === it.barcode) || x.name === it.name); unit = Number(p && p.price) || 0; }
+    ex += unit * (Number(it.qty) || 0);
+  });
+  ex = r2(ex);
+  return { ex, inc: r2(ex * (1 + VAT)) };
+}
+
+// --- סורק קליטה ---
+function openReceivingScanner() {
+  scanPurpose = 'receiving';
+  scanCount = 0; lastScanCode = ''; lastScanTime = 0;
+  const c = $('scanOverlayCount'); if (c) c.textContent = receiptList.length;
+  const n = $('scanOverlayName'); if (n) n.textContent = '';
+  openScanner();
+}
+function updateScanOverlay(name) {
+  const c = $('scanOverlayCount'); if (c) c.textContent = scanCount;
+  const n = $('scanOverlayName'); if (n) n.textContent = name ? ('נוסף: ' + name) : '';
+}
+function handleReceivingScan(code) {
+  code = (code || '').trim(); if (!code) return;
+  const p = products.find(x => (x.barcode || '') === code);
+  if (!p) { promptNewProduct(code); return; }
+  if (p.price == null || p.price === '') { promptSetPrice(p); return; }
+  promptQty(p, 'receipt');
+}
+function addScannedToReceipt(p) {
+  const ex = receiptList.find(it => it.productId === p.id);
+  if (ex) ex.qty += 1;
+  else receiptList.push({ productId: p.id, name: p.name, barcode: p.barcode || '', qty: 1 });
+  scanCount += 1;
+  saveReceiptDraft();
+  if (currentView === 'receiving') refreshReceipt();
+  updateScanOverlay(p.name);
+  updateCart();
+}
+function openReturnsScanner() {
+  scanPurpose = 'returns';
+  scanCount = 0; lastScanCode = ''; lastScanTime = 0;
+  const c = $('scanOverlayCount'); if (c) c.textContent = returnsList.length;
+  const n = $('scanOverlayName'); if (n) n.textContent = '';
+  openScanner();
+}
+function handleReturnsScan(code) {
+  code = (code || '').trim(); if (!code) return;
+  const p = products.find(x => (x.barcode || '') === code);
+  if (!p) { promptNewProduct(code, 'returns'); return; }
+  if (p.price == null || p.price === '') { promptSetPrice(p, 'returns'); return; }
+  promptQty(p, 'returns');
+}
+function addScannedToReturns(p) {
+  const ex = returnsList.find(it => it.productId === p.id);
+  if (ex) ex.qty += 1;
+  else returnsList.push({ productId: p.id, name: p.name, barcode: p.barcode || '', qty: 1 });
+  scanCount += 1;
+  saveReturnsDraft();
+  if (currentView === 'returns') refreshReturnsList();
+  updateScanOverlay(p.name);
+  updateCart();
+}
+function promptQty(p, target) {
+  qtyProduct = p; qtyTarget = target || 'receipt';
+  closeScanner();
+  $('qtyName').textContent = p.name;
+  const ex = (qtyTarget === 'returns' ? returnsList : receiptList).find(it => it.productId === p.id);
+  const exEl = $('qtyExisting');
+  if (exEl) { exEl.textContent = ex ? ('כבר ברשימה: ' + ex.qty + ' — נוסיף לכמות זו') : ''; exEl.classList.toggle('hidden', !ex); }
+  $('qtyVal').value = 1;
+  const m = $('qtyModal'); m.classList.remove('hidden'); m.classList.add('flex');
+  setTimeout(() => { const i = $('qtyVal'); if (i) { i.focus(); i.select(); } }, 80);
+}
+function hideQty() { const m = $('qtyModal'); m.classList.add('hidden'); m.classList.remove('flex'); qtyProduct = null; }
+function qtyStep(d) { const i = $('qtyVal'); if (!i) return; let v = parseInt((i.value || '').replace(/[^0-9]/g, ''), 10) || 0; v = Math.max(1, v + d); i.value = v; }
+function addQtyToTarget(p, q, target) {
+  if (target === 'returns') {
+    const ex = returnsList.find(it => it.productId === p.id);
+    if (ex) ex.qty += q; else returnsList.push({ productId: p.id, name: p.name, barcode: p.barcode || '', qty: q });
+    saveReturnsDraft();
+    if (currentView === 'returns') refreshReturnsList();
+  } else {
+    const ex = receiptList.find(it => it.productId === p.id);
+    if (ex) ex.qty += q; else receiptList.push({ productId: p.id, name: p.name, barcode: p.barcode || '', qty: q });
+    saveReceiptDraft();
+    if (currentView === 'receiving') refreshReceipt();
+  }
+  const c = $('scanOverlayCount'); if (c) c.textContent = (target === 'returns' ? returnsList.length : receiptList.length);
+  const n = $('scanOverlayName'); if (n) n.textContent = 'נוסף: ' + p.name + ' ×' + q;
+  updateCart();
+}
+function commitQty(again) {
+  const p = qtyProduct, tgt = qtyTarget; if (!p) { hideQty(); return; }
+  let q = parseInt(($('qtyVal').value || '').replace(/[^0-9]/g, ''), 10);
+  if (!(q > 0)) q = 1;
+  addQtyToTarget(p, q, tgt);
+  hideQty();
+  if (again) { if (tgt === 'returns') openReturnsScanner(); else openReceivingScanner(); }
+}
+
+// --- מסך התעודה הנוכחית ---
+function renderReceiving() {
+  const t = receiptTotals();
+  app.innerHTML =
+    '<div class="flex gap-2 mb-3">' +
+      '<button data-role="rc-prices" class="btn-tap flex-1 bg-white border border-slate-200 rounded-xl py-2.5 font-black text-slate-700 text-sm flex items-center justify-center gap-2"><i class="fa-solid fa-tags text-blue-600"></i> עדכון מחירים</button>' +
+      '<button data-role="rc-history" class="btn-tap flex-1 bg-white border border-slate-200 rounded-xl py-2.5 font-black text-slate-700 text-sm flex items-center justify-center gap-2"><i class="fa-solid fa-folder-open text-blue-600"></i> תעודות ודוח</button>' +
+    '</div>' +
+    '<button data-role="rc-scan" class="btn-tap w-full bg-blue-600 text-white rounded-2xl py-4 font-black text-lg flex items-center justify-center gap-3 shadow-lg mb-4"><i class="fa-solid fa-barcode text-2xl"></i> סרוק פריט לתעודה</button>' +
+    '<div class="flex items-center justify-between px-1 mb-2"><div class="font-black text-slate-800">פריטים בתעודה</div><div id="rcCount" class="text-xs text-slate-400">' + receiptList.length + ' שורות</div></div>' +
+    '<div id="rcListEl" class="space-y-2.5">' + (receiptList.length ? receiptList.map(buildReceiptRow).join('') : emptyReceiptHtml()) + '</div>' +
+    receiptTotalsHtml(t);
+}
+function emptyReceiptHtml() {
+  return '<div class="text-center text-slate-400 py-10 bg-white rounded-2xl border border-dashed border-slate-200"><i class="fa-solid fa-barcode text-3xl mb-2 opacity-40"></i><div class="font-bold text-sm">אין פריטים עדיין</div><div class="text-xs mt-1">סרוק ברקוד כדי להתחיל תעודה</div></div>';
+}
+function receiptTotalsHtml(t) {
+  if (!receiptList.length) return '<div id="rcTotals"></div>';
+  return '<div id="rcTotals" class="mt-4 mb-24 bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">' +
+    '<div class="flex items-center justify-between text-slate-600 font-bold mb-1"><span>סה"כ ללא מע"מ</span><span id="rcEx">₪' + fmtMoney(t.ex) + '</span></div>' +
+    '<div class="flex items-center justify-between text-slate-800 font-black text-lg pt-2 border-t border-slate-100"><span>כולל מע"מ (' + Math.round(VAT * 100) + '%)</span><span id="rcInc">₪' + fmtMoney(t.inc) + '</span></div>' +
+  '</div>';
+}
+function refreshReceipt() { if (currentView === 'receiving') renderReceiving(); }
+function refreshReceiptTotals() {
+  const t = receiptTotals();
+  const ex = $('rcEx'), inc = $('rcInc');
+  if (ex) ex.textContent = '₪' + fmtMoney(t.ex);
+  if (inc) inc.textContent = '₪' + fmtMoney(t.inc);
+}
+function buildReceiptRow(it) {
+  const p = products.find(x => x.id === it.productId);
+  const day = todayStr();
+  const unit = p ? effectivePrice(p, it.qty, day) : 0;
+  const promoDate = p ? isPromoActive(p, day) : false;
+  const minQ = promoMinQty(p);
+  const applied = promoDate && it.qty >= minQ;
+  const lineTotal = r2(unit * it.qty);
+  let promoTag = '';
+  if (applied) promoTag = '<span class="text-rose-600 font-bold">· מבצע ' + (Number(p.promo.pct) || 0) + '%</span>';
+  else if (promoDate) promoTag = '<span class="text-amber-600 font-bold">· מבצע ' + (Number(p.promo.pct) || 0) + '% מ-' + minQ + ' ארגז</span>';
+  return '<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm" data-id="' + it.productId + '">' +
+    '<div class="flex items-start gap-2">' +
+      '<div class="flex-1 min-w-0">' +
+        '<div class="font-black text-slate-800 truncate">' + (it.name || (p ? p.name : '')) + '</div>' +
+        '<div class="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1.5 flex-wrap">' +
+          '<span><i class="fa-solid fa-barcode"></i> ' + (it.barcode || 'ללא ברקוד') + '</span>' +
+          '<span>· ₪' + fmtMoney(unit) + ' ליח׳</span>' +
+          promoTag +
+        '</div>' +
+      '</div>' +
+      '<button data-role="rc-remove" data-id="' + it.productId + '" class="btn-tap shrink-0 p-2 text-red-500"><i class="fa-solid fa-trash-can"></i></button>' +
+    '</div>' +
+    '<div class="flex items-center justify-between mt-2.5">' +
+      '<div class="flex items-center gap-2">' +
+        '<button data-role="rc-minus" data-id="' + it.productId + '" class="btn-tap w-9 h-9 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-minus text-xs"></i></button>' +
+        '<input data-role="rc-qty" data-id="' + it.productId + '" type="text" inputmode="numeric" value="' + it.qty + '" class="w-12 h-9 text-center text-base font-black border-2 border-slate-200 rounded-lg outline-none focus:border-blue-500">' +
+        '<button data-role="rc-plus" data-id="' + it.productId + '" class="btn-tap w-9 h-9 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-plus text-xs"></i></button>' +
+      '</div>' +
+      '<div class="font-black text-slate-800" data-linetotal="' + it.productId + '">₪' + fmtMoney(lineTotal) + '</div>' +
+    '</div>' +
+  '</div>';
+}
+function changeReceiptQty(productId, delta) {
+  const it = receiptList.find(x => x.productId === productId); if (!it) return;
+  it.qty += delta;
+  if (it.qty <= 0) { removeReceiptLine(productId); return; }
+  saveReceiptDraft(); refreshReceipt(); updateCart();
+}
+function setReceiptQty(productId, val) {
+  const it = receiptList.find(x => x.productId === productId); if (!it) return;
+  let q = parseInt((val || '').toString().replace(/[^0-9]/g, ''), 10);
+  if (!(q > 0)) { return; }
+  it.qty = q;
+  saveReceiptDraft(); updateCart(); refreshReceiptTotals();
+  const lt = app.querySelector('[data-linetotal="' + productId + '"]');
+  const p = products.find(x => x.id === productId);
+  if (lt && p) lt.textContent = '₪' + fmtMoney(effectivePrice(p, q) * q);
+}
+function removeReceiptLine(productId) {
+  const idx = receiptList.findIndex(x => x.productId === productId); if (idx < 0) return;
+  const removed = receiptList[idx];
+  receiptList.splice(idx, 1);
+  saveReceiptDraft(); refreshReceipt(); updateCart();
+  showToast('הוסר מהתעודה', 'בטל', () => {
+    receiptList.splice(Math.min(idx, receiptList.length), 0, removed);
+    saveReceiptDraft(); if (currentView === 'receiving') refreshReceipt(); updateCart();
+  });
+}
+
+// --- מוצר חדש / מחיר חסר (בזמן סריקה) ---
+function promptNewProduct(code, target) {
+  npMode = 'create'; npProductId = null; npTarget = target || 'receipt'; pendingScanBarcode = code;
+  closeScanner();
+  $('npr_code').textContent = code || 'ללא ברקוד';
+  $('npr_name').value = ''; $('npr_name').disabled = false;
+  $('npr_price').value = '';
+  const m = $('newProductModal'); m.classList.remove('hidden'); m.classList.add('flex');
+  setTimeout(() => { const i = $('npr_name'); if (i) i.focus(); }, 80);
+}
+function promptSetPrice(p, target) {
+  npMode = 'setprice'; npProductId = p.id; npTarget = target || 'receipt'; pendingScanBarcode = p.barcode || '';
+  closeScanner();
+  $('npr_code').textContent = p.barcode || 'ללא ברקוד';
+  $('npr_name').value = p.name; $('npr_name').disabled = true;
+  $('npr_price').value = '';
+  const m = $('newProductModal'); m.classList.remove('hidden'); m.classList.add('flex');
+  setTimeout(() => { const i = $('npr_price'); if (i) i.focus(); }, 80);
+}
+function hideNewProduct() {
+  const m = $('newProductModal'); m.classList.add('hidden'); m.classList.remove('flex');
+  $('npr_name').disabled = false; npMode = 'create'; npProductId = null; npTarget = 'receipt'; pendingScanBarcode = null;
+}
+async function saveNewProduct() {
+  const target = npTarget;
+  const priceStr = ($('npr_price').value || '').trim().replace(',', '.');
+  const price = parseFloat(priceStr);
+  if (!(price >= 0)) { $('npr_price').focus(); return; }
+  if (npMode === 'setprice') {
+    const id = npProductId; const p = products.find(x => x.id === id);
+    hideNewProduct();
+    if (p) {
+      p.price = r2(price);
+      if (db) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', id), { price: r2(price) }).catch(console.error);
+      promptQty(p, target);
+    }
+    return;
+  }
+  const name = ($('npr_name').value || '').trim();
+  if (!name) { $('npr_name').focus(); return; }
+  const code = pendingScanBarcode || '';
+  const maxIdx = products.length ? Math.max(...products.map(p => p.orderIndex || 0)) : -1;
+  let newId = 'prod_' + Date.now();
+  const data = { name, barcode: code, price: r2(price), average: 0, defaultUnit: 'carton', orderIndex: maxIdx + 1 };
+  hideNewProduct();
+  if (db) { try { const ref = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'products'), data); newId = ref.id; } catch (e) { console.error(e); } }
+  if (!products.find(x => x.id === newId)) { products.push({ id: newId, ...data }); orderState[newId] = orderState[newId] || { amount: '', unit: 'carton' }; }
+  promptQty({ id: newId, ...data }, target);
+}
+
+// --- סיכום ואישור תעודה ---
+function finishReceipt() {
+  if (!receiptList.length) return;
+  const day = todayStr();
+  const lines = receiptList.map(it => {
+    const p = products.find(x => x.id === it.productId);
+    const unit = effectivePrice(p, it.qty, day);
+    const applied = isPromoActive(p, day) && it.qty >= promoMinQty(p);
+    return { productId: it.productId, name: it.name || (p ? p.name : ''), barcode: it.barcode || (p ? p.barcode : '') || '', qty: it.qty, unitPrice: unit, lineTotal: r2(unit * it.qty), promoPct: (applied ? (Number(p.promo.pct) || 0) : 0) };
+  });
+  const ex = r2(lines.reduce((a, l) => a + l.lineTotal, 0));
+  const inc = r2(ex * (1 + VAT));
+  const listHtml = lines.map(l =>
+    '<div class="flex items-center justify-between gap-2 py-1.5 border-b border-slate-100 last:border-0">' +
+      '<div class="min-w-0"><div class="font-bold text-slate-800 text-sm truncate">' + l.name + '</div>' +
+      '<div class="text-[11px] text-slate-400">' + l.qty + ' × ₪' + fmtMoney(l.unitPrice) + (l.promoPct ? ' · מבצע ' + l.promoPct + '%' : '') + '</div></div>' +
+      '<div class="font-black text-slate-700 text-sm shrink-0">₪' + fmtMoney(l.lineTotal) + '</div>' +
+    '</div>'
+  ).join('');
+  $('rsBody').innerHTML =
+    '<div class="bg-slate-50 rounded-xl p-3 max-h-56 overflow-y-auto border border-slate-100 mb-3">' + listHtml + '</div>' +
+    '<div class="flex items-center justify-between text-slate-600 font-bold"><span>סה"כ ללא מע"מ</span><span>₪' + fmtMoney(ex) + '</span></div>' +
+    '<div class="flex items-center justify-between text-slate-600 font-bold mt-1"><span>מע"מ ' + Math.round(VAT * 100) + '%</span><span>₪' + fmtMoney(r2(inc - ex)) + '</span></div>' +
+    '<div class="flex items-center justify-between text-slate-900 font-black text-xl mt-2 pt-2 border-t border-slate-200"><span>סה"כ לתשלום</span><span>₪' + fmtMoney(inc) + '</span></div>';
+  pendingReceipt = { lines, ex, inc };
+  const m = $('receiptSummaryModal'); m.classList.remove('hidden'); m.classList.add('flex');
+}
+function hideReceiptSummary() { const m = $('receiptSummaryModal'); m.classList.add('hidden'); m.classList.remove('flex'); }
+async function confirmReceipt() {
+  if (!pendingReceipt) { hideReceiptSummary(); return; }
+  const { lines, ex, inc } = pendingReceipt;
+  const data = { timestamp: Date.now(), date: todayStr(), items: lines, count: lines.length, totalExVat: ex, totalIncVat: inc };
+  hideReceiptSummary();
+  if (db) { try { await Promise.race([addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'receipts'), data), new Promise(r => setTimeout(r, 1500))]); } catch (e) { console.error(e); } }
+  receiptList = []; pendingReceipt = null; saveReceiptDraft();
+  setView('receiptsHistory');
+  showToast('התעודה נקלטה ✓', null, null, 2200);
+}
+async function delReceipt(id) {
+  const rc = receipts.find(x => x.id === id);
+  const backup = rc ? { ...rc } : null;
+  if (db) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'receipts', id)).catch(console.error);
+  if (backup) showToast('התעודה נמחקה', 'בטל', () => restoreDoc('receipts', backup));
+}
+
+// --- היסטוריית תעודות + דוח טווח ---
+function receiptsRangeHtml() {
+  return '<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm mb-4">' +
+      '<div class="font-black text-slate-800 mb-2 flex items-center gap-2"><i class="fa-solid fa-coins text-amber-500"></i> דוח לתשלום לספק</div>' +
+      '<div class="flex gap-2 mb-3">' +
+        '<div class="flex-1"><label class="text-[11px] text-slate-400 font-bold block mb-1">מתאריך</label><input id="rcFrom" type="date" class="w-full p-2 rounded-lg border-2 border-slate-200 outline-none text-sm font-bold focus:border-blue-500"></div>' +
+        '<div class="flex-1"><label class="text-[11px] text-slate-400 font-bold block mb-1">עד תאריך</label><input id="rcTo" type="date" class="w-full p-2 rounded-lg border-2 border-slate-200 outline-none text-sm font-bold focus:border-blue-500"></div>' +
+      '</div>' +
+      '<button data-role="rc-calc" class="btn-tap w-full bg-amber-500 text-white rounded-xl py-2.5 font-black flex items-center justify-center gap-2"><i class="fa-solid fa-calculator"></i> חשב סכום</button>' +
+      '<div id="rcRangeResult" class="hidden mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3"></div>' +
+    '</div>';
+}
+function renderReceiptsHistory() {
+  const head = '<div class="flex items-center justify-between px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">תעודות קליטה</h2>' +
+    (receipts.length ? '<button data-role="clear-receipts" class="btn-tap text-xs font-bold text-red-500 bg-red-50 px-3 py-2 rounded-lg flex items-center gap-1.5"><i class="fa-solid fa-trash-can"></i> נקה הכל</button>' : '') +
+    '</div>';
+  if (!receipts.length) { app.innerHTML = head + receiptsRangeHtml() + '<div class="text-center text-slate-400 py-10">אין תעודות עדיין</div>'; return; }
+  const items = receipts.map(rc => {
+    const d = new Date(rc.timestamp);
+    const dateStr = d.toLocaleDateString('he-IL') + ' · ' + d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+    const rows = (rc.items || []).map(l =>
+      '<div class="flex items-center justify-between gap-2 py-1 border-b border-slate-100 last:border-0">' +
+        '<div class="min-w-0"><div class="text-sm font-bold text-slate-700 truncate">' + l.name + '</div><div class="text-[11px] text-slate-400">' + l.qty + ' × ₪' + fmtMoney(l.unitPrice) + (l.promoPct ? ' · מבצע ' + l.promoPct + '%' : '') + '</div></div>' +
+        '<div class="text-sm font-black text-slate-600 shrink-0">₪' + fmtMoney(l.lineTotal) + '</div>' +
+      '</div>'
+    ).join('');
+    return '<details class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">' +
+      '<summary class="cursor-pointer p-4 flex items-center justify-between gap-2">' +
+        '<div class="min-w-0"><div class="font-black text-slate-800 text-sm">' + dateStr + '</div><div class="text-xs text-slate-400 mt-0.5">' + (rc.count || (rc.items || []).length) + ' פריטים</div></div>' +
+        '<div class="flex items-center gap-2 shrink-0"><div class="text-left"><div class="text-[11px] text-slate-400">כולל מע"מ</div><div class="font-black text-slate-800">₪' + fmtMoney(rc.totalIncVat) + '</div></div><i class="fa-solid fa-chevron-down hist-chevron text-slate-400 transition-transform"></i></div>' +
+      '</summary>' +
+      '<div class="px-4 pb-4">' +
+        '<div class="bg-slate-50 rounded-xl p-3 border border-slate-100">' + rows + '</div>' +
+        '<div class="flex items-center justify-between mt-2 text-xs text-slate-500 font-bold px-1"><span>ללא מע"מ: ₪' + fmtMoney(rc.totalExVat) + '</span><span>כולל מע"מ: ₪' + fmtMoney(rc.totalIncVat) + '</span></div>' +
+        '<button data-role="del-receipt" data-id="' + rc.id + '" class="btn-tap mt-2 w-full bg-red-50 text-red-600 font-bold py-2 rounded-xl text-sm flex items-center justify-center gap-2"><i class="fa-solid fa-trash-can"></i> מחק תעודה</button>' +
+      '</div>' +
+    '</details>';
+  }).join('');
+  app.innerHTML = head + receiptsRangeHtml() + '<div class="space-y-2.5 pb-6">' + items + '</div>';
+}
+function calcReceiptRange() {
+  const fromEl = $('rcFrom'), toEl = $('rcTo'), out = $('rcRangeResult');
+  if (!out) return;
+  const from = fromEl ? fromEl.value : '', to = toEl ? toEl.value : '';
+  const fromT = from ? new Date(from + 'T00:00:00').getTime() : -Infinity;
+  const toT = to ? new Date(to + 'T23:59:59').getTime() : Infinity;
+  const recs = receipts.filter(r => r.timestamp >= fromT && r.timestamp <= toT);
+  const rets = returns.filter(r => r.timestamp >= fromT && r.timestamp <= toT);
+  const recEx = r2(recs.reduce((a, r) => a + (Number(r.totalExVat) || 0), 0));
+  const recInc = r2(recs.reduce((a, r) => a + (Number(r.totalIncVat) || 0), 0));
+  let retEx = 0, retInc = 0;
+  rets.forEach(r => { const t = returnTotals(r); retEx += t.ex; retInc += t.inc; });
+  retEx = r2(retEx); retInc = r2(retInc);
+  const netEx = r2(recEx - retEx), netInc = r2(recInc - retInc);
+  out.innerHTML =
+    '<div class="text-[11px] font-bold text-amber-900/70 mb-2">' + recs.length + ' תעודות קליטה · ' + rets.length + ' תעודות חזרה</div>' +
+    '<div class="flex items-center justify-between text-sm font-bold text-amber-900"><span>קליטה (כולל מע"מ)</span><span>₪' + fmtMoney(recInc) + '</span></div>' +
+    '<div class="flex items-center justify-between text-sm font-bold text-emerald-700 mt-1"><span>חזרות / זיכוי</span><span>− ₪' + fmtMoney(retInc) + '</span></div>' +
+    '<div class="flex items-center justify-between text-lg font-black text-amber-900 mt-1.5 pt-1.5 border-t border-amber-200"><span>נטו לתשלום</span><span>₪' + fmtMoney(netInc) + '</span></div>' +
+    '<div class="text-[11px] text-amber-900/60 mt-1.5">ללא מע"מ — קליטה ₪' + fmtMoney(recEx) + ' · חזרות ₪' + fmtMoney(retEx) + ' · נטו ₪' + fmtMoney(netEx) + '</div>';
+  out.classList.remove('hidden');
+}
+
+// --- עדכון מחירים ---
+function priceRowHtml(p) {
+  const day = todayStr();
+  const promoOn = isPromoActive(p, day);
+  const hasPromo = !!(p.promo && p.promo.pct != null && p.promo.pct > 0);
+  const promoUnit = r2((Number(p.price) || 0) * (1 - (Number(p.promo && p.promo.pct) || 0) / 100));
+  const minQ = promoMinQty(p);
+  return '<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm" data-id="' + p.id + '">' +
+    '<div class="flex items-center gap-2">' +
+      '<button data-role="edit-prod" data-id="' + p.id + '" class="btn-tap flex-1 min-w-0 text-right">' +
+        '<div class="font-black text-slate-800 truncate">' + (p.name || '(ללא שם)') + '</div>' +
+        '<div class="text-[11px] text-slate-400 mt-0.5"><i class="fa-solid fa-barcode"></i> ' + (p.barcode || 'ללא ברקוד') + ' <i class="fa-solid fa-pen text-[9px] opacity-60"></i></div>' +
+      '</button>' +
+      '<div class="shrink-0 flex items-center gap-1"><span class="text-slate-400 text-sm font-bold">₪</span><input data-role="price-set" data-id="' + p.id + '" type="text" inputmode="decimal" value="' + (p.price != null ? p.price : '') + '" placeholder="0.00" class="w-20 h-9 text-center font-black border-2 border-slate-200 rounded-lg outline-none focus:border-blue-500"></div>' +
+    '</div>' +
+    '<div class="flex items-center justify-between mt-2.5 pt-2.5 border-t border-slate-100">' +
+      (hasPromo
+        ? '<div class="text-xs min-w-0"><span class="font-black ' + (promoOn ? 'text-rose-600' : 'text-slate-400') + '">מבצע ' + p.promo.pct + '%' + (minQ > 1 ? ' · מ-' + minQ + ' ארגז' : '') + '</span> <span class="text-slate-400">' + p.promo.start + '←' + p.promo.end + '</span>' + (promoOn ? ' <span class="text-rose-600 font-bold">₪' + fmtMoney(promoUnit) + '</span>' : ' <span class="text-slate-300">(לא פעיל)</span>') + '</div>'
+        : '<div class="text-xs text-slate-400">אין מבצע</div>') +
+      '<button data-role="edit-promo" data-id="' + p.id + '" class="btn-tap shrink-0 text-blue-600 font-black text-sm flex items-center gap-1.5"><i class="fa-solid fa-percent"></i> ' + (hasPromo ? 'ערוך' : 'הוסף') + ' מבצע</button>' +
+    '</div>' +
+  '</div>';
+}
+function renderPrices() {
+  app.innerHTML = '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">עדכון מחירים</h2><p class="text-sm text-slate-400 font-bold mt-1">מחירים ללא מע"מ · סרוק לעדכון מהיר או חפש מוצר</p></div>' +
+    '<button data-role="pr-scan" class="btn-tap w-full bg-blue-600 text-white rounded-2xl py-3.5 font-black text-base flex items-center justify-center gap-2 mb-3"><i class="fa-solid fa-barcode text-xl"></i> סרוק לעדכון מחיר</button>' +
+    '<div class="relative mb-3"><i class="fa-solid fa-magnifying-glass absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i><input id="priceSearch" type="text" inputmode="search" autocomplete="off" value="' + (priceQuery || '').replace(/"/g, '&quot;') + '" placeholder="חפש לפי שם או ברקוד..." class="w-full bg-white border border-slate-200 rounded-xl py-3 pr-9 pl-3 text-sm font-bold outline-none focus:border-blue-500"></div>' +
+    '<div id="pricesListEl" class="space-y-2.5 pb-24"></div>';
+  refreshPricesList(priceQuery);
+}
+function refreshPricesList(q) {
+  const box = $('pricesListEl'); if (!box) return;
+  q = (q || '').trim();
+  let list = products.slice().sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+  if (q) list = list.filter(p => (p.name || '').includes(q) || (p.barcode || '').includes(q));
+  let head = '';
+  if (q && /^\d{6,}$/.test(q) && !products.some(p => (p.barcode || '') === q)) {
+    head = '<button data-role="pr-create" data-code="' + q + '" class="btn-tap w-full bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl py-3 font-black flex items-center justify-center gap-2 mb-1"><i class="fa-solid fa-plus"></i> צור מוצר חדש (ברקוד ' + q + ')</button>';
+  }
+  box.innerHTML = head + (list.length ? list.map(priceRowHtml).join('') : (q ? '<div class="text-center text-slate-400 py-8">לא נמצא מוצר</div>' : '<div class="text-center text-slate-400 py-8">אין מוצרים</div>'));
+}
+function savePrice(id, val) {
+  const raw = (val || '').toString().replace(',', '.');
+  const num = parseFloat(raw);
+  const price = (raw.trim() === '') ? null : (num >= 0 ? r2(num) : null);
+  const p = products.find(x => x.id === id); if (p) p.price = price;
+  clearTimeout(priceTimers[id]);
+  priceTimers[id] = setTimeout(() => { if (db) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', id), { price }).catch(console.error); }, 600);
+}
+function openPriceScanner() { scanPurpose = 'price'; openScanner(); }
+function handlePriceScan(code) {
+  code = (code || '').trim(); if (!code) return;
+  const p = products.find(x => (x.barcode || '') === code);
+  openProdModal(p || null, true, code);
+}
+function openProdModal(p, fromScan, presetCode) {
+  priceEditId = p ? p.id : null;
+  priceFromScan = !!fromScan;
+  $('prodTitle').textContent = p ? 'עדכון מוצר' : 'מוצר חדש';
+  $('prod_name').value = p ? (p.name || '') : '';
+  $('prod_barcode').value = p ? (p.barcode || '') : (presetCode || '');
+  $('prod_price').value = (p && p.price != null) ? p.price : '';
+  $('prod_del').classList.toggle('hidden', !p);
+  $('prod_again').classList.toggle('hidden', !fromScan);
+  closeScanner();
+  const m = $('prodModal'); m.classList.remove('hidden'); m.classList.add('flex');
+  setTimeout(() => { const i = $(p ? 'prod_price' : 'prod_name'); if (i) { i.focus(); if (i.select) i.select(); } }, 80);
+}
+function hideProdModal() { const m = $('prodModal'); m.classList.add('hidden'); m.classList.remove('flex'); priceEditId = null; priceFromScan = false; }
+function scanProdBarcode() {
+  scanPurpose = 'prodbarcode';
+  const m = $('prodModal'); m.classList.add('hidden'); m.classList.remove('flex');
+  openScanner();
+}
+async function saveProd(again) {
+  const name = ($('prod_name').value || '').trim();
+  const barcode = ($('prod_barcode').value || '').trim();
+  const raw = ($('prod_price').value || '').toString().replace(',', '.').trim();
+  const num = parseFloat(raw);
+  const price = (raw === '') ? null : (num >= 0 ? r2(num) : null);
+  if (!name) { $('prod_name').focus(); return; }
+  const id = priceEditId;
+  hideProdModal();
+  if (id) {
+    const p = products.find(x => x.id === id);
+    if (p) { p.name = name; p.barcode = barcode; p.price = price; }
+    if (db) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', id), { name, barcode, price }).catch(console.error);
+  } else {
+    const maxIdx = products.length ? Math.max(...products.map(p => p.orderIndex || 0)) : -1;
+    let newId = 'prod_' + Date.now();
+    const data = { name, barcode, price, average: 0, defaultUnit: 'carton', orderIndex: maxIdx + 1 };
+    if (db) { try { const ref = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'products'), data); newId = ref.id; } catch (e) { console.error(e); } }
+    if (!products.find(x => x.id === newId)) { products.push({ id: newId, ...data }); orderState[newId] = orderState[newId] || { amount: '', unit: 'carton' }; }
+  }
+  if (currentView === 'prices') renderPrices();
+  showToast(id ? 'המוצר עודכן' : 'המוצר נוסף', null, null, 1600);
+  if (again) openPriceScanner();
+}
+function delProdFromModal() {
+  const id = priceEditId; if (!id) { hideProdModal(); return; }
+  const p = products.find(x => x.id === id);
+  hideProdModal();
+  showConfirm('מחיקת מוצר', 'למחוק את "' + (p ? p.name : '') + '"? פעולה זו תמחק אותו מכל המסכים.', 'מחק', () => delProduct(id));
+}
+
+// --- עורך מבצע ---
+function openPromoEditor(id) {
+  const p = products.find(x => x.id === id); if (!p) return;
+  promoEditId = id;
+  $('promoName').textContent = p.name;
+  const pr = p.promo || {};
+  $('promoPct').value = (pr.pct != null ? pr.pct : '');
+  $('promoStart').value = pr.start || todayStr();
+  $('promoEnd').value = pr.end || '';
+  $('promoMin').value = (pr.minQty != null && pr.minQty > 1) ? pr.minQty : '';
+  $('promoRemove').classList.toggle('hidden', !(pr.pct != null && pr.pct > 0));
+  const m = $('promoModal'); m.classList.remove('hidden'); m.classList.add('flex');
+  setTimeout(() => { const i = $('promoPct'); if (i) i.focus(); }, 80);
+}
+function hidePromo() { const m = $('promoModal'); m.classList.add('hidden'); m.classList.remove('flex'); promoEditId = null; }
+function savePromo() {
+  const id = promoEditId; if (!id) { hidePromo(); return; }
+  const pct = parseFloat(($('promoPct').value || '').toString().replace(',', '.'));
+  const start = $('promoStart').value || '';
+  const end = $('promoEnd').value || '';
+  if (!(pct > 0) || !start || !end) { showToast('מלא אחוז, תאריך התחלה ותאריך סיום', null, null, 2600); return; }
+  if (end < start) { showToast('תאריך הסיום חייב להיות אחרי ההתחלה', null, null, 2600); return; }
+  const minRaw = parseInt(($('promoMin').value || '').replace(/[^0-9]/g, ''), 10);
+  const minQty = (minRaw > 1) ? minRaw : 1;
+  const promo = { pct: r2(pct), start, end, minQty };
+  const p = products.find(x => x.id === id); if (p) p.promo = promo;
+  hidePromo();
+  if (db) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', id), { promo }).catch(console.error);
+  if (currentView === 'prices') renderPrices();
+  showToast('המבצע נשמר', null, null, 1800);
+}
+function removePromo() {
+  const id = promoEditId; if (!id) { hidePromo(); return; }
+  const p = products.find(x => x.id === id); if (p) p.promo = null;
+  hidePromo();
+  if (db) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', id), { promo: null }).catch(console.error);
+  if (currentView === 'prices') renderPrices();
+  showToast('המבצע בוטל', null, null, 1800);
+}
+
 // ===== חיווט אירועים =====
 $('confirmCancel').addEventListener('click', hideConfirm);
 $('confirmOk').addEventListener('click', () => { const cb = confirmCb; hideConfirm(); if (cb) cb(); });
 $('brandHome').addEventListener('click', () => setView('order'));
-$('btnHistory').addEventListener('click', () => setView(mainMode === 'returns' ? 'returnsHistory' : 'history'));
+$('btnHistory').addEventListener('click', () => setView(mainMode === 'returns' ? 'returnsHistory' : (mainMode === 'receiving' ? 'receiptsHistory' : 'history')));
 $('segOrder').addEventListener('click', () => setView('order'));
 $('segReturns').addEventListener('click', () => setView('returns'));
+$('segReceiving').addEventListener('click', () => setView('receiving'));
 $('btnSettings').addEventListener('click', () => setView('settings'));
 $('btnNotes').addEventListener('click', () => setView('notes'));
 $('backToOrder').addEventListener('click', () => setView(mainMode));
-$('cartBtn').addEventListener('click', () => { if (mainMode === 'returns') openReturnsSend(); else openSendCurrent(); });
+$('cartBtn').addEventListener('click', () => { if (mainMode === 'returns') openReturnsSend(); else if (mainMode === 'receiving') finishReceipt(); else openSendCurrent(); });
 $('promptCancel').addEventListener('click', hidePrompt);
 $('promptOk').addEventListener('click', savePrompt);
 $('promptInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); savePrompt(); } });
-$('promptScan').addEventListener('click', openScanner);
+$('promptScan').addEventListener('click', () => { scanPurpose = 'field'; openScanner(); });
+$('npr_cancel').addEventListener('click', hideNewProduct);
+$('npr_ok').addEventListener('click', saveNewProduct);
+$('promo_cancel').addEventListener('click', hidePromo);
+$('promo_ok').addEventListener('click', savePromo);
+$('promoRemove').addEventListener('click', removePromo);
+$('rs_cancel').addEventListener('click', hideReceiptSummary);
+$('rs_ok').addEventListener('click', confirmReceipt);
+$('qty_minus').addEventListener('click', () => qtyStep(-1));
+$('qty_plus').addEventListener('click', () => qtyStep(1));
+$('qty_again').addEventListener('click', () => commitQty(true));
+$('qty_done').addEventListener('click', () => commitQty(false));
+$('qty_cancel').addEventListener('click', hideQty);
+$('qtyVal').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commitQty(true); } });
+$('prod_cancel').addEventListener('click', hideProdModal);
+$('prod_save').addEventListener('click', () => saveProd(false));
+$('prod_again').addEventListener('click', () => saveProd(true));
+$('prod_del').addEventListener('click', delProdFromModal);
+$('pr_scanbc').addEventListener('click', scanProdBarcode);
 $('scanClose').addEventListener('click', closeScanner);
 $('toastBtn').addEventListener('click', doUndo);
 $('closeSend').addEventListener('click', hideSend);
@@ -1213,6 +1923,9 @@ $('contactList').addEventListener('click', (e) => { const b = e.target.closest('
 app.addEventListener('input', (e) => {
   const t = e.target; const role = t.getAttribute && t.getAttribute('data-role');
   if (t.id === 'returnsSearch') { renderReturnsResults(t.value); return; }
+  if (t.id === 'priceSearch') { priceQuery = t.value; refreshPricesList(priceQuery); return; }
+  if (role === 'rc-qty') { setReceiptQty(t.dataset.id, t.value); return; }
+  if (role === 'price-set') { savePrice(t.dataset.id, t.value); return; }
   if (role === 'amount') {
     const id = t.dataset.id; let v = t.value.replace(/[^0-9]/g, ''); if (v !== t.value) t.value = v;
     (orderState[id] = orderState[id] || { amount: '', unit: 'carton' }).amount = (v === '0' ? '' : v);
@@ -1260,6 +1973,7 @@ app.addEventListener('click', (e) => {
   else if (role === 'add-note') addNote();
   else if (role === 'done-note') doneNote(id);
   else if (role === 'ret-add') addReturn(id);
+  else if (role === 'ret-scan') openReturnsScanner();
   else if (role === 'ret-plus') changeReturnQty(id, 1);
   else if (role === 'ret-minus') changeReturnQty(id, -1);
   else if (role === 'ret-remove') removeReturn(id);
@@ -1268,6 +1982,19 @@ app.addEventListener('click', (e) => {
   else if (role === 'uncredit') markCredited(id, false);
   else if (role === 'clear-history') showConfirm('ניקוי היסטוריה', 'למחוק את כל היסטוריית ההזמנות? פעולה זו אינה הפיכה.', 'מחק הכל', () => clearAllDocs('history'));
   else if (role === 'clear-returns-history') showConfirm('ניקוי היסטוריה', 'למחוק את כל היסטוריית החזרות? פעולה זו אינה הפיכה.', 'מחק הכל', () => clearAllDocs('returns'));
+  else if (role === 'rc-scan') openReceivingScanner();
+  else if (role === 'rc-prices') setView('prices');
+  else if (role === 'pr-scan') openPriceScanner();
+  else if (role === 'pr-create') openProdModal(null, false, t.dataset.code);
+  else if (role === 'edit-prod') { const p = products.find(x => x.id === id); if (p) openProdModal(p, false); }
+  else if (role === 'rc-history') setView('receiptsHistory');
+  else if (role === 'rc-plus') changeReceiptQty(id, 1);
+  else if (role === 'rc-minus') changeReceiptQty(id, -1);
+  else if (role === 'rc-remove') removeReceiptLine(id);
+  else if (role === 'rc-calc') calcReceiptRange();
+  else if (role === 'edit-promo') openPromoEditor(id);
+  else if (role === 'del-receipt') { const rc = receipts.find(x => x.id === id); showConfirm('מחיקת תעודה', 'למחוק את התעודה' + (rc ? ' מ-' + new Date(rc.timestamp).toLocaleDateString('he-IL') : '') + '?', 'מחק', () => delReceipt(id)); }
+  else if (role === 'clear-receipts') showConfirm('ניקוי תעודות', 'למחוק את כל תעודות הקליטה? פעולה זו אינה הפיכה.', 'מחק הכל', () => clearAllDocs('receipts'));
 });
 
 // ===== מצב כהה =====
