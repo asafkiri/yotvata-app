@@ -236,7 +236,7 @@
         <div class="p-5 text-center">
           <div class="flex items-center justify-center gap-2 mb-1"><i class="fa-solid fa-cubes text-blue-600 text-xl"></i><h3 class="font-black text-lg text-slate-800">כמות</h3></div>
           <p id="qtyName" class="text-slate-700 font-bold text-sm"></p>
-          <p id="qtyExisting" class="hidden text-[11px] text-amber-600 font-bold mt-1"></p>
+          <div id="qtyExisting" class="hidden"></div>
           <div class="flex items-center justify-center gap-3 mt-4">
             <button id="qty_minus" class="btn-tap w-14 h-14 rounded-2xl bg-slate-100 text-slate-700 flex items-center justify-center text-2xl"><i class="fa-solid fa-minus"></i></button>
             <input id="qtyVal" type="text" inputmode="numeric" value="1" class="w-24 h-16 text-center text-3xl font-black border-2 border-slate-200 rounded-2xl outline-none focus:border-blue-500">
@@ -1577,7 +1577,13 @@ function promptQty(p, target) {
   $('qtyName').textContent = p.name;
   const ex = (qtyTarget === 'returns' ? returnsList : receiptList).find(it => it.productId === p.id);
   const exEl = $('qtyExisting');
-  if (exEl) { exEl.textContent = ex ? ('כבר ברשימה: ' + ex.qty + ' — נוסיף לכמות זו') : ''; exEl.classList.toggle('hidden', !ex); }
+  if (exEl) {
+    if (ex) {
+      exEl.innerHTML = '<div class="bg-amber-100 border-2 border-amber-400 rounded-2xl p-3 mt-3"><div class="flex items-center justify-center gap-2 text-amber-700"><i class="fa-solid fa-triangle-exclamation text-xl"></i><span class="font-black text-base">כבר נסרק!</span></div><div class="text-amber-900 font-black text-2xl mt-1">' + ex.qty + ' יח׳ כבר ברשימה</div><div class="text-amber-700 text-xs font-bold mt-0.5">הכמות שתזין תתווסף לסכום הזה</div></div>';
+      exEl.classList.remove('hidden');
+      buzz([45, 70, 45]);
+    } else { exEl.innerHTML = ''; exEl.classList.add('hidden'); }
+  }
   $('qtyVal').value = 1;
   const m = $('qtyModal'); m.classList.remove('hidden'); m.classList.add('flex');
   setTimeout(() => { const i = $('qtyVal'); if (i) { i.focus(); i.select(); } }, 80);
@@ -1847,7 +1853,7 @@ function openReconcile() {
     const pr = promoForProduct(it.productId);
     const on = promoTriggered(pr, day);
     const pct = on ? (Number(pr.pct) || 0) : 0;
-    return { productId: it.productId, name: it.name || (p ? p.name : ''), barcode: it.barcode || (p ? p.barcode : '') || '', received: Number(it.qty) || 0, noteQty: Number(it.qty) || 0, price: (on ? r2(base * (1 - pct / 100)) : base), basePrice: base, promoPct: pct, promoOn: on };
+    return { productId: it.productId, name: it.name || (p ? p.name : ''), barcode: it.barcode || (p ? p.barcode : '') || '', received: Number(it.qty) || 0, noteQty: Number(it.qty) || 0, price: (on ? r2(base * (1 - pct / 100)) : base), basePrice: base, promoPct: pct, promoOn: on, checked: false };
   });
   setView('reconcile');
 }
@@ -1869,6 +1875,20 @@ function reconcileTogglePromo(pid) {
   l.price = l.promoOn ? r2(base * (1 - (Number(l.promoPct) || 0) / 100)) : base;
   renderReconcile();
 }
+function reconcileSaveable() { return (reconcileData || []).filter(l => (Number(l.received) || 0) > 0 || (Number(l.noteQty) || 0) > 0); }
+function reconcileProgressHtml() {
+  const lines = reconcileSaveable();
+  const done = lines.filter(l => l.checked).length, total = lines.length;
+  const allDone = total > 0 && done === total;
+  return '<i class="fa-solid ' + (allDone ? 'fa-circle-check' : 'fa-list-check') + '"></i> סומנו ' + done + ' מתוך ' + total + ' מוצרים' + (allDone ? ' ✓' : '');
+}
+function reconcileToggleCheck(pid) {
+  const l = (reconcileData || []).find(x => x.productId === pid); if (!l) return;
+  l.checked = !l.checked;
+  const card = document.querySelector('#app [data-rcard="' + pid + '"]');
+  if (card) card.outerHTML = reconcileRowHtml(l);
+  const pc = $('rcProgress'); if (pc) { pc.innerHTML = reconcileProgressHtml(); const all = reconcileSaveable(); const done = all.filter(x => x.checked).length === all.length && all.length > 0; pc.className = 'mt-2 pt-2 border-t border-amber-200 text-xs font-black ' + (done ? 'text-emerald-700' : 'text-amber-900/70'); }
+}
 function reconcileRowHtml(l) {
   const received = Number(l.received) || 0, noteQty = Number(l.noteQty) || 0;
   const diff = noteQty - received;
@@ -1881,10 +1901,11 @@ function reconcileRowHtml(l) {
                : '<span class="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded line-through">מבצע ' + pct + '%</span>') +
     '<button data-role="rc-recon-promo" data-id="' + l.productId + '" class="btn-tap text-[10px] font-black px-2 py-0.5 rounded-lg border ' + (l.promoOn ? 'border-blue-200 text-blue-700 bg-blue-50' : 'border-emerald-200 text-emerald-700 bg-emerald-50') + '">' + (l.promoOn ? 'חשב בלי מבצע' : 'חשב עם מבצע') + '</button>' +
   '</div>') : '';
-  return '<div class="bg-white rounded-2xl border ' + (diff !== 0 ? 'border-rose-200' : 'border-slate-200') + ' p-3 shadow-sm" data-id="' + l.productId + '">' +
-    '<div class="flex items-center justify-between gap-2 mb-2"><div class="min-w-0"><div class="font-black text-slate-800 text-sm truncate">' + l.name + '</div>' +
+  const checkBtn = '<button data-role="rc-recon-check" data-id="' + l.productId + '" class="btn-tap shrink-0 w-7 h-7 rounded-full flex items-center justify-center ' + (l.checked ? 'bg-emerald-500 text-white' : 'border-2 border-slate-300 text-transparent') + '"><i class="fa-solid fa-check text-xs"></i></button>';
+  return '<div data-rcard="' + l.productId + '" class="' + (l.checked ? 'bg-emerald-50' : 'bg-white') + ' rounded-2xl border ' + (diff !== 0 ? 'border-rose-200' : 'border-slate-200') + ' p-3 shadow-sm" data-id="' + l.productId + '">' +
+    '<div class="flex items-center justify-between gap-2 mb-2"><div class="flex items-center gap-2 min-w-0">' + checkBtn + '<div class="min-w-0"><div class="font-black text-slate-800 text-sm truncate">' + l.name + '</div>' +
       '<div class="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">₪<input data-role="rc-recon-price" data-id="' + l.productId + '" type="text" inputmode="decimal" value="' + (l.price != null ? l.price : '') + '" class="w-14 text-center border border-slate-200 rounded px-1 py-0.5 outline-none focus:border-blue-500"> ליח׳</div>' + promoUi +
-    '</div>' + tag + '</div>' +
+    '</div></div>' + tag + '</div>' +
     '<div class="flex items-center justify-between gap-2">' +
       '<div class="text-sm text-slate-500 font-bold">התקבל: <span class="text-slate-800 font-black">' + received + '</span></div>' +
       '<div class="flex items-center gap-1.5"><span class="text-slate-500 font-bold text-xs">בתעודה:</span>' +
@@ -1900,12 +1921,13 @@ function renderReconcile() {
   const note = receiptNoteTotal;
   const gap = reconcileGap();
   app.innerHTML =
-    '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">השוואת תעודה</h2><div class="text-xs text-slate-400 mt-0.5">הסכום לא תאם — סמן מה התעודה אומרת בשורות החריגות</div></div>' +
+    '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">השוואת תעודה</h2><div class="text-xs text-slate-400 mt-0.5">עבור מוצר-מוצר, סמן ✓ כל מה שבדקת, ותקן כמות/מחיר בשורות חריגות</div></div>' +
     '<div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-sm mb-3">' +
       '<div class="flex justify-between text-sm font-bold text-amber-900"><span>סכום התעודה מהספק</span><span>₪' + fmtMoney(note || 0) + '</span></div>' +
       '<div class="flex justify-between text-sm font-bold text-amber-900 mt-1"><span>שוחזר מהשורות</span><span id="rcReconNote">₪' + fmtMoney(reconcileNoteInc()) + '</span></div>' +
       '<div class="flex justify-between text-lg font-black mt-1.5 pt-1.5 border-t border-amber-200 ' + (Math.abs(gap) <= 1 ? 'text-emerald-700' : 'text-rose-700') + '"><span>הפרש שנותר</span><span id="rcGap">' + (gap > 0 ? 'חסר ' : (gap < 0 ? 'עודף ' : '')) + '₪' + fmtMoney(Math.abs(gap)) + '</span></div>' +
       '<div class="text-[11px] text-amber-900/70 mt-1">תשלם בפועל (מה שהתקבל): <span id="rcRecvInc">₪' + fmtMoney(reconcileReceivedInc()) + '</span></div>' +
+      '<div id="rcProgress" class="mt-2 pt-2 border-t border-amber-200 text-xs font-black text-amber-900/70">' + reconcileProgressHtml() + '</div>' +
     '</div>' +
     '<div class="space-y-2 mb-3">' + reconcileData.map(reconcileRowHtml).join('') + '</div>' +
     '<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm mb-24">' +
@@ -1929,7 +1951,7 @@ function refreshReconcileAddList(q) {
 function reconcileAddItem(pid) {
   if (!reconcileData || reconcileData.find(l => l.productId === pid)) return;
   const p = products.find(x => x.id === pid); if (!p) return;
-  reconcileData.push({ productId: p.id, name: p.name, barcode: p.barcode || '', received: 0, noteQty: 1, price: r2(Number(p.price) || 0) });
+  reconcileData.push({ productId: p.id, name: p.name, barcode: p.barcode || '', received: 0, noteQty: 1, price: r2(Number(p.price) || 0), checked: true });
   renderReconcile();
 }
 function reconcileSetNoteLive(productId, val) {
@@ -1945,11 +1967,16 @@ function reconcileSetPriceLive(productId, val) {
   const l = (reconcileData || []).find(x => x.productId === productId); if (!l) return;
   const n = parseFloat((val || '').toString().replace(/[^0-9.]/g, '')); l.price = isFinite(n) ? n : 0; refreshReconcileHeader();
 }
-function saveReconciledReceipt(force) {
+function saveReconciledReceipt(opts) {
+  opts = opts || {};
   if (!reconcileData) return;
-  if (!force && receiptNoteTotal != null) {
+  if (!opts.skipChecked) {
+    const unchecked = reconcileSaveable().filter(l => !l.checked).length;
+    if (unchecked > 0) { showConfirm('לא סימנת הכל', 'לא סימנת ' + unchecked + ' מוצרים כ"נבדק". ייתכן ששכחת לבדוק אותם — להמשיך בכל זאת?', 'המשך', function () { saveReconciledReceipt({ skipChecked: true }); }); return; }
+  }
+  if (!opts.skipGap && receiptNoteTotal != null) {
     const g = reconcileGap();
-    if (Math.abs(g) > 1) { showConfirm('הפרש לא מוסבר', 'עדיין נשאר הפרש של ₪' + fmtMoney(Math.abs(g)) + ' (' + (g > 0 ? 'חסר' : 'עודף') + ') שלא שובץ לאף פריט. אם פריט לא הגיע — הוסף אותו למטה. לשמור בכל זאת?', 'שמור בכל זאת', function () { saveReconciledReceipt(true); }); return; }
+    if (Math.abs(g) > 1) { showConfirm('הפרש לא מוסבר', 'עדיין נשאר הפרש של ₪' + fmtMoney(Math.abs(g)) + ' (' + (g > 0 ? 'חסר' : 'עודף') + ') שלא שובץ לאף פריט. אם פריט לא הגיע — הוסף אותו למטה. לשמור בכל זאת?', 'שמור בכל זאת', function () { saveReconciledReceipt({ skipChecked: true, skipGap: true }); }); return; }
   }
   reconcileData.forEach(l => {
     const p = products.find(x => x.id === l.productId);
@@ -2615,6 +2642,7 @@ app.addEventListener('click', (e) => {
   else if (role === 'rc-recon-minus') reconcileStepNote(id, -1);
   else if (role === 'rc-recon-plus') reconcileStepNote(id, 1);
   else if (role === 'rc-recon-promo') reconcileTogglePromo(id);
+  else if (role === 'rc-recon-check') reconcileToggleCheck(id);
   else if (role === 'rc-add-item') reconcileAddItem(id);
   else if (role === 'rc-recon-cancel') { reconcileData = null; setView('receiving'); }
   else if (role === 'rc-recon-save') saveReconciledReceipt();
