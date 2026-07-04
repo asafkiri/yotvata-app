@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v19</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v21</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -2691,6 +2691,49 @@ function promoRowHtml(pr, state) {
 }
 // ===== הכנת שלטי מבצע (עד 5 בדף, ייצוא PNG) =====
 const SIGN_MAX = 5;
+const SIGN_MARGIN = 1.25; // רווח מומלץ במבצע: 25%
+function signMaxCost(promoId) {
+  const pr = promos.find(p => p.id === promoId);
+  if (!pr || !Array.isArray(pr.productIds)) return 0;
+  let mx = 0;
+  pr.productIds.forEach(pid => { const p = products.find(x => x.id === pid); const c = Number(p && p.price) || 0; if (c > mx) mx = c; });
+  return mx;
+}
+// עיגול "חנות": מעל .2 → .9 של אותו שקל (13.3→13.9); .2 ומטה → .9 הקודם (13.2→12.9)
+function roundNine(v) {
+  if (!(v > 0)) return 0;
+  const i = Math.floor(v), f = r2(v - i);
+  let out = f > 0.2 ? i + 0.9 : i - 0.1;
+  if (out < 0.9) out = 0.9;
+  return r2(out);
+}
+function signRecommend(s) {
+  const pr = promos.find(p => p.id === s.promoId);
+  if (s.kind === 'pct') {
+    const pct = pr ? r2(Number(pr.pct) || 0) : 0;
+    return pct > 0 ? { type: 'pct', value: pct } : null;
+  }
+  const cost = signMaxCost(s.promoId);
+  if (!(cost > 0)) return null;
+  if (s.kind === 'unit') return { type: 'price', value: roundNine(cost * (1 + VAT) * SIGN_MARGIN), cost: cost };
+  if (s.kind === 'bundle') {
+    const q = parseInt(s.qty, 10);
+    if (!(q > 0)) return null;
+    return { type: 'price', value: roundNine(cost * (1 + VAT) * q * SIGN_MARGIN), cost: cost };
+  }
+  return null;
+}
+function signRecInnerHtml(s, idx) {
+  const rec = signRecommend(s);
+  if (!rec) return '';
+  const label = rec.type === 'pct'
+    ? 'המלצה: <b>' + rec.value + '%</b> <span class="opacity-70">(ההנחה שקיבלת מהספק)</span>'
+    : 'המלצת מחיר: <b>₪' + fmtMoney(rec.value) + '</b> <span class="opacity-70">(עלות מקס׳ ₪' + fmtMoney(rec.cost) + ' + מע״מ + 25% רווח)</span>';
+  return '<div class="flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">' +
+    '<span class="text-[11px] font-bold text-amber-900 leading-tight"><i class="fa-solid fa-lightbulb"></i> ' + label + '</span>' +
+    '<button data-role="sign-apply-rec" data-id="' + idx + '" class="btn-tap shrink-0 text-[11px] font-black text-amber-900 bg-amber-200 px-2.5 py-1.5 rounded-md">השתמש</button>' +
+  '</div>';
+}
 function startSignMaker() {
   signMaker = { step: 'pick', signs: [] };
   setView('signMaker');
@@ -2766,6 +2809,7 @@ function signEditCard(s, idx) {
     '<input data-role="sign-f" data-id="' + idx + '" data-f="title" type="text" value="' + (s.title || '').replace(/"/g, '&quot;') + '" class="w-full h-10 px-2 font-black border-2 border-slate-200 rounded-lg outline-none focus:border-rose-500 mb-2">' +
     '<div class="flex gap-1.5 mb-2">' + signKindBtn(idx, 'unit', 'מחיר ליח׳', s.kind) + signKindBtn(idx, 'bundle', 'כמות במחיר', s.kind) + signKindBtn(idx, 'pct', '% הנחה', s.kind) + '</div>' +
     '<div class="flex gap-2 mb-2">' + fields + '</div>' +
+    '<div id="signRec_' + idx + '" class="mb-2">' + signRecInnerHtml(s, idx) + '</div>' +
     '<label class="text-[10px] font-bold text-slate-400 block mb-0.5">הערה (לא חובה)</label>' +
     '<input data-role="sign-f" data-id="' + idx + '" data-f="note" type="text" value="' + (s.note || '').replace(/"/g, '&quot;') + '" class="w-full h-10 px-2 text-sm font-bold border-2 border-slate-200 rounded-lg outline-none focus:border-rose-500" placeholder="לדוגמה: לא כולל מהדורה מיוחדת">' +
   '</div>';
@@ -2812,74 +2856,74 @@ function drawSignCanvas() {
     ctx.strokeRect(x0, y0, x1 - x0, slotH);
     ctx.strokeStyle = '#fda4af'; ctx.lineWidth = 1.5;
     ctx.strokeRect(x0 + 10, y0 + 10, x1 - x0 - 20, slotH - 20);
-    // --- בניית שורות הרשימה מראש (כדי לקבוע רמת צפיפות) ---
+    // --- בניית שורות הרשימה מראש (2 מוצרים בשורה) + ספירת פריטים לכל שורה ---
     const prods = signProductsOf(s.promoId);
     const perLine = 2;
-    let linesOut = [];
+    const linesOut = [], lineCounts = [];
     { let line = '', cnt = 0;
       prods.forEach(p => {
         const item = p.name + (p.barcode ? ' (' + p.barcode + ')' : '');
         line = line ? line + '  ·  ' + item : item;
         cnt++;
-        if (cnt >= perLine) { linesOut.push(line); line = ''; cnt = 0; }
+        if (cnt >= perLine) { linesOut.push(line); lineCounts.push(cnt); line = ''; cnt = 0; }
       });
-      if (line) linesOut.push(line);
+      if (line) { linesOut.push(line); lineCounts.push(cnt); }
     }
-    // רמת צפיפות: 0=רגיל (עד 2 שורות), 1=דחוס (3), 2=דחוס מאוד (4+)
-    const density = linesOut.length <= 2 ? 0 : (linesOut.length === 3 ? 1 : 2);
-    const D = [
-      { title: 58, titleLH: 62, big: 96, bigPad: 26, bigAfter: 44, note: 30, listHead: 24, list: 24, listSmall: 19, listLH: 28, topPad: 78 },
-      { title: 52, titleLH: 55, big: 84, bigPad: 18, bigAfter: 34, note: 26, listHead: 22, list: 21, listSmall: 17, listLH: 25, topPad: 68 },
-      { title: 42, titleLH: 45, big: 62, bigPad: 8, bigAfter: 20, note: 21, listHead: 19, list: 18, listSmall: 15, listLH: 21, topPad: 52 }
-    ][density];
-    // ברמת הצפיפות הגבוהה: כותרת בשורה אחת (החישוב הדינמי של הרשימה בהמשך)
-    let y = y0 + D.topPad;
-    // כותרת — במצב הדחוס ביותר: שורה אחת בלבד (עם … אם ארוכה)
-    ctx.fillStyle = '#0f172a'; ctx.font = '900 ' + D.title + 'px Heebo, Arial';
-    let titleLines = signWrapText(ctx, s.title || '', x1 - x0 - 80).slice(0, density === 2 ? 1 : 2);
-    if (density === 2) {
-      const full = signWrapText(ctx, s.title || '', x1 - x0 - 80);
-      if (full.length > 1) titleLines = [titleLines[0].replace(/\s+\S*$/, '') + '…'];
-    }
-    titleLines.forEach(ln => { ctx.fillText(ln, cx, y); y += D.titleLH; });
-    // שורת המבצע (הגדולה)
     const big = signLineText(s);
-    if (big) { ctx.fillStyle = '#e11d48'; ctx.font = '900 ' + D.big + 'px Heebo, Arial'; y += D.bigPad; ctx.fillText(big, cx, y); y += D.bigAfter; }
+    const widthAvail = x1 - x0 - 80;
+    const innerH = slotH - 22; // גובה שימושי עד השוליים התחתונים
+    // קנה-מידה רציף: מתחילים גדול ומקטינים רק עד שהכל נכנס — הפונט תמיד הגדול ביותר האפשרי
+    const B = { title: 58, titleLH: 62, big: 96, bigPad: 26, bigAfter: 44, note: 30, listHead: 24, list: 24, listSmall: 19, listLH: 28, topPad: 78 };
+    let M = null, titleLines = null, fitsAll = false;
+    for (let f = 1; f >= 0.55; f = r2(f - 0.05)) {
+      const m = {}; Object.keys(B).forEach(k => m[k] = Math.max(10, Math.round(B[k] * f)));
+      ctx.font = '900 ' + m.title + 'px Heebo, Arial';
+      let tl = signWrapText(ctx, s.title || '', widthAvail).slice(0, 2);
+      if (f < 0.8 && tl.length > 1) tl = [tl[0].replace(/\s+\S*$/, '') + '…'];
+      const top = m.topPad + tl.length * m.titleLH + (big ? m.bigPad + m.bigAfter : 0) + (s.note ? 20 : 0);
+      const listH = prods.length ? 12 + (m.listHead + 16) + linesOut.length * m.listLH + 14 : 0;
+      M = m; titleLines = tl;
+      if (top + listH <= innerH) { fitsAll = true; break; }
+    }
+    let y = y0 + M.topPad;
+    // כותרת
+    ctx.fillStyle = '#0f172a'; ctx.font = '900 ' + M.title + 'px Heebo, Arial';
+    titleLines.forEach(ln => { ctx.fillText(ln, cx, y); y += M.titleLH; });
+    // שורת המבצע (הגדולה)
+    if (big) { ctx.fillStyle = '#e11d48'; ctx.font = '900 ' + M.big + 'px Heebo, Arial'; y += M.bigPad; ctx.fillText(big, cx, y); y += M.bigAfter; }
     // הערה
-    if (s.note) { ctx.fillStyle = '#475569'; ctx.font = '700 ' + D.note + 'px Heebo, Arial'; y += 6; ctx.fillText('* ' + s.note, cx, y); y += 14; }
-    // בלוק הרשימה — קיבולת דינמית: מציגים את כל המוצרים אם הם נכנסים במקום שנשאר
+    if (s.note) { ctx.fillStyle = '#475569'; ctx.font = '700 ' + M.note + 'px Heebo, Arial'; y += 6; ctx.fillText('* ' + s.note, cx, y); y += 14; }
+    // בלוק הרשימה — כשהכל נכנס מציגים הכל; "ועוד" רק כמוצא אחרון אמיתי
     if (prods.length) {
-      const innerBottom = y0 + slotH - 22; // שוליים בטוחים מעל המסגרת הפנימית
-      const headH = D.listHead + 16;
-      const availForLines = innerBottom - (y + 12) - headH - 14;
-      let useLH = D.listLH;
-      let fitLines = Math.floor(availForLines / useLH);
-      // אם כמעט נכנס — מהדקים את שורות הרשימה כדי להכניס את כולן
-      if (fitLines < linesOut.length) {
-        const tightLH = D.listLH - 3;
-        if (Math.floor(availForLines / tightLH) >= linesOut.length) { useLH = tightLH; fitLines = linesOut.length; }
+      const innerBottom = y0 + innerH;
+      const headH = M.listHead + 16;
+      const avail = innerBottom - (y + 12) - headH - 14;
+      let shownL, hasMore;
+      if (fitsAll) { shownL = linesOut.length; hasMore = false; }
+      else {
+        const cap = Math.max(1, Math.floor(avail / M.listLH));
+        if (cap >= linesOut.length) { shownL = linesOut.length; hasMore = false; }
+        else { shownL = Math.max(1, cap - 1); hasMore = true; }
       }
-      const showAll = fitLines >= linesOut.length;
-      const maxL = showAll ? linesOut.length : Math.max(1, fitLines - 1); // משאירים שורה ל"ועוד"
-      const shown = linesOut.slice(0, maxL);
-      const hasMore = !showAll;
-      const moreCount = Math.max(0, prods.length - perLine * maxL);
-      const blockH = headH + shown.length * useLH + (hasMore ? useLH - 4 : 0) + 14;
+      const shown = linesOut.slice(0, shownL);
+      const shownItems = lineCounts.slice(0, shownL).reduce((a, b) => a + b, 0);
+      const moreCount = Math.max(0, prods.length - shownItems);
+      const blockH = headH + shown.length * M.listLH + (hasMore ? M.listLH - 4 : 0) + 14;
       let ly = Math.max(y + 12, innerBottom - blockH);
       // קו מפריד עדין
       ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(x0 + 70, ly - 8); ctx.lineTo(x1 - 70, ly - 8); ctx.stroke();
       // כותרת הרשימה
-      ctx.fillStyle = '#0f172a'; ctx.font = '900 ' + D.listHead + 'px Heebo, Arial';
-      ctx.fillText('המוצרים המשתתפים במבצע:', cx, ly + D.listHead - 6); ly += headH;
+      ctx.fillStyle = '#0f172a'; ctx.font = '900 ' + M.listHead + 'px Heebo, Arial';
+      ctx.fillText('המוצרים המשתתפים במבצע:', cx, ly + M.listHead - 6); ly += headH;
       // הרשימה
       ctx.fillStyle = '#64748b';
       shown.forEach(ln => {
-        ctx.font = '700 ' + D.list + 'px Heebo, Arial';
-        if (ctx.measureText(ln).width > x1 - x0 - 60) ctx.font = '700 ' + D.listSmall + 'px Heebo, Arial';
-        ctx.fillText(ln, cx, ly); ly += useLH;
+        ctx.font = '700 ' + M.list + 'px Heebo, Arial';
+        if (ctx.measureText(ln).width > x1 - x0 - 60) ctx.font = '700 ' + M.listSmall + 'px Heebo, Arial';
+        ctx.fillText(ln, cx, ly); ly += M.listLH;
       });
-      if (hasMore) { ctx.font = '700 ' + D.listSmall + 'px Heebo, Arial'; ctx.fillText('ועוד ' + moreCount + ' מוצרים…', cx, ly); }
+      if (hasMore && moreCount > 0) { ctx.font = '700 ' + M.listSmall + 'px Heebo, Arial'; ctx.fillText('ועוד ' + moreCount + ' מוצרים…', cx, ly); }
     }
   }
   // משבצות ריקות — מסגרת עדינה מקווקוות
@@ -3090,7 +3134,7 @@ app.addEventListener('input', (e) => {
   if (role === 'rc-fix-price') { receiptFixSetPriceLive(t.dataset.id, t.value); return; }
   if (role === 'rv-note') { rvSetNoteLive(parseInt(t.dataset.id, 10), t.value); return; }
   if (role === 'rv-price') { rvSetPriceLive(parseInt(t.dataset.id, 10), t.value); return; }
-  if (role === 'sign-f') { if (signMaker) { const s = signMaker.signs[parseInt(t.dataset.id, 10)]; if (s) { s[t.dataset.f] = t.value; drawSignCanvas(); } } return; }
+  if (role === 'sign-f') { if (signMaker) { const si = parseInt(t.dataset.id, 10); const s = signMaker.signs[si]; if (s) { s[t.dataset.f] = t.value; drawSignCanvas(); const rc = $('signRec_' + si); if (rc) rc.innerHTML = signRecInnerHtml(s, si); } } return; }
   if (role === 'price-set') { savePrice(t.dataset.id, t.value); return; }
   if (role === 'amount') {
     const id = t.dataset.id; let v = t.value.replace(/[^0-9]/g, ''); if (v !== t.value) t.value = v;
@@ -3194,6 +3238,7 @@ app.addEventListener('click', (e) => {
   else if (role === 'sign-back') { if (signMaker) { signMaker.step = 'pick'; renderSignMaker(); } }
   else if (role === 'sign-kind') { if (signMaker) { const s = signMaker.signs[parseInt(id, 10)]; if (s) { s.kind = t.dataset.kind; renderSignMaker(); } } }
   else if (role === 'sign-download') downloadSignImage();
+  else if (role === 'sign-apply-rec') { if (signMaker) { const s = signMaker.signs[parseInt(id, 10)]; if (s) { const rec = signRecommend(s); if (rec) { if (rec.type === 'pct') s.pct = String(rec.value); else s.price = String(rec.value); renderSignMaker(); } } } }
   else if (role === 'promo-open') openPromoEdit(id);
   else if (role === 'promo-info') openPromoPopup(id);
   else if (role === 'pe-toggle') togglePromoProduct(id);
