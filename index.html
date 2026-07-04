@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v25</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v26</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -2886,13 +2886,7 @@ function drawSignCanvas() {
   ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
   ctx.textAlign = 'center'; ctx.direction = 'rtl';
   const pad = 40, gap = 24;
-  // כותרת מיתוג עליונה
-  const brandH = 64;
-  ctx.fillStyle = '#0f172a'; ctx.font = '900 40px Heebo, Arial';
-  ctx.fillText('🛒 ' + storeName, W / 2, pad + 30);
-  ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(pad + 40, pad + brandH - 12); ctx.lineTo(W - pad - 40, pad + brandH - 12); ctx.stroke();
-  const top0 = pad + brandH;
+  const top0 = pad;
   const n = (signMaker.perPage === 4 ? 4 : 5);
   const slotH = Math.floor((H - top0 - pad - gap * (n - 1)) / n);
   const drawCount = Math.min(signMaker.signs.length, n);
@@ -2924,20 +2918,23 @@ function drawSignCanvas() {
     const widthAvail = x1 - x0 - 80;
     const innerH = slotH - 22; // גובה שימושי עד השוליים התחתונים
     // קנה-מידה רציף: מתחילים גדול ומקטינים רק עד שהכל נכנס — הפונט תמיד הגדול ביותר האפשרי
-    const B = { title: 58, titleLH: 62, big: 96, bigPad: 26, bigAfter: 44, old: 30, note: 30, listHead: 24, list: 24, listSmall: 19, listLH: 28, valid: 18, topPad: 78 };
+    const B = { brand: 22, title: 58, titleLH: 62, big: 96, bigPad: 26, bigAfter: 44, old: 30, note: 30, listHead: 24, list: 24, listSmall: 19, listLH: 28, valid: 18, topPad: 78 };
     let M = null, titleLines = null, fitsAll = false;
     for (let f = 1; f >= 0.5; f = r2(f - 0.05)) {
       const m = {}; Object.keys(B).forEach(k => m[k] = Math.max(10, Math.round(B[k] * f)));
       ctx.font = '900 ' + m.title + 'px Heebo, Arial';
       let tl = signWrapText(ctx, s.title || '', widthAvail).slice(0, 2);
       if (f < 0.8 && tl.length > 1) tl = [tl[0].replace(/\s+\S*$/, '') + '…'];
-      const top = m.topPad + tl.length * m.titleLH + (big ? m.bigPad + m.bigAfter : 0) + (oldP != null ? m.old + 8 : 0) + (s.note ? 20 : 0);
+      const top = (m.brand + 2) + m.topPad + tl.length * m.titleLH + (big ? m.bigPad + m.bigAfter : 0) + (oldP != null ? m.old + 8 : 0) + (s.note ? 20 : 0);
       const listH = prods.length ? 12 + (m.listHead + 16) + linesOut.length * m.listLH + 14 : 0;
       const validH = hasValid ? m.valid + 10 : 0;
       M = m; titleLines = tl;
       if (top + listH + validH <= innerH) { fitsAll = true; break; }
     }
-    let y = y0 + M.topPad;
+    // מיתוג בתוך השלט — פס עליון קטן שנשאר גם אחרי גזירה
+    ctx.fillStyle = '#94a3b8'; ctx.font = '700 ' + M.brand + 'px Heebo, Arial';
+    ctx.fillText('🛒 ' + storeName, cx, y0 + 24 + M.brand * 0.4);
+    let y = y0 + (M.brand + 2) + M.topPad;
     // כותרת
     ctx.fillStyle = '#0f172a'; ctx.font = '900 ' + M.title + 'px Heebo, Arial';
     titleLines.forEach(ln => { ctx.fillText(ln, cx, y); y += M.titleLH; });
