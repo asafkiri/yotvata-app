@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v22</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v23</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -2774,7 +2774,7 @@ function signPickToggle(promoId) {
   if (i !== -1) { signMaker.signs.splice(i, 1); renderSignMaker(); return; }
   if (signMaker.signs.length >= SIGN_MAX) { showToast('אפשר עד ' + SIGN_MAX + ' מבצעים בדף', null, null, 2200); return; }
   const pr = promos.find(p => p.id === promoId); if (!pr) return;
-  signMaker.signs.push({ promoId: promoId, kind: 'unit', title: pr.name || ('מבצע ' + pr.pct + '%'), price: '', qty: '', pct: '', note: '' });
+  signMaker.signs.push({ promoId: promoId, kind: 'bundle', title: pr.name || ('מבצע ' + pr.pct + '%'), price: '', qty: '', pct: '', note: '' });
   renderSignMaker();
 }
 function signProductsOf(promoId) {
