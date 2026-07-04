@@ -251,6 +251,25 @@
       </div>
     </div>
 
+    <!-- מוצר ידני לחזרה (ללא ברקוד) -->
+    <div id="manualReturnModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm items-center justify-center p-4 z-[70]">
+      <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
+        <div class="p-5 pb-3"><div class="flex items-center gap-2"><i class="fa-solid fa-pen-to-square text-blue-600 text-xl"></i><h3 class="font-black text-lg text-slate-800">מוצר ידני לחזרה</h3></div><p class="text-slate-500 text-sm mt-1">למוצר ללא ברקוד (מארז שנפתח). ודא מול המנהל את המחיר.</p></div>
+        <div class="px-5 space-y-3">
+          <div><label class="text-xs font-bold text-slate-500 mb-1 block">שם המוצר</label><input id="mr_name" type="text" class="w-full h-11 border-2 border-slate-200 rounded-xl px-3 font-bold outline-none focus:border-blue-500" placeholder="לדוגמה: קוטג׳ מהמארז"></div>
+          <div class="flex gap-2">
+            <div class="flex-1"><label class="text-xs font-bold text-slate-500 mb-1 block">מחיר ליח׳ (ללא מע״מ)</label><div class="flex items-center gap-1 border-2 border-slate-200 rounded-xl px-2 focus-within:border-blue-500"><span class="text-slate-400 font-black">₪</span><input id="mr_price" data-role="mr-live" type="text" inputmode="decimal" class="w-full h-11 text-center font-black outline-none bg-transparent" placeholder="0.00"></div></div>
+            <div class="w-24"><label class="text-xs font-bold text-slate-500 mb-1 block">כמות</label><input id="mr_qty" data-role="mr-live" type="text" inputmode="numeric" value="1" class="w-full h-11 text-center font-black border-2 border-slate-200 rounded-xl outline-none focus:border-blue-500"></div>
+          </div>
+          <div id="mr_total" class="text-center text-sm font-bold text-slate-500 min-h-[20px]"></div>
+        </div>
+        <div class="p-5 pt-3 flex gap-2">
+          <button data-role="mr-cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">ביטול</button>
+          <button data-role="mr-add" class="btn-tap flex-1 py-3 rounded-xl font-black bg-blue-600 text-white">הוסף לחזרה</button>
+        </div>
+      </div>
+    </div>
+
     <!-- חלון עריכת מוצר (עדכון מחירים) -->
     <div id="prodModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm items-center justify-center p-4 z-[70]">
       <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
@@ -956,10 +975,13 @@ function emptyReturnsHtml() {
   return '<div class="text-center py-8 text-slate-400"><i class="fa-solid fa-rotate-left text-3xl mb-2"></i><div class="font-bold">הרשימה ריקה</div><div class="text-xs mt-1">חפש מוצר למעלה והוסף לרשימת החזרות</div></div>';
 }
 function buildReturnRow(it) {
+  const idInfo = it.manual
+    ? '<div class="text-[11px] text-amber-600 font-bold mt-0.5"><i class="fa-solid fa-pen"></i> ידני · ₪' + fmtMoney(Number(it.unitPrice) || 0) + ' ליח׳ (ללא מע״מ)</div>'
+    : '<button data-role="edit-barcode" data-id="' + it.productId + '" class="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1"><i class="fa-solid fa-barcode"></i> ' + (it.barcode || 'ללא ברקוד') + ' <i class="fa-solid fa-pen text-[9px] opacity-60"></i></button>';
   return '<div class="flex items-center gap-2 p-2.5 bg-white border border-slate-100 rounded-2xl shadow-sm" data-rid="' + it.productId + '">' +
     '<div class="flex-1 min-w-0">' +
       '<div class="font-bold text-slate-800 text-sm leading-tight">' + it.name + '</div>' +
-      '<button data-role="edit-barcode" data-id="' + it.productId + '" class="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1"><i class="fa-solid fa-barcode"></i> ' + (it.barcode || 'ללא ברקוד') + ' <i class="fa-solid fa-pen text-[9px] opacity-60"></i></button>' +
+      idInfo +
     '</div>' +
     '<div class="flex items-center gap-1 shrink-0">' +
       '<button data-role="ret-minus" data-id="' + it.productId + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center"><i class="fa-solid fa-minus text-xs"></i></button>' +
@@ -975,7 +997,8 @@ function renderReturns() {
       '<i class="fa-solid fa-magnifying-glass absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>' +
       '<input id="returnsSearch" type="text" inputmode="search" autocomplete="off" placeholder="חפש מוצר להוספה לחזרות..." class="w-full bg-white border border-slate-200 rounded-xl py-3 pr-9 pl-3 text-sm font-bold outline-none focus:border-blue-500">' +
     '</div>' +
-    '<button data-role="ret-scan" class="btn-tap w-full bg-blue-600 text-white rounded-xl py-3 font-black flex items-center justify-center gap-2 mb-3"><i class="fa-solid fa-barcode"></i> סרוק פריט לחזרה</button>' +
+    '<button data-role="ret-scan" class="btn-tap w-full bg-blue-600 text-white rounded-xl py-3 font-black flex items-center justify-center gap-2 mb-2"><i class="fa-solid fa-barcode"></i> סרוק פריט לחזרה</button>' +
+    '<button data-role="ret-manual" class="btn-tap w-full bg-white border-2 border-blue-200 text-blue-700 rounded-xl py-2.5 font-black flex items-center justify-center gap-2 mb-3 text-sm"><i class="fa-solid fa-pen-to-square"></i> הוסף מוצר ידני (ללא ברקוד)</button>' +
     '<div id="returnsResults" class="bg-white border border-slate-200 rounded-xl overflow-hidden mb-3 hidden"></div>' +
     '<div class="flex items-center justify-between px-1 mb-2"><div class="font-black text-slate-800">רשימת חזרות</div><div id="returnsCount" class="text-xs text-slate-400">' + returnsList.length + ' פריטים</div></div>' +
     '<div id="returnsListEl" class="space-y-2.5 pb-6">' + (returnsList.length ? returnsList.map(buildReturnRow).join('') : emptyReturnsHtml()) + '</div>';
@@ -1054,9 +1077,38 @@ async function savePrompt() {
   if (!wasEdit) addReturn(id);
   else refreshReturnsList();
 }
+function openManualReturn() {
+  const m = $('manualReturnModal'); if (!m) return;
+  const n = $('mr_name'); if (n) n.value = '';
+  const pr = $('mr_price'); if (pr) pr.value = '';
+  const q = $('mr_qty'); if (q) q.value = '1';
+  updateManualReturnTotal();
+  m.classList.remove('hidden'); m.classList.add('flex');
+  setTimeout(() => { const i = $('mr_name'); if (i) i.focus(); }, 80);
+}
+function closeManualReturn() { const m = $('manualReturnModal'); if (m) { m.classList.add('hidden'); m.classList.remove('flex'); } }
+function mrPriceVal() { const el = $('mr_price'); const n = parseFloat(((el && el.value) || '').replace(',', '.').replace(/[^0-9.]/g, '')); return isFinite(n) && n > 0 ? r2(n) : 0; }
+function mrQtyVal() { const el = $('mr_qty'); const q = parseInt(((el && el.value) || '').replace(/[^0-9]/g, ''), 10); return isFinite(q) && q > 0 ? q : 0; }
+function updateManualReturnTotal() {
+  const price = mrPriceVal(), qty = mrQtyVal();
+  const el = $('mr_total'); if (el) el.textContent = (price > 0 && qty > 0) ? (qty + ' × ₪' + fmtMoney(price) + ' = ₪' + fmtMoney(r2(price * qty)) + ' (ללא מע״מ)') : '';
+}
+function addManualReturn() {
+  const nEl = $('mr_name'); const name = ((nEl && nEl.value) || '').trim();
+  const price = mrPriceVal(), qty = mrQtyVal();
+  if (!name) { showToast('הזן שם מוצר', null, null, 2000); const i = $('mr_name'); if (i) i.focus(); return; }
+  if (price <= 0) { showToast('הזן מחיר ליחידה (ללא מע״מ)', null, null, 2000); const i = $('mr_price'); if (i) i.focus(); return; }
+  if (qty <= 0) { showToast('הזן כמות', null, null, 2000); const i = $('mr_qty'); if (i) i.focus(); return; }
+  returnsList.push({ productId: 'manual_' + Date.now() + '_' + Math.floor(Math.random() * 1000), name: name, qty: qty, unitPrice: price, manual: true });
+  saveReturnsDraft();
+  closeManualReturn();
+  buzz(30);
+  if (currentView === 'returns') refreshReturnsList();
+  updateCart();
+}
 function openReturnsSend() {
   if (!returnsList.length) return;
-  const items = returnsList.map(it => { const p = products.find(x => x.id === it.productId); const unit = r2(Number(p && p.price) || 0); return { name: it.name, barcode: it.barcode, qty: it.qty, unitPrice: unit, lineTotal: r2(unit * it.qty) }; });
+  const items = returnsList.map(it => { const p = products.find(x => x.id === it.productId); const unit = r2(it.manual ? (Number(it.unitPrice) || 0) : (Number(p && p.price) || 0)); return { name: it.name, barcode: it.barcode || '', qty: it.qty, unitPrice: unit, lineTotal: r2(unit * it.qty) }; });
   const ex = r2(items.reduce((a, l) => a + l.lineTotal, 0));
   sendCtx = { type: 'returns', items, resetCurrent: false, totalExVat: ex, totalIncVat: ex };
   renderSendModal(items, 'רשימת חזרות', 'returns');
@@ -1724,7 +1776,7 @@ function updateScanOverlay(name) {
 function handleReceivingScan(code) {
   code = (code || '').trim(); if (!code) return;
   const p = products.find(x => (x.barcode || '') === code);
-  if (!p) { promptNewProduct(code); return; }
+  if (!p) { buzz([120, 80, 120]); showToast('❌ המוצר לא נמצא במערכת', null, null, 3500); return; }
   if (p.price == null || p.price === '') { promptSetPrice(p); return; }
   promptQty(p, 'receipt');
 }
@@ -2776,6 +2828,7 @@ app.addEventListener('input', (e) => {
   if (role === 'rc-fix-price') { receiptFixSetPriceLive(t.dataset.id, t.value); return; }
   if (role === 'rv-note') { rvSetNoteLive(parseInt(t.dataset.id, 10), t.value); return; }
   if (role === 'rv-price') { rvSetPriceLive(parseInt(t.dataset.id, 10), t.value); return; }
+  if (role === 'mr-live') { updateManualReturnTotal(); return; }
   if (role === 'price-set') { savePrice(t.dataset.id, t.value); return; }
   if (role === 'amount') {
     const id = t.dataset.id; let v = t.value.replace(/[^0-9]/g, ''); if (v !== t.value) t.value = v;
@@ -2825,6 +2878,9 @@ app.addEventListener('click', (e) => {
   else if (role === 'done-note') doneNote(id);
   else if (role === 'ret-add') addReturn(id);
   else if (role === 'ret-scan') openReturnsScanner();
+  else if (role === 'ret-manual') openManualReturn();
+  else if (role === 'mr-cancel') closeManualReturn();
+  else if (role === 'mr-add') addManualReturn();
   else if (role === 'ret-plus') changeReturnQty(id, 1);
   else if (role === 'ret-minus') changeReturnQty(id, -1);
   else if (role === 'ret-remove') removeReturn(id);
