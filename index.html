@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v18</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v19</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -2832,11 +2832,7 @@ function drawSignCanvas() {
       { title: 52, titleLH: 55, big: 84, bigPad: 18, bigAfter: 34, note: 26, listHead: 22, list: 21, listSmall: 17, listLH: 25, topPad: 68 },
       { title: 42, titleLH: 45, big: 62, bigPad: 8, bigAfter: 20, note: 21, listHead: 19, list: 18, listSmall: 15, listLH: 21, topPad: 52 }
     ][density];
-    // ברמת הצפיפות הגבוהה: 4 שורות רשימה, אבל אם יש גם מחיר וגם הערה — 3 (שלא יחרוג)
-    const maxLines = density === 2 ? ((signLineText(s) && s.note) ? 3 : 4) : 3;
-    const shown = linesOut.slice(0, maxLines);
-    const hasMore = linesOut.length > maxLines;
-    const moreCount = Math.max(0, prods.length - perLine * maxLines);
+    // ברמת הצפיפות הגבוהה: כותרת בשורה אחת (החישוב הדינמי של הרשימה בהמשך)
     let y = y0 + D.topPad;
     // כותרת — במצב הדחוס ביותר: שורה אחת בלבד (עם … אם ארוכה)
     ctx.fillStyle = '#0f172a'; ctx.font = '900 ' + D.title + 'px Heebo, Arial';
@@ -2851,11 +2847,24 @@ function drawSignCanvas() {
     if (big) { ctx.fillStyle = '#e11d48'; ctx.font = '900 ' + D.big + 'px Heebo, Arial'; y += D.bigPad; ctx.fillText(big, cx, y); y += D.bigAfter; }
     // הערה
     if (s.note) { ctx.fillStyle = '#475569'; ctx.font = '700 ' + D.note + 'px Heebo, Arial'; y += 6; ctx.fillText('* ' + s.note, cx, y); y += 14; }
-    // בלוק הרשימה — מוצמד לתחתית, לעולם לא חורג מהמסגרת
+    // בלוק הרשימה — קיבולת דינמית: מציגים את כל המוצרים אם הם נכנסים במקום שנשאר
     if (prods.length) {
-      const headH = D.listHead + 16;
-      const blockH = headH + shown.length * D.listLH + (hasMore ? D.listLH - 4 : 0) + 14;
       const innerBottom = y0 + slotH - 22; // שוליים בטוחים מעל המסגרת הפנימית
+      const headH = D.listHead + 16;
+      const availForLines = innerBottom - (y + 12) - headH - 14;
+      let useLH = D.listLH;
+      let fitLines = Math.floor(availForLines / useLH);
+      // אם כמעט נכנס — מהדקים את שורות הרשימה כדי להכניס את כולן
+      if (fitLines < linesOut.length) {
+        const tightLH = D.listLH - 3;
+        if (Math.floor(availForLines / tightLH) >= linesOut.length) { useLH = tightLH; fitLines = linesOut.length; }
+      }
+      const showAll = fitLines >= linesOut.length;
+      const maxL = showAll ? linesOut.length : Math.max(1, fitLines - 1); // משאירים שורה ל"ועוד"
+      const shown = linesOut.slice(0, maxL);
+      const hasMore = !showAll;
+      const moreCount = Math.max(0, prods.length - perLine * maxL);
+      const blockH = headH + shown.length * useLH + (hasMore ? useLH - 4 : 0) + 14;
       let ly = Math.max(y + 12, innerBottom - blockH);
       // קו מפריד עדין
       ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1.5;
@@ -2868,7 +2877,7 @@ function drawSignCanvas() {
       shown.forEach(ln => {
         ctx.font = '700 ' + D.list + 'px Heebo, Arial';
         if (ctx.measureText(ln).width > x1 - x0 - 60) ctx.font = '700 ' + D.listSmall + 'px Heebo, Arial';
-        ctx.fillText(ln, cx, ly); ly += D.listLH;
+        ctx.fillText(ln, cx, ly); ly += useLH;
       });
       if (hasMore) { ctx.font = '700 ' + D.listSmall + 'px Heebo, Arial'; ctx.fillText('ועוד ' + moreCount + ' מוצרים…', cx, ly); }
     }
