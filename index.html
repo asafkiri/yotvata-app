@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v28</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v29</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -2979,9 +2979,8 @@ function drawSignCanvas() {
       const shownItems = lineCounts.slice(0, shownL).reduce((a, b) => a + b, 0);
       const moreCount = Math.max(0, prods.length - shownItems);
       const blockH = headH + shown.length * M.listLH + (hasMore ? M.listLH - 4 : 0) + 14;
-      // ריכוז אנכי: המקום הפנוי מתחלק חצי-חצי בין המחיר לרשימה (במקום בור אחד באמצע)
-      const slack = Math.max(0, innerBottom - blockH - (y + 12));
-      let ly = y + 12 + Math.floor(slack / 2);
+      // הרשימה צמודה לתחתית — כל המקום הפנוי נשאר בין המחיר לרשימה
+      let ly = Math.max(y + 12, innerBottom - blockH);
       // קו מפריד עדין
       ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1.5;
       ctx.beginPath(); ctx.moveTo(x0 + 70, ly - 8); ctx.lineTo(x1 - 70, ly - 8); ctx.stroke();
