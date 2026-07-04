@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v13</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v16</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -410,6 +410,7 @@ let receiptOpened = false;       // האם נפתחה תעודה (שער לפנ�
 let reconcileData = null;        // נתוני מסך השוואת תעודה
 let receiptFix = null;           // תיקון תעודה פתוחה מההיסטוריה
 let returnVerify = null;          // אימות תעודת זיכוי (חזרות)
+let signMaker = null;             // הכנת שלטי מבצע (בחירה + עריכה + תצוגה)
 let receiptDupConfirmed = false; // אישור שמירה למרות חשד לכפילות
 const RECEIPT_DRAFT_KEY = 'yt_receipt_draft';
 const VAT = 0.18;                // מע"מ (קל לשינוי אם ישתנה)
@@ -605,6 +606,7 @@ function renderView() {
   else if (currentView === 'prices') renderPrices();
   else if (currentView === 'promos') renderPromos();
   else if (currentView === 'promoEdit') renderPromoEdit();
+  else if (currentView === 'signMaker') renderSignMaker();
   else if (currentView === 'reconcile') renderReconcile();
   else if (currentView === 'receiptFix') renderReceiptFix();
   else if (currentView === 'returnReconcile') renderReturnReconcile();
@@ -2638,21 +2640,237 @@ function updatePromoHint() {
 function renderPromos() {
   const day = todayStr();
   const head = '<div class="flex items-center justify-between px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">מבצעים</h2></div>' +
-    '<button data-role="promo-new" class="btn-tap w-full bg-rose-600 text-white rounded-2xl py-3.5 font-black text-base flex items-center justify-center gap-2 mb-3"><i class="fa-solid fa-plus"></i> מבצע חדש</button>';
+    '<button data-role="promo-new" class="btn-tap w-full bg-rose-600 text-white rounded-2xl py-3.5 font-black text-base flex items-center justify-center gap-2 mb-2"><i class="fa-solid fa-plus"></i> מבצע חדש</button>' +
+    (promos.length ? '<button data-role="sign-start" class="btn-tap w-full bg-white border-2 border-rose-200 text-rose-700 rounded-2xl py-3 font-black text-sm flex items-center justify-center gap-2 mb-3"><i class="fa-solid fa-print"></i> הכן שלט למבצעים</button>' : '');
   if (!promos.length) { app.innerHTML = head + '<div class="text-center text-slate-400 py-10"><i class="fa-solid fa-percent text-4xl mb-2 opacity-30"></i><div class="font-bold">אין מבצעים עדיין</div></div>'; return; }
-  const rows = promos.slice().sort((a, b) => (b.start || '').localeCompare(a.start || '')).map(pr => {
-    const active = promoActive(pr, day);
+  const withState = promos.slice().map(pr => {
+    let state;
+    if (promoActive(pr, day)) state = 0;            // פעיל
+    else if (pr.start && pr.start > day) state = 1; // עתידי
+    else state = 2;                                 // הסתיים
+    return { pr: pr, state: state };
+  });
+  withState.sort((a, b) => {
+    if (a.state !== b.state) return a.state - b.state;
+    const A = a.pr, B = b.pr;
+    if (a.state === 0) return (A.end || '').localeCompare(B.end || '');     // הפעילים: הנגמר הקרוב קודם
+    if (a.state === 1) return (A.start || '').localeCompare(B.start || ''); // העתידיים: המתחיל הקרוב קודם
+    return (B.end || '').localeCompare(A.end || '');                        // שהסתיימו: האחרון שנגמר קודם
+  });
+  const groupLabels = ['פעילים עכשיו', 'עתידיים', 'הסתיימו'];
+  const groupHeadClass = ['text-emerald-600', 'text-blue-600', 'text-slate-400'];
+  const groupIcon = ['fa-circle-check', 'fa-clock', 'fa-circle-xmark'];
+  let html = '', lastState = -1;
+  withState.forEach(o => {
+    if (o.state !== lastState) {
+      html += '<div class="flex items-center gap-1.5 px-1 mt-4 mb-1.5 text-xs font-black ' + groupHeadClass[o.state] + '"><i class="fa-solid ' + groupIcon[o.state] + '"></i> ' + groupLabels[o.state] + '</div>';
+      lastState = o.state;
+    }
+    html += promoRowHtml(o.pr, o.state);
+  });
+  app.innerHTML = head + '<div class="pb-6">' + html + '</div>';
+}
+function promoRowHtml(pr, state) {
+  const cnt = (pr.productIds || []).length;
+  const cardBorder = state === 0 ? 'border-emerald-200' : (state === 1 ? 'border-blue-200' : 'border-slate-200');
+  const cardBg = state === 2 ? 'bg-slate-50 opacity-70' : 'bg-white';
+  const nameColor = state === 2 ? 'text-slate-500' : 'text-slate-800';
+  const pctBadge = state === 2 ? 'bg-slate-200 text-slate-500' : 'bg-rose-100 text-rose-700';
+  const statusBadge = state === 0
+    ? '<div class="text-[10px] text-emerald-600 font-black mt-1">פעיל</div>'
+    : (state === 1 ? '<div class="text-[10px] text-blue-600 font-black mt-1">עתידי</div>' : '<div class="text-[10px] text-slate-400 font-black mt-1">הסתיים</div>');
+  const meColor = state === 2 ? 'text-slate-400' : 'text-rose-600';
+  return '<button data-role="promo-open" data-id="' + pr.id + '" class="btn-tap block w-full ' + cardBg + ' rounded-2xl border ' + cardBorder + ' p-4 shadow-sm text-right mb-2.5">' +
+    '<div class="flex items-center justify-between gap-2">' +
+      '<div class="min-w-0"><div class="font-black ' + nameColor + ' truncate">' + (pr.name || ('מבצע ' + pr.pct + '%')) + '</div>' +
+      '<div class="text-xs text-slate-400 mt-0.5">' + (pr.type === 'monthEnd' ? '<span class="' + meColor + ' font-black">מרכזת</span> · ' : '') + cnt + ' מוצרים · ' + (pr.start || '?') + ' ← ' + (pr.end || '?') + '</div></div>' +
+      '<div class="shrink-0 text-left"><div class="' + pctBadge + ' font-black px-2.5 py-1 rounded-full text-sm">' + pr.pct + '%</div>' + statusBadge + '</div>' +
+    '</div>' +
+    (promoMinUnitsP(pr) > 1 ? '<div class="text-[11px] text-slate-500 font-bold mt-1"><i class="fa-solid fa-layer-group"></i> מינימום ' + promoMinLabelP(pr) + ' מהסל</div>' : '') +
+  '</button>';
+}
+// ===== הכנת שלטי מבצע (עד 5 בדף, ייצוא PNG) =====
+const SIGN_MAX = 5;
+function startSignMaker() {
+  signMaker = { step: 'pick', signs: [] };
+  setView('signMaker');
+}
+function signPickToggle(promoId) {
+  if (!signMaker) return;
+  const i = signMaker.signs.findIndex(s => s.promoId === promoId);
+  if (i !== -1) { signMaker.signs.splice(i, 1); renderSignMaker(); return; }
+  if (signMaker.signs.length >= SIGN_MAX) { showToast('אפשר עד ' + SIGN_MAX + ' מבצעים בדף', null, null, 2200); return; }
+  const pr = promos.find(p => p.id === promoId); if (!pr) return;
+  signMaker.signs.push({ promoId: promoId, kind: 'unit', title: pr.name || ('מבצע ' + pr.pct + '%'), price: '', qty: '', pct: '', note: '' });
+  renderSignMaker();
+}
+function signProductsOf(promoId) {
+  const pr = promos.find(p => p.id === promoId);
+  if (!pr || !Array.isArray(pr.productIds)) return [];
+  return pr.productIds.map(pid => products.find(x => x.id === pid)).filter(Boolean).map(p => ({ name: p.name || '', barcode: p.barcode || '' }));
+}
+function signLineText(s) {
+  const priceTxt = (v) => '₪' + fmtMoney(Number(v) || 0);
+  if (s.kind === 'unit') return (s.price !== '' && Number(s.price) > 0) ? ('רק ב-' + priceTxt(s.price)) : '';
+  if (s.kind === 'bundle') return (Number(s.qty) > 0 && Number(s.price) > 0) ? (parseInt(s.qty, 10) + ' יח׳ ב-' + priceTxt(s.price)) : '';
+  if (s.kind === 'pct') return (Number(s.pct) > 0) ? (r2(Number(s.pct)) + '% הנחה') : '';
+  return '';
+}
+function renderSignMaker() {
+  if (!signMaker) { setView('promos'); return; }
+  if (signMaker.step === 'pick') { renderSignPick(); return; }
+  renderSignPreview();
+}
+function renderSignPick() {
+  const day = todayStr();
+  const selectable = promos.slice().filter(pr => !(pr.end && pr.end < day)); // פעילים + עתידיים
+  const rows = selectable.map(pr => {
+    const sel = signMaker.signs.some(s => s.promoId === pr.id);
     const cnt = (pr.productIds || []).length;
-    return '<button data-role="promo-open" data-id="' + pr.id + '" class="btn-tap block w-full bg-white rounded-2xl border border-slate-200 p-4 shadow-sm text-right">' +
+    return '<button data-role="sign-pick" data-id="' + pr.id + '" class="btn-tap block w-full bg-white rounded-2xl border-2 ' + (sel ? 'border-rose-500' : 'border-slate-200') + ' p-3.5 text-right mb-2">' +
       '<div class="flex items-center justify-between gap-2">' +
-        '<div class="min-w-0"><div class="font-black text-slate-800 truncate">' + (pr.name || ('מבצע ' + pr.pct + '%')) + '</div>' +
-        '<div class="text-xs text-slate-400 mt-0.5">' + (pr.type === 'monthEnd' ? '<span class="text-rose-600 font-black">מרכזת</span> · ' : '') + cnt + ' מוצרים · ' + (pr.start || '?') + ' ← ' + (pr.end || '?') + '</div></div>' +
-        '<div class="shrink-0 text-left"><div class="bg-rose-100 text-rose-700 font-black px-2.5 py-1 rounded-full text-sm">' + pr.pct + '%</div>' + (active ? '<div class="text-[10px] text-emerald-600 font-bold mt-1">פעיל</div>' : '<div class="text-[10px] text-slate-400 font-bold mt-1">לא פעיל</div>') + '</div>' +
+        '<div class="min-w-0 flex items-center gap-2">' +
+          '<span class="w-6 h-6 rounded-full flex items-center justify-center shrink-0 ' + (sel ? 'bg-rose-500 text-white' : 'border-2 border-slate-300 text-transparent') + '"><i class="fa-solid fa-check text-xs"></i></span>' +
+          '<div class="min-w-0"><div class="font-black text-slate-800 truncate">' + (pr.name || ('מבצע ' + pr.pct + '%')) + '</div>' +
+          '<div class="text-xs text-slate-400">' + cnt + ' מוצרים · ' + (pr.start || '?') + ' ← ' + (pr.end || '?') + '</div></div>' +
+        '</div>' +
+        '<div class="bg-rose-100 text-rose-700 font-black px-2 py-0.5 rounded-full text-xs shrink-0">' + pr.pct + '%</div>' +
       '</div>' +
-      (promoMinUnitsP(pr) > 1 ? '<div class="text-[11px] text-slate-500 font-bold mt-1"><i class="fa-solid fa-layer-group"></i> מינימום ' + promoMinLabelP(pr) + ' מהסל</div>' : '') +
     '</button>';
   }).join('');
-  app.innerHTML = head + '<div class="space-y-2.5 pb-6">' + rows + '</div>';
+  app.innerHTML =
+    '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">הכנת שלט</h2><div class="text-xs text-slate-400 mt-0.5">בחר עד ' + SIGN_MAX + ' מבצעים לדף אחד — השלט מושך את מוצרי המבצע אוטומטית</div></div>' +
+    (selectable.length ? rows : '<div class="text-center text-slate-400 py-10 font-bold">אין מבצעים פעילים או עתידיים</div>') +
+    '<div class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 p-3 flex gap-2 z-40">' +
+      '<button data-role="sign-cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">ביטול</button>' +
+      '<button data-role="sign-next" class="btn-tap flex-1 py-3 rounded-xl font-black ' + (signMaker.signs.length ? 'bg-rose-600 text-white' : 'bg-slate-200 text-slate-400') + '">המשך (' + signMaker.signs.length + ')</button>' +
+    '</div><div class="pb-24"></div>';
+}
+function signKindBtn(idx, kind, label, cur) {
+  return '<button data-role="sign-kind" data-id="' + idx + '" data-kind="' + kind + '" class="btn-tap flex-1 py-2 rounded-lg text-[11px] font-black ' + (cur === kind ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-600') + '">' + label + '</button>';
+}
+function signEditCard(s, idx) {
+  const prods = signProductsOf(s.promoId);
+  let fields = '';
+  if (s.kind === 'unit') {
+    fields = '<div class="flex-1"><label class="text-[10px] font-bold text-slate-400 block mb-0.5">מחיר ליח׳ (₪)</label><input data-role="sign-f" data-id="' + idx + '" data-f="price" type="text" inputmode="decimal" value="' + (s.price || '') + '" class="w-full h-10 text-center font-black border-2 border-slate-200 rounded-lg outline-none focus:border-rose-500" placeholder="0.00"></div>';
+  } else if (s.kind === 'bundle') {
+    fields = '<div class="w-20"><label class="text-[10px] font-bold text-slate-400 block mb-0.5">כמות</label><input data-role="sign-f" data-id="' + idx + '" data-f="qty" type="text" inputmode="numeric" value="' + (s.qty || '') + '" class="w-full h-10 text-center font-black border-2 border-slate-200 rounded-lg outline-none focus:border-rose-500" placeholder="4"></div>' +
+      '<div class="flex-1"><label class="text-[10px] font-bold text-slate-400 block mb-0.5">מחיר כולל (₪)</label><input data-role="sign-f" data-id="' + idx + '" data-f="price" type="text" inputmode="decimal" value="' + (s.price || '') + '" class="w-full h-10 text-center font-black border-2 border-slate-200 rounded-lg outline-none focus:border-rose-500" placeholder="30"></div>';
+  } else {
+    fields = '<div class="flex-1"><label class="text-[10px] font-bold text-slate-400 block mb-0.5">אחוז הנחה (%)</label><input data-role="sign-f" data-id="' + idx + '" data-f="pct" type="text" inputmode="decimal" value="' + (s.pct || '') + '" class="w-full h-10 text-center font-black border-2 border-slate-200 rounded-lg outline-none focus:border-rose-500" placeholder="10"></div>';
+  }
+  return '<div class="bg-white rounded-2xl border border-slate-200 p-3.5 shadow-sm mb-3">' +
+    '<div class="text-[10px] font-black text-slate-400 mb-1.5">שלט ' + (idx + 1) + ' · ' + prods.length + ' מוצרים במבצע</div>' +
+    '<label class="text-[10px] font-bold text-slate-400 block mb-0.5">כותרת השלט</label>' +
+    '<input data-role="sign-f" data-id="' + idx + '" data-f="title" type="text" value="' + (s.title || '').replace(/"/g, '&quot;') + '" class="w-full h-10 px-2 font-black border-2 border-slate-200 rounded-lg outline-none focus:border-rose-500 mb-2">' +
+    '<div class="flex gap-1.5 mb-2">' + signKindBtn(idx, 'unit', 'מחיר ליח׳', s.kind) + signKindBtn(idx, 'bundle', 'כמות במחיר', s.kind) + signKindBtn(idx, 'pct', '% הנחה', s.kind) + '</div>' +
+    '<div class="flex gap-2 mb-2">' + fields + '</div>' +
+    '<label class="text-[10px] font-bold text-slate-400 block mb-0.5">הערה (לא חובה)</label>' +
+    '<input data-role="sign-f" data-id="' + idx + '" data-f="note" type="text" value="' + (s.note || '').replace(/"/g, '&quot;') + '" class="w-full h-10 px-2 text-sm font-bold border-2 border-slate-200 rounded-lg outline-none focus:border-rose-500" placeholder="לדוגמה: לא כולל מהדורה מיוחדת">' +
+  '</div>';
+}
+function renderSignPreview() {
+  const cards = signMaker.signs.map(signEditCard).join('');
+  app.innerHTML =
+    '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">עריכת שלטים</h2><div class="text-xs text-slate-400 mt-0.5">מלא את הפרטים — התצוגה למטה מתעדכנת חי. המספרים לא נמשכים מהמבצע.</div></div>' +
+    cards +
+    '<div class="px-1 mt-4 mb-1.5 text-xs font-black text-slate-500"><i class="fa-solid fa-eye"></i> תצוגה מקדימה של הדף</div>' +
+    '<div class="bg-slate-200 rounded-2xl p-2.5 mb-3"><canvas id="signCanvas" class="w-full rounded-lg shadow"></canvas></div>' +
+    '<div class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 p-3 flex gap-2 z-40">' +
+      '<button data-role="sign-back" class="btn-tap px-4 py-3 rounded-xl font-black bg-slate-100 text-slate-600"><i class="fa-solid fa-arrow-right"></i></button>' +
+      '<button data-role="sign-download" class="btn-tap flex-1 py-3 rounded-xl font-black bg-rose-600 text-white flex items-center justify-center gap-2"><i class="fa-solid fa-share-nodes"></i> שתף / שמור תמונה</button>' +
+    '</div><div class="pb-24"></div>';
+  drawSignCanvas();
+}
+function signWrapText(ctx, text, maxW) {
+  const words = (text || '').split(/\s+/).filter(Boolean);
+  const lines = []; let cur = '';
+  words.forEach(w => {
+    const t = cur ? cur + ' ' + w : w;
+    if (ctx.measureText(t).width <= maxW || !cur) cur = t; else { lines.push(cur); cur = w; }
+  });
+  if (cur) lines.push(cur);
+  return lines;
+}
+function drawSignCanvas() {
+  const cv = $('signCanvas'); if (!cv || !signMaker) return;
+  const W = 1240, H = 1754; // A4 ביחס ~1:1.414, רזולוציה טובה להדפסה
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+  ctx.textAlign = 'center'; ctx.direction = 'rtl';
+  const n = SIGN_MAX; // תמיד 5 משבצות בגודל קבוע
+  const pad = 40, gap = 24;
+  const slotH = Math.floor((H - pad * 2 - gap * (n - 1)) / n);
+  for (let i = 0; i < signMaker.signs.length; i++) {
+    const s = signMaker.signs[i];
+    const y0 = pad + i * (slotH + gap);
+    const x0 = pad, x1 = W - pad, cx = W / 2;
+    // מסגרת
+    ctx.strokeStyle = '#e11d48'; ctx.lineWidth = 5;
+    ctx.strokeRect(x0, y0, x1 - x0, slotH);
+    ctx.strokeStyle = '#fda4af'; ctx.lineWidth = 1.5;
+    ctx.strokeRect(x0 + 10, y0 + 10, x1 - x0 - 20, slotH - 20);
+    let y = y0 + 78;
+    // כותרת
+    ctx.fillStyle = '#0f172a'; ctx.font = '900 58px Heebo, Arial';
+    const titleLines = signWrapText(ctx, s.title || '', x1 - x0 - 80).slice(0, 2);
+    titleLines.forEach(ln => { ctx.fillText(ln, cx, y); y += 62; });
+    // שורת המבצע (הגדולה)
+    const big = signLineText(s);
+    if (big) { ctx.fillStyle = '#e11d48'; ctx.font = '900 96px Heebo, Arial'; y += 26; ctx.fillText(big, cx, y); y += 44; }
+    // הערה
+    if (s.note) { ctx.fillStyle = '#475569'; ctx.font = '700 30px Heebo, Arial'; y += 8; ctx.fillText(s.note, cx, y); y += 20; }
+    // מוצרים משתתפים + ברקודים
+    const prods = signProductsOf(s.promoId);
+    if (prods.length) {
+      ctx.fillStyle = '#64748b'; ctx.font = '700 24px Heebo, Arial';
+      y = Math.max(y + 14, y0 + slotH - 26 - (Math.min(prods.length, 3) - 1) * 28 - 8);
+      const perLine = 2;
+      let line = '', cnt = 0, linesOut = [];
+      prods.forEach(p => {
+        const item = p.name + (p.barcode ? ' (' + p.barcode + ')' : '');
+        line = line ? line + '  ·  ' + item : item;
+        cnt++;
+        if (cnt >= perLine) { linesOut.push(line); line = ''; cnt = 0; }
+      });
+      if (line) linesOut.push(line);
+      linesOut.slice(0, 3).forEach(ln => {
+        if (ctx.measureText(ln).width > x1 - x0 - 60) { ctx.font = '700 19px Heebo, Arial'; }
+        ctx.fillText(ln, cx, y); y += 28; ctx.font = '700 24px Heebo, Arial';
+      });
+      if (linesOut.length > 3) { ctx.font = '700 19px Heebo, Arial'; ctx.fillText('ועוד ' + (prods.length - 6) + ' מוצרים…', cx, y); }
+    }
+  }
+  // משבצות ריקות — מסגרת עדינה מקווקוות
+  for (let i = signMaker.signs.length; i < n; i++) {
+    const y0 = pad + i * (slotH + gap);
+    ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 2; ctx.setLineDash([12, 10]);
+    ctx.strokeRect(pad, y0, W - pad * 2, slotH);
+    ctx.setLineDash([]);
+  }
+}
+function downloadSignImage() {
+  const cv = $('signCanvas'); if (!cv) return;
+  try {
+    cv.toBlob(async function (blob) {
+      if (!blob) { showToast('שגיאה ביצירת התמונה', null, null, 2500); return; }
+      const file = new File([blob], 'shelet-' + todayStr() + '.png', { type: 'image/png' });
+      // שיתוף מקורי (iOS/Android) — מאפשר "שמור תמונה" ישירות לתמונות
+      if (navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share) {
+        try { await navigator.share({ files: [file] }); return; }
+        catch (e) { if (e && e.name === 'AbortError') return; /* המשתמש ביטל */ }
+      }
+      // נפילה: הורדה רגילה לקבצים
+      const a = document.createElement('a');
+      a.download = file.name;
+      a.href = URL.createObjectURL(blob);
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      showToast('התמונה ירדה — פתח אותה מהקבצים/הורדות', null, null, 3000);
+    }, 'image/png');
+  } catch (e) { console.error(e); showToast('שגיאה בהורדה — נסה שוב', null, null, 2500); }
 }
 function renderPromoEdit() {
   const pe = promoEdit || {};
@@ -2833,6 +3051,7 @@ app.addEventListener('input', (e) => {
   if (role === 'rc-fix-price') { receiptFixSetPriceLive(t.dataset.id, t.value); return; }
   if (role === 'rv-note') { rvSetNoteLive(parseInt(t.dataset.id, 10), t.value); return; }
   if (role === 'rv-price') { rvSetPriceLive(parseInt(t.dataset.id, 10), t.value); return; }
+  if (role === 'sign-f') { if (signMaker) { const s = signMaker.signs[parseInt(t.dataset.id, 10)]; if (s) { s[t.dataset.f] = t.value; drawSignCanvas(); } } return; }
   if (role === 'price-set') { savePrice(t.dataset.id, t.value); return; }
   if (role === 'amount') {
     const id = t.dataset.id; let v = t.value.replace(/[^0-9]/g, ''); if (v !== t.value) t.value = v;
@@ -2929,6 +3148,13 @@ app.addEventListener('click', (e) => {
   else if (role === 'rc-remove') removeReceiptLine(id);
   else if (role === 'rc-calc') calcReceiptRange();
   else if (role === 'promo-new') newPromo();
+  else if (role === 'sign-start') startSignMaker();
+  else if (role === 'sign-pick') signPickToggle(id);
+  else if (role === 'sign-cancel') { signMaker = null; setView('promos'); }
+  else if (role === 'sign-next') { if (signMaker && signMaker.signs.length) { signMaker.step = 'edit'; renderSignMaker(); } }
+  else if (role === 'sign-back') { if (signMaker) { signMaker.step = 'pick'; renderSignMaker(); } }
+  else if (role === 'sign-kind') { if (signMaker) { const s = signMaker.signs[parseInt(id, 10)]; if (s) { s.kind = t.dataset.kind; renderSignMaker(); } } }
+  else if (role === 'sign-download') downloadSignImage();
   else if (role === 'promo-open') openPromoEdit(id);
   else if (role === 'promo-info') openPromoPopup(id);
   else if (role === 'pe-toggle') togglePromoProduct(id);
