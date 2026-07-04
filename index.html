@@ -264,8 +264,8 @@
           <div id="mr_total" class="text-center text-sm font-bold text-slate-500 min-h-[20px]"></div>
         </div>
         <div class="p-5 pt-3 flex gap-2">
-          <button data-role="mr-cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">ביטול</button>
-          <button data-role="mr-add" class="btn-tap flex-1 py-3 rounded-xl font-black bg-blue-600 text-white">הוסף לחזרה</button>
+          <button id="mr_cancel" data-role="mr-cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">ביטול</button>
+          <button id="mr_add" data-role="mr-add" class="btn-tap flex-1 py-3 rounded-xl font-black bg-blue-600 text-white">הוסף לחזרה</button>
         </div>
       </div>
     </div>
@@ -2799,6 +2799,10 @@ $('qty_plus').addEventListener('click', () => qtyStep(1));
 $('qty_again').addEventListener('click', () => commitQty(true));
 $('qty_done').addEventListener('click', () => commitQty(false));
 $('qty_cancel').addEventListener('click', hideQty);
+$('mr_cancel').addEventListener('click', closeManualReturn);
+$('mr_add').addEventListener('click', addManualReturn);
+$('mr_price').addEventListener('input', updateManualReturnTotal);
+$('mr_qty').addEventListener('input', updateManualReturnTotal);
 $('qtyVal').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commitQty(true); } });
 $('prod_cancel').addEventListener('click', hideProdModal);
 $('prod_save').addEventListener('click', () => saveProd(false));
@@ -2828,7 +2832,6 @@ app.addEventListener('input', (e) => {
   if (role === 'rc-fix-price') { receiptFixSetPriceLive(t.dataset.id, t.value); return; }
   if (role === 'rv-note') { rvSetNoteLive(parseInt(t.dataset.id, 10), t.value); return; }
   if (role === 'rv-price') { rvSetPriceLive(parseInt(t.dataset.id, 10), t.value); return; }
-  if (role === 'mr-live') { updateManualReturnTotal(); return; }
   if (role === 'price-set') { savePrice(t.dataset.id, t.value); return; }
   if (role === 'amount') {
     const id = t.dataset.id; let v = t.value.replace(/[^0-9]/g, ''); if (v !== t.value) t.value = v;
@@ -2879,8 +2882,6 @@ app.addEventListener('click', (e) => {
   else if (role === 'ret-add') addReturn(id);
   else if (role === 'ret-scan') openReturnsScanner();
   else if (role === 'ret-manual') openManualReturn();
-  else if (role === 'mr-cancel') closeManualReturn();
-  else if (role === 'mr-add') addManualReturn();
   else if (role === 'ret-plus') changeReturnQty(id, 1);
   else if (role === 'ret-minus') changeReturnQty(id, -1);
   else if (role === 'ret-remove') removeReturn(id);
