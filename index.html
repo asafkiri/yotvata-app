@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v27</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v28</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -2899,41 +2899,51 @@ function drawSignCanvas() {
     ctx.strokeRect(x0, y0, x1 - x0, slotH);
     ctx.strokeStyle = '#fda4af'; ctx.lineWidth = 1.5;
     ctx.strokeRect(x0 + 10, y0 + 10, x1 - x0 - 20, slotH - 20);
-    // בניית שורות הרשימה מראש (2 מוצרים בשורה) + ספירת פריטים לכל שורה
+    // בניית שורות הרשימה — 3 מוצרים בשורה; אם ארוך מדי לשלט, ניפול ל-2 (מחושב לפי רוחב אמיתי)
     const prods = signProductsOf(s.promoId);
-    const perLine = 2;
-    const linesOut = [], lineCounts = [];
-    { let line = '', cnt = 0;
+    const buildLines = (per, font) => {
+      ctx.font = font;
+      const out = [], counts = [];
+      let line = '', cnt = 0, tooWide = false;
       prods.forEach(p => {
         const item = p.name + (p.barcode ? ' (' + p.barcode + ')' : '');
         line = line ? line + '  ·  ' + item : item;
         cnt++;
-        if (cnt >= perLine) { linesOut.push(line); lineCounts.push(cnt); line = ''; cnt = 0; }
+        if (cnt >= per) { if (ctx.measureText(line).width > widthAvail + 20) tooWide = true; out.push(line); counts.push(cnt); line = ''; cnt = 0; }
       });
-      if (line) { linesOut.push(line); lineCounts.push(cnt); }
-    }
+      if (line) { if (ctx.measureText(line).width > widthAvail + 20) tooWide = true; out.push(line); counts.push(cnt); }
+      return { out, counts, tooWide };
+    };
     const big = signLineText(s);
     const oldP = (s.kind !== 'pct' && s.oldPrice !== '' && Number(s.oldPrice) > 0) ? r2(Number(s.oldPrice)) : null;
     const hasValid = !!(s.validUntil && s.validUntil.trim());
     const widthAvail = x1 - x0 - 80;
     const innerH = slotH - 22; // גובה שימושי עד השוליים התחתונים
     // קנה-מידה רציף: מתחילים גדול ומקטינים רק עד שהכל נכנס — הפונט תמיד הגדול ביותר האפשרי
-    const B = { brand: 22, title: 58, titleLH: 62, big: 96, bigPad: 26, bigAfter: 44, old: 30, note: 30, listHead: 24, list: 24, listSmall: 19, listLH: 28, valid: 18, topPad: 78 };
-    let M = null, titleLines = null, fitsAll = false;
+    const B = { brand: 22, title: 58, titleLH: 62, big: 96, bigPad: 26, bigAfter: 44, old: 30, note: 30, listHead: 24, list: 24, listSmall: 19, listLH: 28, topPad: 78 };
+    let M = null, titleLines = null, fitsAll = false, linesOut = [], lineCounts = [];
     for (let f = 1; f >= 0.5; f = r2(f - 0.05)) {
       const m = {}; Object.keys(B).forEach(k => m[k] = Math.max(10, Math.round(B[k] * f)));
       ctx.font = '900 ' + m.title + 'px Heebo, Arial';
       let tl = signWrapText(ctx, s.title || '', widthAvail).slice(0, 2);
       if (f < 0.8 && tl.length > 1) tl = [tl[0].replace(/\s+\S*$/, '') + '…'];
+      // רשימה: 3 בשורה בפונט הקטן; אם רחב מדי — 2 בשורה
+      let bl = buildLines(3, '700 ' + m.listSmall + 'px Heebo, Arial');
+      if (bl.tooWide) bl = buildLines(2, '700 ' + m.listSmall + 'px Heebo, Arial');
       const top = (m.brand + 2) + m.topPad + tl.length * m.titleLH + (big ? m.bigPad + m.bigAfter : 0) + (oldP != null ? m.old + 8 : 0) + (s.note ? 20 : 0);
-      const listH = prods.length ? 12 + (m.listHead + 16) + linesOut.length * m.listLH + 14 : 0;
-      const validH = hasValid ? m.valid + 10 : 0;
-      M = m; titleLines = tl;
-      if (top + listH + validH <= innerH) { fitsAll = true; break; }
+      const listH = prods.length ? 12 + (m.listHead + 16) + bl.out.length * m.listLH + 14 : 0;
+      M = m; titleLines = tl; linesOut = bl.out; lineCounts = bl.counts;
+      if (top + listH <= innerH) { fitsAll = true; break; }
     }
-    // מיתוג בתוך השלט — פס עליון קטן שנשאר גם אחרי גזירה
+    // שורת מיתוג + תוקף — פס עליון אחד משותף (חוסך את שורת התחתית)
     ctx.fillStyle = '#94a3b8'; ctx.font = '700 ' + M.brand + 'px Heebo, Arial';
     ctx.fillText('🛒 ' + storeName, cx, y0 + 24 + M.brand * 0.4);
+    if (hasValid) {
+      ctx.font = '700 ' + Math.max(12, Math.round(M.brand * 0.82)) + 'px Heebo, Arial';
+      ctx.textAlign = 'left';
+      ctx.fillText('בתוקף עד ' + s.validUntil.trim(), x0 + 24, y0 + 24 + M.brand * 0.4);
+      ctx.textAlign = 'center';
+    }
     let y = y0 + (M.brand + 2) + M.topPad;
     // כותרת
     ctx.fillStyle = '#0f172a'; ctx.font = '900 ' + M.title + 'px Heebo, Arial';
@@ -2954,9 +2964,8 @@ function drawSignCanvas() {
     // הערה
     if (s.note) { ctx.fillStyle = '#475569'; ctx.font = '700 ' + M.note + 'px Heebo, Arial'; y += 6; ctx.fillText('* ' + s.note, cx, y); y += 14; }
     // בלוק הרשימה — כשהכל נכנס מציגים הכל; "ועוד" רק כמוצא אחרון אמיתי
-    const validReserve = hasValid ? M.valid + 10 : 0;
     if (prods.length) {
-      const innerBottom = y0 + innerH - validReserve;
+      const innerBottom = y0 + innerH;
       const headH = M.listHead + 16;
       const avail = innerBottom - (y + 12) - headH - 14;
       let shownL, hasMore;
@@ -2979,21 +2988,14 @@ function drawSignCanvas() {
       // כותרת הרשימה
       ctx.fillStyle = '#0f172a'; ctx.font = '900 ' + M.listHead + 'px Heebo, Arial';
       ctx.fillText('המוצרים המשתתפים במבצע:', cx, ly + M.listHead - 6); ly += headH;
-      // הרשימה
+      // הרשימה — באותו פונט שבו נבנו השורות
       ctx.fillStyle = '#64748b';
       shown.forEach(ln => {
-        ctx.font = '700 ' + M.list + 'px Heebo, Arial';
-        if (ctx.measureText(ln).width > x1 - x0 - 60) ctx.font = '700 ' + M.listSmall + 'px Heebo, Arial';
+        ctx.font = '700 ' + M.listSmall + 'px Heebo, Arial';
+        if (ctx.measureText(ln).width > x1 - x0 - 50) ctx.font = '700 ' + Math.max(11, M.listSmall - 3) + 'px Heebo, Arial';
         ctx.fillText(ln, cx, ly); ly += M.listLH;
       });
       if (hasMore && moreCount > 0) { ctx.font = '700 ' + M.listSmall + 'px Heebo, Arial'; ctx.fillText('ועוד ' + moreCount + ' מוצרים…', cx, ly); }
-    }
-    // תוקף — פינה שמאלית תחתונה של המשבצת
-    if (hasValid) {
-      ctx.fillStyle = '#94a3b8'; ctx.font = '700 ' + M.valid + 'px Heebo, Arial';
-      ctx.textAlign = 'left';
-      ctx.fillText('בתוקף עד ' + s.validUntil.trim(), x0 + 24, y0 + slotH - 18);
-      ctx.textAlign = 'center';
     }
   }
   // משבצות ריקות — מסגרת עדינה מקווקוות
