@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v17</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v18</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -2812,23 +2812,11 @@ function drawSignCanvas() {
     ctx.strokeRect(x0, y0, x1 - x0, slotH);
     ctx.strokeStyle = '#fda4af'; ctx.lineWidth = 1.5;
     ctx.strokeRect(x0 + 10, y0 + 10, x1 - x0 - 20, slotH - 20);
-    let y = y0 + 78;
-    // כותרת
-    ctx.fillStyle = '#0f172a'; ctx.font = '900 58px Heebo, Arial';
-    const titleLines = signWrapText(ctx, s.title || '', x1 - x0 - 80).slice(0, 2);
-    titleLines.forEach(ln => { ctx.fillText(ln, cx, y); y += 62; });
-    // שורת המבצע (הגדולה)
-    const big = signLineText(s);
-    if (big) { ctx.fillStyle = '#e11d48'; ctx.font = '900 96px Heebo, Arial'; y += 26; ctx.fillText(big, cx, y); y += 44; }
-    // הערה
-    if (s.note) { ctx.fillStyle = '#475569'; ctx.font = '700 30px Heebo, Arial'; y += 8; ctx.fillText('* ' + s.note, cx, y); y += 20; }
-    // מוצרים משתתפים + ברקודים — עם כותרת מפרידה שמבהירה שאלה המשתתפים
+    // --- בניית שורות הרשימה מראש (כדי לקבוע רמת צפיפות) ---
     const prods = signProductsOf(s.promoId);
-    if (prods.length) {
-      // בניית שורות הרשימה מראש כדי לדעת את הגובה הכולל
-      ctx.font = '700 24px Heebo, Arial';
-      const perLine = 2;
-      let line = '', cnt = 0, linesOut = [];
+    const perLine = 2;
+    let linesOut = [];
+    { let line = '', cnt = 0;
       prods.forEach(p => {
         const item = p.name + (p.barcode ? ' (' + p.barcode + ')' : '');
         line = line ? line + '  ·  ' + item : item;
@@ -2836,26 +2824,53 @@ function drawSignCanvas() {
         if (cnt >= perLine) { linesOut.push(line); line = ''; cnt = 0; }
       });
       if (line) linesOut.push(line);
-      const shown = linesOut.slice(0, 3);
-      const hasMore = linesOut.length > 3;
-      const moreCount = Math.max(0, prods.length - perLine * 3);
-      const blockH = 34 /*כותרת*/ + shown.length * 28 + (hasMore ? 24 : 0) + 16 /*מרווח תחתון*/;
-      // הצמדה לתחתית המשבצת, אך לא לפני סוף התוכן העליון
-      let ly = Math.max(y + 18, y0 + slotH - blockH);
+    }
+    // רמת צפיפות: 0=רגיל (עד 2 שורות), 1=דחוס (3), 2=דחוס מאוד (4+)
+    const density = linesOut.length <= 2 ? 0 : (linesOut.length === 3 ? 1 : 2);
+    const D = [
+      { title: 58, titleLH: 62, big: 96, bigPad: 26, bigAfter: 44, note: 30, listHead: 24, list: 24, listSmall: 19, listLH: 28, topPad: 78 },
+      { title: 52, titleLH: 55, big: 84, bigPad: 18, bigAfter: 34, note: 26, listHead: 22, list: 21, listSmall: 17, listLH: 25, topPad: 68 },
+      { title: 42, titleLH: 45, big: 62, bigPad: 8, bigAfter: 20, note: 21, listHead: 19, list: 18, listSmall: 15, listLH: 21, topPad: 52 }
+    ][density];
+    // ברמת הצפיפות הגבוהה: 4 שורות רשימה, אבל אם יש גם מחיר וגם הערה — 3 (שלא יחרוג)
+    const maxLines = density === 2 ? ((signLineText(s) && s.note) ? 3 : 4) : 3;
+    const shown = linesOut.slice(0, maxLines);
+    const hasMore = linesOut.length > maxLines;
+    const moreCount = Math.max(0, prods.length - perLine * maxLines);
+    let y = y0 + D.topPad;
+    // כותרת — במצב הדחוס ביותר: שורה אחת בלבד (עם … אם ארוכה)
+    ctx.fillStyle = '#0f172a'; ctx.font = '900 ' + D.title + 'px Heebo, Arial';
+    let titleLines = signWrapText(ctx, s.title || '', x1 - x0 - 80).slice(0, density === 2 ? 1 : 2);
+    if (density === 2) {
+      const full = signWrapText(ctx, s.title || '', x1 - x0 - 80);
+      if (full.length > 1) titleLines = [titleLines[0].replace(/\s+\S*$/, '') + '…'];
+    }
+    titleLines.forEach(ln => { ctx.fillText(ln, cx, y); y += D.titleLH; });
+    // שורת המבצע (הגדולה)
+    const big = signLineText(s);
+    if (big) { ctx.fillStyle = '#e11d48'; ctx.font = '900 ' + D.big + 'px Heebo, Arial'; y += D.bigPad; ctx.fillText(big, cx, y); y += D.bigAfter; }
+    // הערה
+    if (s.note) { ctx.fillStyle = '#475569'; ctx.font = '700 ' + D.note + 'px Heebo, Arial'; y += 6; ctx.fillText('* ' + s.note, cx, y); y += 14; }
+    // בלוק הרשימה — מוצמד לתחתית, לעולם לא חורג מהמסגרת
+    if (prods.length) {
+      const headH = D.listHead + 16;
+      const blockH = headH + shown.length * D.listLH + (hasMore ? D.listLH - 4 : 0) + 14;
+      const innerBottom = y0 + slotH - 22; // שוליים בטוחים מעל המסגרת הפנימית
+      let ly = Math.max(y + 12, innerBottom - blockH);
       // קו מפריד עדין
       ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.moveTo(x0 + 70, ly - 10); ctx.lineTo(x1 - 70, ly - 10); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x0 + 70, ly - 8); ctx.lineTo(x1 - 70, ly - 8); ctx.stroke();
       // כותרת הרשימה
-      ctx.fillStyle = '#0f172a'; ctx.font = '900 24px Heebo, Arial';
-      ctx.fillText('המוצרים המשתתפים במבצע:', cx, ly + 16); ly += 44;
+      ctx.fillStyle = '#0f172a'; ctx.font = '900 ' + D.listHead + 'px Heebo, Arial';
+      ctx.fillText('המוצרים המשתתפים במבצע:', cx, ly + D.listHead - 6); ly += headH;
       // הרשימה
       ctx.fillStyle = '#64748b';
       shown.forEach(ln => {
-        ctx.font = '700 24px Heebo, Arial';
-        if (ctx.measureText(ln).width > x1 - x0 - 60) ctx.font = '700 19px Heebo, Arial';
-        ctx.fillText(ln, cx, ly); ly += 28;
+        ctx.font = '700 ' + D.list + 'px Heebo, Arial';
+        if (ctx.measureText(ln).width > x1 - x0 - 60) ctx.font = '700 ' + D.listSmall + 'px Heebo, Arial';
+        ctx.fillText(ln, cx, ly); ly += D.listLH;
       });
-      if (hasMore) { ctx.font = '700 19px Heebo, Arial'; ctx.fillText('ועוד ' + moreCount + ' מוצרים…', cx, ly); }
+      if (hasMore) { ctx.font = '700 ' + D.listSmall + 'px Heebo, Arial'; ctx.fillText('ועוד ' + moreCount + ' מוצרים…', cx, ly); }
     }
   }
   // משבצות ריקות — מסגרת עדינה מקווקוות
