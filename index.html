@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v52</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v55</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -1919,6 +1919,27 @@ function handleReceivingScan(code) {
   if (p.price == null || p.price === '') { promptSetPrice(p); return; }
   promptQty(p, 'receipt');
 }
+// הקלדה ידנית של סיומת ברקוד — כשהסורק לא קורא
+function refreshReceivingDigits(qRaw) {
+  const box = $('rcDigitsList'); if (!box) return;
+  const q = (qRaw || '').replace(/[^0-9]/g, '');
+  if (q.length < 4) { box.innerHTML = q.length ? '<div class="text-center text-slate-300 py-1 text-[11px] font-bold">הקלד לפחות 4 ספרות</div>' : ''; return; }
+  const list = products.filter(p => (p.barcode || '').endsWith(q)).slice(0, 6);
+  if (!list.length) { box.innerHTML = '<div class="text-center text-slate-400 py-2 text-xs font-bold">לא נמצא מוצר שהברקוד שלו מסתיים ב-' + q + '</div>'; return; }
+  box.innerHTML = list.map(p => {
+    const b = p.barcode || '';
+    const pre = b.slice(0, b.length - q.length);
+    return '<button data-role="rc-digits-pick" data-id="' + p.id + '" class="btn-tap w-full flex items-center justify-between gap-2 p-2.5 rounded-lg border border-slate-100 bg-slate-50"><div class="min-w-0 text-right"><div class="font-bold text-slate-700 text-sm truncate">' + (p.name || '(ללא שם)') + '</div><div class="text-[11px] text-slate-400" dir="ltr">' + pre + '<b class="text-blue-600">' + q + '</b></div></div><i class="fa-solid fa-plus text-blue-600"></i></button>';
+  }).join('');
+}
+function receivingDigitsPick(pid) {
+  const p = products.find(x => x.id === pid); if (!p) return;
+  const inp = $('rcDigits'); if (inp) inp.value = '';
+  const box = $('rcDigitsList'); if (box) box.innerHTML = '';
+  buzz(30);
+  if (p.price == null || p.price === '') { promptSetPrice(p); return; }
+  promptQty(p, 'receipt');
+}
 function addScannedToReceipt(p) {
   const ex = receiptList.find(it => it.productId === p.id);
   if (ex) ex.qty += 1;
@@ -2029,7 +2050,12 @@ function renderReceiving() {
         '<div class="flex items-center gap-1.5 shrink-0"><button data-role="rc-notes-edit" class="btn-tap text-xs font-bold text-blue-600 bg-blue-50 px-2.5 py-2 rounded-lg"><i class="fa-solid fa-pen"></i> ערוך</button><button data-role="rc-cancel" class="btn-tap text-xs font-bold text-red-500 bg-red-50 px-2.5 py-2 rounded-lg"><i class="fa-solid fa-xmark"></i></button></div>' +
       '</div>';
   app.innerHTML = banner + topButtons + noteBar +
-    '<button data-role="rc-scan" class="btn-tap w-full bg-blue-600 text-white rounded-2xl py-4 font-black text-lg flex items-center justify-center gap-3 shadow-lg mb-4"><i class="fa-solid fa-barcode text-2xl"></i> סרוק פריט לתעודה</button>' +
+    '<button data-role="rc-scan" class="btn-tap w-full bg-blue-600 text-white rounded-2xl py-4 font-black text-lg flex items-center justify-center gap-3 shadow-lg mb-2"><i class="fa-solid fa-barcode text-2xl"></i> סרוק פריט לתעודה</button>' +
+    '<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm mb-4">' +
+      '<div class="text-[11px] font-bold text-slate-400 mb-1.5"><i class="fa-solid fa-keyboard"></i> הסורק לא קורא? הקלד את הספרות האחרונות של הברקוד (6 מומלץ)</div>' +
+      '<input id="rcDigits" type="text" inputmode="numeric" placeholder="למשל: 693134" class="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-3 text-base font-black text-center outline-none focus:border-blue-500" dir="ltr">' +
+      '<div id="rcDigitsList" class="mt-2 space-y-1"></div>' +
+    '</div>' +
     '<div class="flex items-center justify-between px-1 mb-2"><div class="font-black text-slate-800">פריטים בתעודה</div><div id="rcCount" class="text-xs text-slate-400">' + receiptList.length + ' שורות</div></div>' +
     '<div id="rcListEl" class="space-y-2.5">' + (receiptList.length ? receiptList.map(buildReceiptRow).join('') : emptyReceiptHtml()) + '</div>' +
     receiptTotalsHtml(t);
@@ -2279,14 +2305,21 @@ function reconcileRowHtml(l) {
                : '<span class="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded line-through">מבצע ' + pct + '%</span>') +
     '<button data-role="rc-recon-promo" data-id="' + l.productId + '" class="btn-tap text-[10px] font-black px-2 py-0.5 rounded-lg border ' + (l.promoOn ? 'border-blue-200 text-blue-700 bg-blue-50' : 'border-emerald-200 text-emerald-700 bg-emerald-50') + '">' + (l.promoOn ? 'חשב בלי מבצע' : 'חשב עם מבצע') + '</button>' +
   '</div>') : '';
-  const checkBtn = '<button data-role="rc-recon-check" data-id="' + l.productId + '" class="btn-tap shrink-0 w-7 h-7 rounded-full flex items-center justify-center ' + (l.checked ? 'bg-emerald-500 text-white' : 'border-2 border-slate-300 text-transparent') + '"><i class="fa-solid fa-check text-xs"></i></button>';
-  return '<div data-rcard="' + l.productId + '" class="' + (l.checked ? 'bg-emerald-50' : 'bg-white') + ' rounded-2xl border ' + (diff !== 0 ? 'border-rose-200' : 'border-slate-200') + ' p-3 shadow-sm" data-id="' + l.productId + '">' +
-    '<div class="flex items-center justify-between gap-2 mb-2"><div class="flex items-center gap-2 min-w-0">' + checkBtn + '<div class="min-w-0"><div class="font-black text-slate-800 text-sm truncate">' + l.name + '</div>' +
+  return '<div data-rcard="' + l.productId + '" class="bg-white rounded-2xl border ' + (diff !== 0 ? 'border-rose-200' : 'border-slate-200') + ' p-3 shadow-sm" data-id="' + l.productId + '">' +
+    '<div class="flex items-center justify-between gap-2 mb-2"><div class="min-w-0"><div class="font-black text-slate-800 text-sm truncate">' + l.name + '</div>' +
       '<div class="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">₪<input data-role="rc-recon-price" data-id="' + l.productId + '" type="text" inputmode="decimal" value="' + (l.price != null ? l.price : '') + '" class="w-14 text-center border border-slate-200 rounded px-1 py-0.5 outline-none focus:border-blue-500"> ליח׳</div>' + promoUi +
-    '</div></div>' + tag + '</div>' +
+    '</div>' + tag + '</div>' +
     '<div class="flex items-center justify-between gap-2">' +
-      '<div class="text-sm text-slate-500 font-bold">התקבל: <span class="text-slate-800 font-black">' + received + '</span></div>' +
-      '<div class="flex items-center gap-1.5"><span class="text-slate-500 font-bold text-xs">בתעודה:</span>' +
+      '<span class="text-slate-500 font-bold text-xs">התקבל (בפועל):</span>' +
+      '<div class="flex items-center gap-1.5">' +
+        '<button data-role="rc-recon-recv-minus" data-id="' + l.productId + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-minus text-xs"></i></button>' +
+        '<input data-role="rc-recon-recv" data-id="' + l.productId + '" type="text" inputmode="numeric" value="' + received + '" class="w-12 h-8 text-center font-black border-2 ' + (diff !== 0 ? 'border-rose-300' : 'border-slate-200') + ' rounded-lg outline-none focus:border-blue-500">' +
+        '<button data-role="rc-recon-recv-plus" data-id="' + l.productId + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-plus text-xs"></i></button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="flex items-center justify-between gap-2 mt-1.5">' +
+      '<span class="text-slate-500 font-bold text-xs">בתעודה (בנייר):</span>' +
+      '<div class="flex items-center gap-1.5">' +
         '<button data-role="rc-recon-minus" data-id="' + l.productId + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-minus text-xs"></i></button>' +
         '<input data-role="rc-recon-note" data-id="' + l.productId + '" type="text" inputmode="numeric" value="' + noteQty + '" class="w-12 h-8 text-center font-black border-2 ' + (diff !== 0 ? 'border-rose-300' : 'border-slate-200') + ' rounded-lg outline-none focus:border-blue-500">' +
         '<button data-role="rc-recon-plus" data-id="' + l.productId + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-plus text-xs"></i></button>' +
@@ -2299,13 +2332,12 @@ function renderReconcile() {
   const note = receiptNoteTotal;
   const gap = reconcileGap();
   app.innerHTML =
-    '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">השוואת תעודה</h2><div class="text-xs text-slate-400 mt-0.5">עבור מוצר-מוצר, סמן ✓ כל מה שבדקת, ותקן כמות/מחיר בשורות חריגות</div><div class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-1.5 font-bold"><i class="fa-solid fa-circle-info"></i> ה-✓ הוא רק סימון "בדקתי" — ההפרשים (חסר/עודף) נקבעים לפי הכמויות בלבד: "התקבל" = מה שבידיים, "בתעודה" = מה שבנייר</div></div>' +
+    '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">השוואת תעודה</h2><div class="text-xs text-slate-400 mt-0.5">תקן כמויות ומחירים בשורות החריגות — "התקבל" = מה שבידיים, "בתעודה" = מה שבנייר</div></div>' +
     '<div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-sm mb-3">' +
       '<div class="flex justify-between text-sm font-bold text-amber-900"><span>סכום התעודה (ללא מע״מ)</span><span>₪' + fmtMoney(note || 0) + '</span></div>' +
       '<div class="flex justify-between text-sm font-bold text-amber-900 mt-1"><span>שוחזר מהשורות</span><span id="rcReconNote">₪' + fmtMoney(reconcileNoteInc()) + '</span></div>' +
       '<div class="flex justify-between text-lg font-black mt-1.5 pt-1.5 border-t border-amber-200 ' + (Math.abs(gap) <= 1 ? 'text-emerald-700' : 'text-rose-700') + '"><span>הפרש שנותר</span><span id="rcGap">' + (gap > 0 ? 'חסר ' : (gap < 0 ? 'עודף ' : '')) + '₪' + fmtMoney(Math.abs(gap)) + '</span></div>' +
       '<div class="text-[11px] text-amber-900/70 mt-1">תשלם בפועל (מה שהתקבל): <span id="rcRecvInc">₪' + fmtMoney(reconcileReceivedInc()) + '</span></div>' +
-      '<div id="rcProgress" class="mt-2 pt-2 border-t border-amber-200 text-xs font-black text-amber-900/70">' + reconcileProgressHtml() + '</div>' +
     '</div>' +
     '<div class="space-y-2 mb-3">' + reconcileData.map(reconcileRowHtml).join('') + '</div>' +
     '<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm mb-24">' +
@@ -2341,6 +2373,15 @@ function reconcileStepNote(productId, delta) {
   const l = (reconcileData || []).find(x => x.productId === productId); if (!l) return;
   l.noteQty = Math.max(0, (Number(l.noteQty) || 0) + delta); refreshReconcile();
 }
+function reconcileStepRecv(productId, delta) {
+  const l = (reconcileData || []).find(x => x.productId === productId); if (!l) return;
+  l.received = Math.max(0, (Number(l.received) || 0) + delta); refreshReconcile();
+}
+function reconcileSetRecvLive(productId, val) {
+  const l = (reconcileData || []).find(x => x.productId === productId); if (!l) return;
+  let q = parseInt((val || '').toString().replace(/[^0-9]/g, ''), 10); if (isNaN(q) || q < 0) q = 0;
+  l.received = q; refreshReconcileHeader();
+}
 function reconcileSetPriceLive(productId, val) {
   const l = (reconcileData || []).find(x => x.productId === productId); if (!l) return;
   const n = parseFloat((val || '').toString().replace(/[^0-9.]/g, '')); l.price = isFinite(n) ? n : 0; refreshReconcileHeader();
@@ -2348,10 +2389,6 @@ function reconcileSetPriceLive(productId, val) {
 function saveReconciledReceipt(opts) {
   opts = opts || {};
   if (!reconcileData) return;
-  if (!opts.skipChecked) {
-    const unchecked = reconcileSaveable().filter(l => !l.checked).length;
-    if (unchecked > 0) { showConfirm('לא סימנת הכל', 'לא סימנת ' + unchecked + ' מוצרים כ"נבדק". ייתכן ששכחת לבדוק אותם — להמשיך בכל זאת?', 'המשך', function () { saveReconciledReceipt({ skipChecked: true }); }); return; }
-  }
   if (!opts.skipGap && receiptNoteTotal != null) {
     const g = reconcileGap();
     if (Math.abs(g) > 1) { showConfirm('הפרש לא מוסבר', 'עדיין נשאר הפרש של ₪' + fmtMoney(Math.abs(g)) + ' (' + (g > 0 ? 'חסר' : 'עודף') + ') שלא שובץ לאף פריט. אם פריט לא הגיע — הוסף אותו למטה. לשמור בכל זאת?', 'שמור בכל זאת', function () { saveReconciledReceipt({ skipChecked: true, skipGap: true }); }); return; }
@@ -2446,7 +2483,12 @@ function renderReceiptFix() {
       '<div class="flex justify-between text-sm font-bold text-slate-800 mt-1"><span>סה"כ שהתקבל (ללא מע"מ)</span><span id="rfInc">₪' + fmtMoney(t.ex) + '</span></div>' +
       '<div id="rfStatus" class="mt-1.5 pt-1.5 border-t border-slate-100 text-sm font-black ' + (open ? 'text-rose-600' : 'text-emerald-600') + '">' + (open ? '<i class="fa-solid fa-triangle-exclamation"></i> ' + open + ' שורות עם הפרש' : '<i class="fa-solid fa-circle-check"></i> הכל תואם — אפשר לסגור') + '</div>' +
     '</div>' +
-    '<div class="space-y-2 mb-24">' + (receiptFix.items || []).map(receiptFixRowHtml).join('') + '</div>' +
+    '<div class="space-y-2 mb-3">' + (receiptFix.items || []).map(receiptFixRowHtml).join('') + '</div>' +
+    '<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm mb-24">' +
+      '<div class="text-xs font-bold text-slate-500 mb-1.5"><i class="fa-solid fa-circle-plus"></i> פריט שבתעודה אך לא הגיע?</div>' +
+      '<div class="relative"><i class="fa-solid fa-magnifying-glass absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i><input id="rfAddSearch" type="text" placeholder="חפש מוצר להוספה..." class="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 pr-8 pl-3 text-sm font-bold outline-none focus:border-blue-500"></div>' +
+      '<div id="rfAddList" class="mt-2 space-y-1"></div>' +
+    '</div>' +
     '<div class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 p-3 flex gap-2 z-40">' +
       '<button data-role="rc-fix-cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">ביטול</button>' +
       '<button data-role="rc-fix-save" class="btn-tap flex-1 py-3 rounded-xl font-black bg-blue-600 text-white">שמור שינויים</button>' +
@@ -2462,6 +2504,21 @@ function refreshReceiptFixHeader() {
 function receiptFixStepQty(productId, delta) {
   const l = (receiptFix.items || []).find(x => x.productId === productId); if (!l) return;
   l.qty = Math.max(0, (Number(l.qty) || 0) + delta); renderReceiptFix();
+}
+function refreshReceiptFixAddList(q) {
+  const box = $('rfAddList'); if (!box || !receiptFix) return;
+  q = (q || '').trim();
+  if (!q) { box.innerHTML = ''; return; }
+  const have = {}; (receiptFix.items || []).forEach(l => have[l.productId] = 1);
+  const list = products.filter(p => !have[p.id] && ((p.name || '').includes(q) || (p.barcode || '').includes(q))).slice(0, 8);
+  box.innerHTML = list.map(p => '<button data-role="rf-add-item" data-id="' + p.id + '" class="btn-tap w-full flex items-center justify-between gap-2 p-2 rounded-lg border border-slate-100 bg-slate-50"><span class="font-bold text-slate-700 text-sm truncate">' + (p.name || '(ללא שם)') + '</span><i class="fa-solid fa-plus text-blue-600"></i></button>').join('') || '<div class="text-center text-slate-400 py-2 text-xs">לא נמצא</div>';
+}
+function receiptFixAddItem(pid) {
+  if (!receiptFix || (receiptFix.items || []).find(l => l.productId === pid)) return;
+  const p = products.find(x => x.id === pid); if (!p) return;
+  const bp = r2(Number(p.price) || 0);
+  receiptFix.items.push({ productId: p.id, name: p.name, barcode: p.barcode || '', qty: 0, noteQty: 1, unitPrice: bp, basePrice: bp, promoPct: 0, promoOn: false });
+  renderReceiptFix();
 }
 function receiptFixStepNote(productId, delta) {
   const l = (receiptFix.items || []).find(x => x.productId === productId); if (!l) return;
@@ -3496,7 +3553,10 @@ app.addEventListener('input', (e) => {
   if (t.id === 'promoMin' || t.id === 'promoCarton') { updatePromoHint(); return; }
   if (role === 'rc-qty') { setReceiptQty(t.dataset.id, t.value); return; }
   if (t.id === 'rcAddSearch') { refreshReconcileAddList(t.value); return; }
+  if (t.id === 'rfAddSearch') { refreshReceiptFixAddList(t.value); return; }
+  if (t.id === 'rcDigits') { refreshReceivingDigits(t.value); return; }
   if (role === 'rc-recon-note') { reconcileSetNoteLive(t.dataset.id, t.value); return; }
+  if (role === 'rc-recon-recv') { reconcileSetRecvLive(t.dataset.id, t.value); return; }
   if (role === 'rc-recon-price') { reconcileSetPriceLive(t.dataset.id, t.value); return; }
   if (role === 'rc-fix-qty') { receiptFixSetQtyLive(t.dataset.id, t.value); return; }
   if (role === 'rc-fix-note') { receiptFixSetNoteLive(t.dataset.id, t.value); return; }
@@ -3580,9 +3640,13 @@ app.addEventListener('click', (e) => {
   else if (role === 'rc-notes-done') { const v = parseNoteVal(($('rcNoteInput') || {}).value); if (v != null) receiptNotes.push(v); recomputeNoteTotal(); editingNotes = false; saveReceiptDraft(); refreshReceipt(); }
   else if (role === 'rc-recon-minus') reconcileStepNote(id, -1);
   else if (role === 'rc-recon-plus') reconcileStepNote(id, 1);
+  else if (role === 'rc-recon-recv-minus') reconcileStepRecv(id, -1);
+  else if (role === 'rc-recon-recv-plus') reconcileStepRecv(id, 1);
   else if (role === 'rc-recon-promo') reconcileTogglePromo(id);
   else if (role === 'rc-recon-check') reconcileToggleCheck(id);
   else if (role === 'rc-add-item') reconcileAddItem(id);
+  else if (role === 'rf-add-item') receiptFixAddItem(id);
+  else if (role === 'rc-digits-pick') receivingDigitsPick(id);
   else if (role === 'rc-recon-cancel') { reconcileData = null; setView('receiving'); }
   else if (role === 'rc-recon-save') saveReconciledReceipt();
   else if (role === 'rc-fix-open') openReceiptFix(id);
