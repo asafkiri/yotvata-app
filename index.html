@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v63</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v64</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -2318,6 +2318,7 @@ function detectiveSuggestions() {
     groups[key].items.push(l);
   });
   // הרחבה: כשחסר בנייר — ייתכן שמוצר שלם לא נסרק בכלל, סורקים גם את מאגר המוצרים
+  // מועמד מהמאגר (לא נסרק) חייב התאמה מדויקת לחלוטין — שם מרחב הניחושים גדול
   if (gap > 0) {
     const day = todayStr();
     const inRec = {}; (reconcileData || []).forEach(l => inRec[l.productId] = 1);
@@ -2332,13 +2333,16 @@ function detectiveSuggestions() {
       const qty = Math.round(absGap / price);
       if (qty < 1 || qty > 24) return;
       const diff = Math.abs(r2(qty * price) - absGap);
-      if (diff > TOL) return;
+      if (diff > 0.001) return;
       const key = price.toFixed(2) + '_' + qty;
       if (!groups[key]) groups[key] = { qty: qty, price: price, diff: diff, items: [] };
       groups[key].items.push({ productId: p.id, name: p.name, ext: true });
     });
   }
-  const list = Object.values(groups);
+  let list = Object.values(groups);
+  // אם קיימת התאמה מדויקת — מציגים רק אותה ומסתירים את כל ה"קרובים"
+  const exact = list.filter(g => g.diff <= 0.001);
+  if (exact.length) list = exact;
   list.forEach(g => g.items.sort((x, y) => (x.ext ? 1 : 0) - (y.ext ? 1 : 0)));
   list.sort((a, b) => (a.diff - b.diff) || ((a.items.some(i => !i.ext) ? 0 : 1) - (b.items.some(i => !i.ext) ? 0 : 1)));
   const top = list.slice(0, 4);
