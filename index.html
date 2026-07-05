@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v57</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v58</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -2276,12 +2276,30 @@ function openReconcile() {
 function reconcileReceivedInc() { let ex = 0; (reconcileData || []).forEach(l => ex += (Number(l.price) || 0) * (Number(l.received) || 0)); return r2(ex); }
 function reconcileNoteInc() { let ex = 0; (reconcileData || []).forEach(l => ex += (Number(l.price) || 0) * (Number(l.noteQty) || 0)); return r2(ex); }
 function reconcileGap() { return r2((receiptNoteTotal || 0) - reconcileNoteInc()); }
+function reconcileAssigned() {
+  let sh = 0, ov = 0;
+  (reconcileData || []).forEach(l => {
+    const d = (Number(l.noteQty) || 0) - (Number(l.received) || 0);
+    const p = Number(l.price) || 0;
+    if (d > 0) sh += d * p; else if (d < 0) ov += (-d) * p;
+  });
+  return { sh: r2(sh), ov: r2(ov) };
+}
+function reconcileAssignedHtml() {
+  const a = reconcileAssigned();
+  if (!a.sh && !a.ov) return '';
+  const parts = [];
+  if (a.sh) parts.push('<span class="text-rose-700"><i class="fa-solid fa-arrow-down"></i> חוסר משויך: ₪' + fmtMoney(a.sh) + '</span>');
+  if (a.ov) parts.push('<span class="text-amber-700"><i class="fa-solid fa-arrow-up"></i> עודף משויך: ₪' + fmtMoney(a.ov) + '</span>');
+  return parts.join(' <span class="text-amber-900/40">·</span> ');
+}
 function refreshReconcile() { if (currentView === 'reconcile') renderReconcile(); }
 function refreshReconcileHeader() {
   const g = reconcileGap();
   const rn = $('rcReconNote'); if (rn) rn.textContent = '₪' + fmtMoney(reconcileNoteInc());
   const gp = $('rcGap'); if (gp) gp.textContent = (g > 0 ? 'חסר ' : (g < 0 ? 'עודף ' : '')) + '₪' + fmtMoney(Math.abs(g));
   const rv = $('rcRecvInc'); if (rv) rv.textContent = '₪' + fmtMoney(reconcileReceivedInc());
+  const as = $('rcAssigned'); if (as) as.innerHTML = reconcileAssignedHtml();
 }
 function reconcileTogglePromo(pid) {
   const l = (reconcileData || []).find(x => x.productId === pid);
@@ -2348,7 +2366,8 @@ function renderReconcile() {
     '<div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-sm mb-3">' +
       '<div class="flex justify-between text-sm font-bold text-amber-900"><span>סכום התעודה (ללא מע״מ)</span><span>₪' + fmtMoney(note || 0) + '</span></div>' +
       '<div class="flex justify-between text-sm font-bold text-amber-900 mt-1"><span>שוחזר מהשורות</span><span id="rcReconNote">₪' + fmtMoney(reconcileNoteInc()) + '</span></div>' +
-      '<div class="flex justify-between text-lg font-black mt-1.5 pt-1.5 border-t border-amber-200 ' + (Math.abs(gap) <= 1 ? 'text-emerald-700' : 'text-rose-700') + '"><span>הפרש שנותר</span><span id="rcGap">' + (gap > 0 ? 'חסר ' : (gap < 0 ? 'עודף ' : '')) + '₪' + fmtMoney(Math.abs(gap)) + '</span></div>' +
+      '<div class="flex justify-between text-lg font-black mt-1.5 pt-1.5 border-t border-amber-200 ' + (Math.abs(gap) <= 1 ? 'text-emerald-700' : 'text-rose-700') + '"><span>הפרש שלא שויך</span><span id="rcGap">' + (gap > 0 ? 'חסר ' : (gap < 0 ? 'עודף ' : '')) + '₪' + fmtMoney(Math.abs(gap)) + '</span></div>' +
+      '<div id="rcAssigned" class="text-xs font-black mt-1">' + reconcileAssignedHtml() + '</div>' +
       '<div class="text-[11px] text-amber-900/70 mt-1">תשלם בפועל (מה שהתקבל): <span id="rcRecvInc">₪' + fmtMoney(reconcileReceivedInc()) + '</span></div>' +
     '</div>' +
     '<div class="space-y-2 mb-3">' + reconcileData.map(reconcileRowHtml).join('') + '</div>' +
