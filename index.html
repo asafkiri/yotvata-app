@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v50</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v52</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -2299,7 +2299,7 @@ function renderReconcile() {
   const note = receiptNoteTotal;
   const gap = reconcileGap();
   app.innerHTML =
-    '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">השוואת תעודה</h2><div class="text-xs text-slate-400 mt-0.5">עבור מוצר-מוצר, סמן ✓ כל מה שבדקת, ותקן כמות/מחיר בשורות חריגות</div></div>' +
+    '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">השוואת תעודה</h2><div class="text-xs text-slate-400 mt-0.5">עבור מוצר-מוצר, סמן ✓ כל מה שבדקת, ותקן כמות/מחיר בשורות חריגות</div><div class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-1.5 font-bold"><i class="fa-solid fa-circle-info"></i> ה-✓ הוא רק סימון "בדקתי" — ההפרשים (חסר/עודף) נקבעים לפי הכמויות בלבד: "התקבל" = מה שבידיים, "בתעודה" = מה שבנייר</div></div>' +
     '<div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-sm mb-3">' +
       '<div class="flex justify-between text-sm font-bold text-amber-900"><span>סכום התעודה (ללא מע״מ)</span><span>₪' + fmtMoney(note || 0) + '</span></div>' +
       '<div class="flex justify-between text-sm font-bold text-amber-900 mt-1"><span>שוחזר מהשורות</span><span id="rcReconNote">₪' + fmtMoney(reconcileNoteInc()) + '</span></div>' +
@@ -2418,11 +2418,19 @@ function receiptFixRowHtml(l) {
       '<div class="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">₪<input data-role="rc-fix-price" data-id="' + l.productId + '" type="text" inputmode="decimal" value="' + (l.unitPrice != null ? l.unitPrice : '') + '" class="w-14 text-center border border-slate-200 rounded px-1 py-0.5 outline-none focus:border-blue-500"> ליח׳</div>' + promoUi +
     '</div>' + tag + '</div>' +
     '<div class="flex items-center justify-between gap-2">' +
-      '<div class="text-sm text-slate-500 font-bold">בתעודה: <span class="text-slate-800 font-black">' + noteQty + '</span></div>' +
-      '<div class="flex items-center gap-1.5"><span class="text-slate-500 font-bold text-xs">התקבל:</span>' +
+      '<span class="text-slate-500 font-bold text-xs">התקבל (בפועל):</span>' +
+      '<div class="flex items-center gap-1.5">' +
         '<button data-role="rc-fix-minus" data-id="' + l.productId + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-minus text-xs"></i></button>' +
         '<input data-role="rc-fix-qty" data-id="' + l.productId + '" type="text" inputmode="numeric" value="' + qty + '" class="w-12 h-8 text-center font-black border-2 ' + (d !== 0 ? 'border-rose-300' : 'border-slate-200') + ' rounded-lg outline-none focus:border-blue-500">' +
         '<button data-role="rc-fix-plus" data-id="' + l.productId + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-plus text-xs"></i></button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="flex items-center justify-between gap-2 mt-1.5">' +
+      '<span class="text-slate-500 font-bold text-xs">בתעודה (בנייר):</span>' +
+      '<div class="flex items-center gap-1.5">' +
+        '<button data-role="rc-fix-note-minus" data-id="' + l.productId + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-minus text-xs"></i></button>' +
+        '<input data-role="rc-fix-note" data-id="' + l.productId + '" type="text" inputmode="numeric" value="' + noteQty + '" class="w-12 h-8 text-center font-black border-2 ' + (d !== 0 ? 'border-rose-300' : 'border-slate-200') + ' rounded-lg outline-none focus:border-blue-500">' +
+        '<button data-role="rc-fix-note-plus" data-id="' + l.productId + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-plus text-xs"></i></button>' +
       '</div>' +
     '</div>' +
   '</div>';
@@ -2432,7 +2440,7 @@ function renderReceiptFix() {
   const t = receiptFixTotals();
   const open = receiptFixOpenLines().length;
   app.innerHTML =
-    '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">עריכת תעודה</h2><div class="text-xs text-slate-400 mt-0.5">עדכן כמות שהתקבלה, מחיר ליחידה, או בטל מבצע — הסכומים יתעדכנו אוטומטית</div></div>' +
+    '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">עריכת תעודה</h2><div class="text-xs text-slate-400 mt-0.5">עדכן כמה התקבל בפועל וכמה רשום בתעודת הנייר — ההפרש (חסר/עודף) יחושב אוטומטית</div></div>' +
     '<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm mb-3">' +
       (receiptFix.noteTotalInc != null ? '<div class="flex justify-between text-sm font-bold text-slate-600"><span>סכום התעודה (ללא מע״מ)</span><span>₪' + fmtMoney(receiptFix.noteTotalInc) + '</span></div>' : '') +
       '<div class="flex justify-between text-sm font-bold text-slate-800 mt-1"><span>סה"כ שהתקבל (ללא מע"מ)</span><span id="rfInc">₪' + fmtMoney(t.ex) + '</span></div>' +
@@ -2454,6 +2462,15 @@ function refreshReceiptFixHeader() {
 function receiptFixStepQty(productId, delta) {
   const l = (receiptFix.items || []).find(x => x.productId === productId); if (!l) return;
   l.qty = Math.max(0, (Number(l.qty) || 0) + delta); renderReceiptFix();
+}
+function receiptFixStepNote(productId, delta) {
+  const l = (receiptFix.items || []).find(x => x.productId === productId); if (!l) return;
+  l.noteQty = Math.max(0, (Number(l.noteQty) || 0) + delta); renderReceiptFix();
+}
+function receiptFixSetNoteLive(productId, val) {
+  const l = (receiptFix.items || []).find(x => x.productId === productId); if (!l) return;
+  let q = parseInt((val || '').toString().replace(/[^0-9]/g, ''), 10); if (isNaN(q) || q < 0) q = 0;
+  l.noteQty = q; refreshReceiptFixHeader();
 }
 function receiptFixSetQtyLive(productId, val) {
   const l = (receiptFix.items || []).find(x => x.productId === productId); if (!l) return;
@@ -3482,6 +3499,7 @@ app.addEventListener('input', (e) => {
   if (role === 'rc-recon-note') { reconcileSetNoteLive(t.dataset.id, t.value); return; }
   if (role === 'rc-recon-price') { reconcileSetPriceLive(t.dataset.id, t.value); return; }
   if (role === 'rc-fix-qty') { receiptFixSetQtyLive(t.dataset.id, t.value); return; }
+  if (role === 'rc-fix-note') { receiptFixSetNoteLive(t.dataset.id, t.value); return; }
   if (role === 'rc-fix-price') { receiptFixSetPriceLive(t.dataset.id, t.value); return; }
   if (role === 'rv-note') { rvSetNoteLive(parseInt(t.dataset.id, 10), t.value); return; }
   if (role === 'rv-price') { rvSetPriceLive(parseInt(t.dataset.id, 10), t.value); return; }
@@ -3570,6 +3588,8 @@ app.addEventListener('click', (e) => {
   else if (role === 'rc-fix-open') openReceiptFix(id);
   else if (role === 'rc-fix-minus') receiptFixStepQty(id, -1);
   else if (role === 'rc-fix-plus') receiptFixStepQty(id, 1);
+  else if (role === 'rc-fix-note-minus') receiptFixStepNote(id, -1);
+  else if (role === 'rc-fix-note-plus') receiptFixStepNote(id, 1);
   else if (role === 'rc-fix-promo') receiptFixTogglePromo(id);
   else if (role === 'rc-fix-cancel') { receiptFix = null; setView('receiptsHistory'); }
   else if (role === 'rc-fix-save') saveReceiptFix();
