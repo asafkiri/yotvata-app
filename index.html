@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v76</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v77</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -2309,7 +2309,7 @@ function openReconcile() {
   });
   // מיון חד-פעמי בפתיחה: שורות חריגות (חסר/עודף) למעלה — לא ממוין מחדש תוך כדי עבודה
   reconcileData.sort((a, b) => ((Number(a.noteQty) || 0) === (Number(a.received) || 0) ? 1 : 0) - ((Number(b.noteQty) || 0) === (Number(b.received) || 0) ? 1 : 0));
-  detectiveOpen = false; noteCheckOpen = false; noteCheckAuto = false; noteCheckRows = []; noteCheckRes = null; reconcileCheckMode = false; noteCheckQtyMode = false;
+  detectiveOpen = false; noteCheckOpen = false; noteCheckAuto = false; noteCheckRows = []; noteCheckRes = null; reconcileCheckMode = false; noteCheckQtyMode = false; rcStep = null;
   setView('reconcile');
 }
 function reconcileReceivedInc() { let ex = 0; (reconcileData || []).forEach(l => ex += (Number(l.price) || 0) * (Number(l.received) || 0)); return r2(ex); }
@@ -2610,38 +2610,127 @@ function reconcileRowHtml(l) {
     '</div>' +
   '</div>';
 }
+// ===== בדיקת תעודה — זרימה מודרכת (שלב אחד גלוי בכל רגע) =====
+// שלבים: 'detective' (הבלש בטוח) → 'barcodes' (הזנת ברקודים) → 'quantities' (כמויות) → 'balanced'
+let rcStep = null;
+function reconcilePriceEditHtml(l) {
+  return '<span class="text-[11px] text-slate-400">₪<input data-role="rc-recon-price" data-id="' + l.productId + '" type="text" inputmode="decimal" value="' + (l.price != null ? l.price : '') + '" class="w-14 text-center border border-slate-200 rounded px-1 py-0.5 outline-none focus:border-blue-500"> ליח׳</span>';
+}
 function renderReconcile() {
   if (!reconcileData) { setView('receiving'); return; }
   const note = receiptNoteTotal;
   const gap = reconcileGap();
-  // הפרש ללא התאמה ודאית של הבלש → פותחים אוטומטית את בדיקת התעודה המלאה (פעם אחת)
-  if (!noteCheckAuto && Math.abs(gap) > 1) {
-    const ds = detectiveSuggestions();
-    if (!ds || !ds.certain) noteCheckOpen = true;
-    noteCheckAuto = true;
+  const absGap = Math.abs(gap);
+  const dir = gap > 0 ? 'חסר' : 'עודף';
+
+  // קביעת השלב אוטומטית לפי המצב (פעם ראשונה)
+  if (rcStep === null) {
+    if (absGap <= 1) rcStep = 'balanced';
+    else {
+      const ds = detectiveSuggestions();
+      rcStep = (ds && ds.certain) ? 'detective' : 'barcodes';
+    }
   }
-  app.innerHTML =
-    '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">השוואת תעודה</h2><div class="text-xs text-slate-400 mt-0.5">תקן כמויות ומחירים בשורות החריגות — "התקבל" = מה שבידיים, "בתעודה" = מה שבנייר</div></div>' +
-    '<div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-sm mb-3">' +
-      '<div class="flex justify-between text-sm font-bold text-amber-900"><span>סכום התעודה (ללא מע״מ)</span><span>₪' + fmtMoney(note || 0) + '</span></div>' +
-      '<div class="flex justify-between text-sm font-bold text-amber-900 mt-1"><span>שוחזר מהשורות</span><span id="rcReconNote">₪' + fmtMoney(reconcileNoteInc()) + '</span></div>' +
-      '<div class="flex justify-between text-lg font-black mt-1.5 pt-1.5 border-t border-amber-200 ' + (Math.abs(gap) <= 1 ? 'text-emerald-700' : 'text-rose-700') + '"><span>הפרש שלא שויך</span><span id="rcGap">' + (gap > 0 ? 'חסר ' : (gap < 0 ? 'עודף ' : '')) + '₪' + fmtMoney(Math.abs(gap)) + '</span></div>' +
-      '<div id="rcAssigned" class="text-xs font-black mt-1">' + reconcileAssignedHtml() + '</div>' +
-      (reconcileCheckMode ? '<div id="rcProgress" class="mt-2 pt-2 border-t border-amber-200 text-xs font-black text-amber-900/70">' + reconcileProgressHtml() + '</div>' : '') +
-      '<div class="text-[11px] text-amber-900/70 mt-1">תשלם בפועל (מה שהתקבל): <span id="rcRecvInc">₪' + fmtMoney(reconcileReceivedInc()) + '</span></div>' +
-    '</div>' +
-    detectiveHtml() +
-    noteCheckHtml(gap) +
-    '<div class="space-y-2 mb-3">' + reconcileData.map(reconcileRowHtml).join('') + '</div>' +
-    '<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm mb-24">' +
-      '<div class="text-xs font-bold text-slate-500 mb-1.5"><i class="fa-solid fa-circle-plus"></i> פריט שבתעודה אך לא הגיע?</div>' +
-      '<div class="relative"><i class="fa-solid fa-magnifying-glass absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i><input id="rcAddSearch" type="text" placeholder="שם מוצר או ספרות אחרונות של ברקוד..." class="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 pr-8 pl-3 text-sm font-bold outline-none focus:border-blue-500"></div>' +
-      '<div id="rcAddList" class="mt-2 space-y-1"></div>' +
-    '</div>' +
-    '<div class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 p-3 flex gap-2 z-40">' +
-      '<button data-role="rc-recon-cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">חזור לסריקה</button>' +
-      '<button data-role="rc-recon-save" class="btn-tap flex-1 py-3 rounded-xl font-black bg-blue-600 text-white">שמור עם הפרשים</button>' +
+  // אם התאזן בכל שלב — עוברים ל"מאוזן"
+  if (absGap <= 1) rcStep = 'balanced';
+
+  const header = '<div class="px-1 py-1 mb-3"><h2 class="font-black text-2xl text-slate-800">בדיקת תעודה</h2></div>';
+
+  // סרגל סכומים תמידי
+  const summary = '<div class="rounded-2xl p-4 shadow-sm mb-3 ' + (absGap <= 1 ? 'bg-emerald-50 border border-emerald-200' : 'bg-amber-50 border border-amber-200') + '">' +
+    '<div class="flex justify-between text-sm font-bold ' + (absGap <= 1 ? 'text-emerald-900' : 'text-amber-900') + '"><span>תעודת הספק</span><span>₪' + fmtMoney(note || 0) + '</span></div>' +
+    '<div class="flex justify-between text-sm font-bold mt-1 ' + (absGap <= 1 ? 'text-emerald-900' : 'text-amber-900') + '"><span>נסרק בפועל</span><span>₪' + fmtMoney(reconcileReceivedInc()) + '</span></div>' +
+    '<div class="flex justify-between text-lg font-black mt-1.5 pt-1.5 border-t ' + (absGap <= 1 ? 'border-emerald-200 text-emerald-700' : 'border-amber-200 text-rose-700') + '"><span>' + (absGap <= 1 ? 'מאוזן' : dir) + '</span><span>' + (absGap <= 1 ? '✓' : '₪' + fmtMoney(absGap)) + '</span></div>' +
+  '</div>';
+
+  let body = '';
+
+  if (rcStep === 'balanced') {
+    body = '<div class="bg-white rounded-2xl border-2 border-emerald-200 p-6 text-center shadow-sm mb-24">' +
+      '<div class="text-5xl mb-2">✅</div>' +
+      '<div class="font-black text-xl text-emerald-700 mb-1">התעודה מאוזנת</div>' +
+      '<div class="text-sm text-slate-500">כל מה שנסרק תואם לתעודת הספק</div>' +
     '</div>';
+  }
+  else if (rcStep === 'detective') {
+    const s = detectiveSuggestions();
+    if (!s || !s.certain) { rcStep = 'barcodes'; return renderReconcile(); }
+    const g = s.list[0], it = g.items[0];
+    body = '<div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 shadow-sm mb-24">' +
+      '<div class="text-xs font-black text-slate-400 mb-1">שלב 1 מתוך 3 · זיהוי אוטומטי</div>' +
+      '<div class="font-black text-lg text-slate-800 mb-2"><i class="fa-solid fa-lightbulb text-indigo-500"></i> נראה שזה הפריט:</div>' +
+      '<div class="bg-indigo-50 rounded-xl p-3 mb-3"><div class="font-black text-slate-800">' + dir + ': ' + g.qty + ' × ' + it.name + '</div><div class="text-xs text-slate-500 mt-0.5">₪' + fmtMoney(g.price) + ' ליח׳ · ₪' + fmtMoney(r2(g.qty * g.price)) + ' סה״כ' + detectiveTagsHtml(it) + '</div></div>' +
+      '<button data-role="detective-pick" data-g="0" data-id="' + it.productId + '" class="btn-tap w-full bg-indigo-600 text-white rounded-xl py-3 font-black mb-2"><i class="fa-solid fa-check"></i> כן, זה נכון — אשר</button>' +
+      '<button data-role="rc-goto-barcodes" class="btn-tap w-full bg-white border-2 border-slate-200 text-slate-600 rounded-xl py-2.5 font-black text-sm">לא — בדוק לפי הברקודים</button>' +
+    '</div>';
+  }
+  else if (rcStep === 'barcodes') {
+    if (!noteCheckRows.length || noteCheckRows[noteCheckRows.length - 1].d) noteCheckRows.push({ d: '', pid: null, st: 'empty' });
+    const filled = noteCheckRows.filter(r => r.st === 'ok').length;
+    body = '<div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 shadow-sm mb-24">' +
+      '<div class="text-xs font-black text-slate-400 mb-1">שלב 2 מתוך 3 · הקלדת ברקודים</div>' +
+      '<div class="font-black text-lg text-slate-800 mb-1"><i class="fa-solid fa-keyboard text-indigo-500"></i> עבור על תעודת הנייר</div>' +
+      '<div class="text-xs text-slate-500 mb-3 leading-relaxed">לכל שורה בנייר, הקלד את <b>4 הספרות האחרונות</b> של הברקוד. הזיהוי קופץ לבד לשורה הבאה. סיימת את כל הנייר? לחץ "השווה".</div>' +
+      '<div id="ncRows" class="space-y-1.5">' + noteCheckRows.map(ncRowHtml).join('') + '</div>' +
+      '<button data-role="nc-compare" class="btn-tap w-full bg-indigo-600 text-white rounded-xl py-3 font-black mt-3"><i class="fa-solid fa-scale-balanced"></i> השווה (' + filled + ' שורות הוקלדו)</button>' +
+      (noteCheckRes ? ncStepResultHtml() : '') +
+    '</div>';
+  }
+  else if (rcStep === 'quantities') {
+    body = '<div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 shadow-sm mb-24">' +
+      '<div class="text-xs font-black text-slate-400 mb-1">שלב 3 מתוך 3 · כמויות</div>' +
+      '<div class="font-black text-lg text-slate-800 mb-1"><i class="fa-solid fa-list-ol text-indigo-500"></i> כמה מכל מוצר?</div>' +
+      '<div class="text-xs text-slate-500 mb-3 leading-relaxed">ליד כל ברקוד הקלד את הכמות שרשומה בתעודת הנייר. השאר ריק אם המוצר לא בתעודה.</div>' +
+      '<div id="ncRows" class="space-y-1.5">' + noteCheckRows.filter(r => r.st === 'ok').map((r) => ncQtyRowHtml(r, noteCheckRows.indexOf(r))).join('') + '</div>' +
+      '<button data-role="nc-qty-apply" class="btn-tap w-full bg-indigo-600 text-white rounded-xl py-3 font-black mt-3"><i class="fa-solid fa-check"></i> החל כמויות</button>' +
+    '</div>';
+  }
+
+  // כפתור צדדי קטן: סגירה עם הפרש
+  const sideClose = (rcStep !== 'balanced') ?
+    '<div class="text-center mb-24 -mt-20 relative z-10"><button data-role="rc-recon-save" class="btn-tap text-xs font-bold text-slate-400 underline">סגור עם הפרש ואטפל אחר כך</button></div>' : '';
+
+  // סרגל תחתון
+  const footer = '<div class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 p-3 flex gap-2 z-40">' +
+    '<button data-role="rc-recon-cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">חזור לסריקה</button>' +
+    (rcStep === 'balanced'
+      ? '<button data-role="rc-recon-save" class="btn-tap flex-[2] py-3 rounded-xl font-black bg-emerald-600 text-white"><i class="fa-solid fa-check"></i> קלוט תעודה</button>'
+      : '<button data-role="rc-recon-save" class="btn-tap flex-[2] py-3 rounded-xl font-black bg-blue-600 text-white">קלוט תעודה</button>') +
+  '</div>';
+
+  app.innerHTML = header + summary + body + sideClose + footer;
+}
+// תוצאת ההשוואה בתוך שלב הברקודים — מודרך, בלי "הוסף כחסר"
+function ncStepResultHtml() {
+  const r = noteCheckRes; if (!r) return '';
+  let h = '<div class="mt-3 pt-3 border-t border-slate-100 space-y-2">';
+  if (!r.missing.length && !r.extra.length) {
+    h += '<div class="text-sm font-black text-emerald-700"><i class="fa-solid fa-circle-check"></i> כל הברקודים תואמים — ההפרש הוא בכמות של מוצר שכן נסרק.</div>' +
+         '<div class="text-xs text-slate-500">עבור לשלב הכמויות כדי לתקן את הכמות החורגת.</div>' +
+         '<button data-role="rc-goto-quantities" class="btn-tap w-full bg-indigo-600 text-white rounded-xl py-2.5 font-black text-sm">המשך לכמויות ←</button>';
+    return h + '</div>';
+  }
+  if (r.missing.length) {
+    h += '<div class="text-sm font-black text-rose-700">' + r.missing.length + ' מוצרים בנייר שלא נסרקו:</div>';
+    r.missing.forEach(p => { h += '<div class="bg-rose-50 border border-rose-200 rounded-lg p-2 text-xs font-bold text-rose-800">🔴 ' + p.name + '</div>'; });
+    h += '<button data-role="rc-goto-quantities" class="btn-tap w-full bg-indigo-600 text-white rounded-xl py-2.5 font-black text-sm mt-1">המשך — הזן כמויות ←</button>';
+  }
+  if (r.extra.length) {
+    h += '<div class="text-sm font-black text-amber-700 mt-2">' + r.extra.length + ' מוצרים שנסרקו ולא בנייר (עודף):</div>';
+    r.extra.forEach(l => { h += '<div class="flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-lg p-2"><span class="text-xs font-bold text-amber-800 min-w-0 truncate">🟠 ' + l.name + '</span><button data-role="nc-mark-extra" data-id="' + l.productId + '" class="btn-tap shrink-0 bg-amber-600 text-white text-xs font-black px-2.5 py-1.5 rounded-lg">סמן עודף</button></div>'; });
+  }
+  h += '</div>';
+  return h;
+}
+// שורת כמות בשלב הכמויות: ברקוד (נעול) + שם + מחיר לעריכה + שדה כמות
+function ncQtyRowHtml(r, i) {
+  const p = products.find(x => x.id === r.pid); if (!p) return '';
+  const inLine = (reconcileData || []).find(x => x.productId === r.pid);
+  const curQ = r.q != null ? r.q : (inLine && inLine.noteQty != null ? inLine.noteQty : '');
+  return '<div class="flex items-center gap-2 bg-slate-50 rounded-lg p-2">' +
+    '<input data-role="nc-qty" data-i="' + i + '" type="text" inputmode="numeric" value="' + curQ + '" placeholder="כמות" dir="ltr" class="w-16 h-11 text-center font-black border-2 border-indigo-300 bg-white rounded-lg outline-none focus:border-indigo-500">' +
+    '<div class="flex-1 min-w-0"><div class="font-bold text-slate-700 text-sm truncate">' + p.name + '</div><div class="text-[11px] text-slate-400">₪<input data-role="rc-qty-price" data-id="' + r.pid + '" type="text" inputmode="decimal" value="' + r2(Number(p.price) || 0) + '" class="w-12 text-center border border-slate-200 rounded px-1 outline-none focus:border-blue-500"> ליח׳</div></div>' +
+  '</div>';
 }
 // חיפוש להוספת פריט: הקלדת ספרות (4+) מחפשת לפי סוף הברקוד; אחרת לפי שם. תמיד מציג ברקוד בתוצאה
 function addListFilter(q, have) {
@@ -3955,6 +4044,13 @@ app.addEventListener('input', (e) => {
     return;
   }
   if (role === 'rc-recon-price') { reconcileSetPriceLive(t.dataset.id, t.value); return; }
+  if (role === 'rc-qty-price') {
+    const id = t.dataset.id; const v = parseFloat((t.value || '').replace(/[^0-9.]/g, ''));
+    const l = (reconcileData || []).find(x => x.productId === id);
+    const p = products.find(x => x.id === id);
+    if (!isNaN(v)) { if (l) l.price = r2(v); if (p) p.price = r2(v); }
+    return;
+  }
   if (role === 'rc-fix-qty') { receiptFixSetQtyLive(t.dataset.id, t.value); return; }
   if (role === 'rc-fix-note') { receiptFixSetNoteLive(t.dataset.id, t.value); return; }
   if (role === 'rc-fix-price') { receiptFixSetPriceLive(t.dataset.id, t.value); return; }
@@ -4050,6 +4146,20 @@ app.addEventListener('click', (e) => {
   else if (role === 'detective-pick') detectiveApply(parseInt(t.dataset.g, 10) || 0, id);
   else if (role === 'nc-toggle') { noteCheckOpen = !noteCheckOpen; if (currentView === 'reconcile') renderReconcile(); }
   else if (role === 'nc-compare') { noteCheckRes = ncCompute(); if (currentView === 'reconcile') renderReconcile(); }
+  else if (role === 'rc-goto-barcodes') { rcStep = 'barcodes'; noteCheckRes = null; if (currentView === 'reconcile') renderReconcile(); }
+  else if (role === 'rc-goto-quantities') {
+    // מוסיפים את החסרים כשורות (כמות 0) כדי שיופיע להם שדה כמות, ומוודאים שכל הברקודים שהוקלדו רשומים
+    const res = ncCompute();
+    res.missing.forEach(p => {
+      if (!(reconcileData || []).find(l => l.productId === p.id)) {
+        const day = todayStr(); const base = r2(Number(p.price) || 0);
+        const pr = promoForProduct(p.id); const on = promoTriggered(pr, day); const pct = on ? (Number(pr.pct) || 0) : 0;
+        reconcileData.unshift({ productId: p.id, name: p.name, barcode: p.barcode || '', received: 0, noteQty: 0, price: (on ? r2(base * (1 - pct / 100)) : base), basePrice: base, promoPct: pct, promoOn: on, checked: false });
+      }
+    });
+    rcStep = 'quantities'; if (currentView === 'reconcile') renderReconcile();
+  }
+  else if (role === 'rc-qty-price') { /* handled in input */ }
   else if (role === 'nc-qty-mode') { noteCheckQtyMode = true; if (currentView === 'reconcile') renderReconcile(); }
   else if (role === 'nc-qty-apply') {
     let applied = 0;
