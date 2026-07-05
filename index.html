@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v69</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v70</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -2284,7 +2284,7 @@ function openReconcile() {
   });
   // מיון חד-פעמי בפתיחה: שורות חריגות (חסר/עודף) למעלה — לא ממוין מחדש תוך כדי עבודה
   reconcileData.sort((a, b) => ((Number(a.noteQty) || 0) === (Number(a.received) || 0) ? 1 : 0) - ((Number(b.noteQty) || 0) === (Number(b.received) || 0) ? 1 : 0));
-  detectiveOpen = false; noteCheckOpen = false; noteCheckAuto = false; noteCheckRows = []; noteCheckRes = null;
+  detectiveOpen = false; noteCheckOpen = false; noteCheckAuto = false; noteCheckRows = []; noteCheckRes = null; reconcileCheckMode = false;
   setView('reconcile');
 }
 function reconcileReceivedInc() { let ex = 0; (reconcileData || []).forEach(l => ex += (Number(l.price) || 0) * (Number(l.received) || 0)); return r2(ex); }
@@ -2311,6 +2311,7 @@ function reconcileAssignedHtml() {
 let detectiveOpen = false;
 // ===== בדיקת תעודה מלאה (הקלדת סיומות מהנייר) — רק במקרה חסר =====
 let noteCheckOpen = false, noteCheckAuto = false, noteCheckRows = [], noteCheckRes = null;
+let reconcileCheckMode = false; // ✓ ויזואלי מופיע רק כשההפרש הוא בכמויות (כל הברקודים תואמים)
 function ncCls(r) {
   return r.st === 'ok' ? 'border-emerald-300 bg-emerald-50' : r.st === 'multi' ? 'border-amber-300 bg-amber-50' : (r.st === 'none' || r.st === 'dup') ? 'border-rose-300 bg-rose-50' : 'border-slate-200 bg-white';
 }
@@ -2350,7 +2351,7 @@ function ncResultsHtml() {
   const r = noteCheckRes; if (!r) return '';
   let h = '<div class="mt-2 pt-2 border-t border-slate-100 space-y-1.5">';
   h += '<div class="text-[11px] font-black text-slate-500">הוקלדו ' + r.count + ' מוצרים מהנייר</div>';
-  if (!r.missing.length && !r.extra.length) h += '<div class="text-xs font-black text-emerald-700"><i class="fa-solid fa-circle-check"></i> כל מה שבנייר נסרק — ההפרש הוא בכמויות. בדוק את השורות מול הנייר</div>';
+  if (!r.missing.length && !r.extra.length) { h += '<div class="text-xs font-black text-emerald-700"><i class="fa-solid fa-circle-check"></i> כל מה שבנייר נסרק — ההפרש הוא בכמויות. סמן ✓ כל שורה שבדקת מול הנייר כדי לאתר את הכמות החורגת</div>'; reconcileCheckMode = true; }
   r.missing.forEach(p => { h += '<div class="flex items-center justify-between gap-2 bg-rose-50 border border-rose-200 rounded-lg p-2"><span class="text-xs font-bold text-rose-800 min-w-0 truncate">🔴 בנייר ולא נסרק: ' + p.name + '</span><button data-role="nc-add-missing" data-id="' + p.id + '" class="btn-tap shrink-0 bg-rose-600 text-white text-xs font-black px-2.5 py-1.5 rounded-lg">הוסף כחסר</button></div>'; });
   r.extra.forEach(l => { h += '<div class="flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-lg p-2"><span class="text-xs font-bold text-amber-800 min-w-0 truncate">🟠 נסרק ולא בנייר: ' + l.name + '</span><button data-role="nc-mark-extra" data-id="' + l.productId + '" class="btn-tap shrink-0 bg-amber-600 text-white text-xs font-black px-2.5 py-1.5 rounded-lg">סמן עודף</button></div>'; });
   h += '</div>';
@@ -2538,7 +2539,7 @@ function reconcileRowHtml(l) {
                : '<span class="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded line-through">מבצע ' + pct + '%</span>') +
     '<button data-role="rc-recon-promo" data-id="' + l.productId + '" class="btn-tap text-[10px] font-black px-2 py-0.5 rounded-lg border ' + (l.promoOn ? 'border-blue-200 text-blue-700 bg-blue-50' : 'border-emerald-200 text-emerald-700 bg-emerald-50') + '">' + (l.promoOn ? 'חשב בלי מבצע' : 'חשב עם מבצע') + '</button>' +
   '</div>') : '';
-  const checkBtn = '<button data-role="rc-recon-check" data-id="' + l.productId + '" class="btn-tap shrink-0 w-8 h-8 rounded-full flex items-center justify-center ' + (l.checked ? 'bg-emerald-500 text-white' : 'border-2 border-slate-300 text-transparent') + '"><i class="fa-solid fa-check text-sm"></i></button>';
+  const checkBtn = reconcileCheckMode ? '<button data-role="rc-recon-check" data-id="' + l.productId + '" class="btn-tap shrink-0 w-8 h-8 rounded-full flex items-center justify-center ' + (l.checked ? 'bg-emerald-500 text-white' : 'border-2 border-slate-300 text-transparent') + '"><i class="fa-solid fa-check text-sm"></i></button>' : '';
   return '<div data-rcard="' + l.productId + '" class="' + (l.checked ? 'bg-emerald-50' : 'bg-white') + ' rounded-2xl border ' + (diff !== 0 ? 'border-rose-200' : 'border-slate-200') + ' p-3 shadow-sm" data-id="' + l.productId + '">' +
     '<div class="flex items-center justify-between gap-2 mb-2"><div class="flex items-center gap-2 min-w-0">' + checkBtn + '<div class="min-w-0"><div class="font-black text-slate-800 text-sm truncate">' + l.name + '</div>' +
       '<div class="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">₪<input data-role="rc-recon-price" data-id="' + l.productId + '" type="text" inputmode="decimal" value="' + (l.price != null ? l.price : '') + '" class="w-14 text-center border border-slate-200 rounded px-1 py-0.5 outline-none focus:border-blue-500"> ליח׳</div>' + promoUi +
@@ -2578,7 +2579,7 @@ function renderReconcile() {
       '<div class="flex justify-between text-sm font-bold text-amber-900 mt-1"><span>שוחזר מהשורות</span><span id="rcReconNote">₪' + fmtMoney(reconcileNoteInc()) + '</span></div>' +
       '<div class="flex justify-between text-lg font-black mt-1.5 pt-1.5 border-t border-amber-200 ' + (Math.abs(gap) <= 1 ? 'text-emerald-700' : 'text-rose-700') + '"><span>הפרש שלא שויך</span><span id="rcGap">' + (gap > 0 ? 'חסר ' : (gap < 0 ? 'עודף ' : '')) + '₪' + fmtMoney(Math.abs(gap)) + '</span></div>' +
       '<div id="rcAssigned" class="text-xs font-black mt-1">' + reconcileAssignedHtml() + '</div>' +
-      '<div id="rcProgress" class="mt-2 pt-2 border-t border-amber-200 text-xs font-black text-amber-900/70">' + reconcileProgressHtml() + '</div>' +
+      (reconcileCheckMode ? '<div id="rcProgress" class="mt-2 pt-2 border-t border-amber-200 text-xs font-black text-amber-900/70">' + reconcileProgressHtml() + '</div>' : '') +
       '<div class="text-[11px] text-amber-900/70 mt-1">תשלם בפועל (מה שהתקבל): <span id="rcRecvInc">₪' + fmtMoney(reconcileReceivedInc()) + '</span></div>' +
     '</div>' +
     detectiveHtml() +
@@ -2647,7 +2648,7 @@ function reconcileSetPriceLive(productId, val) {
 function saveReconciledReceipt(opts) {
   opts = opts || {};
   if (!reconcileData) return;
-  if (!opts.skipChecked) {
+  if (!opts.skipChecked && reconcileCheckMode) {
     const unchecked = reconcileSaveable().filter(l => !l.checked).length;
     if (unchecked > 0) { showConfirm('לא סימנת הכל', 'נשארו ' + unchecked + ' מוצרים בלי ✓ — ייתכן שעוד לא עברת עליהם מול הנייר. להמשיך בכל זאת?', 'המשך', function () { saveReconciledReceipt({ skipChecked: true }); }); return; }
   }
