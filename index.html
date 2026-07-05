@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v56</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v57</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -1640,6 +1640,16 @@ async function ensureWasmDetector() {
   wasmDetectorCls = mod.BarcodeDetector;
 }
 function nativeScanSupported() { return typeof window.BarcodeDetector !== 'undefined'; }
+// זיהוי מכשיר סמסונג — ה-UA בכרום לאנדרואיד מוקפא (מדווח דגם "K"), לכן שואלים את ה-API הייעודי
+async function isSamsungDevice() {
+  try {
+    if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+      const d = await navigator.userAgentData.getHighEntropyValues(['model']);
+      if (d && /^SM-/i.test((d.model || '').trim())) return true;
+    }
+  } catch (e) {}
+  return /\bSM-|Samsung/i.test(navigator.userAgent);
+}
 function applyScanFocus(stream) {
   try {
     const track = stream && stream.getVideoTracks && stream.getVideoTracks()[0];
@@ -1676,7 +1686,7 @@ async function openScanner() {
       const v = $('scanVideo'); v.srcObject = scanStream; await v.play();
       applyScanFocus(scanStream);
       // זום אוטומטי רק בסמסונג (בעיית פוקוס קרוב) — שיאומי ושאר האנדרואידים ללא שינוי
-      if (/\bSM-|Samsung/i.test(navigator.userAgent)) applyAutoZoom(scanStream);
+      if (await isSamsungDevice()) applyAutoZoom(scanStream);
       setScanHint(readyHint);
       scanTimer = setTimeout(scanTick, 400);
     } else {
