@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v78</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v81</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -2309,7 +2309,7 @@ function openReconcile() {
   });
   // מיון חד-פעמי בפתיחה: שורות חריגות (חסר/עודף) למעלה — לא ממוין מחדש תוך כדי עבודה
   reconcileData.sort((a, b) => ((Number(a.noteQty) || 0) === (Number(a.received) || 0) ? 1 : 0) - ((Number(b.noteQty) || 0) === (Number(b.received) || 0) ? 1 : 0));
-  detectiveOpen = false; noteCheckOpen = false; noteCheckAuto = false; noteCheckRows = []; noteCheckRes = null; reconcileCheckMode = false; noteCheckQtyMode = false; rcStep = null;
+  detectiveOpen = false; noteCheckOpen = false; noteCheckAuto = false; noteCheckRows = []; noteCheckRes = null; reconcileCheckMode = false; noteCheckQtyMode = false; rcStep = null; noteCheckForceQty = false;
   setView('reconcile');
 }
 function reconcileReceivedInc() { let ex = 0; (reconcileData || []).forEach(l => ex += (Number(l.price) || 0) * (Number(l.received) || 0)); return r2(ex); }
@@ -2338,6 +2338,7 @@ let detectiveOpen = false;
 let noteCheckOpen = false, noteCheckAuto = false, noteCheckRows = [], noteCheckRes = null;
 let noteCheckQtyMode = false; // שכבה שלישית: הזנת כמויות ליד הברקודים כשהחישוב לא סגר לבד
 let reconcileCheckMode = false; // ✓ ויזואלי מופיע רק כשההפרש הוא בכמויות (כל הברקודים תואמים)
+let noteCheckForceQty = false;  // המשתמש דחה את הפתרון הוודאי וביקש הזנה ידנית
 function ncCls(r) {
   return r.st === 'ok' ? 'border-emerald-300 bg-emerald-50' : r.st === 'multi' ? 'border-amber-300 bg-amber-50' : (r.st === 'none' || r.st === 'dup') ? 'border-rose-300 bg-rose-50' : 'border-slate-200 bg-white';
 }
@@ -2360,12 +2361,20 @@ function ncMatchRow(row) {
   if (noteCheckRows.some(r => r !== row && r.pid === pid)) { row.st = 'dup'; return; }
   row.pid = pid; row.st = 'ok';
 }
-function ncRowHtml(r, i) {
-  const qtyField = (noteCheckQtyMode && r.st === 'ok') ?
-    '<input data-role="nc-qty" data-i="' + i + '" type="text" inputmode="numeric" value="' + (r.q != null ? r.q : '') + '" placeholder="כמות" dir="ltr" class="w-16 h-10 text-center font-black border-2 border-indigo-200 bg-indigo-50 rounded-lg outline-none focus:border-indigo-500">' : '';
+function ncRowHtml(r, i, needQty) {
+  // מצב כמויות: ליד כל ברקוד מזוהה נפתח שדה כמות ריק
+  if (needQty && r.st === 'ok') {
+    const p = products.find(x => x.id === r.pid);
+    const nm = p ? p.name : '';
+    const price = p ? r2(Number(p.price) || 0) : 0;
+    return '<div class="flex items-center gap-2">' +
+      '<input data-role="nc-qty" data-i="' + i + '" type="text" inputmode="numeric" placeholder="כמות" dir="ltr" onfocus="this.select()" class="w-20 h-12 text-center text-lg font-black border-2 border-indigo-300 bg-white rounded-xl outline-none focus:border-indigo-500">' +
+      '<div class="flex-1 min-w-0"><div class="font-black text-slate-700 text-sm truncate">' + nm + '</div><div class="text-[11px] text-slate-400 mt-0.5" dir="ltr">' + r.d + ' · ₪<input data-role="rc-qty-price" data-id="' + r.pid + '" type="text" inputmode="decimal" value="' + price + '" class="w-12 text-center border border-slate-200 rounded px-1 outline-none focus:border-blue-500"> ליח׳</div></div>' +
+    '</div>';
+  }
+  // מצב ברקודים רגיל
   return '<div class="flex items-center gap-2">' +
     '<input data-role="nc-digit" data-i="' + i + '" type="text" inputmode="numeric" value="' + r.d + '" placeholder="4 ספרות" dir="ltr" class="w-24 h-10 text-center font-black border-2 rounded-lg outline-none focus:border-indigo-500 ' + ncCls(r) + '">' +
-    qtyField +
     '<div class="flex-1 min-w-0 text-xs" id="ncSt_' + i + '">' + ncStatusTxt(r) + '</div>' +
   '</div>';
 }
@@ -2667,14 +2676,33 @@ function renderReconcile() {
   else if (rcStep === 'barcodes') {
     if (!noteCheckRows.length || noteCheckRows[noteCheckRows.length - 1].d) noteCheckRows.push({ d: '', pid: null, st: 'empty' });
     const filled = noteCheckRows.filter(r => r.st === 'ok').length;
-    body = '<div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 shadow-sm mb-24">' +
-      '<div class="text-xs font-black text-slate-400 mb-1">שלב 2 מתוך 3 · הקלדת ברקודים</div>' +
-      '<div class="font-black text-lg text-slate-800 mb-1"><i class="fa-solid fa-keyboard text-indigo-500"></i> עבור על תעודת הנייר</div>' +
-      '<div class="text-xs text-slate-500 mb-3 leading-relaxed">לכל שורה בנייר, הקלד את <b>4 הספרות האחרונות</b> של הברקוד. הזיהוי קופץ לבד לשורה הבאה. סיימת את כל הנייר? לחץ "השווה".</div>' +
-      '<div id="ncRows" class="space-y-1.5">' + noteCheckRows.map(ncRowHtml).join('') + '</div>' +
-      '<button data-role="nc-compare" class="btn-tap w-full bg-indigo-600 text-white rounded-xl py-3 font-black mt-3"><i class="fa-solid fa-scale-balanced"></i> השווה (' + filled + ' שורות הוקלדו)</button>' +
-      (noteCheckRes ? ncStepResultHtml() : '') +
-    '</div>';
+    // אחרי השוואה — קודם מנסים לפתור הכל בוודאות (אלא אם המשתמש ביקש הזנה ידנית)
+    const certain = (noteCheckRes && !noteCheckForceQty) ? solveMissingCertain() : null;
+    if (certain) {
+      const lines = Object.keys(certain).map(pid => { const p = products.find(x => x.id === pid); return { name: p ? p.name : '', qty: certain[pid], price: p ? r2(Number(p.price) || 0) : 0 }; });
+      body = '<div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 shadow-sm mb-24">' +
+        '<div class="text-xs font-black text-slate-400 mb-1">זוהה אוטומטית</div>' +
+        '<div class="font-black text-lg text-slate-800 mb-2"><i class="fa-solid fa-lightbulb text-indigo-500"></i> נמצאה התאמה מדויקת:</div>' +
+        lines.map(l => '<div class="bg-indigo-50 rounded-xl p-3 mb-2 flex items-center justify-between"><span class="font-black text-slate-800">חסר ' + l.qty + ' × ' + l.name + '</span><span class="text-xs text-slate-500">₪' + fmtMoney(l.price) + ' ליח׳</span></div>').join('') +
+        '<button data-role="nc-apply-certain" class="btn-tap w-full bg-indigo-600 text-white rounded-xl py-3 font-black mt-1 mb-2"><i class="fa-solid fa-check"></i> אשר וסגור</button>' +
+        '<button data-role="nc-force-qty" class="btn-tap w-full bg-white border-2 border-slate-200 text-slate-600 rounded-xl py-2.5 font-black text-sm">לא נכון — הזן כמויות ידנית</button>' +
+      '</div>';
+    } else {
+      const needQty = noteCheckRes && (noteCheckRes.missing.length > 0 || (noteCheckRes.missing.length === 0 && noteCheckRes.extra.length === 0 && Math.abs(gap) > 1));
+      const onlyExtra = noteCheckRes && noteCheckRes.missing.length === 0 && noteCheckRes.extra.length > 0;
+      body = '<div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 shadow-sm mb-24">' +
+        '<div class="text-xs font-black text-slate-400 mb-1">שלב 2 · בדיקה לפי הנייר</div>' +
+        '<div class="font-black text-lg text-slate-800 mb-1"><i class="fa-solid fa-keyboard text-indigo-500"></i> עבור על תעודת הנייר</div>' +
+        '<div class="text-xs text-slate-500 mb-3 leading-relaxed">' + (needQty
+          ? 'ליד כל ברקוד הקלד את הכמות שרשומה בנייר. השאר ריק אם המוצר לא בתעודה.'
+          : 'לכל שורה בנייר, הקלד את <b>4 הספרות האחרונות</b> של הברקוד. סיימת? לחץ "השווה".') + '</div>' +
+        '<div id="ncRows" class="space-y-1.5">' + ncBarcodeRowsHtml(needQty) + '</div>' +
+        (onlyExtra ? ncExtraListHtml() : '') +
+        (needQty
+          ? '<button data-role="nc-qty-apply" class="btn-tap w-full bg-indigo-600 text-white rounded-xl py-3 font-black mt-3"><i class="fa-solid fa-check"></i> החל כמויות</button>'
+          : '<button data-role="nc-compare" class="btn-tap w-full bg-indigo-600 text-white rounded-xl py-3 font-black mt-3"><i class="fa-solid fa-scale-balanced"></i> השווה (' + filled + ' שורות הוקלדו)</button>') +
+      '</div>';
+    }
   }
   else if (rcStep === 'quantities') {
     body = '<div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 shadow-sm mb-24">' +
@@ -2699,6 +2727,49 @@ function renderReconcile() {
   '</div>';
 
   app.innerHTML = header + summary + body + sideClose + footer;
+}
+// שורות הברקודים — במצב כמויות נפתח שדה כמות ריק ליד כל ברקוד, וגם למוצרים החסרים
+function ncBarcodeRowsHtml(needQty) {
+  let rows = noteCheckRows.map((r, i) => ncRowHtml(r, i, needQty)).join('');
+  if (needQty && noteCheckRes) {
+    noteCheckRes.missing.forEach(p => {
+      rows += '<div class="flex items-center gap-2">' +
+        '<input data-role="nc-missing-qty" data-id="' + p.id + '" type="text" inputmode="numeric" placeholder="כמות" dir="ltr" onfocus="this.select()" class="w-20 h-12 text-center text-lg font-black border-2 border-rose-300 bg-rose-50 rounded-xl outline-none focus:border-rose-500">' +
+        '<div class="flex-1 min-w-0"><div class="font-black text-rose-700 text-sm truncate">🔴 ' + p.name + '</div><div class="text-[11px] text-slate-400 mt-0.5">לא נסרק · ₪<input data-role="rc-qty-price" data-id="' + p.id + '" type="text" inputmode="decimal" value="' + r2(Number(p.price) || 0) + '" class="w-12 text-center border border-slate-200 rounded px-1 outline-none focus:border-blue-500"> ליח׳</div></div>' +
+      '</div>';
+    });
+  }
+  return rows;
+}
+function ncExtraListHtml() {
+  const r = noteCheckRes; if (!r || !r.extra.length) return '';
+  let h = '<div class="mt-3 pt-3 border-t border-slate-100 space-y-1.5"><div class="text-sm font-black text-amber-700">' + r.extra.length + ' מוצרים שנסרקו ולא בנייר (עודף):</div>';
+  r.extra.forEach(l => { h += '<div class="flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-lg p-2"><span class="text-xs font-bold text-amber-800 min-w-0 truncate">🟠 ' + l.name + '</span><button data-role="nc-mark-extra" data-id="' + l.productId + '" class="btn-tap shrink-0 bg-amber-600 text-white text-xs font-black px-2.5 py-1.5 rounded-lg">סמן עודף</button></div>'; });
+  return h + '</div>';
+}
+// ניסיון לפתור את כל החוסר בוודאות: ארגזים (📦) + חישוב מדויק של השארית. מחזיר מפת {pid:qty} או null
+function solveMissingCertain() {
+  const r = noteCheckRes; if (!r || !r.missing.length) return null;
+  let gap = Math.abs(reconcileGap());
+  const sol = {};
+  const boxed = [], loose = [];
+  r.missing.forEach(p => { const bs = Math.max(0, parseInt(p.boxSize, 10) || 0); (bs > 0 ? boxed : loose).push(p); });
+  // שלב 1: מוצרי ארגז — מניחים ארגז אחד (או כפולה שסוגרת)
+  boxed.forEach(p => {
+    const bs = parseInt(p.boxSize, 10) || 0; const price = Number(p.price) || 0;
+    if (bs > 0 && price > 0) { sol[p.id] = bs; gap = r2(gap - bs * price); }
+  });
+  if (gap < -0.05) return null; // חרגנו — לא ודאי
+  // שלב 2: מוצרים בודדים — רק אם נשאר בדיוק אחד לא-פתור, החישוב חייב להתחלק במדויק
+  if (loose.length === 0) return Math.abs(gap) <= 0.05 ? sol : null;
+  if (loose.length === 1) {
+    const p = loose[0]; const price = Number(p.price) || 0; if (price <= 0) return null;
+    const q = Math.round(gap / price);
+    if (q >= 1 && Math.abs(r2(q * price) - gap) <= 0.05) { sol[p.id] = q; return sol; }
+    return null;
+  }
+  // שני מוצרים בודדים או יותר — עמום, לא ודאי
+  return null;
 }
 // תוצאת ההשוואה בתוך שלב הברקודים — מודרך, בלי "הוסף כחסר"
 function ncStepResultHtml() {
@@ -2726,9 +2797,10 @@ function ncStepResultHtml() {
 function ncQtyRowHtml(r, i) {
   const p = products.find(x => x.id === r.pid); if (!p) return '';
   const inLine = (reconcileData || []).find(x => x.productId === r.pid);
-  const curQ = r.q != null ? r.q : (inLine && inLine.noteQty != null ? inLine.noteQty : '');
+  const rawQ = r.q != null ? r.q : (inLine && inLine.noteQty != null ? inLine.noteQty : '');
+  const curQ = (rawQ === 0 || rawQ === '0') ? '' : rawQ;
   return '<div class="flex items-center gap-2">' +
-    '<input data-role="nc-qty" data-i="' + i + '" type="text" inputmode="numeric" value="' + curQ + '" placeholder="כמות" dir="ltr" class="w-24 h-14 text-center text-xl font-black border-2 border-indigo-300 bg-white rounded-xl outline-none focus:border-indigo-500">' +
+    '<input data-role="nc-qty" data-i="' + i + '" type="text" inputmode="numeric" value="' + curQ + '" placeholder="כמות" dir="ltr" onfocus="this.select()" class="w-24 h-14 text-center text-xl font-black border-2 border-indigo-300 bg-white rounded-xl outline-none focus:border-indigo-500">' +
     '<div class="flex-1 min-w-0"><div class="font-black text-slate-700 text-sm truncate">' + p.name + '</div><div class="text-[11px] text-slate-400 mt-0.5">₪<input data-role="rc-qty-price" data-id="' + r.pid + '" type="text" inputmode="decimal" value="' + r2(Number(p.price) || 0) + '" class="w-12 text-center border border-slate-200 rounded px-1 outline-none focus:border-blue-500"> ליח׳</div></div>' +
   '</div>';
 }
@@ -4041,17 +4113,6 @@ app.addEventListener('input', (e) => {
     const i = parseInt(t.dataset.i, 10) || 0;
     let v = t.value.replace(/[^0-9]/g, ''); if (v !== t.value) t.value = v;
     const row = noteCheckRows[i]; if (row) row.q = v ? parseInt(v, 10) : null;
-    // קפיצה אוטומטית לשדה הכמות הבא (רק שורות מזוהות), כמו בברקודים
-    if (v) {
-      const okRows = noteCheckRows.filter(r => r.st === 'ok');
-      const pos = okRows.indexOf(row);
-      if (pos >= 0 && pos < okRows.length - 1) {
-        const nextI = noteCheckRows.indexOf(okRows[pos + 1]);
-        const box = $('ncRows');
-        const nxt = box && box.querySelector('input[data-role="nc-qty"][data-i="' + nextI + '"]');
-        if (nxt) nxt.focus();
-      }
-    }
     return;
   }
   if (role === 'rc-recon-price') { reconcileSetPriceLive(t.dataset.id, t.value); return; }
@@ -4088,6 +4149,18 @@ app.addEventListener('input', (e) => {
 app.addEventListener('keydown', (e) => {
   const t = e.target;
   if (t.id === 'newNote' && e.key === 'Enter') { e.preventDefault(); addNote(); return; }
+  if (t.getAttribute && t.getAttribute('data-role') === 'nc-qty' && e.key === 'Enter') {
+    e.preventDefault();
+    const i = parseInt(t.dataset.i, 10) || 0;
+    const okRows = noteCheckRows.filter(r => r.st === 'ok');
+    const pos = okRows.indexOf(noteCheckRows[i]);
+    if (pos >= 0 && pos < okRows.length - 1) {
+      const nextI = noteCheckRows.indexOf(okRows[pos + 1]);
+      const nxt = $('ncRows') && $('ncRows').querySelector('input[data-role="nc-qty"][data-i="' + nextI + '"]');
+      if (nxt) { nxt.focus(); nxt.select(); }
+    } else { t.blur(); }
+    return;
+  }
   if (!(t.getAttribute && t.getAttribute('data-role') === 'amount')) return;
   if (e.key === 'Enter') { e.preventDefault(); clearTimeout(advanceTimer); advanceFrom(t.dataset.id); }
 });
@@ -4157,6 +4230,23 @@ app.addEventListener('click', (e) => {
   else if (role === 'detective-pick') detectiveApply(parseInt(t.dataset.g, 10) || 0, id);
   else if (role === 'nc-toggle') { noteCheckOpen = !noteCheckOpen; if (currentView === 'reconcile') renderReconcile(); }
   else if (role === 'nc-compare') { noteCheckRes = ncCompute(); if (currentView === 'reconcile') renderReconcile(); }
+  else if (role === 'nc-apply-certain') {
+    const sol = solveMissingCertain(); if (!sol) return;
+    const day = todayStr();
+    Object.keys(sol).forEach(pid => {
+      let l = (reconcileData || []).find(x => x.productId === pid);
+      if (l) l.noteQty = sol[pid];
+      else {
+        const p = products.find(x => x.id === pid); if (!p) return;
+        const base = r2(Number(p.price) || 0);
+        const pr = promoForProduct(p.id); const on = promoTriggered(pr, day); const pct = on ? (Number(pr.pct) || 0) : 0;
+        reconcileData.unshift({ productId: p.id, name: p.name, barcode: p.barcode || '', received: 0, noteQty: sol[pid], price: (on ? r2(base * (1 - pct / 100)) : base), basePrice: base, promoPct: pct, promoOn: on, checked: false });
+      }
+    });
+    noteCheckRes = ncCompute(); buzz(18);
+    if (currentView === 'reconcile') renderReconcile();
+  }
+  else if (role === 'nc-force-qty') { noteCheckForceQty = true; if (currentView === 'reconcile') renderReconcile(); }
   else if (role === 'rc-goto-barcodes') { rcStep = 'barcodes'; noteCheckRes = null; if (currentView === 'reconcile') renderReconcile(); }
   else if (role === 'rc-goto-quantities') {
     // מוסיפים את החסרים כשורות (כמות 0) כדי שיופיע להם שדה כמות, ומוודאים שכל הברקודים שהוקלדו רשומים
@@ -4176,23 +4266,31 @@ app.addEventListener('click', (e) => {
   else if (role === 'nc-qty-apply') {
     let applied = 0;
     const day = todayStr();
-    noteCheckRows.forEach(row => {
-      if (row.st !== 'ok' || row.pid == null || row.q == null) return;
-      let l = (reconcileData || []).find(x => x.productId === row.pid);
-      if (l) { l.noteQty = row.q; applied++; }
+    const box = $('ncRows');
+    // כמויות של מוצרים שנסרקו (ליד הברקוד)
+    noteCheckRows.forEach((row, i) => {
+      if (row.st !== 'ok' || row.pid == null) return;
+      const inp = box && box.querySelector('input[data-role="nc-qty"][data-i="' + i + '"]');
+      const q = inp ? parseInt((inp.value || '').replace(/[^0-9]/g, ''), 10) : NaN;
+      const l = (reconcileData || []).find(x => x.productId === row.pid);
+      if (l) { l.noteQty = isNaN(q) ? 0 : q; applied++; }
+    });
+    // כמויות של מוצרים חסרים (בנייר ולא נסרקו)
+    if (box) box.querySelectorAll('input[data-role="nc-missing-qty"]').forEach(inp => {
+      const pid = inp.dataset.id;
+      const q = parseInt((inp.value || '').replace(/[^0-9]/g, ''), 10);
+      if (isNaN(q) || q <= 0) return;
+      let l = (reconcileData || []).find(x => x.productId === pid);
+      if (l) { l.noteQty = q; applied++; }
       else {
-        // מוצר שבנייר ולא נסרק — נוסיף אותו כשורה עם הכמות שהוזנה
-        const p = products.find(x => x.id === row.pid); if (!p) return;
+        const p = products.find(x => x.id === pid); if (!p) return;
         const base = r2(Number(p.price) || 0);
-        const pr = promoForProduct(p.id);
-        const on = promoTriggered(pr, day);
-        const pct = on ? (Number(pr.pct) || 0) : 0;
-        reconcileData.unshift({ productId: p.id, name: p.name, barcode: p.barcode || '', received: 0, noteQty: row.q, price: (on ? r2(base * (1 - pct / 100)) : base), basePrice: base, promoPct: pct, promoOn: on, checked: false });
+        const pr = promoForProduct(p.id); const on = promoTriggered(pr, day); const pct = on ? (Number(pr.pct) || 0) : 0;
+        reconcileData.unshift({ productId: p.id, name: p.name, barcode: p.barcode || '', received: 0, noteQty: q, price: (on ? r2(base * (1 - pct / 100)) : base), basePrice: base, promoPct: pct, promoOn: on, checked: false });
         applied++;
       }
     });
-    noteCheckQtyMode = false; noteCheckRes = ncCompute(); buzz(18);
-    showToast(applied ? 'הוחלו כמויות מהנייר על ' + applied + ' מוצרים' : 'לא הוזנו כמויות', null, null, 2600);
+    noteCheckRes = ncCompute(); buzz(18);
     if (currentView === 'reconcile') renderReconcile();
   }
   else if (role === 'nc-add-missing') {
