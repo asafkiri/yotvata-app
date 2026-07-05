@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v48</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v49</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -1632,6 +1632,13 @@ function hideConfirm() { const m = $('confirmModal'); m.classList.add('hidden');
 // ===== סריקת ברקוד במצלמה =====
 let scanStream = null, scanTimer = null, barcodeDetector = null;
 let zxingReader = null, zxingActive = false;
+let wasmDetectorCls = null;
+// מנוע סריקה חזק (zxing-cpp ב-WASM) לאייפון/ספארי — חושף ממשק BarcodeDetector זהה למובנה
+async function ensureWasmDetector() {
+  if (wasmDetectorCls) return;
+  const mod = await import('https://cdn.jsdelivr.net/npm/barcode-detector@3/dist/es/pure.min.js');
+  wasmDetectorCls = mod.BarcodeDetector;
+}
 function nativeScanSupported() { return typeof window.BarcodeDetector !== 'undefined'; }
 function applyScanFocus(stream) {
   try {
@@ -1659,10 +1666,24 @@ async function openScanner() {
       setScanHint(readyHint);
       scanTimer = setTimeout(scanTick, 400);
     } else {
+      // אייפון/ספארי: אין BarcodeDetector מובנה — טוענים מנוע WASM ומשתמשים באותו מסלול סריקה
       setScanHint('טוען מנוע סריקה...');
-      await ensureZxing();
-      setScanHint(readyHint);
-      await startZxing();
+      try {
+        await ensureWasmDetector();
+        if (!barcodeDetector) barcodeDetector = new wasmDetectorCls({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf', 'qr_code'] });
+        scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+        const v = $('scanVideo'); v.srcObject = scanStream; await v.play();
+        applyScanFocus(scanStream);
+        setScanHint(readyHint);
+        scanTimer = setTimeout(scanTick, 400);
+      } catch (err) {
+        // גיבוי: המנוע הישן (ZXing-JS) — כמו שהיה עד היום
+        console.error('WASM scanner failed, falling back to ZXing-JS', err);
+        setScanHint('טוען מנוע סריקה...');
+        await ensureZxing();
+        setScanHint(readyHint);
+        await startZxing();
+      }
     }
   } catch (e) {
     console.error(e);
