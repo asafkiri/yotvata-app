@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v55</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v56</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -1675,6 +1675,8 @@ async function openScanner() {
       scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
       const v = $('scanVideo'); v.srcObject = scanStream; await v.play();
       applyScanFocus(scanStream);
+      // זום אוטומטי רק בסמסונג (בעיית פוקוס קרוב) — שיאומי ושאר האנדרואידים ללא שינוי
+      if (/\bSM-|Samsung/i.test(navigator.userAgent)) applyAutoZoom(scanStream);
       setScanHint(readyHint);
       scanTimer = setTimeout(scanTick, 400);
     } else {
