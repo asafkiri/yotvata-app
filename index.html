@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v75</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v76</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -2380,18 +2380,23 @@ function ncResultsHtml() {
   const r = noteCheckRes; if (!r) return '';
   let h = '<div class="mt-2 pt-2 border-t border-slate-100 space-y-1.5">';
   h += '<div class="text-[11px] font-black text-slate-500">הוקלדו ' + r.count + ' מוצרים מהנייר</div>';
-  if (!r.missing.length && !r.extra.length) { h += '<div class="text-xs font-black text-emerald-700"><i class="fa-solid fa-circle-check"></i> כל מה שבנייר נסרק — ההפרש הוא בכמויות. סמן ✓ כל שורה שבדקת מול הנייר כדי לאתר את הכמות החורגת</div>'; reconcileCheckMode = true; }
-  r.missing.forEach(p => { h += '<div class="flex items-center justify-between gap-2 bg-rose-50 border border-rose-200 rounded-lg p-2"><span class="text-xs font-bold text-rose-800 min-w-0 truncate">🔴 בנייר ולא נסרק: ' + p.name + '</span><button data-role="nc-add-missing" data-id="' + p.id + '" class="btn-tap shrink-0 bg-rose-600 text-white text-xs font-black px-2.5 py-1.5 rounded-lg">הוסף כחסר</button></div>'; });
-  r.extra.forEach(l => { h += '<div class="flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-lg p-2"><span class="text-xs font-bold text-amber-800 min-w-0 truncate">🟠 נסרק ולא בנייר: ' + l.name + '</span><button data-role="nc-mark-extra" data-id="' + l.productId + '" class="btn-tap shrink-0 bg-amber-600 text-white text-xs font-black px-2.5 py-1.5 rounded-lg">סמן עודף</button></div>'; });
-  // אם אחרי הוספת החסרים עדיין נותר הפרש והחישוב לא סגר לבד — מציעים הזנת כמויות
-  const gapNow = reconcileGap();
-  if (Math.abs(gapNow) > 1 && !r.missing.length && (r.extra.length || noteCheckQtyMode)) {
-    if (!noteCheckQtyMode) {
-      h += '<button data-role="nc-qty-mode" class="btn-tap w-full bg-indigo-600 text-white rounded-lg py-2 font-black text-xs mt-1"><i class="fa-solid fa-list-ol"></i> עדיין נותר הפרש — הזן כמויות ליד הברקודים</button>';
-    } else {
-      h += '<div class="text-[11px] font-bold text-indigo-700 bg-indigo-50 rounded-lg p-2"><i class="fa-solid fa-circle-info"></i> הקלד ליד כל ברקוד את הכמות שבנייר — הכמויות יוחלו על התעודה</div>' +
-           '<button data-role="nc-qty-apply" class="btn-tap w-full bg-indigo-600 text-white rounded-lg py-2 font-black text-xs mt-1"><i class="fa-solid fa-check"></i> החל כמויות על התעודה</button>';
+  if (!r.missing.length && !r.extra.length && !noteCheckQtyMode) { h += '<div class="text-xs font-black text-emerald-700"><i class="fa-solid fa-circle-check"></i> כל מה שבנייר נסרק — ההפרש הוא בכמויות. סמן ✓ כל שורה שבדקת מול הנייר כדי לאתר את הכמות החורגת</div>'; reconcileCheckMode = true; }
+  // חוסר של מוצר אחד ומחיר שמסביר בדיוק — הצעה מהירה בכפתור (הדרגה הקלה)
+  const singleExact = r.missing.length === 1 && (function () { const p = r.missing[0]; const pr = Number(p.price) || 0; if (pr <= 0) return false; const g = reconcileGap(); const q = Math.round(g / pr); return q >= 1 && Math.abs(r2(q * pr) - g) <= 0.05; })();
+  if (r.missing.length && (singleExact || !noteCheckQtyMode)) {
+    r.missing.forEach(p => { h += '<div class="flex items-center justify-between gap-2 bg-rose-50 border border-rose-200 rounded-lg p-2"><span class="text-xs font-bold text-rose-800 min-w-0 truncate">🔴 בנייר ולא נסרק: ' + p.name + '</span><button data-role="nc-add-missing" data-id="' + p.id + '" class="btn-tap shrink-0 bg-rose-600 text-white text-xs font-black px-2.5 py-1.5 rounded-lg">הוסף כחסר</button></div>'; });
+    // כמה חסרים בבת אחת → מציעים מעבר להזנת כמויות מהירה ליד הברקודים
+    if (r.missing.length > 1 && !noteCheckQtyMode) {
+      h += '<button data-role="nc-qty-mode" class="btn-tap w-full bg-indigo-600 text-white rounded-lg py-2 font-black text-xs mt-1"><i class="fa-solid fa-list-ol"></i> כמה מוצרים חסרים — הזן כמויות מהר ליד הברקודים</button>';
     }
+  }
+  r.extra.forEach(l => { h += '<div class="flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-lg p-2"><span class="text-xs font-bold text-amber-800 min-w-0 truncate">🟠 נסרק ולא בנייר: ' + l.name + '</span><button data-role="nc-mark-extra" data-id="' + l.productId + '" class="btn-tap shrink-0 bg-amber-600 text-white text-xs font-black px-2.5 py-1.5 rounded-lg">סמן עודף</button></div>'; });
+  // מצב הזנת כמויות מהירה — השדות מופיעים ליד הברקודים למעלה
+  if (noteCheckQtyMode) {
+    h += '<div class="text-[11px] font-bold text-indigo-700 bg-indigo-50 rounded-lg p-2 mt-1"><i class="fa-solid fa-circle-info"></i> ליד כל ברקוד למעלה נפתח שדה כמות — הקלד את הכמות שבנייר (ריק = לא בתעודה)</div>' +
+         '<button data-role="nc-qty-apply" class="btn-tap w-full bg-indigo-600 text-white rounded-lg py-2.5 font-black text-sm mt-1"><i class="fa-solid fa-check"></i> החל כמויות על התעודה</button>';
+  } else if (Math.abs(reconcileGap()) > 1 && !r.missing.length && r.extra.length === 0) {
+    h += '<button data-role="nc-qty-mode" class="btn-tap w-full bg-indigo-600 text-white rounded-lg py-2 font-black text-xs mt-1"><i class="fa-solid fa-list-ol"></i> עדיין נותר הפרש — הזן כמויות ליד הברקודים</button>';
   }
   h += '</div>';
   return h;
@@ -4048,12 +4053,23 @@ app.addEventListener('click', (e) => {
   else if (role === 'nc-qty-mode') { noteCheckQtyMode = true; if (currentView === 'reconcile') renderReconcile(); }
   else if (role === 'nc-qty-apply') {
     let applied = 0;
+    const day = todayStr();
     noteCheckRows.forEach(row => {
       if (row.st !== 'ok' || row.pid == null || row.q == null) return;
-      const l = (reconcileData || []).find(x => x.productId === row.pid);
+      let l = (reconcileData || []).find(x => x.productId === row.pid);
       if (l) { l.noteQty = row.q; applied++; }
+      else {
+        // מוצר שבנייר ולא נסרק — נוסיף אותו כשורה עם הכמות שהוזנה
+        const p = products.find(x => x.id === row.pid); if (!p) return;
+        const base = r2(Number(p.price) || 0);
+        const pr = promoForProduct(p.id);
+        const on = promoTriggered(pr, day);
+        const pct = on ? (Number(pr.pct) || 0) : 0;
+        reconcileData.unshift({ productId: p.id, name: p.name, barcode: p.barcode || '', received: 0, noteQty: row.q, price: (on ? r2(base * (1 - pct / 100)) : base), basePrice: base, promoPct: pct, promoOn: on, checked: false });
+        applied++;
+      }
     });
-    buzz(18);
+    noteCheckQtyMode = false; noteCheckRes = ncCompute(); buzz(18);
     showToast(applied ? 'הוחלו כמויות מהנייר על ' + applied + ' מוצרים' : 'לא הוזנו כמויות', null, null, 2600);
     if (currentView === 'reconcile') renderReconcile();
   }
