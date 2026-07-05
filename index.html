@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v81</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v83</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -2362,14 +2362,17 @@ function ncMatchRow(row) {
   row.pid = pid; row.st = 'ok';
 }
 function ncRowHtml(r, i, needQty) {
-  // מצב כמויות: ליד כל ברקוד מזוהה נפתח שדה כמות ריק
+  // מצב כמויות: ליד כל ברקוד מזוהה נפתח שדה כמות ריק; שורות ריקות/לא מזוהות נעלמות
+  if (needQty && r.st !== 'ok') return '';
   if (needQty && r.st === 'ok') {
     const p = products.find(x => x.id === r.pid);
     const nm = p ? p.name : '';
     const price = p ? r2(Number(p.price) || 0) : 0;
+    const line = (reconcileData || []).find(x => x.productId === r.pid);
+    const notScanned = !(line && (Number(line.received) || 0) > 0);
     return '<div class="flex items-center gap-2">' +
-      '<input data-role="nc-qty" data-i="' + i + '" type="text" inputmode="numeric" placeholder="כמות" dir="ltr" onfocus="this.select()" class="w-20 h-12 text-center text-lg font-black border-2 border-indigo-300 bg-white rounded-xl outline-none focus:border-indigo-500">' +
-      '<div class="flex-1 min-w-0"><div class="font-black text-slate-700 text-sm truncate">' + nm + '</div><div class="text-[11px] text-slate-400 mt-0.5" dir="ltr">' + r.d + ' · ₪<input data-role="rc-qty-price" data-id="' + r.pid + '" type="text" inputmode="decimal" value="' + price + '" class="w-12 text-center border border-slate-200 rounded px-1 outline-none focus:border-blue-500"> ליח׳</div></div>' +
+      '<input data-role="nc-qty" data-i="' + i + '" type="text" inputmode="numeric" placeholder="כמות" dir="ltr" onfocus="this.select()" class="w-20 h-12 text-center text-lg font-black border-2 rounded-xl outline-none ' + (notScanned ? 'border-rose-300 bg-rose-50 focus:border-rose-500' : 'border-indigo-300 bg-white focus:border-indigo-500') + '">' +
+      '<div class="flex-1 min-w-0"><div class="font-black text-sm truncate ' + (notScanned ? 'text-rose-700' : 'text-slate-700') + '">' + (notScanned ? '🔴 ' : '') + nm + '</div><div class="text-[11px] text-slate-400 mt-0.5" dir="ltr">' + r.d + (notScanned ? ' · לא נסרק' : '') + ' · ₪<input data-role="rc-qty-price" data-id="' + r.pid + '" type="text" inputmode="decimal" value="' + price + '" class="w-12 text-center border border-slate-200 rounded px-1 outline-none focus:border-blue-500"> ליח׳</div></div>' +
     '</div>';
   }
   // מצב ברקודים רגיל
@@ -2728,18 +2731,9 @@ function renderReconcile() {
 
   app.innerHTML = header + summary + body + sideClose + footer;
 }
-// שורות הברקודים — במצב כמויות נפתח שדה כמות ריק ליד כל ברקוד, וגם למוצרים החסרים
+// שורות הברקודים — במצב כמויות נפתח שדה כמות ריק ליד כל ברקוד שהוקלד
 function ncBarcodeRowsHtml(needQty) {
-  let rows = noteCheckRows.map((r, i) => ncRowHtml(r, i, needQty)).join('');
-  if (needQty && noteCheckRes) {
-    noteCheckRes.missing.forEach(p => {
-      rows += '<div class="flex items-center gap-2">' +
-        '<input data-role="nc-missing-qty" data-id="' + p.id + '" type="text" inputmode="numeric" placeholder="כמות" dir="ltr" onfocus="this.select()" class="w-20 h-12 text-center text-lg font-black border-2 border-rose-300 bg-rose-50 rounded-xl outline-none focus:border-rose-500">' +
-        '<div class="flex-1 min-w-0"><div class="font-black text-rose-700 text-sm truncate">🔴 ' + p.name + '</div><div class="text-[11px] text-slate-400 mt-0.5">לא נסרק · ₪<input data-role="rc-qty-price" data-id="' + p.id + '" type="text" inputmode="decimal" value="' + r2(Number(p.price) || 0) + '" class="w-12 text-center border border-slate-200 rounded px-1 outline-none focus:border-blue-500"> ליח׳</div></div>' +
-      '</div>';
-    });
-  }
-  return rows;
+  return noteCheckRows.map((r, i) => ncRowHtml(r, i, needQty)).join('');
 }
 function ncExtraListHtml() {
   const r = noteCheckRes; if (!r || !r.extra.length) return '';
@@ -4098,6 +4092,8 @@ app.addEventListener('input', (e) => {
     t.className = 'w-24 h-10 text-center font-black border-2 rounded-lg outline-none focus:border-indigo-500 ' + ncCls(row);
     if (row.st === 'ok') {
       buzz(8);
+      const cmpBtn = app.querySelector('button[data-role="nc-compare"]');
+      if (cmpBtn) cmpBtn.innerHTML = '<i class="fa-solid fa-scale-balanced"></i> השווה (' + noteCheckRows.filter(r => r.st === 'ok').length + ' שורות הוקלדו)';
       const box = $('ncRows');
       if (i === noteCheckRows.length - 1) {
         noteCheckRows.push({ d: '', pid: null, st: 'empty' });
@@ -4267,23 +4263,15 @@ app.addEventListener('click', (e) => {
     let applied = 0;
     const day = todayStr();
     const box = $('ncRows');
-    // כמויות של מוצרים שנסרקו (ליד הברקוד)
     noteCheckRows.forEach((row, i) => {
       if (row.st !== 'ok' || row.pid == null) return;
       const inp = box && box.querySelector('input[data-role="nc-qty"][data-i="' + i + '"]');
       const q = inp ? parseInt((inp.value || '').replace(/[^0-9]/g, ''), 10) : NaN;
-      const l = (reconcileData || []).find(x => x.productId === row.pid);
+      let l = (reconcileData || []).find(x => x.productId === row.pid);
       if (l) { l.noteQty = isNaN(q) ? 0 : q; applied++; }
-    });
-    // כמויות של מוצרים חסרים (בנייר ולא נסרקו)
-    if (box) box.querySelectorAll('input[data-role="nc-missing-qty"]').forEach(inp => {
-      const pid = inp.dataset.id;
-      const q = parseInt((inp.value || '').replace(/[^0-9]/g, ''), 10);
-      if (isNaN(q) || q <= 0) return;
-      let l = (reconcileData || []).find(x => x.productId === pid);
-      if (l) { l.noteQty = q; applied++; }
-      else {
-        const p = products.find(x => x.id === pid); if (!p) return;
+      else if (!isNaN(q) && q > 0) {
+        // מוצר שבנייר ולא נסרק — נוצר כשורה עם הכמות שהוזנה
+        const p = products.find(x => x.id === row.pid); if (!p) return;
         const base = r2(Number(p.price) || 0);
         const pr = promoForProduct(p.id); const on = promoTriggered(pr, day); const pct = on ? (Number(pr.pct) || 0) : 0;
         reconcileData.unshift({ productId: p.id, name: p.name, barcode: p.barcode || '', received: 0, noteQty: q, price: (on ? r2(base * (1 - pct / 100)) : base), basePrice: base, promoPct: pct, promoOn: on, checked: false });
