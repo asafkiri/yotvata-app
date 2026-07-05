@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v62</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v63</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -2317,8 +2317,32 @@ function detectiveSuggestions() {
     if (!groups[key]) groups[key] = { qty: qty, price: price, diff: diff, items: [] };
     groups[key].items.push(l);
   });
-  const list = Object.values(groups).sort((a, b) => a.diff - b.diff).slice(0, 4);
-  return list.length ? { gap: gap, list: list } : null;
+  // הרחבה: כשחסר בנייר — ייתכן שמוצר שלם לא נסרק בכלל, סורקים גם את מאגר המוצרים
+  if (gap > 0) {
+    const day = todayStr();
+    const inRec = {}; (reconcileData || []).forEach(l => inRec[l.productId] = 1);
+    products.forEach(p => {
+      if (inRec[p.id]) return;
+      const base = r2(Number(p.price) || 0);
+      if (base <= 0) return;
+      const pr = promoForProduct(p.id);
+      const on = promoTriggered(pr, day);
+      const pct = on ? (Number(pr.pct) || 0) : 0;
+      const price = on ? r2(base * (1 - pct / 100)) : base;
+      const qty = Math.round(absGap / price);
+      if (qty < 1 || qty > 24) return;
+      const diff = Math.abs(r2(qty * price) - absGap);
+      if (diff > TOL) return;
+      const key = price.toFixed(2) + '_' + qty;
+      if (!groups[key]) groups[key] = { qty: qty, price: price, diff: diff, items: [] };
+      groups[key].items.push({ productId: p.id, name: p.name, ext: true });
+    });
+  }
+  const list = Object.values(groups);
+  list.forEach(g => g.items.sort((x, y) => (x.ext ? 1 : 0) - (y.ext ? 1 : 0)));
+  list.sort((a, b) => (a.diff - b.diff) || ((a.items.some(i => !i.ext) ? 0 : 1) - (b.items.some(i => !i.ext) ? 0 : 1)));
+  const top = list.slice(0, 4);
+  return top.length ? { gap: gap, list: top } : null;
 }
 function detectiveHtml() {
   const s = detectiveSuggestions();
@@ -2329,7 +2353,7 @@ function detectiveHtml() {
   }
   const rows = s.list.map((g, gi) => {
     const names = g.items.map((l, li) =>
-      '<button data-role="detective-pick" data-g="' + gi + '" data-id="' + l.productId + '" class="btn-tap w-full flex items-center justify-between gap-2 p-2 rounded-lg border border-indigo-100 bg-white mt-1"><span class="font-bold text-slate-700 text-sm truncate">' + l.name + '</span><i class="fa-solid fa-check text-indigo-600"></i></button>'
+      '<button data-role="detective-pick" data-g="' + gi + '" data-id="' + l.productId + '" class="btn-tap w-full flex items-center justify-between gap-2 p-2 rounded-lg border border-indigo-100 bg-white mt-1"><span class="font-bold text-slate-700 text-sm truncate">' + l.name + (l.ext ? ' <span class="text-[10px] font-bold text-slate-400">(לא נסרק)</span>' : '') + '</span><i class="fa-solid fa-check text-indigo-600"></i></button>'
     ).join('');
     return '<div class="bg-indigo-50/60 rounded-xl p-2.5 border border-indigo-100">' +
       '<div class="text-xs font-black text-indigo-900">' + (s.gap > 0 ? 'חסר בתעודה' : 'עודף מול התעודה') + ': ' + g.qty + ' יח׳ × ₪' + fmtMoney(g.price) + ' = ₪' + fmtMoney(r2(g.qty * g.price)) + (g.items.length > 1 ? ' <span class="font-bold text-indigo-600">(בחר מי מהם לפי הנייר)</span>' : '') + '</div>' +
@@ -2343,7 +2367,18 @@ function detectiveHtml() {
 function detectiveApply(gi, pid) {
   const s = detectiveSuggestions(); if (!s) return;
   const g = s.list[gi]; if (!g) return;
-  const l = (reconcileData || []).find(x => x.productId === pid); if (!l) return;
+  let l = (reconcileData || []).find(x => x.productId === pid);
+  if (!l) {
+    // מוצר מהמאגר שלא נסרק בכלל — נוסיף אותו כשורה חדשה (התקבל 0)
+    const p = products.find(x => x.id === pid); if (!p) return;
+    const day = todayStr();
+    const base = r2(Number(p.price) || 0);
+    const pr = promoForProduct(p.id);
+    const on = promoTriggered(pr, day);
+    const pct = on ? (Number(pr.pct) || 0) : 0;
+    l = { productId: p.id, name: p.name, barcode: p.barcode || '', received: 0, noteQty: 0, price: (on ? r2(base * (1 - pct / 100)) : base), basePrice: base, promoPct: pct, promoOn: on, checked: false };
+    reconcileData.unshift(l);
+  }
   if (s.gap > 0) l.noteQty = (Number(l.noteQty) || 0) + g.qty;
   else l.noteQty = Math.max(0, (Number(l.noteQty) || 0) - g.qty);
   detectiveOpen = false;
