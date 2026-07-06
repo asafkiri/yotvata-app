@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v88</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v89</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -567,7 +567,7 @@ function startListeners() {
     const incoming = (d && Array.isArray(d.categories)) ? d.categories : [];
     if (JSON.stringify(incoming) === JSON.stringify(pricingCats)) return;
     pricingCats = incoming;
-    if (currentView === 'prices') {
+    if ((currentView === 'prices' || currentView === 'order')) {
       const a = document.activeElement;
       if (!(a && app.contains(a) && (a.tagName === 'INPUT' || a.tagName === 'SELECT'))) rerender();
     }
@@ -678,7 +678,7 @@ function renderOrder() {
     app.innerHTML = '<div class="text-center p-10 text-slate-500">אין מוצרים להצגה. הוסף או הצג מוצרים בהגדרות.</div>';
     updateCart(); return;
   }
-  const rows = visible.map(buildOrderRow).join('');
+  const rows = buildOrderRowsGrouped(visible);
   app.innerHTML =
     '<div class="flex items-center justify-between gap-2 mb-3 px-1">' +
       '<div class="text-[11px] text-slate-400 font-medium leading-tight">טפו על <b class="text-blue-500">מומלץ</b> כדי להזמין את הכמות, או הקלידו כמות אחרת</div>' +
@@ -690,6 +690,25 @@ function renderOrder() {
   updateCart();
 }
 
+// בונה את רשימת ההזמנה מקובצת לפי מחלקות (קטגוריות), לפי סדר המחלקות בהגדרות.
+// בתוך כל מחלקה — סדר המוצרים הידני (orderIndex) נשמר.
+function buildOrderRowsGrouped(visible) {
+  if (!pricingCats.length) return visible.map(buildOrderRow).join('');
+  const byCat = {}; const noCat = [];
+  visible.forEach(p => { const c = p.category && pricingCats.some(x => x.id === p.category) ? p.category : null; if (c) { (byCat[c] = byCat[c] || []).push(p); } else noCat.push(p); });
+  const sortByOrder = arr => arr.sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+  let html = '';
+  pricingCats.forEach(c => {
+    const list = byCat[c.id]; if (!list || !list.length) return;
+    html += '<div class="flex items-center gap-2 mt-4 mb-1.5 px-1 first:mt-0"><div class="h-px bg-slate-200 flex-1"></div><span class="text-xs font-black text-slate-500">' + c.name + '</span><div class="h-px bg-slate-200 flex-1"></div></div>';
+    html += sortByOrder(list).map(buildOrderRow).join('');
+  });
+  if (noCat.length) {
+    html += '<div class="flex items-center gap-2 mt-4 mb-1.5 px-1"><div class="h-px bg-slate-200 flex-1"></div><span class="text-xs font-black text-slate-400">ללא מחלקה</span><div class="h-px bg-slate-200 flex-1"></div></div>';
+    html += sortByOrder(noCat).map(buildOrderRow).join('');
+  }
+  return html;
+}
 function buildOrderRow(p) {
   const st = orderState[p.id] || { amount: '', unit: p.defaultUnit };
   const sel = parseInt(st.amount, 10) > 0;
@@ -789,6 +808,8 @@ function applySearch(q) {
     row.classList.toggle('hidden', !match);
     if (match) any = true;
   });
+  // כותרות מחלקה (ללא data-id) — מוסתרות בזמן חיפוש פעיל
+  list.querySelectorAll(':scope > div:not([data-id])').forEach(h => h.classList.toggle('hidden', !!q));
   const nr = $('noResults'); if (nr) nr.classList.toggle('hidden', any || !q);
 }
 
@@ -3472,7 +3493,7 @@ function priceRowHtml(p) {
     ? '<div class="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-slate-100">' + catSel +
       (rec != null
         ? '<span class="text-xs font-black text-emerald-700">💡 מומלץ למכירה: ₪' + rec.toFixed(2) + '</span>'
-        : '<span class="text-[10px] text-slate-300 font-bold">' + (cat ? 'הזן מחיר עלות' : 'שייך קטגוריה למחיר מומלץ') + '</span>') +
+        : '<span class="text-[10px] text-slate-300 font-bold">' + (cat ? ((Number(cat.pct) || 0) === 0 ? 'מחיר מפוקח — ללא המלצה' : 'הזן מחיר עלות') : 'שייך קטגוריה למחיר מומלץ') + '</span>') +
       '</div>'
     : '');
   return '<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm" data-id="' + p.id + '">' +
@@ -3512,7 +3533,7 @@ function pricingCatOf(p) {
 }
 function recForProduct(p) {
   const c = pricingCatOf(p);
-  if (!c || p.price == null || p.price === '') return null;
+  if (!c || (Number(c.pct) || 0) === 0 || p.price == null || p.price === '') return null;
   return recommendedPrice(Number(p.price) || 0, c.pct);
 }
 function savePricingCats() {
@@ -3528,6 +3549,10 @@ function pricingCatsCardHtml() {
   }
   const rows = pricingCats.map((c, i) =>
     '<div class="flex items-center gap-2">' +
+      '<div class="flex flex-col shrink-0">' +
+        '<button data-role="pcat-up" data-i="' + i + '" class="btn-tap w-7 h-5 rounded-t-lg bg-slate-100 text-slate-500 flex items-center justify-center ' + (i === 0 ? 'opacity-30' : '') + '"><i class="fa-solid fa-chevron-up text-[10px]"></i></button>' +
+        '<button data-role="pcat-down" data-i="' + i + '" class="btn-tap w-7 h-5 rounded-b-lg bg-slate-100 text-slate-500 flex items-center justify-center ' + (i === pricingCats.length - 1 ? 'opacity-30' : '') + '"><i class="fa-solid fa-chevron-down text-[10px]"></i></button>' +
+      '</div>' +
       '<input data-role="pcat-name" data-i="' + i + '" type="text" value="' + (c.name || '').replace(/"/g, '&quot;') + '" placeholder="שם קטגוריה" class="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-bold outline-none focus:border-blue-500">' +
       '<div class="flex items-center gap-1 shrink-0"><input data-role="pcat-pct" data-i="' + i + '" type="text" inputmode="numeric" value="' + (c.pct != null ? c.pct : '') + '" placeholder="%" class="w-14 bg-slate-50 border border-slate-200 rounded-lg px-1 py-1.5 text-center text-sm font-black outline-none focus:border-blue-500"><span class="text-slate-400 font-bold text-sm">%</span></div>' +
       '<button data-role="pcat-del" data-i="' + i + '" class="btn-tap shrink-0 w-8 h-8 rounded-lg bg-rose-50 text-rose-500 flex items-center justify-center"><i class="fa-solid fa-trash text-xs"></i></button>' +
@@ -3535,7 +3560,7 @@ function pricingCatsCardHtml() {
   ).join('');
   return '<div class="bg-white border-2 border-emerald-200 rounded-2xl p-3 shadow-sm mb-3">' +
     '<button data-role="pcat-toggle" class="btn-tap w-full flex items-center justify-between gap-2 font-black text-sm text-slate-800 mb-1"><span><i class="fa-solid fa-percent text-emerald-600"></i> קטגוריות רווחיות — מחיר מומלץ</span><i class="fa-solid fa-chevron-up"></i></button>' +
-    '<div class="text-[11px] text-slate-400 font-bold mb-2">לכל קטגוריה אחוז רווח. מוצר משויך יקבל מחיר מומלץ: עלות + רווח + מע״מ, מעוגל ל-X.90</div>' +
+    '<div class="text-[11px] text-slate-400 font-bold mb-2">לכל קטגוריה אחוז רווח. סדר המחלקות כאן קובע את הסדר במסך ההזמנה. אחוז 0 = ללא המלצה (מוצרי פיקוח)</div>' +
     '<div class="space-y-1.5">' + rows + '</div>' +
     '<button data-role="pcat-add" class="btn-tap w-full bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg py-2 font-black text-xs mt-2"><i class="fa-solid fa-plus"></i> הוסף קטגוריה</button>' +
   '</div>';
@@ -4604,6 +4629,8 @@ app.addEventListener('click', (e) => {
   else if (role === 'pr-scan') openPriceScanner();
   else if (role === 'pcat-toggle') { pricingCatsOpen = !pricingCatsOpen; if (currentView === 'prices') renderPrices(); }
   else if (role === 'pcat-add') { pricingCats.push({ id: 'cat_' + Date.now(), name: '', pct: 30 }); savePricingCats(); if (currentView === 'prices') renderPrices(); }
+  else if (role === 'pcat-up') { const i = parseInt(t.dataset.i, 10); if (i > 0) { const tmp = pricingCats[i]; pricingCats[i] = pricingCats[i - 1]; pricingCats[i - 1] = tmp; savePricingCats(); if (currentView === 'prices') renderPrices(); } }
+  else if (role === 'pcat-down') { const i = parseInt(t.dataset.i, 10); if (i < pricingCats.length - 1) { const tmp = pricingCats[i]; pricingCats[i] = pricingCats[i + 1]; pricingCats[i + 1] = tmp; savePricingCats(); if (currentView === 'prices') renderPrices(); } }
   else if (role === 'pcat-del') {
     const i = parseInt(t.dataset.i, 10);
     const c = pricingCats[i];
