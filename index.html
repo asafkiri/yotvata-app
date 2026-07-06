@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v87</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v88</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -200,6 +200,7 @@
           <input id="npr_name" type="text" autocomplete="off" class="w-full p-3 rounded-xl border-2 border-slate-200 outline-none font-bold focus:border-blue-500 mb-3 disabled:bg-slate-100 disabled:text-slate-500" placeholder="שם המוצר">
           <label class="text-[11px] text-slate-400 font-bold block mb-1">מחיר ליחידה (ללא מע"מ)</label>
           <div class="flex items-center gap-2"><span class="text-slate-400 font-bold text-lg">₪</span><input id="npr_price" type="text" inputmode="decimal" class="flex-1 p-3 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-blue-500" placeholder="0.00"></div>
+          <div id="npr_recHint" class="text-xs font-black text-emerald-700 text-center mt-2 hidden"></div>
         </div>
         <div class="flex gap-2 p-4 pt-0">
           <button id="npr_cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">ביטול</button>
@@ -558,6 +559,18 @@ function startListeners() {
   onSnapshot(retQ, (snap) => {
     returns = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     if (currentView === 'returnsHistory' || currentView === 'returns' || currentView === 'receiptsHistory') rerender();
+  }, console.error);
+
+  // הגדרות מחיר מומלץ — קטגוריות רווחיות
+  onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'pricing'), (snap) => {
+    const d = snap.data();
+    const incoming = (d && Array.isArray(d.categories)) ? d.categories : [];
+    if (JSON.stringify(incoming) === JSON.stringify(pricingCats)) return;
+    pricingCats = incoming;
+    if (currentView === 'prices') {
+      const a = document.activeElement;
+      if (!(a && app.contains(a) && (a.tagName === 'INPUT' || a.tagName === 'SELECT'))) rerender();
+    }
   }, console.error);
 
   // טיוטת חזרות משותפת — מסונכרנת בין כל המכשירים בזמן אמת
@@ -2339,8 +2352,21 @@ function promptSetPrice(p, target) {
   $('npr_code').textContent = p.barcode || 'ללא ברקוד';
   $('npr_name').value = p.name; $('npr_name').disabled = true;
   $('npr_price').value = '';
+  updateNprRecHint();
   const m = $('newProductModal'); m.classList.remove('hidden'); m.classList.add('flex');
   setTimeout(() => { const i = $('npr_price'); if (i) i.focus(); }, 80);
+}
+// המלצת מחיר חיה בחלון קביעת מחיר — לפי קטגוריית הרווחיות של המוצר
+function updateNprRecHint() {
+  const h = $('npr_recHint'); if (!h) return;
+  const p = npMode === 'setprice' ? products.find(x => x.id === npProductId) : null;
+  const c = p ? pricingCatOf(p) : null;
+  if (!c) { h.classList.add('hidden'); return; }
+  const cost = parseFloat((($('npr_price') || {}).value || '').replace(',', '.'));
+  if (!(cost > 0)) { h.textContent = 'קטגוריה: ' + c.name + ' (' + c.pct + '%) — הקלד עלות לקבלת מחיר מומלץ'; h.classList.remove('hidden'); return; }
+  const rec = recommendedPrice(cost, c.pct);
+  h.textContent = '💡 מומלץ למכירה: ₪' + rec.toFixed(2) + ' (' + c.name + ' · ' + c.pct + '%)';
+  h.classList.remove('hidden');
 }
 function hideNewProduct() {
   const m = $('newProductModal'); m.classList.add('hidden'); m.classList.remove('flex');
@@ -3436,6 +3462,19 @@ function priceRowHtml(p) {
   const onNow = promoActive(op, todayStr());
   const mop = promos.find(pr => pr.type === 'monthEnd' && Array.isArray(pr.productIds) && pr.productIds.indexOf(p.id) !== -1) || null;
   const mOn = promoActive(mop, todayStr());
+  const cat = pricingCatOf(p);
+  const rec = recForProduct(p);
+  const catSel = '<select data-role="cat-set" data-id="' + p.id + '" class="text-[11px] font-bold bg-slate-50 border border-slate-200 rounded-lg px-1.5 py-1 outline-none max-w-[45%]">' +
+    '<option value="">ללא קטגוריה</option>' +
+    pricingCats.map(c => '<option value="' + c.id + '"' + ((p.category || '') === c.id ? ' selected' : '') + '>' + c.name + ' (' + c.pct + '%)</option>').join('') +
+    '</select>';
+  const recLine = (pricingCats.length
+    ? '<div class="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-slate-100">' + catSel +
+      (rec != null
+        ? '<span class="text-xs font-black text-emerald-700">💡 מומלץ למכירה: ₪' + rec.toFixed(2) + '</span>'
+        : '<span class="text-[10px] text-slate-300 font-bold">' + (cat ? 'הזן מחיר עלות' : 'שייך קטגוריה למחיר מומלץ') + '</span>') +
+      '</div>'
+    : '');
   return '<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm" data-id="' + p.id + '">' +
     '<div class="flex items-center gap-2">' +
       '<button data-role="edit-prod" data-id="' + p.id + '" class="btn-tap flex-1 min-w-0 text-right">' +
@@ -3450,10 +3489,60 @@ function priceRowHtml(p) {
           (mop ? '<div><span class="font-black ' + (mOn ? 'text-rose-600' : 'text-slate-400') + '"><i class="fa-solid fa-clock-rotate-left"></i> מרכזת: ' + (mop.name || ('מבצע ' + mop.pct + '%')) + ' · ' + mop.pct + '%</span>' + (mOn ? '' : ' <span class="text-slate-300">(לא פעיל)</span>') + '</div>' : '') +
         '</div>'
       : '') +
+    recLine +
+  '</div>';
+}
+// ===== מחיר מומלץ לפי קטגוריות רווחיות =====
+// עלות (ללא מע"מ) × (1 + אחוז/100) × מע"מ 18% → עיגול לחוק ה-X.90:
+// עד X.2 מעגלים מטה ל-(X-1).90, מעל X.2 מעגלים ל-X.90
+let pricingCats = [];
+let pricingCatsTimer = null, pricingCatsOpen = false;
+function recommendedPrice(cost, pct) {
+  if (!(cost > 0)) return null;
+  const raw = r2(cost * 1.18 * (1 + (Number(pct) || 0) / 100));
+  const base = Math.floor(raw);
+  const frac = r2(raw - base);
+  let rec = frac <= 0.2 ? base - 0.10 : base + 0.90;
+  if (rec < 0.9) rec = 0.90;
+  return r2(rec);
+}
+function pricingCatOf(p) {
+  if (!p || !p.category) return null;
+  return pricingCats.find(c => c.id === p.category) || null;
+}
+function recForProduct(p) {
+  const c = pricingCatOf(p);
+  if (!c || p.price == null || p.price === '') return null;
+  return recommendedPrice(Number(p.price) || 0, c.pct);
+}
+function savePricingCats() {
+  if (!db) return;
+  clearTimeout(pricingCatsTimer);
+  pricingCatsTimer = setTimeout(() => {
+    setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'pricing'), { categories: pricingCats, updatedAt: Date.now() }).catch(console.error);
+  }, 700);
+}
+function pricingCatsCardHtml() {
+  if (!pricingCatsOpen) {
+    return '<button data-role="pcat-toggle" class="btn-tap w-full bg-white border border-slate-200 text-slate-700 rounded-xl py-2.5 px-3 font-black text-sm flex items-center justify-between gap-2 mb-3"><span><i class="fa-solid fa-percent text-emerald-600"></i> קטגוריות רווחיות — מחיר מומלץ' + (pricingCats.length ? ' (' + pricingCats.length + ')' : '') + '</span><i class="fa-solid fa-chevron-down"></i></button>';
+  }
+  const rows = pricingCats.map((c, i) =>
+    '<div class="flex items-center gap-2">' +
+      '<input data-role="pcat-name" data-i="' + i + '" type="text" value="' + (c.name || '').replace(/"/g, '&quot;') + '" placeholder="שם קטגוריה" class="flex-1 min-w-0 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-bold outline-none focus:border-blue-500">' +
+      '<div class="flex items-center gap-1 shrink-0"><input data-role="pcat-pct" data-i="' + i + '" type="text" inputmode="numeric" value="' + (c.pct != null ? c.pct : '') + '" placeholder="%" class="w-14 bg-slate-50 border border-slate-200 rounded-lg px-1 py-1.5 text-center text-sm font-black outline-none focus:border-blue-500"><span class="text-slate-400 font-bold text-sm">%</span></div>' +
+      '<button data-role="pcat-del" data-i="' + i + '" class="btn-tap shrink-0 w-8 h-8 rounded-lg bg-rose-50 text-rose-500 flex items-center justify-center"><i class="fa-solid fa-trash text-xs"></i></button>' +
+    '</div>'
+  ).join('');
+  return '<div class="bg-white border-2 border-emerald-200 rounded-2xl p-3 shadow-sm mb-3">' +
+    '<button data-role="pcat-toggle" class="btn-tap w-full flex items-center justify-between gap-2 font-black text-sm text-slate-800 mb-1"><span><i class="fa-solid fa-percent text-emerald-600"></i> קטגוריות רווחיות — מחיר מומלץ</span><i class="fa-solid fa-chevron-up"></i></button>' +
+    '<div class="text-[11px] text-slate-400 font-bold mb-2">לכל קטגוריה אחוז רווח. מוצר משויך יקבל מחיר מומלץ: עלות + רווח + מע״מ, מעוגל ל-X.90</div>' +
+    '<div class="space-y-1.5">' + rows + '</div>' +
+    '<button data-role="pcat-add" class="btn-tap w-full bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg py-2 font-black text-xs mt-2"><i class="fa-solid fa-plus"></i> הוסף קטגוריה</button>' +
   '</div>';
 }
 function renderPrices() {
   app.innerHTML = '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">עדכון מחירים</h2><p class="text-sm text-slate-400 font-bold mt-1">מחירים ללא מע"מ · סרוק לעדכון מהיר או חפש מוצר</p></div>' +
+    pricingCatsCardHtml() +
     '<button data-role="pr-scan" class="btn-tap w-full bg-blue-600 text-white rounded-2xl py-3.5 font-black text-base flex items-center justify-center gap-2 mb-3"><i class="fa-solid fa-barcode text-xl"></i> סרוק לעדכון מחיר</button>' +
     '<div class="relative mb-3"><i class="fa-solid fa-magnifying-glass absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i><input id="priceSearch" type="text" inputmode="search" autocomplete="off" value="' + (priceQuery || '').replace(/"/g, '&quot;') + '" placeholder="חפש לפי שם או ברקוד..." class="w-full bg-white border border-slate-200 rounded-xl py-3 pr-9 pl-3 text-sm font-bold outline-none focus:border-blue-500"></div>' +
     '<div id="pricesListEl" class="space-y-2.5 pb-24"></div>';
@@ -4194,6 +4283,7 @@ $('cartBtn').addEventListener('click', () => { if (mainMode === 'returns') openR
 $('promptCancel').addEventListener('click', hidePrompt);
 $('promptOk').addEventListener('click', savePrompt);
 $('promptInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); savePrompt(); } });
+$('npr_price').addEventListener('input', updateNprRecHint);
 $('promptScan').addEventListener('click', () => { scanPurpose = 'field'; openScanner(); });
 $('npr_cancel').addEventListener('click', hideNewProduct);
 $('npr_ok').addEventListener('click', saveNewProduct);
@@ -4295,6 +4385,17 @@ app.addEventListener('input', (e) => {
   if (role === 'rv-price') { rvSetPriceLive(parseInt(t.dataset.id, 10), t.value); return; }
   if (role === 'sign-f') { if (signMaker) { const si = parseInt(t.dataset.id, 10); const s = signMaker.signs[si]; if (s) { s[t.dataset.f] = t.value; drawSignCanvas(); const rc = $('signRec_' + si); if (rc) rc.innerHTML = signRecInnerHtml(s, si); } } return; }
   if (role === 'price-set') { savePrice(t.dataset.id, t.value); return; }
+  if (role === 'pcat-name') { const i = parseInt(t.dataset.i, 10); if (pricingCats[i]) { pricingCats[i].name = t.value; savePricingCats(); } return; }
+  if (role === 'pcat-pct') { const i = parseInt(t.dataset.i, 10); let v = t.value.replace(/[^0-9]/g, ''); if (v !== t.value) t.value = v; if (pricingCats[i]) { pricingCats[i].pct = v ? parseInt(v, 10) : 0; savePricingCats(); } return; }
+  if (role === 'cat-set') {
+    const p = products.find(x => x.id === t.dataset.id);
+    if (p) {
+      p.category = t.value || null;
+      if (db) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', p.id), { category: p.category }).catch(console.error);
+      refreshPricesList(priceQuery);
+    }
+    return;
+  }
   if (role === 'amount') {
     const id = t.dataset.id; let v = t.value.replace(/[^0-9]/g, ''); if (v !== t.value) t.value = v;
     (orderState[id] = orderState[id] || { amount: '', unit: 'carton' }).amount = (v === '0' ? '' : v);
@@ -4501,6 +4602,13 @@ app.addEventListener('click', (e) => {
   else if (role === 'rc-prices') setView('prices');
   else if (role === 'rc-promos') setView('promos');
   else if (role === 'pr-scan') openPriceScanner();
+  else if (role === 'pcat-toggle') { pricingCatsOpen = !pricingCatsOpen; if (currentView === 'prices') renderPrices(); }
+  else if (role === 'pcat-add') { pricingCats.push({ id: 'cat_' + Date.now(), name: '', pct: 30 }); savePricingCats(); if (currentView === 'prices') renderPrices(); }
+  else if (role === 'pcat-del') {
+    const i = parseInt(t.dataset.i, 10);
+    const c = pricingCats[i];
+    if (c) showConfirm('מחיקת קטגוריה', 'למחוק את "' + (c.name || 'קטגוריה') + '"? מוצרים משויכים יאבדו את המחיר המומלץ.', 'מחק', () => { pricingCats.splice(i, 1); savePricingCats(); if (currentView === 'prices') renderPrices(); });
+  }
   else if (role === 'pr-create') openProdModal(null, false, t.dataset.code);
   else if (role === 'edit-prod') { const p = products.find(x => x.id === id); if (p) openProdModal(p, false); }
   else if (role === 'rc-history') setView('receiptsHistory');
