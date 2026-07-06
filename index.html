@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v85</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v87</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -310,7 +310,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebas
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import {
   initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager,
-  collection, onSnapshot, doc, deleteDoc, addDoc, updateDoc, setDoc, writeBatch, query, orderBy, limit, getDocs
+  collection, onSnapshot, doc, deleteDoc, addDoc, updateDoc, setDoc, writeBatch, query, orderBy, limit, getDocs, where
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -1014,9 +1014,9 @@ async function addNote() {
 }
 async function doneNote(id) {
   const n = notes.find(x => x.id === id);
-  const backup = n ? { text: n.text, timestamp: n.timestamp || Date.now() } : null;
-  if (db) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'notes', id)).catch(console.error);
-  if (backup) showToast('ההערה סומנה כבוצעה', 'בטל', () => { if (db) addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'notes'), backup).catch(console.error); });
+  const backup = n ? { ...n } : null;
+  const ok = await hardDeleteDocWithBackup('notes', id, backup, 'note-done');
+  if (ok && backup) showToast('ההערה סומנה כבוצעה', 'בטל', () => restoreDoc('notes', backup));
 }
 async function toggleHidden(id) {
   const p = products.find(x => x.id === id); if (!p || !db) return;
@@ -1427,7 +1427,7 @@ async function clearReturnVerification(id) {
   else if (currentView === 'receiptsHistory') renderReceiptsHistory();
   if (db) { try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'returns', id), { credited: false, creditedAt: null, creditStatus: null, creditNoteTotal: null, creditNoteParts: null }); } catch (e) { console.error(e); } }
 }
-function saveReturnVerify(opts) {
+async function saveReturnVerify(opts) {
   opts = opts || {};
   if (!returnVerify) return;
   const items = returnVerify.items || [];
@@ -1448,10 +1448,14 @@ function saveReturnVerify(opts) {
   const sentEx = r2(items.reduce((a, l) => a + (Number(l.unitPrice) || 0) * (Number(l.qty) || 0), 0));
   const open = outItems.some(l => l.noteQty != null && l.noteQty !== l.qty);
   const id = returnVerify.id, noteTotal = returnVerify.noteTotal;
+  const updateData = { items: outItems, totalExVat: sentEx, totalIncVat: sentEx, creditNoteTotal: noteTotal, creditStatus: open ? 'open' : 'ok', credited: true, creditedAt: Date.now() };
+  const saved = await mustCloudWrite('save return verification', () =>
+    updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'returns', id), updateData)
+  );
+  if (!saved) return;
   const r = returns.find(x => x.id === id);
-  if (r) { r.items = outItems; r.totalExVat = sentEx; r.totalIncVat = sentEx; r.creditNoteTotal = noteTotal; r.creditStatus = open ? 'open' : 'ok'; r.credited = true; r.creditedAt = Date.now(); }
+  if (r) Object.assign(r, updateData);
   returnVerify = null;
-  if (db) { try { updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'returns', id), { items: outItems, totalExVat: sentEx, totalIncVat: sentEx, creditNoteTotal: noteTotal, creditStatus: open ? 'open' : 'ok', credited: true, creditedAt: Date.now() }).catch(console.error); } catch (e) { console.error(e); } }
   setView(rvOrigin);
   showToast(open ? 'נשמר — נותר פער בזיכוי' : 'הזיכוי אומת ✓', null, null, 2000);
 }
@@ -1473,18 +1477,31 @@ function pruneOnLoad() {
   if (prunedOnce) return; prunedOnce = true;
   pruneCollection('history', 20);
   pruneCollection('returns', 20);
+  pruneTrash(30);
 }
-async function clearAllDocs(name) {
+// ריקון סל המחזור: מוחק גיבויים בני יותר מ-X ימים. טעות מחיקה מתגלה תוך ימים — אחרי חודש הגיבוי מיצה את תפקידו
+async function pruneTrash(days) {
   if (!db) return;
   try {
-    const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', name));
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    const snap = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'trash'), where('deletedAt', '<', cutoff)));
     const docs = snap.docs;
+    if (!docs.length) return;
     for (let i = 0; i < docs.length; i += 400) {
       const batch = writeBatch(db);
       docs.slice(i, i + 400).forEach(dd => batch.delete(dd.ref));
       await batch.commit();
     }
-  } catch (e) { console.error(e); }
+    console.info('trash pruned:', docs.length, 'old backups removed');
+  } catch (e) { console.error('trash prune failed', e); }
+}
+async function clearAllDocs(name) {
+  if (!db) return;
+  try {
+    const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', name));
+    const deleted = await hardDeleteSnapshotDocsWithBackup(name, snap.docs, 'clear-all');
+    showToast(deleted ? ('נמחקו ' + deleted + ' רשומות ונשמר להן גיבוי בסל מחזור') : 'אין רשומות למחיקה', null, null, 3500);
+  } catch (e) { console.error(e); showToast('מחיקה מרוכזת נכשלה — לא נמחק בלי גיבוי.', null, null, 4500); }
 }
 
 // ===== פעולות מוצרים/אנשי קשר =====
@@ -1517,8 +1534,8 @@ async function addProduct() {
 async function delProduct(id) {
   const p = products.find(x => x.id === id);
   const backup = p ? { ...p } : null;
-  if (db) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', id)).catch(console.error);
-  if (backup) showToast('המוצר נמחק', 'בטל', () => restoreDoc('products', backup));
+  const ok = await hardDeleteDocWithBackup('products', id, backup, 'delete-product');
+  if (ok && backup) showToast('המוצר נמחק ונשמר גיבוי', 'בטל', () => restoreDoc('products', backup));
 }
 async function addContact() {
   const nEl = $('ncName'), pEl = $('ncPhone'); if (!nEl || !pEl) return;
@@ -1529,8 +1546,8 @@ async function addContact() {
 async function delContact(id) {
   const c = contacts.find(x => x.id === id);
   const backup = c ? { ...c } : null;
-  if (db) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'contacts', id)).catch(console.error);
-  if (backup) showToast('איש הקשר נמחק', 'בטל', () => restoreDoc('contacts', backup));
+  const ok = await hardDeleteDocWithBackup('contacts', id, backup, 'delete-contact');
+  if (ok && backup) showToast('איש הקשר נמחק ונשמר גיבוי', 'בטל', () => restoreDoc('contacts', backup));
 }
 
 // ===== החלפת יחידה =====
@@ -1609,20 +1626,24 @@ async function performSend(contact) {
   let phone = (contact.phone || '').replace(/[-+\s]/g, '');
   if (phone.startsWith('0')) phone = '972' + phone.substring(1);
   if (type === 'returns') {
-    if (db) {
-      const sp = addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'returns'), { timestamp: Date.now(), sentTo: contact.name, items, credited: false, totalExVat: (sendCtx && sendCtx.totalExVat) || 0, totalIncVat: (sendCtx && sendCtx.totalIncVat) || 0 }).catch(console.error);
-      await Promise.race([sp, new Promise(r => setTimeout(r, 1500))]);
-    }
+    const saved = await mustCloudWrite('save returns before send', () =>
+      addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'returns'), {
+        timestamp: Date.now(), sentTo: contact.name, items, credited: false,
+        totalExVat: (sendCtx && sendCtx.totalExVat) || 0,
+        totalIncVat: (sendCtx && sendCtx.totalIncVat) || 0
+      })
+    );
+    if (!saved) return;
     const msg = buildReturnsMessage(items, note);
     const url = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg);
     returnsList = []; saveReturnsDraft();
     sendCtx = null; hideSend(); setView('returnsHistory'); window.location.href = url;
     return;
   }
-  if (db) {
-    const sp = addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'history'), { timestamp: Date.now(), sentTo: contact.name, items }).catch(console.error);
-    await Promise.race([sp, new Promise(r => setTimeout(r, 1500))]);
-  }
+  const saved = await mustCloudWrite('save order before send', () =>
+    addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'history'), { timestamp: Date.now(), sentTo: contact.name, items })
+  );
+  if (!saved) return;
   const msg = buildMessage(items, note);
   const url = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg);
   if (resetCurrent) {
@@ -1815,6 +1836,108 @@ function restoreDoc(name, obj) {
   const batch = writeBatch(db);
   batch.set(doc(db, 'artifacts', appId, 'public', 'data', name, obj.id), obj);
   batch.commit().catch(console.error);
+}
+
+// ===== שכבת בטיחות נתונים =====
+// כל פעולה שמנקה טיוטה/מוחקת מידע עוברת מכאן, כדי לא לאבד נתונים בגלל אינטרנט איטי או תקלה ב-Firebase.
+function cloneSafe(obj) {
+  try { return JSON.parse(JSON.stringify(obj || {})); }
+  catch (e) { return obj || {}; }
+}
+function trashDocId(name, id) {
+  return name + '_' + id + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+}
+// חיווי "שומר לענן" + נעילה — מונע לחיצות כפולות (=רשומות כפולות) ומראה למשתמש שמשהו קורה
+let cloudBusyEl = null, cloudSlowTimer = null, cloudWriteInFlight = false;
+function showCloudBusy() {
+  if (!cloudBusyEl) {
+    cloudBusyEl = document.createElement('div');
+    cloudBusyEl.className = 'fixed inset-0 bg-black/30 z-[100] flex items-center justify-center';
+    cloudBusyEl.innerHTML = '<div class="bg-white rounded-2xl px-6 py-4 font-black text-slate-700 shadow-xl flex items-center gap-3"><i class="fa-solid fa-cloud-arrow-up fa-beat text-blue-600"></i> <span id="cloudBusyTxt">שומר לענן...</span></div>';
+    document.body.appendChild(cloudBusyEl);
+  }
+  const t = document.getElementById('cloudBusyTxt'); if (t) t.textContent = 'שומר לענן...';
+  cloudBusyEl.style.display = 'flex';
+  clearTimeout(cloudSlowTimer);
+  cloudSlowTimer = setTimeout(() => { const s = document.getElementById('cloudBusyTxt'); if (s) s.textContent = 'עדיין שומר — בדוק חיבור אינטרנט...'; }, 10000);
+}
+function hideCloudBusy() {
+  clearTimeout(cloudSlowTimer);
+  if (cloudBusyEl) cloudBusyEl.style.display = 'none';
+}
+async function mustCloudWrite(actionName, fn) {
+  if (!db) {
+    showToast('לא בוצע: אין חיבור לענן. הנתונים נשארו בטיוטה.', null, null, 4500);
+    return false;
+  }
+  if (cloudWriteInFlight) {
+    showToast('פעולה קודמת עדיין נשמרת — המתן רגע', null, null, 2500);
+    return false;
+  }
+  cloudWriteInFlight = true;
+  showCloudBusy();
+  try {
+    await fn();
+    return true;
+  } catch (e) {
+    console.error(actionName || 'Cloud write failed', e);
+    showToast('השמירה בענן נכשלה — לא ניקיתי את הטיוטה. נסה שוב כשיש חיבור יציב.', null, null, 5500);
+    return false;
+  } finally {
+    cloudWriteInFlight = false;
+    hideCloudBusy();
+  }
+}
+async function hardDeleteDocWithBackup(name, id, data, reason) {
+  if (!db || !id) return false;
+  showCloudBusy();
+  try {
+    const backup = cloneSafe({ id, ...(data || {}) });
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'trash', trashDocId(name, id)), {
+      collectionName: name,
+      originalId: id,
+      reason: reason || 'delete',
+      deletedAt: Date.now(),
+      data: backup
+    });
+    batch.delete(doc(db, 'artifacts', appId, 'public', 'data', name, id));
+    await batch.commit();
+    return true;
+  } catch (e) {
+    console.error('safe delete failed', name, id, e);
+    showToast('המחיקה נכשלה — לא מחקתי בלי גיבוי.', null, null, 4500);
+    return false;
+  } finally {
+    hideCloudBusy();
+  }
+}
+async function hardDeleteSnapshotDocsWithBackup(name, docs, reason) {
+  if (!db || !docs || !docs.length) return 0;
+  let deleted = 0;
+  showCloudBusy();
+  try {
+    // 2 כתיבות לכל מסמך (גיבוי + מחיקה), לכן עד 200 בבאטצ׳ כדי לא להתקרב למגבלת Firestore.
+    for (let i = 0; i < docs.length; i += 200) {
+      const batch = writeBatch(db);
+      docs.slice(i, i + 200).forEach(dd => {
+        const id = dd.id;
+        batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'trash', trashDocId(name, id)), {
+          collectionName: name,
+          originalId: id,
+          reason: reason || 'bulk-delete',
+          deletedAt: Date.now(),
+          data: cloneSafe({ id, ...dd.data() })
+        });
+        batch.delete(dd.ref);
+        deleted++;
+      });
+      await batch.commit();
+    }
+    return deleted;
+  } finally {
+    hideCloudBusy();
+  }
 }
 
 // ===== קליטת תעודות =====
@@ -3047,8 +3170,12 @@ async function saveReceiptFix() {
   const ex = r2(items.reduce((a, l) => a + l.lineTotal, 0));
   const open = items.some(l => l.noteQty != null && l.noteQty !== l.qty);
   const id = receiptFix.id;
+  const updateData = { items, count: items.length, totalExVat: ex, totalIncVat: ex, status: open ? 'open' : 'ok' };
+  const saved = await mustCloudWrite('save receipt fix', () =>
+    updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'receipts', id), updateData)
+  );
+  if (!saved) return;
   receiptFix = null;
-  if (db) { try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'receipts', id), { items, count: items.length, totalExVat: ex, totalIncVat: ex, status: open ? 'open' : 'ok' }); } catch (e) { console.error(e); } }
   setView('receiptsHistory');
   const offRc = receipts.find(x => x.id === id);
   if (offRc && findOffsetMatch(offRc)) showToast('💡 זוהה קיזוז אפשרי מול תעודה קודמת — ראה בכרטיס התעודה', null, null, 3500);
@@ -3058,8 +3185,11 @@ async function confirmReceipt() {
   if (!pendingReceipt) { hideReceiptSummary(); return; }
   const { lines, ex, noteTotal, status, noteParts } = pendingReceipt;
   const data = { timestamp: Date.now(), date: todayStr(), items: lines, count: lines.length, totalExVat: ex, totalIncVat: ex, noteTotalInc: (noteTotal != null ? noteTotal : null), noteParts: (Array.isArray(noteParts) ? noteParts : []), status: status || 'ok' };
+  const saved = await mustCloudWrite('save receipt before clearing draft', () =>
+    addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'receipts'), data)
+  );
+  if (!saved) return;
   hideReceiptSummary();
-  if (db) { try { await Promise.race([addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'receipts'), data), new Promise(r => setTimeout(r, 1500))]); } catch (e) { console.error(e); } }
   receiptList = []; pendingReceipt = null; receiptNoteTotal = null; receiptNotes = []; receiptOpened = false; editingNotes = false; reconcileData = null; receiptDupConfirmed = false; saveReceiptDraft();
   setView('receiptsHistory');
   const newOpen = receipts.filter(r => !r.offsetClosed && receiptDiscrepancyInfo(r).open).find(r => findOffsetMatch(r));
@@ -3069,8 +3199,8 @@ async function confirmReceipt() {
 async function delReceipt(id) {
   const rc = receipts.find(x => x.id === id);
   const backup = rc ? { ...rc } : null;
-  if (db) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'receipts', id)).catch(console.error);
-  if (backup) showToast('התעודה נמחקה', 'בטל', () => restoreDoc('receipts', backup));
+  const ok = await hardDeleteDocWithBackup('receipts', id, backup, 'delete-receipt');
+  if (ok && backup) showToast('התעודה נמחקה ונשמר גיבוי', 'בטל', () => restoreDoc('receipts', backup));
 }
 
 // --- היסטוריית תעודות + דוח טווח ---
@@ -4024,12 +4154,13 @@ function savePromoEntity() {
 }
 function deletePromoEntity() {
   const id = promoEdit && promoEdit.id; if (!id) { promoEdit = null; setView('promos'); return; }
+  const backup = { ...promoEdit };
   const nm = (promoEdit.name) || 'המבצע';
-  showConfirm('מחיקת מבצע', 'למחוק את "' + nm + '"? פעולה זו אינה הפיכה.', 'מחק', () => {
+  showConfirm('מחיקת מבצע', 'למחוק את "' + nm + '"? יישמר גיבוי בסל מחזור.', 'מחק', async () => {
     promoEdit = null;
-    if (db) deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'promos', id)).catch(console.error);
+    const ok = await hardDeleteDocWithBackup('promos', id, backup, 'delete-promo');
     setView('promos');
-    showToast('המבצע נמחק', null, null, 1800);
+    if (ok) showToast('המבצע נמחק ונשמר גיבוי', 'בטל', () => restoreDoc('promos', backup));
   });
 }
 function openPromoPopup(promoId) {
@@ -4399,7 +4530,7 @@ app.addEventListener('click', (e) => {
   else if (role === 'pe-cancel') { promoEdit = null; setView('promos'); }
   else if (role === 'pe-delete') deletePromoEntity();
   else if (role === 'del-receipt') { const rc = receipts.find(x => x.id === id); showConfirm('מחיקת תעודה', 'למחוק את התעודה' + (rc ? ' מ-' + new Date(rc.timestamp).toLocaleDateString('he-IL') : '') + '?', 'מחק', () => delReceipt(id)); }
-  else if (role === 'clear-receipts') showConfirm('ניקוי תעודות', 'למחוק את כל תעודות הקליטה? פעולה זו אינה הפיכה.', 'מחק הכל', () => clearAllDocs('receipts'));
+  else if (role === 'clear-receipts') showConfirm('ניקוי תעודות', 'למחוק את כל תעודות הקליטה? יישמר גיבוי בסל מחזור.', 'מחק הכל', () => clearAllDocs('receipts'));
 });
 
 // ===== מצב כהה =====
