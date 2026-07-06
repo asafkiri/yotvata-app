@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v89</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v90</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -567,7 +567,7 @@ function startListeners() {
     const incoming = (d && Array.isArray(d.categories)) ? d.categories : [];
     if (JSON.stringify(incoming) === JSON.stringify(pricingCats)) return;
     pricingCats = incoming;
-    if ((currentView === 'prices' || currentView === 'order')) {
+    if ((currentView === 'prices' || currentView === 'order' || currentView === 'settings')) {
       const a = document.activeElement;
       if (!(a && app.contains(a) && (a.tagName === 'INPUT' || a.tagName === 'SELECT'))) rerender();
     }
@@ -825,18 +825,36 @@ function clearOrder() {
 }
 
 // ===== מסך הגדרות (גרירה לסידור) =====
-function renderSettings() {
-  if (movingId) { renderMoveMode(); return; }
-  const rows = products.map((p, i) =>
-    '<div class="prod-item flex items-center gap-2 p-2.5 ' + (p.hidden ? 'bg-slate-50 opacity-70' : 'bg-white') + ' border border-slate-100 rounded-xl" data-id="' + p.id + '">' +
+function settingsRowHtml(p) {
+  return '<div class="prod-item flex items-center gap-2 p-2.5 ' + (p.hidden ? 'bg-slate-50 opacity-70' : 'bg-white') + ' border border-slate-100 rounded-xl" data-id="' + p.id + '">' +
       '<button data-role="move" data-id="' + p.id + '" class="btn-tap shrink-0 w-9 h-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center" title="העבר מוצר"><i class="fa-solid fa-up-down text-sm"></i></button>' +
       '<div class="flex-1 min-w-0 font-bold text-sm ' + (p.hidden ? 'text-slate-400 line-through' : 'text-slate-800') + ' leading-tight">' + p.name + (p.hidden ? ' <span class="text-[10px] text-amber-500 font-black no-underline">(אזל)</span>' : '') + '</div>' +
       '<input data-role="avg-set" data-id="' + p.id + '" type="text" inputmode="numeric" value="' + (p.average || '') + '" placeholder="0" class="w-14 bg-slate-100 rounded-lg p-1.5 text-center font-bold text-sm outline-none">' +
       '<input data-role="box-set" data-id="' + p.id + '" type="text" inputmode="numeric" value="' + (p.boxSize || '') + '" placeholder="📦" title="יח׳ בארגז — רק למוצרים שמגיעים אך ורק בארגזים" class="w-12 bg-amber-50 border border-amber-100 rounded-lg p-1.5 text-center font-bold text-sm outline-none">' +
       '<button data-role="toggle-hidden" data-id="' + p.id + '" class="btn-tap shrink-0 p-2 ' + (p.hidden ? 'text-amber-500' : 'text-slate-300') + '" title="' + (p.hidden ? 'הצג מוצר' : 'הסתר (אזל במלאי)') + '"><i class="fa-solid ' + (p.hidden ? 'fa-eye-slash' : 'fa-eye') + '"></i></button>' +
       '<button data-role="del-product" data-id="' + p.id + '" class="btn-tap shrink-0 p-2 text-red-500"><i class="fa-solid fa-trash-can"></i></button>' +
-    '</div>'
-  ).join('');
+    '</div>';
+}
+function settingsCatHeaderHtml(name, faded) {
+  return '<div class="flex items-center gap-2 mt-4 mb-1.5 px-1 first:mt-0"><div class="h-px bg-slate-200 flex-1"></div><span class="text-xs font-black ' + (faded ? 'text-slate-400' : 'text-slate-500') + '">' + name + '</span><div class="h-px bg-slate-200 flex-1"></div></div>';
+}
+function buildSettingsRowsGrouped() {
+  if (!pricingCats.length) return products.map(settingsRowHtml).join('');
+  const byCat = {}; const noCat = [];
+  products.forEach(p => { const c = p.category && pricingCats.some(x => x.id === p.category) ? p.category : null; if (c) (byCat[c] = byCat[c] || []).push(p); else noCat.push(p); });
+  const sortByOrder = arr => arr.sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+  let html = '';
+  pricingCats.forEach(c => {
+    const list = byCat[c.id]; if (!list || !list.length) return;
+    html += settingsCatHeaderHtml(c.name, false);
+    html += sortByOrder(list).map(settingsRowHtml).join('');
+  });
+  if (noCat.length) { html += settingsCatHeaderHtml('ללא מחלקה', true); html += sortByOrder(noCat).map(settingsRowHtml).join(''); }
+  return html;
+}
+function renderSettings() {
+  if (movingId) { renderMoveMode(); return; }
+  const rows = buildSettingsRowsGrouped();
   app.innerHTML =
     '<div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 mb-4">' +
       '<div class="flex items-center gap-2 mb-2"><i class="fa-solid fa-sliders text-blue-600"></i><h2 class="font-black text-lg text-slate-800">הגדרות מערכת</h2></div>' +
@@ -933,27 +951,43 @@ function cancelMove() { movingId = null; renderSettings(); }
 function applyMove(targetId, atEnd) {
   const moving = products.find(p => p.id === movingId);
   if (!moving) { movingId = null; renderSettings(); return; }
-  const without = products.filter(p => p.id !== movingId);
+  const movingCat = (moving.category && pricingCats.some(x => x.id === moving.category)) ? moving.category : null;
+  const keyOf = p => (p.category && pricingCats.some(x => x.id === p.category)) ? p.category : null;
+  // סדר חדש בתוך המחלקה בלבד
+  const catMembers = products.filter(p => keyOf(p) === movingCat).sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+  const rest = catMembers.filter(p => p.id !== movingId);
   let insertAt;
-  if (atEnd) insertAt = without.length;
-  else { const ti = without.findIndex(p => p.id === targetId); insertAt = ti < 0 ? without.length : ti; }
-  without.splice(insertAt, 0, moving);
+  if (atEnd) insertAt = rest.length;
+  else { const ti = rest.findIndex(p => p.id === targetId); insertAt = ti < 0 ? rest.length : ti; }
+  rest.splice(insertAt, 0, moving);
+  // מרכיבים מחדש את הסדר הגלובלי: לכל מוצר מקצים orderIndex, כשחברי המחלקה בסדר החדש
+  const newCatOrderIds = rest.map(p => p.id);
+  let ptr = 0;
+  const fullOrder = products.slice().sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0)).map(p => {
+    if (keyOf(p) === movingCat) { return newCatOrderIds[ptr++]; }
+    return p.id;
+  });
   buzz(18);
-  persistOrder(without.map(p => p.id));
+  persistOrder(fullOrder);
   movingId = null;
   renderSettings();
   showToast('"' + moving.name + '" הועבר', null, null, 2000);
 }
 function renderMoveMode() {
   const moving = products.find(p => p.id === movingId);
+  if (!moving) { movingId = null; renderSettings(); return; }
   const name = moving ? moving.name : '';
+  const movingCat = (moving.category && pricingCats.some(x => x.id === moving.category)) ? moving.category : null;
+  const catName = (pricingCats.find(c => c.id === movingCat) || {}).name || 'ללא מחלקה';
   const banner =
     '<div class="bg-blue-600 text-white rounded-2xl p-3 mb-3 flex items-center justify-between gap-2 shadow-sm">' +
       '<div class="font-black text-sm min-w-0 truncate"><i class="fa-solid fa-arrows-up-down"></i> מעבירים: ' + name + '</div>' +
       '<button data-role="cancel-move" class="btn-tap bg-white/20 px-3 py-1.5 rounded-lg font-black text-sm shrink-0">ביטול</button>' +
     '</div>' +
-    '<div class="text-xs text-slate-400 px-1 mb-2">לחץ על מוצר כדי להניח את "' + name + '" מעליו, או על הכפתור למטה כדי להניח בסוף:</div>';
-  const rows = products.map(p => {
+    '<div class="text-xs text-slate-400 px-1 mb-2">ההזזה בתוך מחלקת <b class="text-slate-600">' + catName + '</b> בלבד. לחץ על מוצר כדי להניח את "' + name + '" מעליו:</div>';
+  // רק מוצרים מאותה מחלקה הם יעדים חוקיים
+  const sameCat = products.filter(p => (((p.category && pricingCats.some(x => x.id === p.category)) ? p.category : null)) === movingCat).sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+  const rows = sameCat.map(p => {
     if (p.id === movingId) {
       return '<div class="flex items-center gap-2 p-3 bg-blue-50 border-2 border-blue-500 rounded-xl"><i class="fa-solid fa-hand-pointer text-blue-500"></i><div class="flex-1 font-black text-blue-700 truncate">' + p.name + '</div><span class="text-xs text-blue-500 font-bold shrink-0">המוצר שמועבר</span></div>';
     }
@@ -963,7 +997,7 @@ function renderMoveMode() {
       '<span class="text-[11px] text-blue-500 font-bold shrink-0">הנח מעל</span>' +
     '</button>';
   }).join('');
-  const endBtn = '<button data-role="place-end" class="btn-tap w-full p-3 mt-1 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl text-slate-600 font-bold text-sm flex items-center justify-center gap-2"><i class="fa-solid fa-arrow-down"></i> הנח בסוף הרשימה</button>';
+  const endBtn = '<button data-role="place-end" class="btn-tap w-full p-3 mt-1 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl text-slate-600 font-bold text-sm flex items-center justify-center gap-2"><i class="fa-solid fa-arrow-down"></i> הנח בסוף המחלקה</button>';
   app.innerHTML = banner + '<div class="space-y-2">' + rows + endBtn + '</div>';
 }
 
