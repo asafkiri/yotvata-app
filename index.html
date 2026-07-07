@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v95 איפוס PIN</title>
+    <title>הזמנות יטבתה - v96 גיבוי ושחזור</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v95 איפוס PIN</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v96 גיבוי ושחזור</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -424,6 +424,20 @@ const ADMIN_SESSION_MS = 15 * 60 * 1000; // מצב מנהל נשאר פתוח 15
 const ADMIN_UNTIL_KEY = 'yt_admin_until_v1';
 let adminPin = ADMIN_DEFAULT_PIN;        // נשמר בענן בתוך config/app/adminPin
 let adminSessionUntil = (() => { try { return Number(sessionStorage.getItem(ADMIN_UNTIL_KEY)) || 0; } catch (e) { return 0; } })();
+const BACKUP_COLLECTIONS = [
+  { name: 'products', label: 'מוצרים' },
+  { name: 'contacts', label: 'אנשי קשר' },
+  { name: 'history', label: 'היסטוריית הזמנות' },
+  { name: 'returns', label: 'היסטוריית חזרות' },
+  { name: 'receipts', label: 'תעודות קליטה' },
+  { name: 'promos', label: 'מבצעים' },
+  { name: 'notes', label: 'הערות' },
+  { name: 'settings', label: 'הגדרות מחירים' },
+  { name: 'config', label: 'הגדרות מערכת' },
+  { name: 'drafts', label: 'טיוטות משותפות' },
+  { name: 'trash', label: 'סל מחזור' }
+];
+let pendingBackupImport = null, pendingBackupFileName = '';
 let scanPurpose = 'field';       // 'field' = מילוי שדה ברקוד | 'receiving' = סריקה רציפה לקליטה
 let scanCount = 0;               // מונה פריטים בסשן סריקה נוכחי
 let lastScanCode = '', lastScanTime = 0; // מניעת ספירה כפולה של אותו ברקוד
@@ -677,12 +691,13 @@ function renderView() {
   else if (currentView === 'notes') renderNotes();
   else if (currentView === 'trash') renderTrash();
   else if (currentView === 'health') renderHealth();
+  else if (currentView === 'backup') renderBackup();
   updateCart();
   updateBackBarLabel();
 }
 function updateBackBarLabel() {
   const b = $('backToOrder'); if (!b) return;
-  const txt = (currentView === 'trash' || currentView === 'health') ? 'חזרה להגדרות' : (mainMode === 'returns' ? 'חזרה לחזרות' : (mainMode === 'receiving' ? 'חזרה לקליטה' : 'חזרה להזמנה'));
+  const txt = (currentView === 'trash' || currentView === 'health' || currentView === 'backup') ? 'חזרה להגדרות' : (mainMode === 'returns' ? 'חזרה לחזרות' : (mainMode === 'receiving' ? 'חזרה לקליטה' : 'חזרה להזמנה'));
   b.innerHTML = '<i class="fa-solid fa-chevron-right"></i> ' + txt;
 }
 
@@ -999,11 +1014,11 @@ function adminClickActionName(role) {
     'del-contact': 'מחיקת איש קשר', 'clear-history': 'מחיקת היסטוריית הזמנות', 'clear-returns-history': 'מחיקת היסטוריית חזרות', 'clear-receipts': 'מחיקת תעודות קליטה',
     'rc-fix-open': 'תיקון תעודה מההיסטוריה', 'rc-fix-save': 'שמירת תיקון תעודה', 'pcat-add': 'עריכת קטגוריות רווחיות', 'pcat-up': 'עריכת קטגוריות רווחיות',
     'pcat-down': 'עריכת קטגוריות רווחיות', 'pcat-del': 'מחיקת קטגוריה רווחית', 'promo-new': 'יצירת מבצע', 'pe-save': 'שמירת מבצע', 'pe-delete': 'מחיקת מבצע',
-    'trash-delete': 'מחיקה לצמיתות מסל מחזור', 'trash-clear': 'ריקון סל מחזור', 'trash-restore': 'שחזור מסל מחזור', 'del-receipt': 'מחיקת תעודה'
+    'trash-delete': 'מחיקה לצמיתות מסל מחזור', 'trash-clear': 'ריקון סל מחזור', 'trash-restore': 'שחזור מסל מחזור', 'del-receipt': 'מחיקת תעודה', 'backup-import-confirm': 'ייבוא גיבוי מלא'
   };
   return map[role] || 'פעולה זו דורשת מנהל';
 }
-const ADMIN_CLICK_ROLES = new Set(['cfg-save','add-product','del-product','toggle-hidden','del-contact','clear-history','clear-returns-history','clear-receipts','rc-fix-open','rc-fix-save','pcat-add','pcat-up','pcat-down','pcat-del','promo-new','pe-save','pe-delete','trash-delete','trash-clear','trash-restore','del-receipt']);
+const ADMIN_CLICK_ROLES = new Set(['cfg-save','add-product','del-product','toggle-hidden','del-contact','clear-history','clear-returns-history','clear-receipts','rc-fix-open','rc-fix-save','pcat-add','pcat-up','pcat-down','pcat-del','promo-new','pe-save','pe-delete','trash-delete','trash-clear','trash-restore','del-receipt','backup-import-confirm']);
 const ADMIN_INPUT_ROLES = new Set(['price-set','pcat-name','pcat-pct','cat-set','avg','avg-set','box-set']);
 function restoreLockedAdminInput(t) {
   const role = t && t.getAttribute && t.getAttribute('data-role');
@@ -1074,6 +1089,14 @@ function renderSettings() {
       '<span class="font-black text-slate-700 text-lg">סל מחזור</span>' +
       '<span id="trashCountPill" class="mr-auto bg-amber-50 text-amber-700 text-xs font-black px-2.5 py-1 rounded-full border border-amber-100">' + trash.length + '</span>' +
     '</button>' +
+    '<div class="mb-5">' +
+      '<div class="text-[11px] font-black text-slate-400 px-1 mb-1.5">כלים מתקדמים</div>' +
+      '<button data-role="go-backup" class="btn-tap w-full bg-white border border-slate-200 p-4 rounded-2xl flex items-center justify-center gap-3 shadow-sm">' +
+        '<div class="bg-slate-100 p-3 rounded-full text-slate-600"><i class="fa-solid fa-shield-halved text-2xl"></i></div>' +
+        '<div class="flex-1 min-w-0 text-right"><div class="font-black text-slate-700 text-lg leading-tight">גיבוי ושחזור נתונים</div><div class="text-[11px] text-slate-400 font-bold mt-0.5">לשימוש לפני עדכון קוד או שינוי גדול</div></div>' +
+        '<i class="fa-solid fa-chevron-left text-slate-300"></i>' +
+      '</button>' +
+    '</div>' +
     '<div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">' +
       '<div class="bg-slate-100 p-4 border-b border-slate-200 flex items-center justify-between gap-2"><h2 class="font-black text-lg text-slate-800">עריכת מוצרים</h2><span class="text-[11px] text-slate-500 font-medium flex items-center gap-1"><i class="fa-solid fa-up-down"></i> לחץ ⬍ להעברה</span></div>' +
       '<div class="px-4 py-2 bg-amber-50/60 border-b border-slate-200 text-[11px] font-bold text-slate-500">העמודה האפורה: כמות מומלצת להזמנה · עמודת 📦: יח׳ בארגז — מלא <b>רק</b> למוצרים שמגיעים אך ורק בארגזים שלמים (משמש את הבלש בהשוואת תעודה)</div>' +
@@ -1096,7 +1119,7 @@ function htmlEscape(v) {
 function trashLabel(name) {
   const map = {
     products: 'מוצרים', contacts: 'אנשי קשר', history: 'היסטוריית הזמנות', returns: 'היסטוריית חזרות',
-    receipts: 'תעודות קליטה', promos: 'מבצעים', notes: 'הערות', config: 'הגדרות'
+    receipts: 'תעודות קליטה', promos: 'מבצעים', notes: 'הערות', settings: 'הגדרות מחירים', config: 'הגדרות מערכת', drafts: 'טיוטות'
   };
   return map[name] || name || 'לא ידוע';
 }
@@ -1204,6 +1227,188 @@ async function clearTrash() {
     console.error('clear trash failed', e);
     showToast('ריקון סל המחזור נכשל', null, null, 3500);
   } finally { hideCloudBusy(); }
+}
+
+
+// ===== גיבוי ושחזור מלא =====
+function backupCollectionLabel(name) {
+  const found = BACKUP_COLLECTIONS.find(c => c.name === name);
+  return found ? found.label : trashLabel(name);
+}
+function backupNowStamp() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '_' + pad(d.getHours()) + '-' + pad(d.getMinutes());
+}
+function backupDocCount(payload, name) {
+  const col = payload && payload.collections && payload.collections[name];
+  return col && typeof col === 'object' ? Object.keys(col).length : 0;
+}
+function backupTotalCount(payload) {
+  if (!payload || !payload.collections) return 0;
+  return Object.keys(payload.collections).reduce((a, name) => a + backupDocCount(payload, name), 0);
+}
+function validBackupPayload(payload) {
+  return !!(payload && payload.collections && typeof payload.collections === 'object' && (payload.backupType === 'yotvata-firestore-full' || payload.appId === appId));
+}
+function backupSummaryHtml(payload) {
+  if (!payload || !payload.collections) return '';
+  const rows = BACKUP_COLLECTIONS.map(c => {
+    const n = backupDocCount(payload, c.name);
+    return '<div class="flex items-center justify-between py-1.5 border-b border-slate-100 last:border-b-0"><span class="font-bold text-slate-600">' + htmlEscape(c.label) + '</span><span class="font-black text-slate-800">' + n + '</span></div>';
+  }).join('');
+  const dateTxt = payload.exportedAt ? new Date(payload.exportedAt).toLocaleString('he-IL') : (payload.exportedAtIso || 'לא ידוע');
+  return '<div class="bg-slate-50 border border-slate-200 rounded-2xl p-3 mt-3">' +
+    '<div class="flex items-center justify-between gap-2 mb-2"><span class="text-xs font-black text-slate-400">סיכום קובץ</span><span class="text-xs font-black text-blue-600">' + backupTotalCount(payload) + ' רשומות</span></div>' +
+    '<div class="text-xs text-slate-500 font-bold mb-2">נוצר: ' + htmlEscape(dateTxt) + '</div>' +
+    '<div class="text-sm">' + rows + '</div>' +
+  '</div>';
+}
+function renderBackup() {
+  const pending = pendingBackupImport;
+  app.innerHTML =
+    '<div class="flex items-center justify-between gap-2 px-1 py-2 mb-2">' +
+      '<div><h2 class="font-black text-2xl text-slate-800">גיבוי ושחזור</h2><div class="text-xs text-slate-400 font-bold">כלי צדדי לשימוש לפני עדכון קוד, שינוי גדול או טיפול חירום</div></div>' +
+    '</div>' +
+    '<div class="bg-blue-50 border border-blue-100 rounded-2xl p-3 text-xs text-blue-800 font-bold mb-3 leading-relaxed">' +
+      '<i class="fa-solid fa-circle-info"></i> ייצוא גיבוי רק מוריד קובץ למכשיר ולא משנה נתונים. ייבוא גיבוי הוא פעולה מסוכנת ולכן דורש מצב מנהל ואישור כפול.' +
+    '</div>' +
+    '<div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 mb-3">' +
+      '<div class="flex items-center gap-2 mb-1"><i class="fa-solid fa-download text-green-600"></i><h3 class="font-black text-lg text-slate-800">ייצוא גיבוי מלא</h3></div>' +
+      '<div class="text-sm text-slate-500 font-bold leading-relaxed mb-3">מוריד קובץ JSON עם מוצרים, מחירים, אנשי קשר, היסטוריות, תעודות, חזרות, מבצעים, הגדרות וסל מחזור.</div>' +
+      '<button data-role="backup-export" class="btn-tap w-full py-3.5 rounded-xl font-black bg-green-600 text-white flex items-center justify-center gap-2"><i class="fa-solid fa-file-arrow-down"></i> ייצא גיבוי מלא</button>' +
+    '</div>' +
+    '<div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 mb-3">' +
+      '<div class="flex items-center gap-2 mb-1"><i class="fa-solid fa-upload text-amber-600"></i><h3 class="font-black text-lg text-slate-800">ייבוא גיבוי</h3></div>' +
+      '<div class="text-sm text-slate-500 font-bold leading-relaxed mb-3">מיועד למקרה של תקלה או חזרה אחורה. הייבוא מחליף את נתוני הענן לפי הקובץ, אבל לא משנה את PIN המנהל הנוכחי.</div>' +
+      '<input id="backupImportFile" type="file" accept="application/json,.json" class="hidden">' +
+      '<button data-role="backup-pick" class="btn-tap w-full py-3 rounded-xl font-black bg-amber-50 text-amber-800 border border-amber-100 flex items-center justify-center gap-2"><i class="fa-solid fa-folder-open"></i> בחר קובץ גיבוי</button>' +
+      (pending ? '<div class="mt-3 text-xs font-black text-slate-500">קובץ נבחר: ' + htmlEscape(pendingBackupFileName || 'גיבוי') + '</div>' + backupSummaryHtml(pending) +
+        '<div class="flex gap-2 mt-3"><button data-role="backup-cancel-import" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">בטל בחירה</button><button data-role="backup-import-confirm" class="btn-tap flex-1 py-3 rounded-xl font-black bg-red-600 text-white">ייבא ושחזר</button></div>' : '') +
+    '</div>' +
+    '<div class="bg-slate-100 border border-slate-200 rounded-2xl p-3 text-xs text-slate-500 font-bold leading-relaxed pb-4">' +
+      '<i class="fa-solid fa-lightbulb text-amber-500"></i> המלצה: לפני כל העלאת גרסה חדשה, לחץ ייצוא גיבוי מלא ושמור את הקובץ במקום שתזהה לפי התאריך.' +
+    '</div>';
+}
+async function exportFullBackup() {
+  if (!db) { showToast('אין חיבור לענן — אי אפשר להכין גיבוי מלא כרגע', null, null, 3500); return; }
+  showCloudBusy('מכין גיבוי מלא...');
+  try {
+    const payload = {
+      backupType: 'yotvata-firestore-full',
+      backupVersion: 1,
+      appId,
+      appVersion: 'v96_backup_restore',
+      exportedAt: Date.now(),
+      exportedAtIso: new Date().toISOString(),
+      collections: {},
+      localDrafts: {
+        order: readLocalJson(ORDER_DRAFT_KEY, null),
+        returns: readLocalJson(RETURNS_DRAFT_KEY, null),
+        receipt: readLocalJson(RECEIPT_DRAFT_KEY, null)
+      }
+    };
+    for (const c of BACKUP_COLLECTIONS) {
+      const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', c.name));
+      payload.collections[c.name] = {};
+      snap.docs.forEach(dd => {
+        const data = cloneSafe(dd.data());
+        if (c.name === 'config' && dd.id === 'app' && data && typeof data === 'object') delete data.adminPin; // ה-PIN לא יוצא לקובץ הגיבוי
+        payload.collections[c.name][dd.id] = data;
+      });
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'yotvata-backup-' + backupNowStamp() + '.json';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { try { URL.revokeObjectURL(url); a.remove(); } catch (e) {} }, 1000);
+    showToast('גיבוי מלא הוכן להורדה ✓', null, null, 3500);
+  } catch (e) {
+    console.error('backup export failed', e);
+    showToast('יצירת הגיבוי נכשלה — בדוק חיבור אינטרנט', null, null, 4500);
+  } finally { hideCloudBusy(); }
+}
+function pickBackupFile() {
+  const inp = $('backupImportFile');
+  if (inp) { inp.value = ''; inp.click(); }
+}
+function handleBackupFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const payload = JSON.parse(String(reader.result || '{}'));
+      if (!validBackupPayload(payload)) throw new Error('קובץ לא מזוהה כגיבוי תקין');
+      pendingBackupImport = payload;
+      pendingBackupFileName = file.name || '';
+      renderBackup();
+      showToast('קובץ הגיבוי נטען — בדוק את הסיכום לפני ייבוא', null, null, 3500);
+    } catch (e) {
+      console.error('backup parse failed', e);
+      pendingBackupImport = null; pendingBackupFileName = '';
+      showToast('הקובץ לא נראה כמו גיבוי תקין', null, null, 4000);
+      if (currentView === 'backup') renderBackup();
+    }
+  };
+  reader.onerror = () => showToast('לא הצלחתי לקרוא את קובץ הגיבוי', null, null, 3500);
+  reader.readAsText(file);
+}
+async function commitBackupOpQueue(ops, busyText) {
+  let batch = writeBatch(db), n = 0, total = 0;
+  async function flush() {
+    if (!n) return;
+    await batch.commit();
+    total += n;
+    batch = writeBatch(db); n = 0;
+    if (busyText) showCloudBusy(busyText + ' (' + total + ')');
+  }
+  for (const op of ops) {
+    if (op.type === 'delete') batch.delete(op.ref);
+    else if (op.type === 'set') batch.set(op.ref, op.data || {});
+    n++;
+    if (n >= 400) await flush();
+  }
+  await flush();
+  return total;
+}
+async function applyBackupToCloud(payload) {
+  if (!db || !validBackupPayload(payload)) throw new Error('גיבוי לא תקין');
+  showCloudBusy('משחזר נתונים מגיבוי...');
+  const currentPin = adminPin || ADMIN_DEFAULT_PIN;
+  let restored = 0;
+  try {
+    for (const c of BACKUP_COLLECTIONS) {
+      const ref = collection(db, 'artifacts', appId, 'public', 'data', c.name);
+      const existing = await getDocs(ref);
+      const ops = [];
+      existing.docs.forEach(dd => ops.push({ type: 'delete', ref: dd.ref }));
+      const docsObj = cloneSafe((payload.collections && payload.collections[c.name]) || {});
+      if (c.name === 'config') {
+        docsObj.app = docsObj.app && typeof docsObj.app === 'object' ? docsObj.app : {};
+        docsObj.app.adminPin = currentPin;
+        docsObj.app.adminPinPreservedAt = Date.now();
+      }
+      Object.keys(docsObj).forEach(id => ops.push({ type: 'set', ref: doc(db, 'artifacts', appId, 'public', 'data', c.name, id), data: cloneSafe(docsObj[id]) }));
+      restored += await commitBackupOpQueue(ops, 'משחזר: ' + c.label);
+    }
+    showToast('השחזור הסתיים ✓ הנתונים יתעדכנו מהענן בעוד רגע', null, null, 4500);
+    pendingBackupImport = null; pendingBackupFileName = '';
+    setView('health');
+  } finally { hideCloudBusy(); }
+  return restored;
+}
+function confirmRestoreBackup() {
+  if (!pendingBackupImport) { showToast('בחר קודם קובץ גיבוי', null, null, 2500); return; }
+  const total = backupTotalCount(pendingBackupImport);
+  showConfirm('ייבוא גיבוי', 'פעולה זו תחליף את נתוני הענן לפי הקובץ שנבחר (' + total + ' רשומות). PIN המנהל הנוכחי לא ישתנה. להמשיך?', 'כן, המשך', () => {
+    showConfirm('אישור אחרון לשחזור', 'בטוח לשחזר מהגיבוי? מומלץ לעשות ייצוא גיבוי עדכני לפני פעולה כזאת.', 'שחזר עכשיו', async () => {
+      try { await applyBackupToCloud(pendingBackupImport); }
+      catch (e) { console.error('backup restore failed', e); showToast('השחזור נכשל — הנתונים לא שוחזרו במלואם', null, null, 5000); }
+    });
+  });
 }
 
 // ===== בדיקת תקינות מערכת =====
@@ -5116,6 +5321,11 @@ app.addEventListener('input', (e) => {
   }
 });
 
+app.addEventListener('change', (e) => {
+  const t = e.target;
+  if (t && t.id === 'backupImportFile') { handleBackupFile(t.files && t.files[0]); return; }
+});
+
 app.addEventListener('keydown', (e) => {
   const t = e.target;
   if (t.id === 'newNote' && e.key === 'Enter') { e.preventDefault(); addNote(); return; }
@@ -5155,6 +5365,11 @@ app.addEventListener('click', (e) => {
   else if (role === 'go-contacts') setView('contacts');
   else if (role === 'go-trash') setView('trash');
   else if (role === 'go-health') setView('health');
+  else if (role === 'go-backup') setView('backup');
+  else if (role === 'backup-export') exportFullBackup();
+  else if (role === 'backup-pick') pickBackupFile();
+  else if (role === 'backup-cancel-import') { pendingBackupImport = null; pendingBackupFileName = ''; renderBackup(); }
+  else if (role === 'backup-import-confirm') confirmRestoreBackup();
   else if (role === 'go-settings') setView('settings');
   else if (role === 'add-product') addProduct();
   else if (role === 'del-product') { const p = products.find(x => x.id === id); showConfirm('מחיקת מוצר', 'למחוק את "' + (p ? p.name : '') + '"?', 'מחק', () => delProduct(id)); }
