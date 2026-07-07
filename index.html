@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v92 סל מחזור</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v93 תקינות מערכת</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -670,12 +670,13 @@ function renderView() {
   else if (currentView === 'returnReconcile') renderReturnReconcile();
   else if (currentView === 'notes') renderNotes();
   else if (currentView === 'trash') renderTrash();
+  else if (currentView === 'health') renderHealth();
   updateCart();
   updateBackBarLabel();
 }
 function updateBackBarLabel() {
   const b = $('backToOrder'); if (!b) return;
-  const txt = currentView === 'trash' ? 'חזרה להגדרות' : (mainMode === 'returns' ? 'חזרה לחזרות' : (mainMode === 'receiving' ? 'חזרה לקליטה' : 'חזרה להזמנה'));
+  const txt = (currentView === 'trash' || currentView === 'health') ? 'חזרה להגדרות' : (mainMode === 'returns' ? 'חזרה לחזרות' : (mainMode === 'receiving' ? 'חזרה לקליטה' : 'חזרה להזמנה'));
   b.innerHTML = '<i class="fa-solid fa-chevron-right"></i> ' + txt;
 }
 
@@ -874,6 +875,11 @@ function renderSettings() {
         '<button data-role="cfg-save" class="btn-tap bg-blue-600 text-white px-4 py-2.5 rounded-lg font-black self-end">שמור</button>' +
       '</div>' +
     '</div>' +
+    '<button data-role="go-health" class="btn-tap w-full bg-white border border-slate-200 p-4 rounded-2xl flex items-center justify-center gap-3 mb-3 shadow-sm">' +
+      '<div class="bg-indigo-100 p-3 rounded-full text-indigo-600"><i class="fa-solid fa-heart-pulse text-2xl"></i></div>' +
+      '<span class="font-black text-slate-700 text-lg">בדיקת תקינות מערכת</span>' +
+      '<span class="mr-auto bg-indigo-50 text-indigo-700 text-xs font-black px-2.5 py-1 rounded-full border border-indigo-100">חדש</span>' +
+    '</button>' +
     '<button data-role="go-contacts" class="btn-tap w-full bg-white border border-slate-200 p-4 rounded-2xl flex items-center justify-center gap-3 mb-5 shadow-sm">' +
       '<div class="bg-green-100 p-3 rounded-full text-green-600"><i class="fa-brands fa-whatsapp text-2xl"></i></div>' +
       '<span class="font-black text-slate-700 text-lg">אנשי קשר (וואטסאפ)</span>' +
@@ -1013,6 +1019,200 @@ async function clearTrash() {
     console.error('clear trash failed', e);
     showToast('ריקון סל המחזור נכשל', null, null, 3500);
   } finally { hideCloudBusy(); }
+}
+
+// ===== בדיקת תקינות מערכת =====
+function readLocalJson(key, fallback) {
+  try { const raw = localStorage.getItem(key); return raw ? JSON.parse(raw) : fallback; }
+  catch (e) { return fallback; }
+}
+function listSample(arr, n) {
+  arr = arr || []; n = n || 4;
+  if (!arr.length) return '';
+  const names = arr.slice(0, n).map(x => (typeof x === 'string' ? x : (x && (x.name || x.title || x.id)) || '')).filter(Boolean);
+  return names.join(', ') + (arr.length > n ? ' ועוד ' + (arr.length - n) : '');
+}
+function normalizePhoneDigits(v) { return String(v || '').replace(/\D/g, ''); }
+function healthDraftCounts() {
+  const od = readLocalJson(ORDER_DRAFT_KEY, {});
+  const rd = readLocalJson(RETURNS_DRAFT_KEY, []);
+  const rc = readLocalJson(RECEIPT_DRAFT_KEY, null);
+  const orderCount = od && typeof od === 'object' ? Object.values(od).filter(x => parseInt(x && x.amount, 10) > 0).length : 0;
+  const returnsCount = Array.isArray(rd) ? rd.length : 0;
+  let receiptCount = 0, receiptNotesCount = 0, receiptIsOpen = false;
+  if (Array.isArray(rc)) { receiptCount = rc.length; receiptIsOpen = rc.length > 0; }
+  else if (rc && typeof rc === 'object') {
+    receiptCount = Array.isArray(rc.items) ? rc.items.length : 0;
+    receiptNotesCount = Array.isArray(rc.notes) ? rc.notes.length : 0;
+    receiptIsOpen = !!rc.opened || receiptCount > 0;
+  }
+  return { orderCount, returnsCount, receiptCount, receiptNotesCount, receiptIsOpen };
+}
+function duplicateBarcodeGroups() {
+  const m = {};
+  products.forEach(p => {
+    const bc = String(p.barcode || '').trim();
+    if (!bc) return;
+    (m[bc] = m[bc] || []).push(p);
+  });
+  return Object.keys(m).filter(bc => m[bc].length > 1).map(bc => ({ barcode: bc, products: m[bc] }));
+}
+function healthStatusMeta(status) {
+  const map = {
+    ok:   { icon: 'fa-circle-check', cls: 'bg-emerald-50 border-emerald-100 text-emerald-700', dot: 'bg-emerald-500', title: 'תקין' },
+    warn: { icon: 'fa-triangle-exclamation', cls: 'bg-amber-50 border-amber-100 text-amber-800', dot: 'bg-amber-500', title: 'לטיפול' },
+    bad:  { icon: 'fa-circle-xmark', cls: 'bg-red-50 border-red-100 text-red-700', dot: 'bg-red-500', title: 'בעיה' },
+    info: { icon: 'fa-circle-info', cls: 'bg-blue-50 border-blue-100 text-blue-700', dot: 'bg-blue-500', title: 'מידע' }
+  };
+  return map[status] || map.info;
+}
+function healthRowHtml(item) {
+  const m = healthStatusMeta(item.status);
+  const action = item.actionRole ? '<button data-role="' + item.actionRole + '" class="btn-tap shrink-0 px-3 py-2 rounded-xl font-black text-xs bg-white/80 border border-current/10">' + htmlEscape(item.actionText || 'פתח') + '</button>' : '';
+  return '<div class="rounded-2xl border p-3 ' + m.cls + '">' +
+    '<div class="flex items-start gap-3">' +
+      '<div class="w-10 h-10 rounded-xl bg-white/70 flex items-center justify-center shrink-0"><i class="fa-solid ' + m.icon + '"></i></div>' +
+      '<div class="flex-1 min-w-0">' +
+        '<div class="flex items-start justify-between gap-2">' +
+          '<div class="font-black leading-tight">' + htmlEscape(item.title) + '</div>' + action +
+        '</div>' +
+        '<div class="text-sm font-bold mt-1 leading-relaxed opacity-90">' + htmlEscape(item.text || '') + '</div>' +
+        (item.detail ? '<div class="text-xs mt-2 leading-relaxed opacity-75">' + htmlEscape(item.detail) + '</div>' : '') +
+      '</div>' +
+    '</div>' +
+  '</div>';
+}
+function healthStatCardHtml(label, val, sub, status) {
+  const m = healthStatusMeta(status || 'info');
+  return '<div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-3">' +
+    '<div class="flex items-center justify-between gap-2"><span class="text-[11px] font-black text-slate-400">' + htmlEscape(label) + '</span><span class="w-2.5 h-2.5 rounded-full ' + m.dot + '"></span></div>' +
+    '<div class="text-2xl font-black text-slate-800 mt-1">' + htmlEscape(val) + '</div>' +
+    '<div class="text-xs font-bold text-slate-400 mt-0.5">' + htmlEscape(sub || '') + '</div>' +
+  '</div>';
+}
+function buildSystemHealth() {
+  const activeProducts = products.filter(p => !p.hidden);
+  const missingPrice = activeProducts.filter(p => p.price == null || p.price === '' || !(Number(p.price) > 0));
+  const missingBarcode = activeProducts.filter(p => !String(p.barcode || '').trim());
+  const missingAverage = activeProducts.filter(p => !(parseInt(p.average, 10) > 0));
+  const dupBc = duplicateBarcodeGroups();
+  const badContacts = contacts.filter(c => normalizePhoneDigits(c.phone).length < 9);
+  const drafts = healthDraftCounts();
+  const openReceipts = receipts.filter(rc => !rc.offsetClosed && receiptDiscrepancyInfo(rc).open);
+  const now = new Date();
+  const cloudOk = !!(db && auth && auth.currentUser && navigator.onLine);
+  const items = [];
+  items.push({
+    status: cloudOk ? 'ok' : (navigator.onLine && db ? 'warn' : 'bad'),
+    title: 'חיבור לענן',
+    text: cloudOk ? 'האפליקציה מחוברת ומזוהה מול Firebase.' : (navigator.onLine ? 'יש אינטרנט, אבל עדיין לא זוהה משתמש ענן מלא.' : 'המכשיר לא מחובר לאינטרנט כרגע.'),
+    detail: auth && auth.currentUser ? ('UID פעיל: ' + auth.currentUser.uid.slice(0, 8) + '…') : 'אין משתמש Firebase פעיל עדיין.'
+  });
+  items.push({
+    status: cloudFailedWrites.length ? 'bad' : 'ok',
+    title: 'פעולות שלא נשמרו',
+    text: cloudFailedWrites.length ? ('יש ' + cloudFailedWrites.length + ' פעולות שממתינות לניסיון שמירה חוזר.') : 'אין פעולות תקועות ביומן המקומי.',
+    detail: cloudFailedWrites.length ? ('אחרונה: ' + (cloudFailedWrites[0].actionName || 'שמירה') + ' · ' + (cloudFailedWrites[0].error || 'ללא פירוט')) : '',
+    actionRole: cloudFailedWrites.length ? 'health-retry-cloud' : null,
+    actionText: 'נסה שוב'
+  });
+  items.push({
+    status: products.length ? 'ok' : 'bad',
+    title: 'מאגר מוצרים',
+    text: products.length ? ('יש ' + products.length + ' מוצרים, מתוכם ' + activeProducts.length + ' פעילים.') : 'אין מוצרים במערכת — אי אפשר לעבוד כך.',
+    detail: products.filter(p => p.hidden).length ? (products.filter(p => p.hidden).length + ' מוצרים מוסתרים/אזלו') : ''
+  });
+  items.push({
+    status: missingPrice.length ? 'warn' : 'ok',
+    title: 'מחירים חסרים',
+    text: missingPrice.length ? ('יש ' + missingPrice.length + ' מוצרים פעילים בלי מחיר תקין.') : 'לכל המוצרים הפעילים יש מחיר.',
+    detail: listSample(missingPrice),
+    actionRole: missingPrice.length ? 'health-go-prices' : null,
+    actionText: 'מחירים'
+  });
+  items.push({
+    status: missingBarcode.length ? 'warn' : 'ok',
+    title: 'ברקודים חסרים',
+    text: missingBarcode.length ? ('יש ' + missingBarcode.length + ' מוצרים פעילים בלי ברקוד.') : 'לכל המוצרים הפעילים יש ברקוד.',
+    detail: listSample(missingBarcode),
+    actionRole: missingBarcode.length ? 'health-go-prices' : null,
+    actionText: 'טפל'
+  });
+  items.push({
+    status: dupBc.length ? 'bad' : 'ok',
+    title: 'ברקודים כפולים',
+    text: dupBc.length ? ('נמצאו ' + dupBc.length + ' ברקודים שמופיעים ביותר ממוצר אחד.') : 'לא נמצאו ברקודים כפולים.',
+    detail: dupBc.slice(0, 3).map(g => g.barcode + ': ' + g.products.map(p => p.name).join(' / ')).join(' · '),
+    actionRole: dupBc.length ? 'health-go-prices' : null,
+    actionText: 'בדוק'
+  });
+  items.push({
+    status: missingAverage.length ? 'info' : 'ok',
+    title: 'כמויות מומלצות',
+    text: missingAverage.length ? ('יש ' + missingAverage.length + ' מוצרים פעילים בלי כמות מומלצת.') : 'לכל המוצרים הפעילים יש כמות מומלצת.',
+    detail: listSample(missingAverage)
+  });
+  items.push({
+    status: contacts.length ? (badContacts.length ? 'warn' : 'ok') : 'bad',
+    title: 'אנשי קשר לשליחה',
+    text: contacts.length ? ('יש ' + contacts.length + ' אנשי קשר לשליחת וואטסאפ.') : 'אין אנשי קשר — אי אפשר לשלוח הזמנה מהר.',
+    detail: badContacts.length ? ('טלפונים שדורשים בדיקה: ' + listSample(badContacts)) : '',
+    actionRole: (!contacts.length || badContacts.length) ? 'go-contacts' : null,
+    actionText: 'אנשי קשר'
+  });
+  items.push({
+    status: (drafts.orderCount || drafts.returnsCount || drafts.receiptIsOpen) ? 'warn' : 'ok',
+    title: 'טיוטות פתוחות',
+    text: (drafts.orderCount || drafts.returnsCount || drafts.receiptIsOpen) ? 'יש טיוטה פתוחה במכשיר הזה — כדאי לסיים או לנקות אותה.' : 'אין טיוטות פתוחות במכשיר הזה.',
+    detail: 'הזמנה: ' + drafts.orderCount + ' · חזרות: ' + drafts.returnsCount + ' · קליטה: ' + drafts.receiptCount + (drafts.receiptNotesCount ? (' · סכומי תעודה: ' + drafts.receiptNotesCount) : '')
+  });
+  items.push({
+    status: openReceipts.length ? 'warn' : 'ok',
+    title: 'תעודות עם הפרש פתוח',
+    text: openReceipts.length ? ('יש ' + openReceipts.length + ' תעודות קליטה עם חוסר/עודף שלא נסגר.') : 'אין תעודות קליטה עם הפרש פתוח.',
+    detail: openReceipts.length ? ('מאזן פתוח: ₪' + fmtMoney(receiptsBalance().bal)) : '',
+    actionRole: openReceipts.length ? 'health-go-receipts' : null,
+    actionText: 'תעודות'
+  });
+  items.push({
+    status: trash.length > 20 ? 'warn' : 'info',
+    title: 'סל מחזור',
+    text: trash.length ? ('יש ' + trash.length + ' פריטים בסל המחזור לשחזור.') : 'סל המחזור ריק.',
+    detail: trash.length ? 'מומלץ לא לרוקן מיד — זה הביטוח שלך נגד מחיקה בטעות.' : '',
+    actionRole: trash.length ? 'go-trash' : null,
+    actionText: 'פתח'
+  });
+  items.push({
+    status: (VAT > 0 && VAT <= 0.5) ? 'ok' : 'warn',
+    title: 'הגדרות מע״מ ורווח',
+    text: 'מע״מ: ' + r2(VAT * 100) + '% · רווח מומלץ למבצעים: ' + r2(signMarginPct) + '%.',
+    detail: 'נבדק ב-' + now.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })
+  });
+  return items;
+}
+function renderHealth() {
+  const items = buildSystemHealth();
+  const bad = items.filter(x => x.status === 'bad').length;
+  const warn = items.filter(x => x.status === 'warn').length;
+  const ok = items.filter(x => x.status === 'ok').length;
+  const headline = bad ? 'יש בעיות שדורשות טיפול' : (warn ? 'המערכת עובדת, אבל יש דברים לבדוק' : 'המערכת נראית תקינה');
+  const headCls = bad ? 'from-red-600 to-rose-500' : (warn ? 'from-amber-500 to-orange-500' : 'from-emerald-600 to-green-500');
+  app.innerHTML =
+    '<div class="rounded-3xl bg-gradient-to-l ' + headCls + ' text-white shadow-lg p-5 mb-4">' +
+      '<div class="flex items-start justify-between gap-3">' +
+        '<div><div class="text-xs font-black opacity-80 mb-1">בדיקת תקינות מערכת</div><h2 class="text-2xl font-black leading-tight">' + headline + '</h2><div class="text-sm font-bold opacity-90 mt-2">בדיקה מהירה של ענן, נתונים, טיוטות, ברקודים, מחירים וסל מחזור.</div></div>' +
+        '<button data-role="health-refresh" class="btn-tap w-11 h-11 rounded-2xl bg-white/20 border border-white/25 flex items-center justify-center shrink-0"><i class="fa-solid fa-rotate"></i></button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="grid grid-cols-3 gap-2 mb-4">' +
+      healthStatCardHtml('תקין', ok, 'בדיקות שעברו', 'ok') +
+      healthStatCardHtml('לטיפול', warn, 'אזהרות', warn ? 'warn' : 'ok') +
+      healthStatCardHtml('בעיות', bad, 'קריטי', bad ? 'bad' : 'ok') +
+    '</div>' +
+    '<div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-3 mb-4 text-xs text-slate-500 font-bold leading-relaxed">' +
+      '<i class="fa-solid fa-lightbulb text-amber-500"></i> המסך הזה לא משנה נתונים לבד. הוא רק מציף לך מה דורש בדיקה לפני שעובדים עם האפליקציה בשטח.' +
+    '</div>' +
+    '<div class="space-y-3 pb-6">' + items.map(healthRowHtml).join('') + '</div>';
 }
 
 // ===== גרירה (Pointer Events) =====
@@ -4588,7 +4788,7 @@ $('segReturns').addEventListener('click', () => setView('returns'));
 $('segReceiving').addEventListener('click', () => setView('receiving'));
 $('btnSettings').addEventListener('click', () => setView('settings'));
 $('btnNotes').addEventListener('click', () => setView('notes'));
-$('backToOrder').addEventListener('click', () => setView(currentView === 'trash' ? 'settings' : mainMode));
+$('backToOrder').addEventListener('click', () => setView((currentView === 'trash' || currentView === 'health') ? 'settings' : mainMode));
 $('cartBtn').addEventListener('click', () => { if (mainMode === 'returns') openReturnsSend(); else if (mainMode === 'receiving') finishReceipt(); else openSendCurrent(); });
 $('promptCancel').addEventListener('click', hidePrompt);
 $('promptOk').addEventListener('click', savePrompt);
@@ -4755,6 +4955,7 @@ app.addEventListener('click', (e) => {
   if (role === 'clear-order') showConfirm('ניקוי הזמנה', 'לנקות את כל הכמויות שהוזנו?', 'נקה', clearOrder);
   else if (role === 'go-contacts') setView('contacts');
   else if (role === 'go-trash') setView('trash');
+  else if (role === 'go-health') setView('health');
   else if (role === 'go-settings') setView('settings');
   else if (role === 'add-product') addProduct();
   else if (role === 'del-product') { const p = products.find(x => x.id === id); showConfirm('מחיקת מוצר', 'למחוק את "' + (p ? p.name : '') + '"?', 'מחק', () => delProduct(id)); }
@@ -4950,6 +5151,12 @@ app.addEventListener('click', (e) => {
   else if (role === 'pe-save') savePromoEntity();
   else if (role === 'pe-cancel') { promoEdit = null; setView('promos'); }
   else if (role === 'pe-delete') deletePromoEntity();
+  else if (role === 'health-refresh') renderHealth();
+  else if (role === 'health-retry-cloud') retryCloudFailedWrites().then(() => {
+    if (currentView === 'health') renderHealth();
+  });
+  else if (role === 'health-go-prices') setView('prices');
+  else if (role === 'health-go-receipts') setView('receiptsHistory');
   else if (role === 'trash-restore') showConfirm('שחזור מסל המחזור', 'לשחזר את הרשומה למקום המקורי?', 'שחזר', () => restoreTrashItem(id));
   else if (role === 'trash-delete') showConfirm('מחיקה לצמיתות', 'למחוק את הרשומה הזאת לצמיתות מסל המחזור?', 'מחק לצמיתות', () => deleteTrashItem(id));
   else if (role === 'trash-clear') showConfirm('ריקון סל מחזור', 'למחוק לצמיתות את כל מה שנמצא בסל המחזור?', 'רוקן', clearTrash);
