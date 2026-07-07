@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v90</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v92 סל מחזור</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -384,7 +384,7 @@ const INITIAL_PRODUCTS = RAW_PRODUCTS.map((raw, index) => {
 });
 
 // ===== מצב =====
-let products = [], contacts = [], history = [], notes = [];
+let products = [], contacts = [], history = [], notes = [], trash = [];
 let orderState = {};
 let currentView = 'order';
 let mainMode = 'order';
@@ -450,7 +450,7 @@ function saveReturnsDraft() {
   if (!db) return;
   clearTimeout(returnsDraftTimer);
   returnsDraftTimer = setTimeout(() => {
-    setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'drafts', 'returns'), { items: returnsList, updatedAt: Date.now() }).catch(console.error);
+    runCloudTaskSilent('save returns draft', { op: 'set', path: dataPath('drafts', 'returns'), data: { items: returnsList, updatedAt: Date.now() }, merge: true, operationId: 'returns_draft' });
   }, 700);
 }
 function restoreReturnsDraft() { try { const s = localStorage.getItem(RETURNS_DRAFT_KEY); if (s) { const a = JSON.parse(s); if (Array.isArray(a)) returnsList = a; } } catch (e) {} }
@@ -603,6 +603,13 @@ function startListeners() {
     rerender();
   }, console.error);
 
+  const trashRef = collection(db, 'artifacts', appId, 'public', 'data', 'trash');
+  const trashQ = query(trashRef, orderBy('deletedAt', 'desc'), limit(100));
+  onSnapshot(trashQ, (snap) => {
+    trash = snap.docs.map(d => ({ trashId: d.id, ...d.data() }));
+    if (currentView === 'trash' || currentView === 'settings') rerender();
+  }, console.error);
+
   const cfgRef = doc(db, 'artifacts', appId, 'public', 'data', 'config', 'app');
   onSnapshot(cfgRef, (snap) => {
     const d = snap.data() || {};
@@ -662,12 +669,13 @@ function renderView() {
   else if (currentView === 'receiptFix') renderReceiptFix();
   else if (currentView === 'returnReconcile') renderReturnReconcile();
   else if (currentView === 'notes') renderNotes();
+  else if (currentView === 'trash') renderTrash();
   updateCart();
   updateBackBarLabel();
 }
 function updateBackBarLabel() {
   const b = $('backToOrder'); if (!b) return;
-  const txt = mainMode === 'returns' ? 'חזרה לחזרות' : (mainMode === 'receiving' ? 'חזרה לקליטה' : 'חזרה להזמנה');
+  const txt = currentView === 'trash' ? 'חזרה להגדרות' : (mainMode === 'returns' ? 'חזרה לחזרות' : (mainMode === 'receiving' ? 'חזרה לקליטה' : 'חזרה להזמנה'));
   b.innerHTML = '<i class="fa-solid fa-chevron-right"></i> ' + txt;
 }
 
@@ -870,6 +878,11 @@ function renderSettings() {
       '<div class="bg-green-100 p-3 rounded-full text-green-600"><i class="fa-brands fa-whatsapp text-2xl"></i></div>' +
       '<span class="font-black text-slate-700 text-lg">אנשי קשר (וואטסאפ)</span>' +
     '</button>' +
+    '<button data-role="go-trash" class="btn-tap w-full bg-white border border-slate-200 p-4 rounded-2xl flex items-center justify-center gap-3 mb-5 shadow-sm">' +
+      '<div class="bg-amber-100 p-3 rounded-full text-amber-600"><i class="fa-solid fa-recycle text-2xl"></i></div>' +
+      '<span class="font-black text-slate-700 text-lg">סל מחזור</span>' +
+      '<span id="trashCountPill" class="mr-auto bg-amber-50 text-amber-700 text-xs font-black px-2.5 py-1 rounded-full border border-amber-100">' + trash.length + '</span>' +
+    '</button>' +
     '<div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">' +
       '<div class="bg-slate-100 p-4 border-b border-slate-200 flex items-center justify-between gap-2"><h2 class="font-black text-lg text-slate-800">עריכת מוצרים</h2><span class="text-[11px] text-slate-500 font-medium flex items-center gap-1"><i class="fa-solid fa-up-down"></i> לחץ ⬍ להעברה</span></div>' +
       '<div class="px-4 py-2 bg-amber-50/60 border-b border-slate-200 text-[11px] font-bold text-slate-500">העמודה האפורה: כמות מומלצת להזמנה · עמודת 📦: יח׳ בארגז — מלא <b>רק</b> למוצרים שמגיעים אך ורק בארגזים שלמים (משמש את הבלש בהשוואת תעודה)</div>' +
@@ -882,6 +895,124 @@ function renderSettings() {
       '<div id="prodList" class="p-2 space-y-2">' + rows + '</div>' +
     '</div>';
   setupDrag();
+}
+
+
+// ===== סל מחזור =====
+function htmlEscape(v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ch]));
+}
+function trashLabel(name) {
+  const map = {
+    products: 'מוצרים', contacts: 'אנשי קשר', history: 'היסטוריית הזמנות', returns: 'היסטוריית חזרות',
+    receipts: 'תעודות קליטה', promos: 'מבצעים', notes: 'הערות', config: 'הגדרות'
+  };
+  return map[name] || name || 'לא ידוע';
+}
+function trashReasonLabel(reason) {
+  const map = {
+    'delete-product': 'מחיקת מוצר', 'delete-contact': 'מחיקת איש קשר', 'delete-receipt': 'מחיקת תעודה',
+    'delete-promo': 'מחיקת מבצע', 'clear-all': 'ניקוי מרוכז', 'bulk-delete': 'מחיקה מרוכזת', 'note-done': 'סיום הערה'
+  };
+  return map[reason] || reason || 'מחיקה';
+}
+function trashTitle(it) {
+  const d = it && it.data ? it.data : {};
+  if (d.name) return d.name;
+  if (d.title) return d.title;
+  if (Array.isArray(d.items) && d.items.length) return d.items.length + ' פריטים';
+  if (d.timestamp) {
+    try { return new Date(d.timestamp).toLocaleDateString('he-IL'); } catch (e) {}
+  }
+  return (it.originalId || it.trashId || '').toString().slice(0, 24);
+}
+function trashPreview(it) {
+  const d = it && it.data ? it.data : {};
+  const bits = [];
+  if (d.phone) bits.push('טלפון: ' + d.phone);
+  if (d.price != null) bits.push('מחיר: ₪' + fmtMoney(d.price));
+  if (d.average != null) bits.push('מומלץ: ' + d.average);
+  if (d.total != null) bits.push('סה״כ: ₪' + fmtMoney(d.total));
+  if (d.noteTotal != null) bits.push('תעודה: ₪' + fmtMoney(d.noteTotal));
+  if (d.barcode) bits.push('ברקוד: ' + d.barcode);
+  if (Array.isArray(d.items)) bits.push('פריטים: ' + d.items.length);
+  return bits.slice(0, 3).join(' · ');
+}
+function trashCard(it) {
+  const dt = it.deletedAt ? new Date(it.deletedAt) : null;
+  const dateStr = dt ? (dt.toLocaleDateString('he-IL') + ' · ' + dt.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })) : 'ללא תאריך';
+  const title = htmlEscape(trashTitle(it));
+  const preview = htmlEscape(trashPreview(it));
+  return '<div class="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">' +
+    '<div class="flex items-start gap-3">' +
+      '<div class="w-11 h-11 shrink-0 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center"><i class="fa-solid fa-recycle"></i></div>' +
+      '<div class="flex-1 min-w-0">' +
+        '<div class="flex items-center gap-2 flex-wrap mb-1">' +
+          '<span class="text-[11px] font-black bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">' + htmlEscape(trashLabel(it.collectionName)) + '</span>' +
+          '<span class="text-[11px] font-bold text-slate-400">' + htmlEscape(dateStr) + '</span>' +
+        '</div>' +
+        '<div class="font-black text-slate-800 leading-tight truncate">' + title + '</div>' +
+        '<div class="text-xs text-slate-400 font-bold mt-1">' + htmlEscape(trashReasonLabel(it.reason)) + '</div>' +
+        (preview ? '<div class="text-xs text-slate-500 mt-2 leading-snug">' + preview + '</div>' : '') +
+      '</div>' +
+    '</div>' +
+    '<div class="flex gap-2 mt-4">' +
+      '<button data-role="trash-restore" data-id="' + htmlEscape(it.trashId) + '" class="btn-tap flex-1 py-2.5 rounded-xl font-black bg-green-600 text-white flex items-center justify-center gap-2"><i class="fa-solid fa-rotate-left"></i> שחזר</button>' +
+      '<button data-role="trash-delete" data-id="' + htmlEscape(it.trashId) + '" class="btn-tap px-4 py-2.5 rounded-xl font-black bg-red-50 text-red-600 flex items-center justify-center gap-2"><i class="fa-solid fa-trash-can"></i></button>' +
+    '</div>' +
+  '</div>';
+}
+function renderTrash() {
+  const body = trash.length ? trash.map(trashCard).join('') :
+    '<div class="text-center py-16 bg-white border border-slate-200 rounded-2xl shadow-sm text-slate-400">' +
+      '<i class="fa-solid fa-recycle text-4xl mb-3 text-slate-300"></i><div class="font-black text-lg">סל המחזור ריק</div>' +
+      '<div class="text-sm font-bold mt-1">מחיקות עתידיות יופיעו כאן לשחזור</div>' +
+    '</div>';
+  app.innerHTML =
+    '<div class="flex items-center justify-between gap-2 px-1 py-2 mb-2">' +
+      '<div><h2 class="font-black text-2xl text-slate-800">סל מחזור</h2><div class="text-xs text-slate-400 font-bold">שחזור מחיקות מהענן · נשמר עד 90 יום</div></div>' +
+      (trash.length ? '<button data-role="trash-clear" class="btn-tap text-xs font-bold text-red-500 bg-red-50 px-3 py-2 rounded-lg flex items-center gap-1.5"><i class="fa-solid fa-trash-can"></i> רוקן</button>' : '') +
+    '</div>' +
+    '<div class="bg-amber-50 border border-amber-100 rounded-2xl p-3 text-xs text-amber-800 font-bold mb-3 leading-relaxed">' +
+      '<i class="fa-solid fa-circle-info"></i> שחזור מחזיר את הרשומה למקום המקורי. מחיקה מכאן היא מחיקה לצמיתות מהסל.' +
+    '</div>' +
+    '<div class="space-y-3 pb-6">' + body + '</div>';
+}
+async function restoreTrashItem(trashId) {
+  const it = trash.find(x => x.trashId === trashId);
+  if (!it || !it.collectionName || !it.originalId || !it.data) { showToast('לא ניתן לשחזר את הרשומה הזאת', null, null, 3000); return; }
+  const data = cloneSafe(it.data);
+  data.id = it.originalId;
+  const task = {
+    op: 'batch', operationId: makeOperationId('trash_restore'), writes: [
+      { op: 'set', path: dataPath(it.collectionName, it.originalId), data },
+      { op: 'delete', path: dataPath('trash', trashId) }
+    ]
+  };
+  const ok = await runCloudTask('restore from trash', task);
+  if (ok) showToast('שוחזר בהצלחה ✓', null, null, 2500);
+}
+async function deleteTrashItem(trashId) {
+  const ok = await runCloudTask('delete trash item', { op: 'delete', path: dataPath('trash', trashId), operationId: makeOperationId('trash_delete') });
+  if (ok) showToast('נמחק לצמיתות מסל המחזור', null, null, 2500);
+}
+async function clearTrash() {
+  if (!db) return;
+  try {
+    const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'trash'));
+    if (snap.empty) { showToast('סל המחזור כבר ריק', null, null, 2200); return; }
+    let deleted = 0;
+    showCloudBusy('מרוקן סל מחזור...');
+    for (let i = 0; i < snap.docs.length; i += 450) {
+      const batch = writeBatch(db);
+      snap.docs.slice(i, i + 450).forEach(dd => { batch.delete(dd.ref); deleted++; });
+      await batch.commit();
+    }
+    showToast('נמחקו לצמיתות ' + deleted + ' רשומות מסל המחזור', null, null, 3500);
+  } catch (e) {
+    console.error('clear trash failed', e);
+    showToast('ריקון סל המחזור נכשל', null, null, 3500);
+  } finally { hideCloudBusy(); }
 }
 
 // ===== גרירה (Pointer Events) =====
@@ -942,9 +1073,7 @@ async function persistOrder(ids) {
   const map = {}; products.forEach(p => map[p.id] = p);
   products = ids.map((id, i) => { const p = map[id]; if (p) p.orderIndex = i; return p; }).filter(Boolean);
   if (!db) return;
-  const batch = writeBatch(db);
-  ids.forEach((id, i) => batch.update(doc(db, 'artifacts', appId, 'public', 'data', 'products', id), { orderIndex: i }));
-  await batch.commit().catch(console.error);
+  await runCloudTask('persist product order', { op: 'batch', writes: ids.map((id, i) => ({ op: 'update', path: dataPath('products', id), data: { orderIndex: i } })), operationId: makeOperationId('order_products') });
 }
 function startMove(id) { movingId = id; buzz(10); renderSettings(); window.scrollTo({ top: 0, behavior: 'smooth' }); }
 function cancelMove() { movingId = null; renderSettings(); }
@@ -1078,7 +1207,9 @@ async function addNote() {
   const el = $('newNote'); if (!el) return;
   const text = el.value.trim(); if (!text || !db) return;
   el.value = ''; el.blur();
-  await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'notes'), { text, timestamp: Date.now() }).catch(console.error);
+  const newId = makeOperationId('note');
+  const saved = await runCloudTask('add note', { op: 'set', path: dataPath('notes', newId), data: { text, timestamp: Date.now(), operationId: newId }, operationId: newId });
+  if (!saved) { el.value = text; el.focus(); }
 }
 async function doneNote(id) {
   const n = notes.find(x => x.id === id);
@@ -1088,7 +1219,7 @@ async function doneNote(id) {
 }
 async function toggleHidden(id) {
   const p = products.find(x => x.id === id); if (!p || !db) return;
-  await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', id), { hidden: !p.hidden }).catch(console.error);
+  await runCloudTask('toggle product hidden', { op: 'update', path: dataPath('products', id), data: { hidden: !p.hidden }, operationId: makeOperationId('hidden') });
 }
 
 // ===== מרחב חזרות =====
@@ -1200,8 +1331,9 @@ async function savePrompt() {
   if (!id) { hidePrompt(); return; }
   const val = ($('promptInput').value || '').trim();
   if (!val) { hidePrompt(); return; }
+  const saved = await runCloudTask('save product barcode', { op: 'update', path: dataPath('products', id), data: { barcode: val }, operationId: makeOperationId('barcode') });
+  if (!saved) return;
   const p = products.find(x => x.id === id); if (p) p.barcode = val;
-  if (db) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', id), { barcode: val }).catch(console.error);
   const entry = returnsList.find(it => it.productId === id); if (entry) { entry.barcode = val; saveReturnsDraft(); }
   hidePrompt();
   if (!wasEdit) addReturn(id);
@@ -1327,10 +1459,8 @@ async function markCredited(id, val) {
   if (r) { r.credited = val; r.creditedAt = val ? Date.now() : null; }
   if (currentView === 'returnsHistory') renderReturnsHistory();
   buzz(val ? 18 : 8);
-  if (db) {
-    try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'returns', id), { credited: val, creditedAt: val ? Date.now() : null }); }
-    catch (e) { console.error(e); }
-  }
+  const data = { credited: val, creditedAt: val ? Date.now() : null };
+  await runCloudTask('mark return credited', { op: 'update', path: dataPath('returns', id), data, operationId: makeOperationId('ret_credited') });
 }
 // ===== אימות תעודת זיכוי (חזרות) — מנגנון מקביל לקליטה (ללא מבצעים) =====
 function returnsDiscrepancyInfo(r) {
@@ -1386,12 +1516,12 @@ async function addCreditNote(id, amount) {
     buzz(18);
     if (currentView === 'returnsHistory') renderReturnsHistory();
     else if (currentView === 'receiptsHistory') renderReceiptsHistory();
-    if (db) { try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'returns', id), { items, creditNoteParts: parts, creditNoteTotal: total, creditStatus: 'ok', credited: true, creditedAt: Date.now() }); } catch (e) { console.error(e); } }
+    await runCloudTask('complete credit note', { op: 'update', path: dataPath('returns', id), data: { items, creditNoteParts: parts, creditNoteTotal: total, creditStatus: 'ok', credited: true, creditedAt: Date.now() }, operationId: makeOperationId('credit_complete') });
     showToast('הזיכוי הושלם — הפער נסגר ✓', null, null, 2400);
   } else {
     // עדיין לא תואם — שומרים את התעודה הנוספת ופותחים אימות מלא לעדכון השורות
     r.creditNoteParts = parts; r.creditNoteTotal = total;
-    if (db) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'returns', id), { creditNoteParts: parts, creditNoteTotal: total }).catch(console.error);
+    await runCloudTask('add credit note part', { op: 'update', path: dataPath('returns', id), data: { creditNoteParts: parts, creditNoteTotal: total }, operationId: makeOperationId('credit_part') });
     openReturnVerify(id, total);
     showToast('נוספה תעודה (סה"כ ₪' + fmtMoney(total) + ') — עדכן את השורות לפי הזיכוי', null, null, 3000);
   }
@@ -1485,7 +1615,7 @@ async function markReturnVerified(id, noteTotal) {
   buzz(18);
   if (currentView === 'returnsHistory') renderReturnsHistory();
   else if (currentView === 'receiptsHistory') renderReceiptsHistory();
-  if (db) { try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'returns', id), { credited: true, creditedAt: Date.now(), creditNoteTotal: noteTotal, creditStatus: 'ok' }); } catch (e) { console.error(e); } }
+  await runCloudTask('mark return verified', { op: 'update', path: dataPath('returns', id), data: { credited: true, creditedAt: Date.now(), creditNoteTotal: noteTotal, creditStatus: 'ok' }, operationId: makeOperationId('return_verified') });
 }
 async function clearReturnVerification(id) {
   const r = returns.find(x => x.id === id);
@@ -1493,7 +1623,7 @@ async function clearReturnVerification(id) {
   buzz(8);
   if (currentView === 'returnsHistory') renderReturnsHistory();
   else if (currentView === 'receiptsHistory') renderReceiptsHistory();
-  if (db) { try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'returns', id), { credited: false, creditedAt: null, creditStatus: null, creditNoteTotal: null, creditNoteParts: null }); } catch (e) { console.error(e); } }
+  await runCloudTask('clear return verification', { op: 'update', path: dataPath('returns', id), data: { credited: false, creditedAt: null, creditStatus: null, creditNoteTotal: null, creditNoteParts: null }, operationId: makeOperationId('clear_return_verify') });
 }
 async function saveReturnVerify(opts) {
   opts = opts || {};
@@ -1517,9 +1647,8 @@ async function saveReturnVerify(opts) {
   const open = outItems.some(l => l.noteQty != null && l.noteQty !== l.qty);
   const id = returnVerify.id, noteTotal = returnVerify.noteTotal;
   const updateData = { items: outItems, totalExVat: sentEx, totalIncVat: sentEx, creditNoteTotal: noteTotal, creditStatus: open ? 'open' : 'ok', credited: true, creditedAt: Date.now() };
-  const saved = await mustCloudWrite('save return verification', () =>
-    updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'returns', id), updateData)
-  );
+  const opId = makeOperationId('return_verify');
+  const saved = await runCloudTask('save return verification', { op: 'update', path: dataPath('returns', id), data: updateData, operationId: opId });
   if (!saved) return;
   const r = returns.find(x => x.id === id);
   if (r) Object.assign(r, updateData);
@@ -1545,9 +1674,9 @@ function pruneOnLoad() {
   if (prunedOnce) return; prunedOnce = true;
   pruneCollection('history', 20);
   pruneCollection('returns', 20);
-  pruneTrash(30);
+  pruneTrash(90);
 }
-// ריקון סל המחזור: מוחק גיבויים בני יותר מ-X ימים. טעות מחיקה מתגלה תוך ימים — אחרי חודש הגיבוי מיצה את תפקידו
+// ריקון סל המחזור: מוחק גיבויים ישנים מאוד. השחזור הידני נמצא במסך סל מחזור
 async function pruneTrash(days) {
   if (!db) return;
   try {
@@ -1579,7 +1708,7 @@ function saveAvg(id, val) {
   const p = products.find(x => x.id === id); if (p) p.average = avg;
   if (!db) return;
   clearTimeout(avgTimers[id]);
-  avgTimers[id] = setTimeout(() => { updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', id), { average: avg }).catch(console.error); }, 700);
+  avgTimers[id] = setTimeout(() => { runCloudTaskSilent('save average', { op: 'update', path: dataPath('products', id), data: { average: avg }, operationId: makeOperationId('avg') }); }, 700);
 }
 const boxTimers = {};
 function saveBoxSize(id, val) {
@@ -1588,7 +1717,7 @@ function saveBoxSize(id, val) {
   const p = products.find(x => x.id === id); if (p) p.boxSize = box;
   if (!db) return;
   clearTimeout(boxTimers[id]);
-  boxTimers[id] = setTimeout(() => { updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', id), { boxSize: box }).catch(console.error); }, 700);
+  boxTimers[id] = setTimeout(() => { runCloudTaskSilent('save box size', { op: 'update', path: dataPath('products', id), data: { boxSize: box }, operationId: makeOperationId('box') }); }, 700);
 }
 async function addProduct() {
   const nameEl = $('npName'); if (!nameEl) return;
@@ -1596,8 +1725,11 @@ async function addProduct() {
   const avg = parseInt(($('npAvg').value || '').replace(/[^0-9]/g, ''), 10) || 0;
   const unit = $('npUnit').value;
   const maxIdx = products.length ? Math.max(...products.map(p => p.orderIndex || 0)) : -1;
+  const newId = makeOperationId('prod');
+  const data = { name, average: avg, defaultUnit: unit, orderIndex: maxIdx + 1, operationId: newId };
+  const saved = await runCloudTask('add product', { op: 'set', path: dataPath('products', newId), data, operationId: newId });
+  if (!saved) return;
   nameEl.value = ''; $('npAvg').value = '';
-  await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'products'), { name, average: avg, defaultUnit: unit, orderIndex: maxIdx + 1 }).catch(console.error);
 }
 async function delProduct(id) {
   const p = products.find(x => x.id === id);
@@ -1608,8 +1740,11 @@ async function delProduct(id) {
 async function addContact() {
   const nEl = $('ncName'), pEl = $('ncPhone'); if (!nEl || !pEl) return;
   const name = nEl.value.trim(), phone = pEl.value.trim(); if (!name || !phone || !db) return;
+  const newId = makeOperationId('contact');
+  const data = { name, phone, orderIndex: contacts.length, operationId: newId };
+  const saved = await runCloudTask('add contact', { op: 'set', path: dataPath('contacts', newId), data, operationId: newId });
+  if (!saved) return;
   nEl.value = ''; pEl.value = '';
-  await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'contacts'), { name, phone, orderIndex: contacts.length }).catch(console.error);
 }
 async function delContact(id) {
   const c = contacts.find(x => x.id === id);
@@ -1694,13 +1829,14 @@ async function performSend(contact) {
   let phone = (contact.phone || '').replace(/[-+\s]/g, '');
   if (phone.startsWith('0')) phone = '972' + phone.substring(1);
   if (type === 'returns') {
-    const saved = await mustCloudWrite('save returns before send', () =>
-      addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'returns'), {
-        timestamp: Date.now(), sentTo: contact.name, items, credited: false,
-        totalExVat: (sendCtx && sendCtx.totalExVat) || 0,
-        totalIncVat: (sendCtx && sendCtx.totalIncVat) || 0
-      })
-    );
+    const opId = sendCtx.operationId || (sendCtx.operationId = makeOperationId('returns'));
+    const data = {
+      timestamp: Date.now(), sentTo: contact.name, items, credited: false,
+      totalExVat: (sendCtx && sendCtx.totalExVat) || 0,
+      totalIncVat: (sendCtx && sendCtx.totalIncVat) || 0,
+      operationId: opId
+    };
+    const saved = await runCloudTask('save returns before send', { op: 'set', path: dataPath('returns', opId), data, operationId: opId });
     if (!saved) return;
     const msg = buildReturnsMessage(items, note);
     const url = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg);
@@ -1708,9 +1844,9 @@ async function performSend(contact) {
     sendCtx = null; hideSend(); setView('returnsHistory'); window.location.href = url;
     return;
   }
-  const saved = await mustCloudWrite('save order before send', () =>
-    addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'history'), { timestamp: Date.now(), sentTo: contact.name, items })
-  );
+  const opId = sendCtx.operationId || (sendCtx.operationId = makeOperationId('order'));
+  const data = { timestamp: Date.now(), sentTo: contact.name, items, operationId: opId };
+  const saved = await runCloudTask('save order before send', { op: 'set', path: dataPath('history', opId), data, operationId: opId });
   if (!saved) return;
   const msg = buildMessage(items, note);
   const url = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg);
@@ -1900,10 +2036,8 @@ function showToast(msg, actionLabel, actionFn, duration) {
 function hideToast() { const t = $('toast'); if (t) { t.classList.add('hidden'); t.classList.remove('flex'); } undoAction = null; clearTimeout(toastTimer); }
 function doUndo() { const fn = undoAction; hideToast(); if (fn) fn(); }
 function restoreDoc(name, obj) {
-  if (!db || !obj || !obj.id) return;
-  const batch = writeBatch(db);
-  batch.set(doc(db, 'artifacts', appId, 'public', 'data', name, obj.id), obj);
-  batch.commit().catch(console.error);
+  if (!obj || !obj.id) return;
+  runCloudTask('restore deleted ' + name, { op: 'set', path: dataPath(name, obj.id), data: obj, operationId: makeOperationId('restore') });
 }
 
 // ===== שכבת בטיחות נתונים =====
@@ -1916,15 +2050,112 @@ function trashDocId(name, id) {
   return name + '_' + id + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
 }
 // חיווי "שומר לענן" + נעילה — מונע לחיצות כפולות (=רשומות כפולות) ומראה למשתמש שמשהו קורה
-let cloudBusyEl = null, cloudSlowTimer = null, cloudWriteInFlight = false;
-function showCloudBusy() {
+// v91: שכבת שמירה בטוחה + מזהה פעולה + יומן פעולות שלא נשמרו.
+const CLOUD_FAILED_KEY = 'yt_cloud_failed_writes_v1';
+let cloudBusyEl = null, cloudSlowTimer = null, cloudWriteInFlight = false, cloudFailedWrites = [];
+
+function dataPath(name, id) { return ['artifacts', appId, 'public', 'data', name, id]; }
+function makeOperationId(prefix) {
+  const p = (prefix || 'op').replace(/[^a-zA-Z0-9_-]/g, '_');
+  try { if (crypto && crypto.randomUUID) return p + '_' + crypto.randomUUID(); } catch (e) {}
+  return p + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
+}
+function loadCloudFailedWrites() {
+  try { const raw = localStorage.getItem(CLOUD_FAILED_KEY); cloudFailedWrites = raw ? (JSON.parse(raw) || []) : []; }
+  catch (e) { cloudFailedWrites = []; }
+}
+function saveCloudFailedWrites() {
+  try { localStorage.setItem(CLOUD_FAILED_KEY, JSON.stringify(cloudFailedWrites.slice(0, 30))); } catch (e) {}
+  updateCloudFailButton();
+}
+function errText(e) { return (e && (e.message || e.code)) ? String(e.message || e.code).slice(0, 180) : 'שגיאה לא ידועה'; }
+function addCloudFailedWrite(actionName, err, task) {
+  if (!task) return;
+  const opId = task.operationId || makeOperationId('failed');
+  const old = cloudFailedWrites.find(x => x.operationId === opId);
+  if (old) { old.error = errText(err); old.updatedAt = Date.now(); old.tries = (old.tries || 0) + 1; old.task = cloneSafe(task); saveCloudFailedWrites(); return; }
+  cloudFailedWrites.unshift({ id: makeOperationId('fail'), operationId: opId, actionName: actionName || 'שמירה לענן', createdAt: Date.now(), updatedAt: Date.now(), tries: 1, error: errText(err), task: cloneSafe(task) });
+  cloudFailedWrites = cloudFailedWrites.slice(0, 30);
+  saveCloudFailedWrites();
+}
+function removeCloudFailedWrite(id) {
+  cloudFailedWrites = cloudFailedWrites.filter(x => x.id !== id);
+  saveCloudFailedWrites();
+}
+function updateCloudFailButton() {
+  let b = document.getElementById('cloudFailBtn');
+  if (!cloudFailedWrites.length) { if (b) b.remove(); return; }
+  if (!b) {
+    b = document.createElement('button');
+    b.id = 'cloudFailBtn';
+    b.className = 'btn-tap fixed left-3 bottom-24 z-[80] bg-amber-500 text-white rounded-full shadow-2xl px-4 py-2.5 font-black text-xs flex items-center gap-2';
+    b.onclick = showCloudFailDetails;
+    document.body.appendChild(b);
+  }
+  b.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> ' + cloudFailedWrites.length + ' לא נשמרו';
+}
+function showCloudFailDetails() {
+  if (!cloudFailedWrites.length) return;
+  const first = cloudFailedWrites[0];
+  const msg = 'יש ' + cloudFailedWrites.length + ' פעולות שלא קיבלו אישור מהענן. הפעולה האחרונה: ' + (first.actionName || 'שמירה') + '. שגיאה: ' + (first.error || 'לא ידוע') + '. לנסות לשמור שוב עכשיו?';
+  showConfirm('פעולות שלא נשמרו', msg, 'נסה שוב', retryCloudFailedWrites);
+}
+async function executeCloudTask(task) {
+  if (!db || !task) throw new Error('אין חיבור לענן');
+  if (Array.isArray(task.tasks)) { for (const t of task.tasks) await executeCloudTask(t); return; }
+  if (task.op === 'batch') {
+    const batch = writeBatch(db);
+    (task.writes || []).forEach(w => {
+      const ref = doc(db, ...w.path);
+      if (w.op === 'set') { if (w.merge) batch.set(ref, w.data || {}, { merge: true }); else batch.set(ref, w.data || {}); }
+      else if (w.op === 'update') batch.update(ref, w.data || {});
+      else if (w.op === 'delete') batch.delete(ref);
+    });
+    await batch.commit();
+    return;
+  }
+  const ref = doc(db, ...task.path);
+  if (task.op === 'set') return task.merge ? setDoc(ref, task.data || {}, { merge: true }) : setDoc(ref, task.data || {});
+  if (task.op === 'update') return updateDoc(ref, task.data || {});
+  if (task.op === 'delete') return deleteDoc(ref);
+  throw new Error('פעולת ענן לא מוכרת: ' + task.op);
+}
+async function retryCloudFailedWrites() {
+  if (!cloudFailedWrites.length) return;
+  if (!db) { showToast('אין חיבור לענן — נסה שוב כשהאפליקציה מחוברת', null, null, 3500); return; }
+  if (cloudWriteInFlight) { showToast('פעולה קודמת עדיין נשמרת — המתן רגע', null, null, 2500); return; }
+  cloudWriteInFlight = true;
+  showCloudBusy('שומר פעולות שנכשלו...');
+  let ok = 0, fail = 0;
+  try {
+    const list = cloudFailedWrites.slice().reverse(); // הישן קודם
+    for (const item of list) {
+      try { await executeCloudTask(item.task); removeCloudFailedWrite(item.id); ok++; }
+      catch (e) { item.error = errText(e); item.tries = (item.tries || 0) + 1; item.updatedAt = Date.now(); fail++; }
+    }
+    saveCloudFailedWrites();
+    showToast(fail ? ('נשמרו ' + ok + ', נשארו ' + fail + ' פעולות שלא נשמרו') : 'כל הפעולות נשמרו לענן ✓', null, null, 4000);
+  } finally {
+    cloudWriteInFlight = false;
+    hideCloudBusy();
+  }
+}
+async function runCloudTask(actionName, task) {
+  return mustCloudWrite(actionName, () => executeCloudTask(task), { failedTask: task });
+}
+async function runCloudTaskSilent(actionName, task) {
+  if (!db) { addCloudFailedWrite(actionName, new Error('אין חיבור לענן'), task); showToast('שינוי לא נשמר בענן — נשמר ביומן פעולות', null, null, 3000); return false; }
+  try { await executeCloudTask(task); return true; }
+  catch (e) { console.error(actionName || 'silent cloud write failed', e); addCloudFailedWrite(actionName, e, task); showToast('שינוי לא נשמר בענן — אפשר לנסות שוב מהכפתור הצהוב', null, null, 3500); return false; }
+}
+function showCloudBusy(text) {
   if (!cloudBusyEl) {
     cloudBusyEl = document.createElement('div');
-    cloudBusyEl.className = 'fixed inset-0 bg-black/30 z-[100] flex items-center justify-center';
+    cloudBusyEl.className = 'fixed inset-0 bg-black/40 z-[100] flex items-center justify-center';
     cloudBusyEl.innerHTML = '<div class="bg-white rounded-2xl px-6 py-4 font-black text-slate-700 shadow-xl flex items-center gap-3"><i class="fa-solid fa-cloud-arrow-up fa-beat text-blue-600"></i> <span id="cloudBusyTxt">שומר לענן...</span></div>';
     document.body.appendChild(cloudBusyEl);
   }
-  const t = document.getElementById('cloudBusyTxt'); if (t) t.textContent = 'שומר לענן...';
+  const t = document.getElementById('cloudBusyTxt'); if (t) t.textContent = text || 'שומר לענן...';
   cloudBusyEl.style.display = 'flex';
   clearTimeout(cloudSlowTimer);
   cloudSlowTimer = setTimeout(() => { const s = document.getElementById('cloudBusyTxt'); if (s) s.textContent = 'עדיין שומר — בדוק חיבור אינטרנט...'; }, 10000);
@@ -1933,8 +2164,10 @@ function hideCloudBusy() {
   clearTimeout(cloudSlowTimer);
   if (cloudBusyEl) cloudBusyEl.style.display = 'none';
 }
-async function mustCloudWrite(actionName, fn) {
+async function mustCloudWrite(actionName, fn, opts) {
+  opts = opts || {};
   if (!db) {
+    addCloudFailedWrite(actionName, new Error('אין חיבור לענן'), opts.failedTask);
     showToast('לא בוצע: אין חיבור לענן. הנתונים נשארו בטיוטה.', null, null, 4500);
     return false;
   }
@@ -1949,6 +2182,7 @@ async function mustCloudWrite(actionName, fn) {
     return true;
   } catch (e) {
     console.error(actionName || 'Cloud write failed', e);
+    addCloudFailedWrite(actionName, e, opts.failedTask);
     showToast('השמירה בענן נכשלה — לא ניקיתי את הטיוטה. נסה שוב כשיש חיבור יציב.', null, null, 5500);
     return false;
   } finally {
@@ -1956,6 +2190,8 @@ async function mustCloudWrite(actionName, fn) {
     hideCloudBusy();
   }
 }
+loadCloudFailedWrites();
+updateCloudFailButton();
 async function hardDeleteDocWithBackup(name, id, data, reason) {
   if (!db || !id) return false;
   showCloudBusy();
@@ -2434,22 +2670,23 @@ async function saveNewProduct() {
   if (!(price >= 0)) { $('npr_price').focus(); return; }
   if (npMode === 'setprice') {
     const id = npProductId; const p = products.find(x => x.id === id);
+    if (!p) { hideNewProduct(); return; }
+    const saved = await runCloudTask('save scanned product price', { op: 'update', path: dataPath('products', id), data: { price: r2(price) }, operationId: makeOperationId('scan_price') });
+    if (!saved) return;
+    p.price = r2(price);
     hideNewProduct();
-    if (p) {
-      p.price = r2(price);
-      if (db) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', id), { price: r2(price) }).catch(console.error);
-      promptQty(p, target);
-    }
+    promptQty(p, target);
     return;
   }
   const name = ($('npr_name').value || '').trim();
   if (!name) { $('npr_name').focus(); return; }
   const code = pendingScanBarcode || '';
   const maxIdx = products.length ? Math.max(...products.map(p => p.orderIndex || 0)) : -1;
-  let newId = 'prod_' + Date.now();
-  const data = { name, barcode: code, price: r2(price), average: 0, defaultUnit: 'carton', orderIndex: maxIdx + 1 };
+  const newId = makeOperationId('prod');
+  const data = { name, barcode: code, price: r2(price), average: 0, defaultUnit: 'carton', orderIndex: maxIdx + 1, operationId: newId };
+  const saved = await runCloudTask('create scanned product', { op: 'set', path: dataPath('products', newId), data, operationId: newId });
+  if (!saved) return;
   hideNewProduct();
-  if (db) { try { const ref = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'products'), data); newId = ref.id; } catch (e) { console.error(e); } }
   if (!products.find(x => x.id === newId)) { products.push({ id: newId, ...data }); orderState[newId] = orderState[newId] || { amount: '', unit: 'carton' }; }
   promptQty({ id: newId, ...data }, target);
 }
@@ -3089,7 +3326,7 @@ function saveReconciledReceipt(opts) {
   reconcileData.forEach(l => {
     const p = products.find(x => x.id === l.productId);
     const np = ((Number(l.promoPct) || 0) > 0 && l.promoOn) ? r2(Number(l.basePrice) || 0) : r2(Number(l.price) || 0);
-    if (p && np > 0 && r2(Number(p.price) || 0) !== np) { p.price = np; if (db) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', l.productId), { price: np }).catch(console.error); }
+    if (p && np > 0 && r2(Number(p.price) || 0) !== np) { p.price = np; if (db) runCloudTaskSilent('save price from reconcile', { op: 'update', path: dataPath('products', l.productId), data: { price: np }, operationId: makeOperationId('reconcile_price') }); }
   });
   const lines = reconcileData.filter(l => (Number(l.received) || 0) > 0 || (Number(l.noteQty) || 0) > 0).map(l => {
     const received = Number(l.received) || 0, noteQty = Number(l.noteQty) || 0, price = r2(Number(l.price) || 0);
@@ -3252,9 +3489,8 @@ async function saveReceiptFix() {
   const open = items.some(l => l.noteQty != null && l.noteQty !== l.qty);
   const id = receiptFix.id;
   const updateData = { items, count: items.length, totalExVat: ex, totalIncVat: ex, status: open ? 'open' : 'ok' };
-  const saved = await mustCloudWrite('save receipt fix', () =>
-    updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'receipts', id), updateData)
-  );
+  const opId = makeOperationId('receipt_fix');
+  const saved = await runCloudTask('save receipt fix', { op: 'update', path: dataPath('receipts', id), data: updateData, operationId: opId });
   if (!saved) return;
   receiptFix = null;
   setView('receiptsHistory');
@@ -3265,10 +3501,9 @@ async function saveReceiptFix() {
 async function confirmReceipt() {
   if (!pendingReceipt) { hideReceiptSummary(); return; }
   const { lines, ex, noteTotal, status, noteParts } = pendingReceipt;
-  const data = { timestamp: Date.now(), date: todayStr(), items: lines, count: lines.length, totalExVat: ex, totalIncVat: ex, noteTotalInc: (noteTotal != null ? noteTotal : null), noteParts: (Array.isArray(noteParts) ? noteParts : []), status: status || 'ok' };
-  const saved = await mustCloudWrite('save receipt before clearing draft', () =>
-    addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'receipts'), data)
-  );
+  const opId = pendingReceipt.operationId || (pendingReceipt.operationId = makeOperationId('receipt'));
+  const data = { timestamp: Date.now(), date: todayStr(), items: lines, count: lines.length, totalExVat: ex, totalIncVat: ex, noteTotalInc: (noteTotal != null ? noteTotal : null), noteParts: (Array.isArray(noteParts) ? noteParts : []), status: status || 'ok', operationId: opId };
+  const saved = await runCloudTask('save receipt before clearing draft', { op: 'set', path: dataPath('receipts', opId), data, operationId: opId });
   if (!saved) return;
   hideReceiptSummary();
   receiptList = []; pendingReceipt = null; receiptNoteTotal = null; receiptNotes = []; receiptOpened = false; editingNotes = false; reconcileData = null; receiptDupConfirmed = false; saveReceiptDraft();
@@ -3389,7 +3624,7 @@ function findOffsetMatch(rc) {
   }
   return null;
 }
-function applyOffset(rcId, otherId) {
+async function applyOffset(rcId, otherId) {
   const rc = receipts.find(x => x.id === rcId);
   const other = receipts.find(x => x.id === otherId);
   if (!rc || !other) return;
@@ -3397,8 +3632,14 @@ function applyOffset(rcId, otherId) {
   rc.offsetClosed = true; rc.offsetWith = otherId; rc.offsetAt = stamp;
   other.offsetClosed = true; other.offsetWith = rcId; other.offsetAt = stamp;
   if (db) {
-    updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'receipts', rcId), { offsetClosed: true, offsetWith: otherId, offsetAt: stamp }).catch(console.error);
-    updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'receipts', otherId), { offsetClosed: true, offsetWith: rcId, offsetAt: stamp }).catch(console.error);
+    const saved = await runCloudTask('apply receipt offset', {
+      op: 'batch', operationId: makeOperationId('offset'),
+      writes: [
+        { op: 'update', path: dataPath('receipts', rcId), data: { offsetClosed: true, offsetWith: otherId, offsetAt: stamp } },
+        { op: 'update', path: dataPath('receipts', otherId), data: { offsetClosed: true, offsetWith: rcId, offsetAt: stamp } }
+      ]
+    });
+    if (!saved) { rc.offsetClosed = false; other.offsetClosed = false; if (currentView === 'receiptsHistory') renderReceiptsHistory(); return; }
   }
   buzz(18);
   showToast('הקיזוז אושר — שתי התעודות נסגרו', null, null, 2600);
@@ -3574,7 +3815,7 @@ function savePricingCats() {
   if (!db) return;
   clearTimeout(pricingCatsTimer);
   pricingCatsTimer = setTimeout(() => {
-    setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'pricing'), { categories: pricingCats, updatedAt: Date.now() }).catch(console.error);
+    runCloudTaskSilent('save pricing categories', { op: 'set', path: dataPath('settings', 'pricing'), data: { categories: pricingCats, updatedAt: Date.now() }, merge: true, operationId: 'pricing_settings' });
   }, 700);
 }
 function pricingCatsCardHtml() {
@@ -3624,7 +3865,7 @@ function savePrice(id, val) {
   const price = (raw.trim() === '') ? null : (num >= 0 ? r2(num) : null);
   const p = products.find(x => x.id === id); if (p) p.price = price;
   clearTimeout(priceTimers[id]);
-  priceTimers[id] = setTimeout(() => { if (db) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', id), { price }).catch(console.error); }, 600);
+  priceTimers[id] = setTimeout(() => { if (db) runCloudTaskSilent('save product price', { op: 'update', path: dataPath('products', id), data: { price }, operationId: makeOperationId('price') }); }, 600);
 }
 function openPriceScanner() { scanPurpose = 'price'; openScanner(); }
 function handlePriceScan(code) {
@@ -3670,18 +3911,21 @@ async function saveProd(again) {
   const price = (raw === '') ? null : (num >= 0 ? r2(num) : null);
   if (!name) { $('prod_name').focus(); return; }
   const id = priceEditId;
-  hideProdModal();
   if (id) {
+    const data = { name, barcode, price };
+    const saved = await runCloudTask('save product', { op: 'update', path: dataPath('products', id), data, operationId: makeOperationId('product_save') });
+    if (!saved) return;
     const p = products.find(x => x.id === id);
-    if (p) { p.name = name; p.barcode = barcode; p.price = price; }
-    if (db) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', id), { name, barcode, price }).catch(console.error);
+    if (p) Object.assign(p, data);
   } else {
     const maxIdx = products.length ? Math.max(...products.map(p => p.orderIndex || 0)) : -1;
-    let newId = 'prod_' + Date.now();
-    const data = { name, barcode, price, average: 0, defaultUnit: 'carton', orderIndex: maxIdx + 1 };
-    if (db) { try { const ref = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'products'), data); newId = ref.id; } catch (e) { console.error(e); } }
+    const newId = makeOperationId('prod');
+    const data = { name, barcode, price, average: 0, defaultUnit: 'carton', orderIndex: maxIdx + 1, operationId: newId };
+    const saved = await runCloudTask('create product', { op: 'set', path: dataPath('products', newId), data, operationId: newId });
+    if (!saved) return;
     if (!products.find(x => x.id === newId)) { products.push({ id: newId, ...data }); orderState[newId] = orderState[newId] || { amount: '', unit: 'carton' }; }
   }
+  hideProdModal();
   if (currentView === 'prices') renderPrices();
   showToast(id ? 'המוצר עודכן' : 'המוצר נוסף', null, null, 1600);
   if (again) openPriceScanner();
@@ -3778,7 +4022,7 @@ function promoRowHtml(pr, state) {
 // ===== הכנת שלטי מבצע (עד 5 בדף, ייצוא PNG) =====
 const SIGN_MAX = 5;
 function signMarginFactor() { return 1 + (Number(signMarginPct) || 0) / 100; }
-function saveAppConfig() {
+async function saveAppConfig() {
   const vEl = $('cfgVat'), mEl = $('cfgMargin'), sEl = $('cfgStore');
   const v = parseFloat(((vEl && vEl.value) || '').replace(',', '.'));
   const m = parseFloat(((mEl && mEl.value) || '').replace(',', '.'));
@@ -3788,7 +4032,8 @@ function saveAppConfig() {
   VAT = r2(v / 100); signMarginPct = r2(m);
   if (sn) storeName = sn;
   buzz(20);
-  if (db) { try { setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'app'), { vatPct: r2(v), marginPct: r2(m), storeName: storeName }, { merge: true }).catch(console.error); } catch (e) { console.error(e); } }
+  const saved = await runCloudTask('save app config', { op: 'set', path: dataPath('config', 'app'), data: { vatPct: r2(v), marginPct: r2(m), storeName: storeName }, merge: true, operationId: 'app_config' });
+  if (!saved) return;
   showToast('ההגדרות נשמרו — מע״מ ' + r2(v) + '% · רווח ' + r2(m) + '%', null, null, 2600);
 }
 function signMaxCost(promoId) {
@@ -4275,7 +4520,7 @@ function togglePromoProduct(pid) {
   const cnt = $('peCount'); if (cnt) cnt.textContent = '(' + arr.length + ')';
   refreshPromoProdList(promoSearch);
 }
-function savePromoEntity() {
+async function savePromoEntity() {
   if (!promoEdit) return;
   const name = ($('promoName').value || '').trim();
   const pct = parseFloat(($('promoPct').value || '').toString().replace(',', '.'));
@@ -4295,8 +4540,14 @@ function savePromoEntity() {
   const data = { name: name || ('מבצע ' + r2(pct) + '%'), pct: r2(pct), start, end, minQty: Math.max(1, qty), minUnit, cartonSize, productIds, type };
   const id = promoEdit.id;
   promoEdit = null;
-  if (id) { if (db) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'promos', id), data).catch(console.error); }
-  else if (db) addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'promos'), data).catch(console.error);
+  let saved = false;
+  if (id) saved = await runCloudTask('save promo', { op: 'update', path: dataPath('promos', id), data, operationId: makeOperationId('promo_save') });
+  else {
+    const newId = makeOperationId('promo');
+    data.operationId = newId;
+    saved = await runCloudTask('create promo', { op: 'set', path: dataPath('promos', newId), data, operationId: newId });
+  }
+  if (!saved) { promoEdit = { id, ...data, productIds }; return; }
   setView('promos');
   showToast('המבצע נשמר', null, null, 1800);
 }
@@ -4337,7 +4588,7 @@ $('segReturns').addEventListener('click', () => setView('returns'));
 $('segReceiving').addEventListener('click', () => setView('receiving'));
 $('btnSettings').addEventListener('click', () => setView('settings'));
 $('btnNotes').addEventListener('click', () => setView('notes'));
-$('backToOrder').addEventListener('click', () => setView(mainMode));
+$('backToOrder').addEventListener('click', () => setView(currentView === 'trash' ? 'settings' : mainMode));
 $('cartBtn').addEventListener('click', () => { if (mainMode === 'returns') openReturnsSend(); else if (mainMode === 'receiving') finishReceipt(); else openSendCurrent(); });
 $('promptCancel').addEventListener('click', hidePrompt);
 $('promptOk').addEventListener('click', savePrompt);
@@ -4450,7 +4701,7 @@ app.addEventListener('input', (e) => {
     const p = products.find(x => x.id === t.dataset.id);
     if (p) {
       p.category = t.value || null;
-      if (db) updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'products', p.id), { category: p.category }).catch(console.error);
+      if (db) runCloudTaskSilent('save product category', { op: 'update', path: dataPath('products', p.id), data: { category: p.category }, operationId: makeOperationId('cat') });
       refreshPricesList(priceQuery);
     }
     return;
@@ -4503,6 +4754,7 @@ app.addEventListener('click', (e) => {
   const role = t.dataset.role, id = t.dataset.id;
   if (role === 'clear-order') showConfirm('ניקוי הזמנה', 'לנקות את כל הכמויות שהוזנו?', 'נקה', clearOrder);
   else if (role === 'go-contacts') setView('contacts');
+  else if (role === 'go-trash') setView('trash');
   else if (role === 'go-settings') setView('settings');
   else if (role === 'add-product') addProduct();
   else if (role === 'del-product') { const p = products.find(x => x.id === id); showConfirm('מחיקת מוצר', 'למחוק את "' + (p ? p.name : '') + '"?', 'מחק', () => delProduct(id)); }
@@ -4534,8 +4786,8 @@ app.addEventListener('click', (e) => {
   else if (role === 'rv-cancel') { returnVerify = null; setView(rvOrigin); }
   else if (role === 'rv-save') saveReturnVerify();
   else if (role === 'uncredit') clearReturnVerification(id);
-  else if (role === 'clear-history') showConfirm('ניקוי היסטוריה', 'למחוק את כל היסטוריית ההזמנות? פעולה זו אינה הפיכה.', 'מחק הכל', () => clearAllDocs('history'));
-  else if (role === 'clear-returns-history') showConfirm('ניקוי היסטוריה', 'למחוק את כל היסטוריית החזרות? פעולה זו אינה הפיכה.', 'מחק הכל', () => clearAllDocs('returns'));
+  else if (role === 'clear-history') showConfirm('ניקוי היסטוריה', 'למחוק את כל היסטוריית ההזמנות? יישמר גיבוי בסל מחזור.', 'מחק הכל', () => clearAllDocs('history'));
+  else if (role === 'clear-returns-history') showConfirm('ניקוי היסטוריה', 'למחוק את כל היסטוריית החזרות? יישמר גיבוי בסל מחזור.', 'מחק הכל', () => clearAllDocs('returns'));
   else if (role === 'rc-scan') openReceivingScanner();
   else if (role === 'rc-open') { const v = parseNoteVal(($('rcNoteInput') || {}).value); if (v != null) receiptNotes.push(v); recomputeNoteTotal(); receiptOpened = true; receiptDupConfirmed = false; saveReceiptDraft(); refreshReceipt(); openReceivingScanner(); }
   else if (role === 'rc-open-skip') { receiptNotes = []; recomputeNoteTotal(); receiptOpened = true; receiptDupConfirmed = false; saveReceiptDraft(); refreshReceipt(); openReceivingScanner(); }
@@ -4698,6 +4950,9 @@ app.addEventListener('click', (e) => {
   else if (role === 'pe-save') savePromoEntity();
   else if (role === 'pe-cancel') { promoEdit = null; setView('promos'); }
   else if (role === 'pe-delete') deletePromoEntity();
+  else if (role === 'trash-restore') showConfirm('שחזור מסל המחזור', 'לשחזר את הרשומה למקום המקורי?', 'שחזר', () => restoreTrashItem(id));
+  else if (role === 'trash-delete') showConfirm('מחיקה לצמיתות', 'למחוק את הרשומה הזאת לצמיתות מסל המחזור?', 'מחק לצמיתות', () => deleteTrashItem(id));
+  else if (role === 'trash-clear') showConfirm('ריקון סל מחזור', 'למחוק לצמיתות את כל מה שנמצא בסל המחזור?', 'רוקן', clearTrash);
   else if (role === 'del-receipt') { const rc = receipts.find(x => x.id === id); showConfirm('מחיקת תעודה', 'למחוק את התעודה' + (rc ? ' מ-' + new Date(rc.timestamp).toLocaleDateString('he-IL') : '') + '?', 'מחק', () => delReceipt(id)); }
   else if (role === 'clear-receipts') showConfirm('ניקוי תעודות', 'למחוק את כל תעודות הקליטה? יישמר גיבוי בסל מחזור.', 'מחק הכל', () => clearAllDocs('receipts'));
 });
