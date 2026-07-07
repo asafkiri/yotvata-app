@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה</title>
+    <title>הזמנות יטבתה - v95 איפוס PIN</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v93 תקינות מערכת</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v95 איפוס PIN</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -419,6 +419,11 @@ const RECEIPT_DRAFT_KEY = 'yt_receipt_draft';
 let VAT = 0.18;                  // מע"מ — ניתן לשינוי בהגדרות (נשמר בענן)
 let signMarginPct = 25;          // % רווח מומלץ למבצעים — ניתן לשינוי בהגדרות
 let storeName = 'מיני מרקט שלום'; // שם החנות לשלטים — ניתן לשינוי בהגדרות
+const ADMIN_DEFAULT_PIN = '1111';
+const ADMIN_SESSION_MS = 15 * 60 * 1000; // מצב מנהל נשאר פתוח 15 דקות
+const ADMIN_UNTIL_KEY = 'yt_admin_until_v1';
+let adminPin = ADMIN_DEFAULT_PIN;        // נשמר בענן בתוך config/app/adminPin
+let adminSessionUntil = (() => { try { return Number(sessionStorage.getItem(ADMIN_UNTIL_KEY)) || 0; } catch (e) { return 0; } })();
 let scanPurpose = 'field';       // 'field' = מילוי שדה ברקוד | 'receiving' = סריקה רציפה לקליטה
 let scanCount = 0;               // מונה פריטים בסשן סריקה נוכחי
 let lastScanCode = '', lastScanTime = 0; // מניעת ספירה כפולה של אותו ברקוד
@@ -617,6 +622,7 @@ function startListeners() {
     if (isFinite(v) && v >= 0 && v <= 50) VAT = r2(v / 100);
     if (isFinite(m) && m >= 0 && m <= 300) signMarginPct = r2(m);
     if (typeof d.storeName === 'string' && d.storeName.trim()) storeName = d.storeName.trim();
+    if (typeof d.adminPin === 'string' && /^\d{4,8}$/.test(d.adminPin)) adminPin = d.adminPin;
     if (currentView === 'settings') renderSettings();
   }, console.error);
 }
@@ -833,6 +839,184 @@ function clearOrder() {
   showToast('ההזמנה נוקתה', 'בטל', () => { orderState = prev; saveDraft(); if (currentView === 'order') renderOrder(); updateCart(); });
 }
 
+// ===== מצב מנהל / PIN =====
+function isAdminMode() { return Date.now() < adminSessionUntil; }
+function adminLeftText() {
+  if (!isAdminMode()) return 'לא פעיל';
+  const m = Math.max(1, Math.ceil((adminSessionUntil - Date.now()) / 60000));
+  return 'פעיל לעוד כ-' + m + ' דק׳';
+}
+function enterAdminMode() {
+  adminSessionUntil = Date.now() + ADMIN_SESSION_MS;
+  try { sessionStorage.setItem(ADMIN_UNTIL_KEY, String(adminSessionUntil)); } catch (e) {}
+}
+function exitAdminMode() {
+  adminSessionUntil = 0;
+  try { sessionStorage.removeItem(ADMIN_UNTIL_KEY); } catch (e) {}
+  showToast('מצב מנהל נסגר', null, null, 2200);
+  if (currentView === 'settings') renderSettings();
+}
+function normalizePin(v) { return String(v || '').replace(/\D/g, '').slice(0, 8); }
+function removeAdminModal() {
+  const old = document.getElementById('adminPinModalDynamic');
+  if (old) old.remove();
+}
+function openAdminPinModal(actionName, onOk) {
+  removeAdminModal();
+  const wrap = document.createElement('div');
+  wrap.id = 'adminPinModalDynamic';
+  wrap.className = 'fixed inset-0 bg-slate-900/65 backdrop-blur-sm z-[120] flex items-center justify-center p-4';
+  wrap.innerHTML =
+    '<div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">' +
+      '<div class="bg-slate-800 text-white p-4 flex items-center justify-between gap-2">' +
+        '<div><h3 class="font-black text-lg">פעולת מנהל</h3><div class="text-xs text-slate-300 font-bold mt-0.5">' + htmlEscape(actionName || 'פעולה זו דורשת PIN') + '</div></div>' +
+        '<button id="admClose" class="btn-tap w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button>' +
+      '</div>' +
+      '<div class="p-5">' +
+        '<div class="text-sm text-slate-500 font-bold mb-3 leading-relaxed">הקלד PIN מנהל כדי להמשיך. לאחר כניסה, מצב מנהל יישאר פתוח ל-15 דקות.</div>' +
+        '<input id="admPinInput" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" autocomplete="one-time-code" class="w-full h-14 text-center text-2xl tracking-[0.35em] font-black border-2 border-slate-200 rounded-2xl outline-none focus:border-blue-500" placeholder="••••">' +
+        '<div id="admErr" class="hidden mt-2 text-center text-sm font-black text-red-500">PIN שגוי</div>' +
+      '</div>' +
+      '<div class="flex gap-2 p-4 pt-0">' +
+        '<button id="admCancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">ביטול</button>' +
+        '<button id="admOk" class="btn-tap flex-1 py-3 rounded-xl font-black bg-blue-600 text-white">אישור</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(wrap);
+  const input = document.getElementById('admPinInput');
+  const err = document.getElementById('admErr');
+  const close = () => removeAdminModal();
+  const ok = () => {
+    const val = normalizePin(input && input.value);
+    if (val && val === adminPin) {
+      enterAdminMode();
+      close();
+      showToast('מצב מנהל נפתח ל-15 דקות ✓', null, null, 2600);
+      if (typeof onOk === 'function') onOk();
+      else if (currentView === 'settings') renderSettings();
+    } else {
+      if (err) err.classList.remove('hidden');
+      if (input) { input.select(); buzz(80); }
+    }
+  };
+  document.getElementById('admClose').onclick = close;
+  document.getElementById('admCancel').onclick = close;
+  document.getElementById('admOk').onclick = ok;
+  if (input) {
+    setTimeout(() => input.focus(), 80);
+    input.addEventListener('input', () => { input.value = normalizePin(input.value); if (err) err.classList.add('hidden'); });
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok(); });
+  }
+}
+function requireAdmin(actionName, onOk) {
+  if (isAdminMode()) { enterAdminMode(); if (typeof onOk === 'function') onOk(); return true; }
+  openAdminPinModal(actionName, onOk);
+  return false;
+}
+function openChangeAdminPinModal() {
+  if (!isAdminMode()) { requireAdmin('החלפת PIN מנהל', openChangeAdminPinModal); return; }
+  removeAdminModal();
+  const wrap = document.createElement('div');
+  wrap.id = 'adminPinModalDynamic';
+  wrap.className = 'fixed inset-0 bg-slate-900/65 backdrop-blur-sm z-[120] flex items-center justify-center p-4';
+  wrap.innerHTML =
+    '<div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">' +
+      '<div class="bg-blue-700 text-white p-4 flex items-center justify-between gap-2">' +
+        '<div><h3 class="font-black text-lg">החלפת PIN מנהל</h3><div class="text-xs text-blue-100 font-bold mt-0.5">ה-PIN נשמר בענן לכל המכשירים</div></div>' +
+        '<button id="admClose" class="btn-tap w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button>' +
+      '</div>' +
+      '<div class="p-5 space-y-3">' +
+        '<div><label class="text-xs font-bold text-slate-500 mb-1 block">PIN נוכחי</label><input id="admOld" type="password" inputmode="numeric" maxlength="8" class="w-full h-12 text-center text-xl tracking-[0.25em] font-black border-2 border-slate-200 rounded-xl outline-none focus:border-blue-500"></div>' +
+        '<div><label class="text-xs font-bold text-slate-500 mb-1 block">PIN חדש (4-8 ספרות)</label><input id="admNew" type="password" inputmode="numeric" maxlength="8" class="w-full h-12 text-center text-xl tracking-[0.25em] font-black border-2 border-slate-200 rounded-xl outline-none focus:border-blue-500"></div>' +
+        '<div><label class="text-xs font-bold text-slate-500 mb-1 block">אימות PIN חדש</label><input id="admNew2" type="password" inputmode="numeric" maxlength="8" class="w-full h-12 text-center text-xl tracking-[0.25em] font-black border-2 border-slate-200 rounded-xl outline-none focus:border-blue-500"></div>' +
+        '<div id="admErr" class="hidden text-center text-sm font-black text-red-500"></div>' +
+      '</div>' +
+      '<div class="flex gap-2 p-4 pt-0">' +
+        '<button id="admCancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">ביטול</button>' +
+        '<button id="admOk" class="btn-tap flex-1 py-3 rounded-xl font-black bg-blue-600 text-white">שמור PIN</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(wrap);
+  const oldEl = document.getElementById('admOld'), newEl = document.getElementById('admNew'), new2El = document.getElementById('admNew2'), err = document.getElementById('admErr');
+  const clean = el => { if (el) el.value = normalizePin(el.value); if (err) err.classList.add('hidden'); };
+  [oldEl, newEl, new2El].forEach(el => el && el.addEventListener('input', () => clean(el)));
+  const setErr = msg => { if (err) { err.textContent = msg; err.classList.remove('hidden'); } buzz(80); };
+  const close = () => removeAdminModal();
+  const save = async () => {
+    const oldPin = normalizePin(oldEl && oldEl.value), np = normalizePin(newEl && newEl.value), np2 = normalizePin(new2El && new2El.value);
+    if (oldPin !== adminPin) { setErr('ה-PIN הנוכחי שגוי'); return; }
+    if (!/^\d{4,8}$/.test(np)) { setErr('PIN חדש חייב להיות 4 עד 8 ספרות'); return; }
+    if (np !== np2) { setErr('האימות לא תואם ל-PIN החדש'); return; }
+    const prev = adminPin;
+    adminPin = np;
+    const saved = await runCloudTask('change admin pin', { op: 'set', path: dataPath('config', 'app'), data: { adminPin: np, adminPinUpdatedAt: Date.now() }, merge: true, operationId: 'admin_pin' });
+    if (!saved) { adminPin = prev; return; }
+    enterAdminMode();
+    close();
+    showToast('PIN מנהל הוחלף בהצלחה ✓', null, null, 3000);
+    if (currentView === 'settings') renderSettings();
+  };
+  document.getElementById('admClose').onclick = close;
+  document.getElementById('admCancel').onclick = close;
+  document.getElementById('admOk').onclick = save;
+  [oldEl, newEl, new2El].forEach(el => el && el.addEventListener('keydown', e => { if (e.key === 'Enter') save(); }));
+  setTimeout(() => oldEl && oldEl.focus(), 80);
+}
+
+function resetAdminPinToDefault() {
+  showConfirm('איפוס PIN מנהל', 'האיפוס יחזיר את קוד המנהל ל-1111. זה מתאים כי ה-PIN נועד למנוע טעויות ולא לשמש אבטחה חזקה. להמשיך?', 'כן, המשך', () => {
+    showConfirm('אישור אחרון', 'בטוח לאפס את PIN המנהל ל-1111?', 'אפס ל-1111', async () => {
+      const prev = adminPin;
+      adminPin = ADMIN_DEFAULT_PIN;
+      const saved = await runCloudTask('reset admin pin', { op: 'set', path: dataPath('config', 'app'), data: { adminPin: ADMIN_DEFAULT_PIN, adminPinResetAt: Date.now() }, merge: true, operationId: 'admin_pin_reset' });
+      if (!saved) { adminPin = prev; return; }
+      enterAdminMode();
+      showToast('PIN מנהל אופס ל-1111 ✓', null, null, 3200);
+      if (currentView === 'settings') renderSettings();
+    });
+  });
+}
+function adminSettingsHtml() {
+  const active = isAdminMode();
+  const pinDefault = adminPin === ADMIN_DEFAULT_PIN;
+  return '<div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 mb-4">' +
+    '<div class="flex items-center justify-between gap-3 mb-2">' +
+      '<div class="flex items-center gap-2"><i class="fa-solid fa-user-shield text-blue-600"></i><h2 class="font-black text-lg text-slate-800">מצב מנהל</h2></div>' +
+      '<span class="text-[11px] font-black px-2.5 py-1 rounded-full ' + (active ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-slate-100 text-slate-500') + '">' + adminLeftText() + '</span>' +
+    '</div>' +
+    '<div class="text-xs text-slate-500 font-bold leading-relaxed mb-3">פעולות מסוכנות כמו מחיקה, שינוי מחיר, שינוי מוצר, מבצעים וריקון סל מחזור יבקשו PIN לפני ביצוע.</div>' +
+    (pinDefault ? '<div class="bg-amber-50 border border-amber-100 text-amber-800 text-xs font-bold rounded-xl p-2 mb-3"><i class="fa-solid fa-triangle-exclamation"></i> PIN ברירת מחדל: 1111 — אפשר להשאיר כקוד פשוט נגד טעויות, או להחליף.</div>' : '') +
+    '<div class="flex gap-2">' +
+      (active ? '<button data-role="admin-logout" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-700">יציאה ממנהל</button>' : '<button data-role="admin-login" class="btn-tap flex-1 py-3 rounded-xl font-black bg-blue-600 text-white">כניסת מנהל</button>') +
+      '<button data-role="admin-change-pin" class="btn-tap flex-1 py-3 rounded-xl font-black bg-blue-50 text-blue-700">החלפת PIN</button>' +
+    '</div>' +
+    '<button data-role="admin-reset-pin" class="btn-tap mt-2 w-full py-3 rounded-xl font-black bg-amber-50 text-amber-800 border border-amber-100 flex items-center justify-center gap-2"><i class="fa-solid fa-rotate-left"></i> שכחתי PIN / איפוס ל-1111</button>' +
+  '</div>';
+}
+function adminClickActionName(role) {
+  const map = {
+    'cfg-save': 'שמירת הגדרות מערכת', 'add-product': 'הוספת מוצר', 'del-product': 'מחיקת מוצר', 'toggle-hidden': 'הסתרת/הצגת מוצר',
+    'del-contact': 'מחיקת איש קשר', 'clear-history': 'מחיקת היסטוריית הזמנות', 'clear-returns-history': 'מחיקת היסטוריית חזרות', 'clear-receipts': 'מחיקת תעודות קליטה',
+    'rc-fix-open': 'תיקון תעודה מההיסטוריה', 'rc-fix-save': 'שמירת תיקון תעודה', 'pcat-add': 'עריכת קטגוריות רווחיות', 'pcat-up': 'עריכת קטגוריות רווחיות',
+    'pcat-down': 'עריכת קטגוריות רווחיות', 'pcat-del': 'מחיקת קטגוריה רווחית', 'promo-new': 'יצירת מבצע', 'pe-save': 'שמירת מבצע', 'pe-delete': 'מחיקת מבצע',
+    'trash-delete': 'מחיקה לצמיתות מסל מחזור', 'trash-clear': 'ריקון סל מחזור', 'trash-restore': 'שחזור מסל מחזור', 'del-receipt': 'מחיקת תעודה'
+  };
+  return map[role] || 'פעולה זו דורשת מנהל';
+}
+const ADMIN_CLICK_ROLES = new Set(['cfg-save','add-product','del-product','toggle-hidden','del-contact','clear-history','clear-returns-history','clear-receipts','rc-fix-open','rc-fix-save','pcat-add','pcat-up','pcat-down','pcat-del','promo-new','pe-save','pe-delete','trash-delete','trash-clear','trash-restore','del-receipt']);
+const ADMIN_INPUT_ROLES = new Set(['price-set','pcat-name','pcat-pct','cat-set','avg','avg-set','box-set']);
+function restoreLockedAdminInput(t) {
+  const role = t && t.getAttribute && t.getAttribute('data-role');
+  if (!role) return;
+  const id = t.dataset && t.dataset.id;
+  if (role === 'price-set') { const p = products.find(x => x.id === id); if (p) t.value = (p.price != null ? p.price : ''); }
+  else if (role === 'avg' || role === 'avg-set') { const p = products.find(x => x.id === id); if (p) t.value = (p.average || ''); }
+  else if (role === 'box-set') { const p = products.find(x => x.id === id); if (p) t.value = (p.boxSize || ''); }
+  else if (role === 'cat-set') { const p = products.find(x => x.id === id); if (p) t.value = p.category || ''; }
+  else if (role === 'pcat-name') { const i = parseInt(t.dataset.i, 10); if (pricingCats[i]) t.value = pricingCats[i].name || ''; }
+  else if (role === 'pcat-pct') { const i = parseInt(t.dataset.i, 10); if (pricingCats[i]) t.value = pricingCats[i].pct != null ? pricingCats[i].pct : ''; }
+}
+
 // ===== מסך הגדרות (גרירה לסידור) =====
 function settingsRowHtml(p) {
   return '<div class="prod-item flex items-center gap-2 p-2.5 ' + (p.hidden ? 'bg-slate-50 opacity-70' : 'bg-white') + ' border border-slate-100 rounded-xl" data-id="' + p.id + '">' +
@@ -875,6 +1059,7 @@ function renderSettings() {
         '<button data-role="cfg-save" class="btn-tap bg-blue-600 text-white px-4 py-2.5 rounded-lg font-black self-end">שמור</button>' +
       '</div>' +
     '</div>' +
+    adminSettingsHtml() +
     '<button data-role="go-health" class="btn-tap w-full bg-white border border-slate-200 p-4 rounded-2xl flex items-center justify-center gap-3 mb-3 shadow-sm">' +
       '<div class="bg-indigo-100 p-3 rounded-full text-indigo-600"><i class="fa-solid fa-heart-pulse text-2xl"></i></div>' +
       '<span class="font-black text-slate-700 text-lg">בדיקת תקינות מערכת</span>' +
@@ -4796,7 +4981,7 @@ $('promptInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e
 $('npr_price').addEventListener('input', updateNprRecHint);
 $('promptScan').addEventListener('click', () => { scanPurpose = 'field'; openScanner(); });
 $('npr_cancel').addEventListener('click', hideNewProduct);
-$('npr_ok').addEventListener('click', saveNewProduct);
+$('npr_ok').addEventListener('click', () => requireAdmin('יצירת מוצר חדש', saveNewProduct));
 $('piClose').addEventListener('click', hidePromoInfo);
 $('rs_cancel').addEventListener('click', hideReceiptSummary);
 $('rs_ok').addEventListener('click', confirmReceipt);
@@ -4811,9 +4996,9 @@ $('mr_price').addEventListener('input', updateManualReturnTotal);
 $('mr_qty').addEventListener('input', updateManualReturnTotal);
 $('qtyVal').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commitQty(true); } });
 $('prod_cancel').addEventListener('click', hideProdModal);
-$('prod_save').addEventListener('click', () => saveProd(false));
-$('prod_again').addEventListener('click', () => saveProd(true));
-$('prod_del').addEventListener('click', delProdFromModal);
+$('prod_save').addEventListener('click', () => requireAdmin('שמירת מוצר/מחיר', () => saveProd(false)));
+$('prod_again').addEventListener('click', () => requireAdmin('שמירת מוצר/מחיר', () => saveProd(true)));
+$('prod_del').addEventListener('click', () => requireAdmin('מחיקת מוצר', delProdFromModal));
 $('pr_scanbc').addEventListener('click', scanProdBarcode);
 $('prod_cartonPrice').addEventListener('input', calcCartonPrice);
 $('prod_cartonUnits').addEventListener('input', calcCartonPrice);
@@ -4826,6 +5011,15 @@ $('contactList').addEventListener('click', (e) => { const b = e.target.closest('
 
 app.addEventListener('input', (e) => {
   const t = e.target; const role = t.getAttribute && t.getAttribute('data-role');
+  if (ADMIN_INPUT_ROLES.has(role) && !isAdminMode()) {
+    restoreLockedAdminInput(t);
+    if (t.blur) t.blur();
+    requireAdmin('שינוי מוצר/מחיר דורש מנהל', () => {
+      showToast('מצב מנהל נפתח — אפשר לערוך עכשיו', null, null, 2400);
+      if (currentView === 'prices' || currentView === 'settings') renderView();
+    });
+    return;
+  }
   if (t.id === 'returnsSearch') { renderReturnsResults(t.value); return; }
   if (t.id === 'retDigits') { refreshReturnsDigits(t.value); return; }
   if (t.id === 'priceSearch') { priceQuery = t.value; refreshPricesList(priceQuery); return; }
@@ -4952,6 +5146,11 @@ app.addEventListener('click', (e) => {
   if (unitBtn) { toggleUnit(unitBtn.dataset.id, unitBtn); buzz(8); return; }
   const t = e.target.closest('[data-role]'); if (!t) return;
   const role = t.dataset.role, id = t.dataset.id;
+  if (role === 'admin-login') { requireAdmin('כניסת מנהל', () => { if (currentView === 'settings') renderSettings(); }); return; }
+  if (role === 'admin-logout') { exitAdminMode(); return; }
+  if (role === 'admin-change-pin') { openChangeAdminPinModal(); return; }
+  if (role === 'admin-reset-pin') { resetAdminPinToDefault(); return; }
+  if (ADMIN_CLICK_ROLES.has(role) && !isAdminMode()) { requireAdmin(adminClickActionName(role), () => { setTimeout(() => t.click(), 0); }); return; }
   if (role === 'clear-order') showConfirm('ניקוי הזמנה', 'לנקות את כל הכמויות שהוזנו?', 'נקה', clearOrder);
   else if (role === 'go-contacts') setView('contacts');
   else if (role === 'go-trash') setView('trash');
