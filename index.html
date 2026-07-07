@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v98.2 חיווי תעודות</title>
+    <title>הזמנות יטבתה - v99.2 דרישות זיכוי ספק</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v98.2 חיווי תעודות</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v99.2 דרישות זיכוי ספק</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -1031,7 +1031,7 @@ function adminClickActionName(role) {
   };
   return map[role] || 'פעולה זו דורשת מנהל';
 }
-const ADMIN_CLICK_ROLES = new Set(['cfg-save','add-product','del-product','toggle-hidden','del-contact','clear-history','clear-returns-history','clear-receipts','rc-fix-open','rc-fix-save','pcat-add','pcat-up','pcat-down','pcat-del','promo-new','pe-save','pe-delete','trash-delete','trash-clear','trash-restore','del-receipt','backup-import-confirm']);
+const ADMIN_CLICK_ROLES = new Set(['cfg-save','add-product','del-product','toggle-hidden','del-contact','clear-history','clear-returns-history','clear-receipts','rc-fix-open','rc-fix-save','pcat-add','pcat-up','pcat-down','pcat-del','promo-new','pe-save','pe-delete','trash-delete','trash-clear','trash-restore','del-receipt','backup-import-confirm','rc-credit-verify','rc-credit-cancel']);
 const ADMIN_INPUT_ROLES = new Set(['price-set','pcat-name','pcat-pct','cat-set','avg','avg-set','box-set']);
 function restoreLockedAdminInput(t) {
   const role = t && t.getAttribute && t.getAttribute('data-role');
@@ -1376,7 +1376,7 @@ async function logAction(type, title, details, meta) {
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'actionLog', id), {
       timestamp: Date.now(), type: type || 'system', title: title || 'פעולה', details: details || '',
       deviceName: actionDeviceLabel(), uid: (auth && auth.currentUser && auth.currentUser.uid) || '',
-      appVersion: 'v97_action_log', meta: cloneSafe(meta || {})
+      appVersion: 'v99_2_supplier_credit_claims', meta: cloneSafe(meta || {})
     });
   } catch (e) { console.warn('action log failed', e); }
 }
@@ -1460,7 +1460,7 @@ async function exportFullBackup() {
       backupType: 'yotvata-firestore-full',
       backupVersion: 1,
       appId,
-      appVersion: 'v97_action_log',
+      appVersion: 'v99_2_supplier_credit_claims',
       exportedAt: Date.now(),
       exportedAtIso: new Date().toISOString(),
       collections: {},
@@ -3515,12 +3515,12 @@ function openReconcile() {
   });
   // מיון חד-פעמי בפתיחה: שורות חריגות (חסר/עודף) למעלה — לא ממוין מחדש תוך כדי עבודה
   reconcileData.sort((a, b) => ((Number(a.noteQty) || 0) === (Number(a.received) || 0) ? 1 : 0) - ((Number(b.noteQty) || 0) === (Number(b.received) || 0) ? 1 : 0));
-  detectiveOpen = false; noteCheckOpen = false; noteCheckAuto = false; noteCheckRows = []; noteCheckRes = null; reconcileCheckMode = false; noteCheckQtyMode = false; rcStep = null; noteCheckForceQty = false;
+  detectiveOpen = false; noteCheckOpen = false; noteCheckAuto = false; noteCheckRows = []; noteCheckRes = null; reconcileCheckMode = false; noteCheckQtyMode = false; rcStep = null; noteCheckForceQty = false; ncPromoResult = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null;
   setView('reconcile');
 }
 function reconcileReceivedInc() { let ex = 0; (reconcileData || []).forEach(l => ex += (Number(l.price) || 0) * (Number(l.received) || 0)); return r2(ex); }
 function reconcileNoteInc() { let ex = 0; (reconcileData || []).forEach(l => ex += (Number(l.price) || 0) * (Number(l.noteQty) || 0)); return r2(ex); }
-function reconcileGap() { return r2((receiptNoteTotal || 0) - reconcileNoteInc()); }
+function reconcileGap() { return r2((receiptNoteTotal || 0) + (Number(reconcileSupplierDiscount) || 0) - reconcileNoteInc()); }
 function reconcileAssigned() {
   let sh = 0, ov = 0;
   (reconcileData || []).forEach(l => {
@@ -3546,6 +3546,12 @@ let noteCheckQtyMode = false; // שכבה שלישית: הזנת כמויות ל
 let reconcileCheckMode = false; // ✓ ויזואלי מופיע רק כשההפרש הוא בכמויות (כל הברקודים תואמים)
 let noteCheckForceQty = false;  // המשתמש דחה את הפתרון הוודאי וביקש הזנה ידנית
 let ncQtyAdvTimer = null;       // קפיצה אוטומטית מושהית בין שדות כמות
+let ncPriceAdvTimer = null;     // קפיצה אוטומטית מושהית בין שדות מחיר
+let ncPromoResult = null;       // תוצאת בדיקת מבצעים לפי כוכבית בתעודת הספק
+let reconcileSupplierDiscount = 0;       // הנחת ספק/מבצע שנמצאה בתעודה (ללא מע״מ)
+let reconcileSupplierPromoItems = [];    // מוצרים שסומנו בכוכבית בתעודה
+let reconcilePromoMismatchItems = [];     // מוצרים שמוגדרים במבצע במערכת אך לא הופיעו בכוכבית/לא קיבלו הנחה אצל הספק
+let reconcileSupplierCreditClaim = null;     // דרישת זיכוי פתוחה מול ספק כשהמבצע מגיע אך לא הופיע בתעודה
 function ncCls(r) {
   return r.st === 'ok' ? 'border-emerald-300 bg-emerald-50' : r.st === 'multi' ? 'border-amber-300 bg-amber-50' : (r.st === 'none' || r.st === 'dup') ? 'border-rose-300 bg-rose-50' : 'border-slate-200 bg-white';
 }
@@ -3830,7 +3836,7 @@ function reconcileRowHtml(l) {
   '</div>';
 }
 // ===== בדיקת תעודה — זרימה מודרכת (שלב אחד גלוי בכל רגע) =====
-// שלבים: 'detective' (הבלש בטוח) → 'barcodes' (הזנת ברקודים) → 'quantities' (כמויות) → 'balanced'
+// שלבים: 'detective' (הבלש בטוח) → 'barcodes' (ברקודים) → 'quantities' (כמויות) → 'prices' (מחירים ללא מבצע) → 'promos' (כוכביות/מבצעים) → 'balanced'
 let rcStep = null;
 function reconcilePriceEditHtml(l) {
   return '<span class="text-[11px] text-slate-400">₪<input data-role="rc-recon-price" data-id="' + l.productId + '" type="text" inputmode="decimal" value="' + (l.price != null ? l.price : '') + '" class="w-14 text-center border border-slate-200 rounded px-1 py-0.5 outline-none focus:border-blue-500"> ליח׳</span>';
@@ -3858,9 +3864,16 @@ function renderReconcile() {
   // סרגל סכומים תמידי
   const asgTop = reconcileAssigned();
   const explained = absGap <= 1 && (asgTop.sh > 0.05 || asgTop.ov > 0.05);
+  const discountLine = (Number(reconcileSupplierDiscount) || 0) > 0
+    ? '<div class="flex justify-between text-sm font-black mt-1 text-emerald-700"><span>הנחת ספק / מבצע</span><span>−₪' + fmtMoney(reconcileSupplierDiscount) + '</span></div>'
+    : '';
+  const promoMismatchLine = (Array.isArray(reconcilePromoMismatchItems) && reconcilePromoMismatchItems.length)
+    ? '<div class="mt-2 text-xs font-bold text-amber-800 bg-amber-100/70 rounded-xl p-2"><i class="fa-solid fa-triangle-exclamation"></i> במערכת מוגדר מבצע שלא הופיע אצל הספק: ' + reconcilePromoMismatchItems.map(x => x.name).join(' · ') + '</div>'
+    : '';
   const summary = '<div class="rounded-2xl p-4 shadow-sm mb-3 ' + (absGap <= 1 ? (explained ? 'bg-amber-50 border border-amber-200' : 'bg-emerald-50 border border-emerald-200') : 'bg-amber-50 border border-amber-200') + '">' +
     '<div class="flex justify-between text-sm font-bold ' + (absGap <= 1 && !explained ? 'text-emerald-900' : 'text-amber-900') + '"><span>תעודת הספק</span><span>₪' + fmtMoney(note || 0) + '</span></div>' +
-    '<div class="flex justify-between text-sm font-bold mt-1 ' + (absGap <= 1 && !explained ? 'text-emerald-900' : 'text-amber-900') + '"><span>נסרק בפועל</span><span>₪' + fmtMoney(reconcileReceivedInc()) + '</span></div>' +
+    '<div class="flex justify-between text-sm font-bold mt-1 ' + (absGap <= 1 && !explained ? 'text-emerald-900' : 'text-amber-900') + '"><span>מחירי שורות מהנייר</span><span>₪' + fmtMoney(reconcileNoteInc()) + '</span></div>' +
+    discountLine +
     '<div class="flex justify-between text-lg font-black mt-1.5 pt-1.5 border-t ' + (absGap <= 1 ? (explained ? 'border-amber-200 text-amber-700' : 'border-emerald-200 text-emerald-700') : 'border-amber-200 text-rose-700') + '"><span>' + (absGap <= 1 ? (explained ? 'הוסבר — הפרש פתוח' : 'מאוזן') : dir) + '</span><span>' + (absGap <= 1 ? (explained ? '₪' + fmtMoney(r2(asgTop.sh - asgTop.ov > 0 ? asgTop.sh - asgTop.ov : asgTop.ov - asgTop.sh)) : '✓') : '₪' + fmtMoney(absGap)) + '</span></div>' +
   '</div>';
 
@@ -3938,11 +3951,30 @@ function renderReconcile() {
   }
   else if (rcStep === 'quantities') {
     body = '<div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 shadow-sm mb-24">' +
-      '<div class="text-xs font-black text-slate-400 mb-1">שלב 3 מתוך 3 · כמויות</div>' +
+      '<div class="text-xs font-black text-slate-400 mb-1">שלב 3 מתוך 5 · כמויות</div>' +
       '<div class="font-black text-lg text-slate-800 mb-1"><i class="fa-solid fa-list-ol text-indigo-500"></i> כמה מכל מוצר?</div>' +
       '<div class="text-xs text-slate-500 mb-3 leading-relaxed">ליד כל ברקוד הקלד את הכמות שרשומה בתעודת הנייר. השאר ריק אם המוצר לא בתעודה.</div>' +
       '<div id="ncRows" class="space-y-1.5">' + noteCheckRows.filter(r => r.st === 'ok').map((r) => ncQtyRowHtml(r, noteCheckRows.indexOf(r))).join('') + '</div>' +
       '<button data-role="nc-qty-apply" class="btn-tap w-full bg-indigo-600 text-white rounded-xl py-3 font-black mt-3"><i class="fa-solid fa-check"></i> החל כמויות</button>' +
+    '</div>';
+  }
+  else if (rcStep === 'prices') {
+    body = '<div class="bg-white rounded-2xl border-2 border-blue-200 p-4 shadow-sm mb-24">' +
+      '<div class="text-xs font-black text-slate-400 mb-1">שלב 4 מתוך 5 · מחירים</div>' +
+      '<div class="font-black text-lg text-slate-800 mb-1"><i class="fa-solid fa-tags text-blue-500"></i> מחירי התעודה — ללא מבצע</div>' +
+      '<div class="text-xs text-slate-500 mb-3 leading-relaxed">הזן את המחיר שמופיע בשורת המוצר בתעודת הספק. <b>לא</b> להזין מחיר אחרי הנחה/מבצע. אחרי הקלדת מחיר השדה יקפוץ לבד לשורה הבאה.</div>' +
+      '<div id="ncRows" class="space-y-1.5">' + ncPriceRowsHtml() + '</div>' +
+      '<button data-role="nc-price-apply" class="btn-tap w-full bg-blue-600 text-white rounded-xl py-3 font-black mt-3"><i class="fa-solid fa-check"></i> החל מחירים</button>' +
+    '</div>';
+  }
+  else if (rcStep === 'promos') {
+    body = '<div class="bg-white rounded-2xl border-2 border-rose-200 p-4 shadow-sm mb-24">' +
+      '<div class="text-xs font-black text-slate-400 mb-1">שלב 5 מתוך 5 · מבצעים</div>' +
+      '<div class="font-black text-lg text-slate-800 mb-1"><i class="fa-solid fa-asterisk text-rose-500"></i> סמן מוצרים עם כוכבית</div>' +
+      '<div class="text-xs text-slate-500 mb-3 leading-relaxed">המחירים הרגילים הוזנו ועדיין יש הפרש. בתעודת הספק מוצרים במבצע מסומנים בכוכבית — סמן אותם כאן והמערכת תבדוק אם המבצע מוגדר או אם זו הנחת ספק לתעודה הזאת.</div>' +
+      '<div id="ncRows" class="space-y-1.5">' + ncPromoRowsHtml() + '</div>' +
+      '<button data-role="nc-promo-apply" class="btn-tap w-full bg-rose-600 text-white rounded-xl py-3 font-black mt-3"><i class="fa-solid fa-percent"></i> בדוק מבצעים</button>' +
+      (ncPromoResult ? ncPromoResultHtml() : '') +
     '</div>';
   }
 
@@ -4027,6 +4059,240 @@ function ncQtyRowHtml(r, i) {
     '<div class="flex-1 min-w-0"><div class="font-black text-slate-700 text-sm truncate">' + p.name + '</div><div class="text-[11px] text-slate-400 mt-0.5">₪<input data-role="rc-qty-price" data-id="' + r.pid + '" type="text" inputmode="decimal" value="' + r2(Number(p.price) || 0) + '" class="w-12 text-center border border-slate-200 rounded px-1 outline-none focus:border-blue-500"> ליח׳</div></div>' +
   '</div>';
 }
+function ncPaperRows() {
+  // כל השורות שזוהו מהנייר, לפי הסדר שהעובד הקליד. אם משום מה אין שורות — נופלים לשורות התעודה הקיימות.
+  const rows = noteCheckRows.filter(r => r.st === 'ok' && r.pid != null);
+  if (rows.length) return rows;
+  return (reconcileData || []).map(l => ({ pid: l.productId, st: 'ok', q: (l.noteQty != null ? l.noteQty : l.received), price: l.price, promoMark: false }));
+}
+function ncPriceRowsHtml() {
+  const rows = ncPaperRows();
+  if (!rows.length) return '<div class="text-center text-slate-400 py-4 text-sm font-bold">אין שורות מזוהות מהנייר — חזור לשלב הברקודים.</div>';
+  return rows.map((r, idx) => {
+    const p = products.find(x => x.id === r.pid);
+    const l = (reconcileData || []).find(x => x.productId === r.pid);
+    const val = (r.price != null && r.price !== '') ? r.price : (l && l.price != null ? r2(Number(l.price) || 0) : r2(Number(p && p.price) || 0));
+    const q = (r.q != null && r.q !== '') ? r.q : (l && l.noteQty != null ? l.noteQty : '');
+    return '<div class="flex items-center gap-2 bg-slate-50 border border-slate-100 rounded-xl p-2.5">' +
+      '<input data-role="nc-price" data-i="' + noteCheckRows.indexOf(r) + '" type="text" inputmode="decimal" value="' + val + '" placeholder="מחיר" dir="ltr" onfocus="this.select()" class="w-24 h-12 text-center text-lg font-black border-2 border-blue-300 bg-white rounded-xl outline-none focus:border-blue-500">' +
+      '<div class="flex-1 min-w-0"><div class="font-black text-slate-700 text-sm truncate">' + (p ? p.name : '') + '</div><div class="text-[11px] text-slate-400">כמות בנייר: ' + (q === '' ? '—' : q) + ' · מחיר מערכת: ₪' + fmtMoney(Number(p && p.price) || 0) + '</div></div>' +
+    '</div>';
+  }).join('');
+}
+function ncPromoRowsHtml() {
+  const rows = ncPaperRows();
+  if (!rows.length) return '<div class="text-center text-slate-400 py-4 text-sm font-bold">אין שורות מזוהות מהנייר.</div>';
+  return rows.map((r, idx) => {
+    const p = products.find(x => x.id === r.pid);
+    const l = (reconcileData || []).find(x => x.productId === r.pid);
+    const pr = promoForProduct(r.pid);
+    const q = (r.q != null && r.q !== '') ? Number(r.q) : (l && l.noteQty != null ? Number(l.noteQty) : 0);
+    const configured = pr && promoActive(pr, todayStr()) ? (' · מוגדר במערכת: ' + (Number(pr.pct) || 0) + '%') : '';
+    return '<label class="btn-tap flex items-center gap-3 bg-slate-50 border ' + (r.promoMark ? 'border-rose-300 bg-rose-50' : 'border-slate-100') + ' rounded-xl p-3">' +
+      '<input data-role="nc-promo-mark" data-i="' + noteCheckRows.indexOf(r) + '" type="checkbox" ' + (r.promoMark ? 'checked' : '') + ' class="w-6 h-6 accent-rose-600">' +
+      '<div class="flex-1 min-w-0"><div class="font-black text-slate-700 text-sm truncate">' + (p ? p.name : '') + '</div><div class="text-[11px] text-slate-400">כמות: ' + (q || '—') + ' · מחיר: ₪' + fmtMoney(Number(l && l.price) || Number(p && p.price) || 0) + configured + '</div></div>' +
+      '<span class="text-rose-500 font-black text-xl">*</span>' +
+    '</label>';
+  }).join('');
+}
+function applyNotePricesFromInputs() {
+  const box = $('ncRows');
+  let changed = 0;
+  ncPaperRows().forEach((row) => {
+    const idx = noteCheckRows.indexOf(row);
+    const inp = box && box.querySelector('input[data-role="nc-price"][data-i="' + idx + '"]');
+    const n = inp ? parseFloat((inp.value || '').replace(',', '.').replace(/[^0-9.]/g, '')) : NaN;
+    if (!(n >= 0)) return;
+    row.price = r2(n);
+    let l = (reconcileData || []).find(x => x.productId === row.pid);
+    if (!l) {
+      const p = products.find(x => x.id === row.pid); if (!p) return;
+      l = { productId: p.id, name: p.name, barcode: p.barcode || '', received: 0, noteQty: Number(row.q) || 0, price: row.price, basePrice: row.price, promoPct: 0, promoOn: false, checked: false };
+      reconcileData.unshift(l);
+    } else {
+      l.price = row.price;
+      l.basePrice = row.price;
+      l.promoPct = 0;
+      l.promoOn = false;
+    }
+    changed++;
+  });
+  return changed;
+}
+function configuredDiscountForMarked(marked) {
+  const groups = {}; const day = todayStr();
+  marked.forEach(row => {
+    const pr = promoForProduct(row.pid);
+    if (!pr || !promoActive(pr, day)) return;
+    const id = pr.id || ('promo_' + (Number(pr.pct) || 0));
+    groups[id] = groups[id] || { promo: pr, rows: [] };
+    groups[id].rows.push(row);
+  });
+  let total = 0; const details = [];
+  Object.values(groups).forEach(g => {
+    const pct = Number(g.promo.pct) || 0; if (pct <= 0) return;
+    let base = 0;
+    g.rows.forEach(row => {
+      const l = (reconcileData || []).find(x => x.productId === row.pid);
+      const qty = Number(row.q != null ? row.q : (l && l.noteQty)) || 0;
+      const price = Number(l && l.price) || 0;
+      base += price * qty;
+    });
+    const disc = r2(base * pct / 100);
+    if (disc > 0) { total += disc; details.push({ name: g.promo.name || ('מבצע ' + pct + '%'), pct, discount: disc }); }
+  });
+  return { total: r2(total), details };
+}
+
+function rowNoteQtyForPromo(row) {
+  const l = (reconcileData || []).find(x => x.productId === row.pid);
+  return Number(row.q != null && row.q !== '' ? row.q : (l && l.noteQty != null ? l.noteQty : 0)) || 0;
+}
+function rowUnitPriceForPromo(row) {
+  const l = (reconcileData || []).find(x => x.productId === row.pid);
+  return Number(l && l.price != null ? l.price : (row.price != null ? row.price : 0)) || 0;
+}
+function configuredDiscountForRows(rows) {
+  const groups = {}; const day = todayStr();
+  (rows || []).forEach(row => {
+    const pr = promoForProduct(row.pid);
+    if (!pr || !promoActive(pr, day)) return;
+    const id = pr.id || ('promo_' + (Number(pr.pct) || 0));
+    groups[id] = groups[id] || { promo: pr, rows: [] };
+    groups[id].rows.push(row);
+  });
+  let total = 0; const details = [];
+  Object.values(groups).forEach(g => {
+    const pct = Number(g.promo.pct) || 0; if (pct <= 0) return;
+    let base = 0;
+    g.rows.forEach(row => { base += rowUnitPriceForPromo(row) * rowNoteQtyForPromo(row); });
+    const disc = r2(base * pct / 100);
+    if (disc > 0) { total += disc; details.push({ name: g.promo.name || ('מבצע ' + pct + '%'), pct, discount: disc }); }
+  });
+  return { total: r2(total), details };
+}
+function configuredPromoRowsInPaper() {
+  const day = todayStr();
+  return ncPaperRows().filter(row => {
+    const pr = promoForProduct(row.pid);
+    return !!(pr && promoActive(pr, day) && (Number(pr.pct) || 0) > 0);
+  });
+}
+function buildPromoMismatchItems(rows) {
+  return (rows || []).map(row => {
+    const p = products.find(x => x.id === row.pid);
+    const pr = promoForProduct(row.pid);
+    const qty = rowNoteQtyForPromo(row);
+    const price = rowUnitPriceForPromo(row);
+    const pct = Number(pr && pr.pct) || 0;
+    return { productId: row.pid, name: p ? p.name : '', qty, unitPrice: r2(price), promoPct: pct, expectedDiscount: r2(price * qty * pct / 100) };
+  }).filter(x => x.productId && x.expectedDiscount > 0);
+}
+function computeConfiguredPromoMismatch() {
+  const activeRows = configuredPromoRowsInPaper();
+  if (!activeRows.length) return { hasMismatch: false, items: [], expected: 0, actual: 0, unmarkedExpected: 0 };
+  const actual = Math.max(0, r2(reconcileNoteInc() - (receiptNoteTotal || 0)));
+  const expectedAll = configuredDiscountForRows(activeRows);
+  const unmarkedRows = activeRows.filter(row => !row.promoMark);
+  const unmarkedExpected = configuredDiscountForRows(unmarkedRows);
+  const hasMismatch = unmarkedExpected.total > 0.05 && expectedAll.total > actual + 1;
+  return { hasMismatch, items: buildPromoMismatchItems(unmarkedRows), expected: expectedAll.total, actual, unmarkedExpected: unmarkedExpected.total, details: expectedAll.details };
+}
+function promoMismatchNoticeHtml(items, actual, expected) {
+  items = Array.isArray(items) ? items : [];
+  if (!items.length) return '';
+  return '<div class="mt-2 rounded-xl bg-amber-50 border border-amber-200 p-2.5 text-xs font-bold text-amber-800">' +
+    '<div class="font-black mb-1"><i class="fa-solid fa-triangle-exclamation"></i> מבצע מוגדר במערכת אך לא הופיע בתעודת הספק</div>' +
+    '<div>המערכת ציפתה להנחת מבצע של כ־₪' + fmtMoney(expected || 0) + ', ובתעודה נמצאה הנחה של ₪' + fmtMoney(actual || 0) + '.</div>' +
+    '<div class="text-[11px] mt-1">לא סומנו בכוכבית: ' + items.map(x => x.name).join(' · ') + '</div>' +
+    '<div class="text-[11px] mt-1 text-amber-700/80">אם המבצע לא מגיע — תקן/בטל במערכת. אם המבצע כן מגיע — פתח דרישת זיכוי כדי שלא יפספסו בסיכום ספק.</div>' +
+  '</div>';
+}
+function supplierCreditAmountFromMismatch(mismatch) {
+  if (!mismatch) return 0;
+  const byField = Number(mismatch.unmarkedExpected);
+  if (isFinite(byField) && byField > 0) return r2(byField);
+  return r2((mismatch.items || []).reduce((a, x) => a + (Number(x.expectedDiscount) || 0), 0));
+}
+function buildSupplierCreditClaimFromMismatch(mismatch) {
+  const amount = supplierCreditAmountFromMismatch(mismatch);
+  const items = (mismatch && Array.isArray(mismatch.items)) ? cloneSafe(mismatch.items) : [];
+  return { status: 'open', type: 'missing_supplier_promo', amount, items, createdAt: Date.now(), note: 'מבצע מוגדר במערכת לא הופיע בתעודת הספק — ממתין לזיכוי/תיקון ספק' };
+}
+function supplierCreditClaimOpen(rc) {
+  const c = rc && rc.supplierCreditClaim;
+  return !!(c && c.status === 'open' && (Number(c.amount) || 0) > 0);
+}
+function supplierCreditClaimAmount(rc) { return supplierCreditClaimOpen(rc) ? r2(Number(rc.supplierCreditClaim.amount) || 0) : 0; }
+function supplierCreditClaimItemsText(c) {
+  const items = (c && Array.isArray(c.items)) ? c.items : [];
+  return items.map(x => (x.name || '') + (x.expectedDiscount ? ' ₪' + fmtMoney(x.expectedDiscount) : '')).filter(Boolean).join(' · ');
+}
+async function setReceiptSupplierCreditStatus(id, status) {
+  const rc = receipts.find(x => x.id === id); if (!rc || !rc.supplierCreditClaim) return;
+  const claim = cloneSafe(rc.supplierCreditClaim);
+  claim.status = status;
+  if (status === 'verified') claim.verifiedAt = Date.now();
+  if (status === 'cancelled') claim.cancelledAt = Date.now();
+  claim.updatedAt = Date.now();
+  const ok = await runCloudTask(status === 'verified' ? 'verify supplier promo credit' : 'cancel supplier promo credit', { op: 'update', path: dataPath('receipts', id), data: { supplierCreditClaim: claim }, operationId: makeOperationId('supplier_credit') });
+  if (ok) showToast(status === 'verified' ? 'דרישת הזיכוי סומנה כזוכתה ✓' : 'דרישת הזיכוי בוטלה/סומנה כלא מגיעה', null, null, 2500);
+}
+function openSupplierCreditClaims(list) {
+  return (list || []).filter(supplierCreditClaimOpen);
+}
+function supplierCreditWarningHtml(list, compact) {
+  const open = openSupplierCreditClaims(list);
+  if (!open.length) return '';
+  const total = r2(open.reduce((a, r) => a + supplierCreditClaimAmount(r), 0));
+  const details = compact ? '' : '<div class="mt-2 space-y-1">' + open.slice(0, 5).map(r => {
+    const d = r.timestamp ? new Date(r.timestamp).toLocaleDateString('he-IL') : '';
+    const c = r.supplierCreditClaim || {};
+    return '<div class="bg-white/15 rounded-lg px-2 py-1.5 text-xs font-bold flex justify-between gap-2"><span class="truncate">' + d + ' · ' + (supplierCreditClaimItemsText(c) || 'מבצע ספק') + '</span><span class="shrink-0">₪' + fmtMoney(c.amount || 0) + '</span></div>';
+  }).join('') + (open.length > 5 ? '<div class="text-xs font-bold opacity-90">ועוד ' + (open.length - 5) + ' דרישות...</div>' : '') + '</div>';
+  return '<div class="bg-orange-600 text-white rounded-2xl p-4 mb-3 shadow-lg border-2 border-orange-300">' +
+    '<div class="font-black text-lg flex items-center gap-2"><i class="fa-solid fa-triangle-exclamation fa-beat"></i> יש זיכויים פתוחים מול הספק</div>' +
+    '<div class="font-black text-2xl mt-1">₪' + fmtMoney(total) + '</div>' +
+    '<div class="text-xs text-white/95 mt-1 font-bold leading-relaxed">הסכום הזה <u>לא הופחת מהתשלום</u>, כי עדיין לא אומת מול תעודת זיכוי אמיתית. בדוק לפני סגירת חשבון ספק.</div>' + details +
+  '</div>';
+}
+function computePromoResultFromMarks() {
+  const marked = ncPaperRows().filter(r => r.promoMark);
+  const needed = r2(reconcileNoteInc() - (receiptNoteTotal || 0));
+  const mismatch = computeConfiguredPromoMismatch();
+  if (!marked.length) {
+    if (mismatch.hasMismatch) return { ok: true, reverse: true, needed: Math.max(0, needed), marked: [], mismatch, msg: 'נמצא מבצע שמוגדר במערכת, אבל בתעודת הספק הוא לא סומן בכוכבית/לא קיבל הנחה.' };
+    return { ok: false, needed, msg: 'לא סומנו מוצרים עם כוכבית.' };
+  }
+  if (needed <= 0) {
+    if (mismatch.hasMismatch) return { ok: true, reverse: true, needed: 0, marked, mismatch, msg: 'סומנו כוכביות, אבל לא נמצאה הנחת ספק להסביר. בנוסף יש מבצע במערכת שלא הופיע אצל הספק.' };
+    return { ok: false, needed, marked, msg: 'אין כרגע הנחה להסביר — סכום התעודה לא נמוך מסכום השורות.' };
+  }
+  const conf = configuredDiscountForMarked(marked);
+  const configuredMatch = conf.total > 0 && Math.abs(conf.total - needed) <= 1;
+  const ok = configuredMatch || mismatch.hasMismatch;
+  let msg = configuredMatch ? 'המבצע שמוגדר במערכת מסביר את ההפרש.' : 'הכוכביות מסבירות שיש מבצע/הנחת ספק, אבל המבצע לא מוגדר במערכת או שהאחוז שונה.';
+  if (mismatch.hasMismatch) msg += ' בנוסף נמצא מבצע שמוגדר במערכת אך לא הופיע בתעודת הספק.';
+  return { ok, needed, marked, configured: conf, mismatch: (mismatch.hasMismatch ? mismatch : null), msg };
+}
+function ncPromoResultHtml() {
+  const r = ncPromoResult; if (!r) return '';
+  const markedNames = (r.marked || []).map(row => { const p = products.find(x => x.id === row.pid); return p ? p.name : ''; }).filter(Boolean).join(' · ');
+  const cls = r.ok ? (r.reverse ? 'amber' : 'emerald') : 'amber';
+  const mis = r.mismatch && r.mismatch.items && r.mismatch.items.length ? promoMismatchNoticeHtml(r.mismatch.items, r.mismatch.actual, r.mismatch.expected) : '';
+  return '<div class="mt-3 rounded-xl border p-3 bg-' + cls + '-50 border-' + cls + '-200 text-' + cls + '-800">' +
+    '<div class="font-black text-sm mb-1"><i class="fa-solid ' + (r.ok && !r.reverse ? 'fa-circle-check' : 'fa-triangle-exclamation') + '"></i> ' + r.msg + '</div>' +
+    '<div class="text-xs font-bold">הנחה נדרשת לפי התעודה: ₪' + fmtMoney(Math.max(0, r.needed || 0)) + '</div>' +
+    (r.configured && r.configured.total > 0 ? '<div class="text-xs font-bold">מבצע מוגדר שחושב: ₪' + fmtMoney(r.configured.total) + '</div>' : '') +
+    (markedNames ? '<div class="text-[11px] mt-1">סומנו בכוכבית: ' + markedNames + '</div>' : '') +
+    mis +
+    '<div class="flex gap-2 mt-3">' +
+      ((r.mismatch && r.mismatch.items && r.mismatch.items.length) ? '<button data-role="nc-promo-claim" class="btn-tap flex-1 bg-orange-600 text-white rounded-lg py-2 font-black text-xs">המבצע מגיע — פתח דרישת זיכוי</button>' : '<button data-role="nc-promo-accept" class="btn-tap flex-1 bg-emerald-600 text-white rounded-lg py-2 font-black text-xs">אשר כתעודה תקינה</button>') +
+      '<button data-role="nc-promo-open-promos" class="btn-tap flex-1 bg-white border border-rose-200 text-rose-700 rounded-lg py-2 font-black text-xs">פתח מבצעים</button>' +
+    '</div>' +
+    ((r.mismatch && r.mismatch.items && r.mismatch.items.length) ? '<button data-role="nc-promo-accept" class="btn-tap w-full mt-2 bg-white border border-slate-200 text-slate-600 rounded-lg py-2 font-black text-xs">המבצע לא מגיע — אשר בלי דרישת זיכוי</button>' : '') +
+  '</div>';
+}
 // חיפוש להוספת פריט: הקלדת ספרות (4+) מחפשת לפי סוף הברקוד; אחרת לפי שם. תמיד מציג ברקוד בתוצאה
 function addListFilter(q, have) {
   const t = (q || '').trim();
@@ -4100,12 +4366,16 @@ function saveReconciledReceipt(opts) {
     return line;
   });
   if (!lines.length) { showToast('אין פריטים לשמירה', null, null, 2000); return; }
-  const ex = r2(lines.reduce((a, l) => a + l.lineTotal, 0));
+  const grossEx = r2(lines.reduce((a, l) => a + l.lineTotal, 0));
+  const supplierDiscount = r2(Number(reconcileSupplierDiscount) || 0);
+  const ex = r2(grossEx - supplierDiscount);
   const open = lines.some(l => l.noteQty != null && l.noteQty !== l.qty);
-  pendingReceipt = { lines, ex, noteTotal: receiptNoteTotal, status: open ? 'open' : 'ok', noteParts: receiptNotes.slice() };
-  presentReconcileSummary(lines, ex, open);
+  const supplierCreditClaim = reconcileSupplierCreditClaim ? cloneSafe(reconcileSupplierCreditClaim) : null;
+  pendingReceipt = { lines, ex, grossEx, supplierDiscount, supplierPromoItems: reconcileSupplierPromoItems.slice(), supplierPromoMismatchItems: reconcilePromoMismatchItems.slice(), supplierCreditClaim, noteTotal: receiptNoteTotal, status: open ? 'open' : 'ok', noteParts: receiptNotes.slice() };
+  presentReconcileSummary(lines, ex, open, { grossEx, supplierDiscount, supplierPromoItems: reconcileSupplierPromoItems.slice(), supplierPromoMismatchItems: reconcilePromoMismatchItems.slice(), supplierCreditClaim });
 }
-function presentReconcileSummary(lines, ex, open) {
+function presentReconcileSummary(lines, ex, open, extra) {
+  extra = extra || {};
   const listHtml = lines.map(l => {
     const diff = (l.noteQty != null ? l.noteQty : l.qty) - l.qty;
     const tag = diff > 0 ? ' · <span class="text-rose-600 font-bold">חסר ' + diff + '</span>' : (diff < 0 ? ' · <span class="text-amber-600 font-bold">עודף ' + (-diff) + '</span>' : '');
@@ -4115,10 +4385,21 @@ function presentReconcileSummary(lines, ex, open) {
       '<div class="font-black text-slate-700 text-sm shrink-0">₪' + fmtMoney(l.lineTotal) + '</div>' +
     '</div>';
   }).join('');
+  const discountSummary = (Number(extra.supplierDiscount) || 0) > 0
+    ? '<div class="mt-2 rounded-xl bg-emerald-50 border border-emerald-200 p-2.5 text-xs font-bold text-emerald-800"><i class="fa-solid fa-percent"></i> הנחת ספק / מבצע: −₪' + fmtMoney(extra.supplierDiscount) + (extra.supplierPromoItems && extra.supplierPromoItems.length ? '<div class="text-[11px] mt-1">סומנו בכוכבית: ' + extra.supplierPromoItems.map(x => x.name).join(' · ') + '</div>' : '') + '</div>'
+    : '';
+  const promoMismatchSummary = (extra.supplierPromoMismatchItems && extra.supplierPromoMismatchItems.length)
+    ? '<div class="mt-2 rounded-xl bg-amber-50 border border-amber-200 p-2.5 text-xs font-bold text-amber-800"><i class="fa-solid fa-triangle-exclamation"></i> מבצע שמוגדר במערכת לא הופיע בתעודת הספק<div class="text-[11px] mt-1">' + extra.supplierPromoMismatchItems.map(x => x.name).join(' · ') + '</div></div>'
+    : '';
+  const supplierCreditSummary = (extra.supplierCreditClaim && Number(extra.supplierCreditClaim.amount) > 0)
+    ? '<div class="mt-2 rounded-xl bg-orange-50 border-2 border-orange-300 p-3 text-xs font-bold text-orange-900"><div class="font-black text-sm"><i class="fa-solid fa-triangle-exclamation"></i> נפתחה דרישת זיכוי פתוחה מול הספק</div><div class="mt-1">סכום מוערך לזיכוי: ₪' + fmtMoney(extra.supplierCreditClaim.amount) + '</div><div class="text-[11px] mt-1">לא יופחת מהתשלום עד שתאמת מול תעודת זיכוי אמיתית.</div></div>'
+    : '';
   $('rsBody').innerHTML =
     (open ? '<div class="bg-rose-50 border border-rose-200 rounded-xl p-2.5 mb-3 text-xs font-bold text-rose-700"><i class="fa-solid fa-triangle-exclamation"></i> נשמר עם הפרשים — התעודה תסומן כפתוחה עד שתתוקן</div>' : '') +
     '<div class="bg-slate-50 rounded-xl p-3 max-h-56 overflow-y-auto border border-slate-100 mb-3">' + listHtml + '</div>' +
-    '<div class="flex items-center justify-between text-slate-900 font-black text-xl mt-2 pt-2 border-t border-slate-200"><span>לתשלום — מה שהתקבל (ללא מע"מ)</span><span>₪' + fmtMoney(ex) + '</span></div>' +
+    ((Number(extra.supplierDiscount) || 0) > 0 ? '<div class="flex items-center justify-between text-slate-500 font-bold text-sm"><span>סכום שורות לפני מבצע</span><span>₪' + fmtMoney(extra.grossEx || ex) + '</span></div>' : '') +
+    discountSummary + promoMismatchSummary + supplierCreditSummary +
+    '<div class="flex items-center justify-between text-slate-900 font-black text-xl mt-2 pt-2 border-t border-slate-200"><span>לתשלום — מה שהתקבל (ללא מע״מ)</span><span>₪' + fmtMoney(ex) + '</span></div>' +
     (receiptNoteTotal != null ? '<div class="text-[11px] text-slate-400 mt-1">סכום התעודה מהספק: ₪' + fmtMoney(receiptNoteTotal) + '</div>' : '');
   const m = $('receiptSummaryModal'); m.classList.remove('hidden'); m.classList.add('flex');
 }
@@ -4265,13 +4546,14 @@ async function saveReceiptFix() {
 }
 async function confirmReceipt() {
   if (!pendingReceipt) { hideReceiptSummary(); return; }
-  const { lines, ex, noteTotal, status, noteParts } = pendingReceipt;
+  const { lines, ex, grossEx, supplierDiscount, supplierPromoItems, supplierPromoMismatchItems, supplierCreditClaim, noteTotal, status, noteParts } = pendingReceipt;
   const opId = pendingReceipt.operationId || (pendingReceipt.operationId = makeOperationId('receipt'));
-  const data = { timestamp: Date.now(), date: todayStr(), items: lines, count: lines.length, totalExVat: ex, totalIncVat: ex, noteTotalInc: (noteTotal != null ? noteTotal : null), noteParts: (Array.isArray(noteParts) ? noteParts : []), status: status || 'ok', operationId: opId };
+  const creditClaim = supplierCreditClaim ? { ...cloneSafe(supplierCreditClaim), createdAt: supplierCreditClaim.createdAt || Date.now() } : null;
+  const data = { timestamp: Date.now(), date: todayStr(), items: lines, count: lines.length, totalExVat: ex, totalIncVat: ex, grossExVat: (grossEx != null ? grossEx : ex), supplierDiscount: r2(Number(supplierDiscount) || 0), supplierPromoItems: (Array.isArray(supplierPromoItems) ? supplierPromoItems : []), supplierPromoMismatchItems: (Array.isArray(supplierPromoMismatchItems) ? supplierPromoMismatchItems : []), supplierCreditClaim: creditClaim, noteTotalInc: (noteTotal != null ? noteTotal : null), noteParts: (Array.isArray(noteParts) ? noteParts : []), status: status || 'ok', operationId: opId };
   const saved = await runCloudTask('save receipt before clearing draft', { op: 'set', path: dataPath('receipts', opId), data, operationId: opId });
   if (!saved) return;
   hideReceiptSummary();
-  receiptList = []; pendingReceipt = null; receiptNoteTotal = null; receiptNotes = []; receiptOpened = false; editingNotes = false; reconcileData = null; receiptDupConfirmed = false; saveReceiptDraft();
+  receiptList = []; pendingReceipt = null; receiptNoteTotal = null; receiptNotes = []; receiptOpened = false; editingNotes = false; reconcileData = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; receiptDupConfirmed = false; saveReceiptDraft();
   setView('receiptsHistory');
   const newOpen = receipts.filter(r => !r.offsetClosed && receiptDiscrepancyInfo(r).open).find(r => findOffsetMatch(r));
   if (newOpen) showToast('💡 זוהה קיזוז אפשרי מול תעודה קודמת — ראה בכרטיס התעודה', null, null, 3500);
@@ -4484,6 +4766,17 @@ function renderReceiptsHistory() {
     } else if (hasInternalOffset) {
       statusTxt = '<i class="fa-solid fa-circle-check"></i> אומתה · קיזוז פנימי';
       metaStatus = ' · <span class="text-emerald-700 font-black">קיזוז פנימי</span>';
+    } else if ((Number(rc.supplierDiscount) || 0) > 0) {
+      statusTxt = '<i class="fa-solid fa-circle-check"></i> אומתה · מבצע ספק';
+      metaStatus = ' · <span class="text-emerald-700 font-black">מבצע ספק</span>';
+    } else if (supplierCreditClaimOpen(rc)) {
+      barCls = 'bg-orange-500 text-white';
+      borderCls = 'border-orange-300';
+      statusTxt = '<i class="fa-solid fa-triangle-exclamation"></i> אומתה · ממתין לזיכוי ספק';
+      metaStatus = ' · <span class="text-orange-700 font-black">ממתין לזיכוי ספק</span>';
+    } else if ((rc.supplierPromoMismatchItems || []).length) {
+      statusTxt = '<i class="fa-solid fa-circle-check"></i> אומתה · מבצע לא הופיע אצל הספק';
+      metaStatus = ' · <span class="text-amber-700 font-black">מבצע לא הופיע אצל הספק</span>';
     }
     return '<details class="bg-white rounded-2xl border-2 ' + borderCls + ' shadow-sm overflow-hidden">' +
       '<summary class="cursor-pointer">' +
@@ -4506,6 +4799,9 @@ function renderReceiptsHistory() {
           (rc.noteTotalInc != null ? '<div class="mt-1 pt-1 border-t border-rose-200 text-rose-700/80">תעודת ספק ₪' + fmtMoney(rc.noteTotalInc) + (rc.noteParts && rc.noteParts.length > 1 ? ' (' + rc.noteParts.map(x => '₪' + fmtMoney(x)).join(' + ') + ')' : '') + ' · שולם בפועל ₪' + fmtMoney(rc.totalExVat) + '</div>' : '') +
         '</div>' : '') +
         ((di.priceOffsets && di.priceOffsets.length) ? '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800"><div class="font-black mb-1"><i class="fa-solid fa-scale-balanced"></i> קיזוז פנימי לפי מחיר זהה</div>' + di.priceOffsets.map(o => '<div class="font-bold">' + receiptSideText(o.shortItems) + ' ⇄ ' + receiptSideText(o.overItems) + ' · ₪' + fmtMoney(o.price) + '</div>').join('') + '</div>' : '') +
+        ((Number(rc.supplierDiscount) || 0) > 0 ? '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800"><div class="font-black mb-1"><i class="fa-solid fa-percent"></i> אומתה עם מבצע / הנחת ספק</div><div class="font-bold">הנחה: −₪' + fmtMoney(rc.supplierDiscount) + ((rc.grossExVat != null) ? ' · לפני מבצע: ₪' + fmtMoney(rc.grossExVat) : '') + '</div>' + ((rc.supplierPromoItems || []).length ? '<div class="text-[11px] mt-1">כוכבית: ' + (rc.supplierPromoItems || []).map(x => x.name).join(' · ') + '</div>' : '') + '</div>' : '') +
+        (supplierCreditClaimOpen(rc) ? '<div class="mt-2 bg-orange-50 border-2 border-orange-300 rounded-xl p-3 text-xs text-orange-900"><div class="font-black text-sm mb-1"><i class="fa-solid fa-triangle-exclamation"></i> ממתין לזיכוי ספק — לא לפספס בסיכום!</div><div class="font-black text-base">סכום זיכוי פתוח: ₪' + fmtMoney(supplierCreditClaimAmount(rc)) + '</div><div class="font-bold mt-1">' + supplierCreditClaimItemsText(rc.supplierCreditClaim) + '</div><div class="text-[11px] mt-1">הסכום לא הופחת מהתשלום עד אימות מול תעודת זיכוי.</div><div class="flex gap-2 mt-2"><button data-role="rc-credit-verify" data-id="' + rc.id + '" class="btn-tap flex-1 bg-emerald-600 text-white rounded-lg py-2 font-black text-xs"><i class="fa-solid fa-check-double"></i> סמן שזוכה</button><button data-role="rc-credit-cancel" data-id="' + rc.id + '" class="btn-tap flex-1 bg-white border border-orange-200 text-orange-700 rounded-lg py-2 font-black text-xs">לא מגיע / בטל</button></div></div>' : '') +
+        (((rc.supplierPromoMismatchItems || []).length) ? '<div class="mt-2 bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-xs text-amber-800"><div class="font-black mb-1"><i class="fa-solid fa-triangle-exclamation"></i> מבצע מוגדר במערכת אך לא הופיע אצל הספק</div><div class="font-bold">' + (rc.supplierPromoMismatchItems || []).map(x => x.name).join(' · ') + '</div></div>' : '') +
         (rc.offsetClosed ? '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs font-black text-emerald-700"><i class="fa-solid fa-scale-balanced"></i> קוזז מול תעודה אחרת — סגור</div>' :
           (function () { const m = findOffsetMatch(rc); if (!m) return ''; const od = new Date(m.other.timestamp).toLocaleDateString('he-IL');
             return '<div class="mt-2 bg-indigo-50 border-2 border-indigo-200 rounded-xl p-3">' +
@@ -4530,7 +4826,8 @@ function renderReceiptsHistory() {
     else if (recBal.bal < -0.5) recBalBanner = '<div class="bg-blue-600 text-white rounded-2xl p-4 mb-3 shadow-md"><div class="font-black text-lg flex items-center gap-2"><i class="fa-solid fa-scale-unbalanced-flip"></i> קיבלת ₪' + fmtMoney(-recBal.bal) + ' בסחורה מעבר לתעודות</div><div class="text-xs text-white/90 mt-1">השלמות שקיבלת — יתקזזו מול חוסרים עתידיים</div></div>';
     else recBalBanner = '<div class="bg-emerald-500 text-white rounded-2xl p-4 mb-3 shadow-md"><div class="font-black text-lg flex items-center gap-2"><i class="fa-solid fa-scale-balanced"></i> מאזן הסחורה מול הספק מאוזן ✓</div><div class="text-xs text-white/90 mt-1">החוסרים וההשלמות מתקזזים — אין חוב סחורה פתוח</div></div>';
   }
-  app.innerHTML = head + recBalBanner + receiptsRangeHtml() + '<div class="space-y-2.5 pb-6">' + items + '</div>';
+  const supplierCreditBanner = supplierCreditWarningHtml(receipts, true);
+  app.innerHTML = head + supplierCreditBanner + recBalBanner + receiptsRangeHtml() + '<div class="space-y-2.5 pb-6">' + items + '</div>';
 }
 function calcReceiptRange() {
   const fromEl = $('rcFrom'), toEl = $('rcTo'), out = $('rcRangeResult');
@@ -4567,10 +4864,13 @@ function calcReceiptRange() {
     ? '<div class="flex items-center justify-between text-sm font-bold text-rose-700 mt-1"><span><i class="fa-solid fa-clock-rotate-left"></i> הנחות מרכזת (צפי)</span><span>− ₪' + fmtMoney(meEx) + '</span></div>' +
       meList.map(s => '<div class="flex items-center justify-between text-[11px] text-rose-600/80 pr-3"><span>· ' + s.name + ' ' + s.pct + '%</span><span>− ₪' + fmtMoney(r2(s.ex)) + '</span></div>').join('')
     : '';
+  const openSupplierCredits = openSupplierCreditClaims(recs);
+  const openSupplierCreditEx = r2(openSupplierCredits.reduce((a, r) => a + supplierCreditClaimAmount(r), 0));
+  const supplierCreditHtml = openSupplierCredits.length ? supplierCreditWarningHtml(openSupplierCredits, false) : '';
   const netEx = r2(recEx - retEx - meEx);
   const vatAmount = r2(netEx * VAT);
   const netInc = r2(netEx + vatAmount);
-  out.innerHTML =
+  out.innerHTML = supplierCreditHtml +
     '<div class="text-[11px] font-bold text-amber-900/70 mb-2">' + recs.length + ' תעודות קליטה · ' + rets.length + ' תעודות חזרה</div>' +
     '<div class="flex items-center justify-between text-sm font-bold text-amber-900"><span>קליטה</span><span>₪' + fmtMoney(recEx) + '</span></div>' +
     '<div class="flex items-center justify-between text-sm font-bold text-emerald-700 mt-1"><span>חזרות / זיכוי</span><span>− ₪' + fmtMoney(retEx) + '</span></div>' +
@@ -5521,6 +5821,25 @@ app.addEventListener('input', (e) => {
     }
     return;
   }
+  if (role === 'nc-price') {
+    const i = parseInt(t.dataset.i, 10) || 0;
+    const row = noteCheckRows[i]; if (row) row.price = t.value;
+    clearTimeout(ncPriceAdvTimer);
+    const cleaned = (t.value || '').replace(',', '.');
+    const done = /^\d+(?:\.\d{2})$/.test(cleaned) || /^\d{2,}$/.test(cleaned);
+    if (done) {
+      ncPriceAdvTimer = setTimeout(() => {
+        if (document.activeElement !== t) return;
+        const rows = ncPaperRows(); const pos = rows.indexOf(row);
+        if (pos >= 0 && pos < rows.length - 1) {
+          const nextI = noteCheckRows.indexOf(rows[pos + 1]);
+          const nxt = $('ncRows') && $('ncRows').querySelector('input[data-role="nc-price"][data-i="' + nextI + '"]');
+          if (nxt && !nxt.value) { nxt.focus(); buzz(6); }
+        }
+      }, 650);
+    }
+    return;
+  }
   if (role === 'rc-recon-price') { reconcileSetPriceLive(t.dataset.id, t.value); return; }
   if (role === 'rc-qty-price') {
     const id = t.dataset.id; const v = parseFloat((t.value || '').replace(/[^0-9.]/g, ''));
@@ -5566,11 +5885,29 @@ app.addEventListener('input', (e) => {
 app.addEventListener('change', (e) => {
   const t = e.target;
   if (t && t.id === 'backupImportFile') { handleBackupFile(t.files && t.files[0]); return; }
+  if (t && t.getAttribute && t.getAttribute('data-role') === 'nc-promo-mark') {
+    const i = parseInt(t.dataset.i, 10) || 0;
+    const row = noteCheckRows[i]; if (row) row.promoMark = !!t.checked;
+    ncPromoResult = null;
+    if (currentView === 'reconcile') renderReconcile();
+    return;
+  }
 });
 
 app.addEventListener('keydown', (e) => {
   const t = e.target;
   if (t.id === 'newNote' && e.key === 'Enter') { e.preventDefault(); addNote(); return; }
+  if (t.getAttribute && t.getAttribute('data-role') === 'nc-price' && e.key === 'Enter') {
+    e.preventDefault();
+    const i = parseInt(t.dataset.i, 10) || 0;
+    const rows = ncPaperRows(); const row = noteCheckRows[i]; const pos = rows.indexOf(row);
+    if (pos >= 0 && pos < rows.length - 1) {
+      const nextI = noteCheckRows.indexOf(rows[pos + 1]);
+      const nxt = $('ncRows') && $('ncRows').querySelector('input[data-role="nc-price"][data-i="' + nextI + '"]');
+      if (nxt) { nxt.focus(); nxt.select(); }
+    } else { t.blur(); }
+    return;
+  }
   if (t.getAttribute && t.getAttribute('data-role') === 'nc-qty' && e.key === 'Enter') {
     e.preventDefault();
     const i = parseInt(t.dataset.i, 10) || 0;
@@ -5719,8 +6056,64 @@ app.addEventListener('click', (e) => {
       }
     });
     noteCheckRes = ncCompute(); buzz(18);
+    if (Math.abs(reconcileGap()) > 1) rcStep = 'prices';
     if (currentView === 'reconcile') renderReconcile();
   }
+  else if (role === 'nc-price-apply') {
+    const n = applyNotePricesFromInputs();
+    reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; ncPromoResult = null;
+    const mismatch = computeConfiguredPromoMismatch();
+    if (mismatch.hasMismatch) {
+      reconcilePromoMismatchItems = mismatch.items || [];
+      ncPromoResult = { ok: true, reverse: true, needed: Math.max(0, r2(reconcileNoteInc() - (receiptNoteTotal || 0))), marked: [], mismatch, msg: 'נמצא מבצע שמוגדר במערכת, אבל בתעודת הספק הוא לא סומן בכוכבית/לא קיבל הנחה.' };
+    }
+    buzz(18);
+    if (!n) { showToast('לא הוזנו מחירים', null, null, 2200); }
+    if (Math.abs(reconcileGap()) <= 1) rcStep = 'balanced';
+    else rcStep = 'promos';
+    if (currentView === 'reconcile') renderReconcile();
+  }
+  else if (role === 'nc-promo-apply') {
+    ncPromoResult = computePromoResultFromMarks();
+    if (ncPromoResult.ok) {
+      reconcileSupplierCreditClaim = null;
+      if (ncPromoResult.mismatch && ncPromoResult.mismatch.items && ncPromoResult.mismatch.items.length) {
+        showToast('נמצא מבצע במערכת שלא הופיע אצל הספק — בחר אם לפתוח דרישת זיכוי או לאשר בלי זיכוי', null, null, 4200);
+      } else {
+        reconcileSupplierDiscount = Math.max(0, Number(ncPromoResult.needed) || 0);
+        reconcileSupplierPromoItems = (ncPromoResult.marked || []).map(row => { const p = products.find(x => x.id === row.pid); return { productId: row.pid, name: p ? p.name : '', qty: Number(row.q) || 0 }; });
+        reconcilePromoMismatchItems = [];
+        rcStep = 'balanced';
+        showToast('המבצע מסביר את ההפרש — התעודה מאוזנת', null, null, 3000);
+      }
+    }
+    if (currentView === 'reconcile') renderReconcile();
+  }
+  else if (role === 'nc-promo-accept') {
+    const r = ncPromoResult || computePromoResultFromMarks();
+    if (!r || (!r.reverse && !(r.needed > 0) && !(r.marked || []).length)) { showToast('סמן קודם מוצרים עם כוכבית', null, null, 2200); return; }
+    reconcileSupplierCreditClaim = null;
+    reconcileSupplierDiscount = Math.max(0, Number(r.needed) || 0);
+    reconcileSupplierPromoItems = (r.marked || []).map(row => { const p = products.find(x => x.id === row.pid); return { productId: row.pid, name: p ? p.name : '', qty: Number(row.q) || 0 }; });
+    reconcilePromoMismatchItems = (r.mismatch && r.mismatch.items) ? r.mismatch.items : [];
+    ncPromoResult = r;
+    rcStep = 'balanced';
+    showToast(r.reverse ? 'סומן: מבצע מערכת לא הופיע אצל הספק — בלי דרישת זיכוי' : 'סומן כמבצע ספק לתעודה הזאת', null, null, 3000);
+    if (currentView === 'reconcile') renderReconcile();
+  }
+  else if (role === 'nc-promo-claim') {
+    const r = ncPromoResult || computePromoResultFromMarks();
+    if (!r || !(r.mismatch && r.mismatch.items && r.mismatch.items.length)) { showToast('לא נמצאה בעיית מבצע לפתיחת זיכוי', null, null, 2200); return; }
+    reconcileSupplierDiscount = Math.max(0, Number(r.needed) || 0);
+    reconcileSupplierPromoItems = (r.marked || []).map(row => { const p = products.find(x => x.id === row.pid); return { productId: row.pid, name: p ? p.name : '', qty: Number(row.q) || 0 }; });
+    reconcilePromoMismatchItems = (r.mismatch && r.mismatch.items) ? r.mismatch.items : [];
+    reconcileSupplierCreditClaim = buildSupplierCreditClaimFromMismatch(r.mismatch);
+    ncPromoResult = r;
+    rcStep = 'balanced';
+    showToast('נפתחה דרישת זיכוי פתוחה — תופיע בסיכום ספק ולא תרד מהתשלום עד אימות', null, null, 4800);
+    if (currentView === 'reconcile') renderReconcile();
+  }
+  else if (role === 'nc-promo-open-promos') { setView('promos'); }
   else if (role === 'nc-add-missing') {
     const p = products.find(x => x.id === id);
     if (p && !(reconcileData || []).find(l => l.productId === id)) {
@@ -5762,6 +6155,8 @@ app.addEventListener('click', (e) => {
   else if (role === 'rc-recon-save') saveReconciledReceipt();
   else if (role === 'rc-fix-open') openReceiptFix(id);
   else if (role === 'rc-offset') { const otherId = t.dataset.other; const rc = receipts.find(x => x.id === id); const other = receipts.find(x => x.id === otherId); const m = rc ? findOffsetMatch(rc) : null; if (m && other) showConfirm('אישור קיזוז', m.qty + ' × ' + m.name + ' מתקזזים מול תעודת ' + new Date(other.timestamp).toLocaleDateString('he-IL') + '. שתי התעודות ייסגרו ויצאו מהמאזן הפתוח.', 'אשר קיזוז', () => applyOffset(id, otherId)); }
+  else if (role === 'rc-credit-verify') showConfirm('אימות זיכוי ספק', 'סמן שהספק הוציא תעודת זיכוי/תיקון עבור הדרישה הזאת? רק אחרי שיש זיכוי אמיתי.', 'סמן שזוכה', () => setReceiptSupplierCreditStatus(id, 'verified'));
+  else if (role === 'rc-credit-cancel') showConfirm('ביטול דרישת זיכוי', 'לבטל את דרישת הזיכוי או לסמן שהמבצע לא מגיע?', 'בטל דרישה', () => setReceiptSupplierCreditStatus(id, 'cancelled'));
   else if (role === 'rc-fix-minus') receiptFixStepQty(id, -1);
   else if (role === 'rc-fix-plus') receiptFixStepQty(id, 1);
   else if (role === 'rc-fix-note-minus') receiptFixStepNote(id, -1);
