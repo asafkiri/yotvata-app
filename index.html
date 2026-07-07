@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v96 גיבוי ושחזור</title>
+    <title>הזמנות יטבתה - v97 יומן פעולות</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v96 גיבוי ושחזור</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v97 יומן פעולות</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -384,7 +384,7 @@ const INITIAL_PRODUCTS = RAW_PRODUCTS.map((raw, index) => {
 });
 
 // ===== מצב =====
-let products = [], contacts = [], history = [], notes = [], trash = [];
+let products = [], contacts = [], history = [], notes = [], trash = [], actionLog = [];
 let orderState = {};
 let currentView = 'order';
 let mainMode = 'order';
@@ -435,9 +435,14 @@ const BACKUP_COLLECTIONS = [
   { name: 'settings', label: 'הגדרות מחירים' },
   { name: 'config', label: 'הגדרות מערכת' },
   { name: 'drafts', label: 'טיוטות משותפות' },
-  { name: 'trash', label: 'סל מחזור' }
+  { name: 'trash', label: 'סל מחזור' },
+  { name: 'actionLog', label: 'יומן פעולות' }
 ];
 let pendingBackupImport = null, pendingBackupFileName = '';
+const DEVICE_NAME_KEY = 'yt_device_name_v1';
+let deviceName = (() => {
+  try { return localStorage.getItem(DEVICE_NAME_KEY) || ''; } catch (e) { return ''; }
+})();
 let scanPurpose = 'field';       // 'field' = מילוי שדה ברקוד | 'receiving' = סריקה רציפה לקליטה
 let scanCount = 0;               // מונה פריטים בסשן סריקה נוכחי
 let lastScanCode = '', lastScanTime = 0; // מניעת ספירה כפולה של אותו ברקוד
@@ -629,6 +634,13 @@ function startListeners() {
     if (currentView === 'trash' || currentView === 'settings') rerender();
   }, console.error);
 
+  const alRef = collection(db, 'artifacts', appId, 'public', 'data', 'actionLog');
+  const alQ = query(alRef, orderBy('timestamp', 'desc'), limit(100));
+  onSnapshot(alQ, (snap) => {
+    actionLog = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if (currentView === 'actionLog' || currentView === 'settings') rerender();
+  }, console.error);
+
   const cfgRef = doc(db, 'artifacts', appId, 'public', 'data', 'config', 'app');
   onSnapshot(cfgRef, (snap) => {
     const d = snap.data() || {};
@@ -692,12 +704,13 @@ function renderView() {
   else if (currentView === 'trash') renderTrash();
   else if (currentView === 'health') renderHealth();
   else if (currentView === 'backup') renderBackup();
+  else if (currentView === 'actionLog') renderActionLog();
   updateCart();
   updateBackBarLabel();
 }
 function updateBackBarLabel() {
   const b = $('backToOrder'); if (!b) return;
-  const txt = (currentView === 'trash' || currentView === 'health' || currentView === 'backup') ? 'חזרה להגדרות' : (mainMode === 'returns' ? 'חזרה לחזרות' : (mainMode === 'receiving' ? 'חזרה לקליטה' : 'חזרה להזמנה'));
+  const txt = (currentView === 'trash' || currentView === 'health' || currentView === 'backup' || currentView === 'actionLog') ? 'חזרה להגדרות' : (mainMode === 'returns' ? 'חזרה לחזרות' : (mainMode === 'receiving' ? 'חזרה לקליטה' : 'חזרה להזמנה'));
   b.innerHTML = '<i class="fa-solid fa-chevron-right"></i> ' + txt;
 }
 
@@ -1091,6 +1104,16 @@ function renderSettings() {
     '</button>' +
     '<div class="mb-5">' +
       '<div class="text-[11px] font-black text-slate-400 px-1 mb-1.5">כלים מתקדמים</div>' +
+      '<div class="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm mb-3">' +
+        '<label class="block text-xs font-bold text-slate-500 mb-1">שם מכשיר ביומן פעולות</label>' +
+        '<input data-role="device-name" type="text" value="' + htmlEscape(deviceName) + '" placeholder="לדוגמה: טלפון אסף / קופה / אבא" class="w-full p-2.5 rounded-xl border-2 border-slate-200 outline-none font-bold focus:border-blue-500">' +
+        '<div class="text-[11px] text-slate-400 font-bold mt-1.5">נשמר רק במכשיר הזה, כדי שיומן הפעולות יראה מאיפה בוצע השינוי.</div>' +
+      '</div>' +
+      '<button data-role="go-action-log" class="btn-tap w-full bg-white border border-slate-200 p-4 rounded-2xl flex items-center justify-center gap-3 shadow-sm mb-3">' +
+        '<div class="bg-purple-100 p-3 rounded-full text-purple-600"><i class="fa-solid fa-list-check text-2xl"></i></div>' +
+        '<div class="flex-1 min-w-0 text-right"><div class="font-black text-slate-700 text-lg leading-tight">יומן פעולות</div><div class="text-[11px] text-slate-400 font-bold mt-0.5">שינויים חשובים, מחיקות, שחזורים וגיבויים</div></div>' +
+        '<span class="bg-purple-50 text-purple-700 text-xs font-black px-2.5 py-1 rounded-full border border-purple-100">' + actionLog.length + '</span>' +
+      '</button>' +
       '<button data-role="go-backup" class="btn-tap w-full bg-white border border-slate-200 p-4 rounded-2xl flex items-center justify-center gap-3 shadow-sm">' +
         '<div class="bg-slate-100 p-3 rounded-full text-slate-600"><i class="fa-solid fa-shield-halved text-2xl"></i></div>' +
         '<div class="flex-1 min-w-0 text-right"><div class="font-black text-slate-700 text-lg leading-tight">גיבוי ושחזור נתונים</div><div class="text-[11px] text-slate-400 font-bold mt-0.5">לשימוש לפני עדכון קוד או שינוי גדול</div></div>' +
@@ -1119,7 +1142,7 @@ function htmlEscape(v) {
 function trashLabel(name) {
   const map = {
     products: 'מוצרים', contacts: 'אנשי קשר', history: 'היסטוריית הזמנות', returns: 'היסטוריית חזרות',
-    receipts: 'תעודות קליטה', promos: 'מבצעים', notes: 'הערות', settings: 'הגדרות מחירים', config: 'הגדרות מערכת', drafts: 'טיוטות'
+    receipts: 'תעודות קליטה', promos: 'מבצעים', notes: 'הערות', settings: 'הגדרות מחירים', config: 'הגדרות מערכת', drafts: 'טיוטות', actionLog: 'יומן פעולות'
   };
   return map[name] || name || 'לא ידוע';
 }
@@ -1223,12 +1246,151 @@ async function clearTrash() {
       await batch.commit();
     }
     showToast('נמחקו לצמיתות ' + deleted + ' רשומות מסל המחזור', null, null, 3500);
+    logAction('delete', 'ריקון סל מחזור', 'נמחקו לצמיתות ' + deleted + ' רשומות', { count: deleted });
   } catch (e) {
     console.error('clear trash failed', e);
     showToast('ריקון סל המחזור נכשל', null, null, 3500);
   } finally { hideCloudBusy(); }
 }
 
+
+
+// ===== יומן פעולות =====
+function setDeviceNameLocal(v) {
+  deviceName = (v || '').toString().trim().slice(0, 40);
+  try { localStorage.setItem(DEVICE_NAME_KEY, deviceName); } catch (e) {}
+}
+function actionDeviceLabel() { return deviceName || 'מכשיר ללא שם'; }
+function actionLogIcon(type) {
+  const map = {
+    backup: 'fa-shield-halved', import: 'fa-upload', export: 'fa-download', delete: 'fa-trash-can', restore: 'fa-rotate-left',
+    product: 'fa-box', contact: 'fa-address-book', receipt: 'fa-file-invoice', returns: 'fa-rotate-left', order: 'fa-cart-shopping',
+    promo: 'fa-tag', settings: 'fa-sliders', admin: 'fa-user-shield', price: 'fa-shekel-sign', health: 'fa-heart-pulse', system: 'fa-circle-info'
+  };
+  return map[type] || 'fa-list-check';
+}
+function actionLogTypeLabel(type) {
+  const map = { backup: 'גיבוי', import: 'ייבוא', export: 'ייצוא', delete: 'מחיקה', restore: 'שחזור', product: 'מוצר', contact: 'איש קשר', receipt: 'תעודה', returns: 'חזרות', order: 'הזמנה', promo: 'מבצע', settings: 'הגדרות', admin: 'מנהל', price: 'מחיר', health: 'תקינות', system: 'מערכת' };
+  return map[type] || 'פעולה';
+}
+function actionDateText(ts) {
+  const d = ts ? new Date(ts) : null;
+  return d ? (d.toLocaleDateString('he-IL') + ' · ' + d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })) : 'ללא תאריך';
+}
+function actionLogCard(a) {
+  const type = a.type || 'system';
+  const metaBits = [];
+  if (a.deviceName) metaBits.push('מכשיר: ' + a.deviceName);
+  if (a.uid) metaBits.push('UID: ' + String(a.uid).slice(0, 8));
+  return '<div class="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">' +
+    '<div class="flex items-start gap-3">' +
+      '<div class="w-11 h-11 shrink-0 rounded-xl bg-purple-100 text-purple-600 flex items-center justify-center"><i class="fa-solid ' + actionLogIcon(type) + '"></i></div>' +
+      '<div class="flex-1 min-w-0">' +
+        '<div class="flex items-center gap-2 flex-wrap mb-1">' +
+          '<span class="text-[11px] font-black bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full">' + htmlEscape(actionLogTypeLabel(type)) + '</span>' +
+          '<span class="text-[11px] font-bold text-slate-400">' + htmlEscape(actionDateText(a.timestamp)) + '</span>' +
+        '</div>' +
+        '<div class="font-black text-slate-800 leading-tight">' + htmlEscape(a.title || 'פעולה') + '</div>' +
+        (a.details ? '<div class="text-xs text-slate-500 font-bold mt-1 leading-snug whitespace-pre-line">' + htmlEscape(a.details) + '</div>' : '') +
+        (metaBits.length ? '<div class="text-[11px] text-slate-400 font-bold mt-2">' + htmlEscape(metaBits.join(' · ')) + '</div>' : '') +
+      '</div>' +
+    '</div>' +
+  '</div>';
+}
+function renderActionLog() {
+  const body = actionLog.length ? actionLog.map(actionLogCard).join('') :
+    '<div class="text-center py-16 bg-white border border-slate-200 rounded-2xl shadow-sm text-slate-400">' +
+      '<i class="fa-solid fa-list-check text-4xl mb-3 text-slate-300"></i><div class="font-black text-lg">אין עדיין פעולות ביומן</div>' +
+      '<div class="text-sm font-bold mt-1">שינויים חשובים יופיעו כאן אוטומטית</div>' +
+    '</div>';
+  app.innerHTML =
+    '<div class="flex items-center justify-between gap-2 px-1 py-2 mb-2">' +
+      '<div><h2 class="font-black text-2xl text-slate-800">יומן פעולות</h2><div class="text-xs text-slate-400 font-bold">100 הפעולות האחרונות · לזיהוי שינויים ותקלות</div></div>' +
+      '<button data-role="action-log-refresh" class="btn-tap text-xs font-bold text-purple-600 bg-purple-50 px-3 py-2 rounded-lg flex items-center gap-1.5"><i class="fa-solid fa-rotate"></i> רענן</button>' +
+    '</div>' +
+    '<div class="bg-purple-50 border border-purple-100 rounded-2xl p-3 text-xs text-purple-800 font-bold mb-3 leading-relaxed">' +
+      '<i class="fa-solid fa-circle-info"></i> היומן מתעד פעולות משמעותיות בלבד: מחיקות, שחזורים, גיבויים, שינויי מחיר/מוצר, תעודות, חזרות והגדרות.' +
+    '</div>' +
+    '<div class="space-y-3 pb-6">' + body + '</div>';
+}
+function actionTitleFromCloud(actionName, task) {
+  const map = {
+    'save order before send': ['order', 'שליחת הזמנה'],
+    'save returns before send': ['returns', 'שליחת חזרות'],
+    'save receipt before clearing draft': ['receipt', 'קליטת תעודה'],
+    'save receipt fix': ['receipt', 'תיקון תעודה'],
+    'save return verification': ['returns', 'אימות תעודת זיכוי'],
+    'add product': ['product', 'הוספת מוצר'],
+    'add contact': ['contact', 'הוספת איש קשר'],
+    'toggle product hidden': ['product', 'הסתרת/הצגת מוצר'],
+    'save app config': ['settings', 'שמירת הגדרות מערכת'],
+    'create promo': ['promo', 'יצירת מבצע'],
+    'save promo': ['promo', 'שמירת מבצע'],
+    'restore from trash': ['restore', 'שחזור מסל מחזור'],
+    'delete trash item': ['delete', 'מחיקה לצמיתות מסל מחזור'],
+    'change admin pin': ['admin', 'החלפת PIN מנהל'],
+    'reset admin pin': ['admin', 'איפוס PIN מנהל'],
+    'restore deleted products': ['restore', 'שחזור מוצר'],
+    'restore deleted contacts': ['restore', 'שחזור איש קשר'],
+    'restore deleted receipts': ['restore', 'שחזור תעודה'],
+    'restore deleted promos': ['restore', 'שחזור מבצע']
+  };
+  return map[actionName] || null;
+}
+function actionDetailsFromCloud(actionName, task) {
+  const d = task && task.data ? task.data : {};
+  if (actionName === 'save order before send') return 'נשלח אל: ' + (d.sentTo || 'לא ידוע') + ' · פריטים: ' + ((d.items || []).length || 0);
+  if (actionName === 'save returns before send') return 'נשלח אל: ' + (d.sentTo || 'לא ידוע') + ' · פריטים: ' + ((d.items || []).length || 0) + ' · סה״כ ללא מע״מ: ₪' + fmtMoney(d.totalExVat || 0);
+  if (actionName === 'save receipt before clearing draft') return 'שורות: ' + (d.count || 0) + ' · סה״כ ללא מע״מ: ₪' + fmtMoney(d.totalExVat || 0) + ' · סטטוס: ' + (d.status || 'ok');
+  if (actionName === 'save receipt fix') return 'תעודה עודכנה · שורות: ' + (d.count || 0) + ' · סה״כ: ₪' + fmtMoney(d.totalExVat || 0) + ' · סטטוס: ' + (d.status || 'ok');
+  if (actionName === 'save return verification') return d.creditStatus === 'open' ? 'נשמר עם פער פתוח בזיכוי' : 'הזיכוי אומת ללא פער פתוח';
+  if (actionName === 'add product') return d.name ? ('מוצר: ' + d.name + ' · מומלץ: ' + (d.average || 0)) : '';
+  if (actionName === 'add contact') return d.name ? ('איש קשר: ' + d.name + ' · ' + (d.phone || '')) : '';
+  if (actionName === 'toggle product hidden') {
+    const id = task && task.path ? task.path[task.path.length - 1] : '';
+    const p = products.find(x => x.id === id);
+    return (p ? p.name + ' · ' : '') + (d.hidden ? 'הוסתר' : 'הוצג');
+  }
+  if (actionName === 'save app config') return 'מע״מ: ' + (d.vatPct != null ? d.vatPct + '%' : '-') + ' · רווח: ' + (d.marginPct != null ? d.marginPct + '%' : '-') + ' · חנות: ' + (d.storeName || '-');
+  if (actionName === 'create promo' || actionName === 'save promo') return (d.name || 'מבצע') + ' · ' + (d.pct || 0) + '% · ' + (d.start || '?') + ' ← ' + (d.end || '?');
+  return '';
+}
+function shouldLogSilentCloudAction(actionName) {
+  return ['save product price','save price from reconcile','save average','save box size','save product category','save pricing categories'].includes(actionName);
+}
+function silentActionDetails(actionName, task) {
+  const d = (task && task.data) || {};
+  const id = task && task.path ? task.path[task.path.length - 1] : '';
+  const p = products.find(x => x.id === id);
+  if (actionName === 'save product price' || actionName === 'save price from reconcile') return (p ? p.name + ' · ' : '') + 'מחיר: ' + (d.price == null ? 'ריק' : '₪' + fmtMoney(d.price));
+  if (actionName === 'save average') return (p ? p.name + ' · ' : '') + 'מומלץ: ' + (d.average || 0);
+  if (actionName === 'save box size') return (p ? p.name + ' · ' : '') + 'יח׳ בארגז: ' + (d.boxSize || 0);
+  if (actionName === 'save product category') return (p ? p.name + ' · ' : '') + 'קטגוריה עודכנה';
+  if (actionName === 'save pricing categories') return 'קטגוריות רווחיות עודכנו · ' + (((d.categories || []).length) || 0) + ' קטגוריות';
+  return '';
+}
+async function logAction(type, title, details, meta) {
+  if (!db) return;
+  try {
+    const id = makeOperationId('alog');
+    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'actionLog', id), {
+      timestamp: Date.now(), type: type || 'system', title: title || 'פעולה', details: details || '',
+      deviceName: actionDeviceLabel(), uid: (auth && auth.currentUser && auth.currentUser.uid) || '',
+      appVersion: 'v97_action_log', meta: cloneSafe(meta || {})
+    });
+  } catch (e) { console.warn('action log failed', e); }
+}
+function logCloudActionIfNeeded(actionName, task) {
+  const info = actionTitleFromCloud(actionName, task);
+  if (!info) return;
+  logAction(info[0], info[1], actionDetailsFromCloud(actionName, task), { actionName, operationId: task && task.operationId });
+}
+function logSilentCloudActionIfNeeded(actionName, task) {
+  if (!shouldLogSilentCloudAction(actionName)) return;
+  const type = (actionName === 'save product price' || actionName === 'save price from reconcile') ? 'price' : 'product';
+  const titleMap = { 'save product price': 'שינוי מחיר מוצר', 'save price from reconcile': 'שינוי מחיר מהשוואת תעודה', 'save average': 'שינוי כמות מומלצת', 'save box size': 'שינוי יחידות בארגז', 'save product category': 'שינוי קטגוריית מוצר', 'save pricing categories': 'שינוי קטגוריות רווחיות' };
+  logAction(type, titleMap[actionName] || 'שינוי מוצר', silentActionDetails(actionName, task), { actionName, operationId: task && task.operationId });
+}
 
 // ===== גיבוי ושחזור מלא =====
 function backupCollectionLabel(name) {
@@ -1298,7 +1460,7 @@ async function exportFullBackup() {
       backupType: 'yotvata-firestore-full',
       backupVersion: 1,
       appId,
-      appVersion: 'v96_backup_restore',
+      appVersion: 'v97_action_log',
       exportedAt: Date.now(),
       exportedAtIso: new Date().toISOString(),
       collections: {},
@@ -1326,6 +1488,7 @@ async function exportFullBackup() {
     a.click();
     setTimeout(() => { try { URL.revokeObjectURL(url); a.remove(); } catch (e) {} }, 1000);
     showToast('גיבוי מלא הוכן להורדה ✓', null, null, 3500);
+    logAction('export', 'ייצוא גיבוי מלא', 'קובץ גיבוי הוכן להורדה · ' + backupTotalCount(payload) + ' רשומות', { total: backupTotalCount(payload), fileName: a.download });
   } catch (e) {
     console.error('backup export failed', e);
     showToast('יצירת הגיבוי נכשלה — בדוק חיבור אינטרנט', null, null, 4500);
@@ -1395,6 +1558,7 @@ async function applyBackupToCloud(payload) {
       restored += await commitBackupOpQueue(ops, 'משחזר: ' + c.label);
     }
     showToast('השחזור הסתיים ✓ הנתונים יתעדכנו מהענן בעוד רגע', null, null, 4500);
+    logAction('import', 'ייבוא גיבוי מלא', 'שוחזרו/נמחקו ' + restored + ' פעולות כתיבה מהגיבוי · PIN מנהל נשמר', { restoredOps: restored });
     pendingBackupImport = null; pendingBackupFileName = '';
     setView('health');
   } finally { hideCloudBusy(); }
@@ -2264,6 +2428,7 @@ function pruneOnLoad() {
   if (prunedOnce) return; prunedOnce = true;
   pruneCollection('history', 20);
   pruneCollection('returns', 20);
+  pruneCollection('actionLog', 300); // יומן פעולות — שומר 300 אחרונות, מציג 100
   pruneTrash(90);
 }
 // ריקון סל המחזור: מוחק גיבויים ישנים מאוד. השחזור הידני נמצא במסך סל מחזור
@@ -2288,6 +2453,7 @@ async function clearAllDocs(name) {
     const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', name));
     const deleted = await hardDeleteSnapshotDocsWithBackup(name, snap.docs, 'clear-all');
     showToast(deleted ? ('נמחקו ' + deleted + ' רשומות ונשמר להן גיבוי בסל מחזור') : 'אין רשומות למחיקה', null, null, 3500);
+    if (deleted) logAction('delete', 'מחיקה מרוכזת', trashLabel(name) + ' · נמחקו ' + deleted + ' רשומות ונשמרו בסל מחזור', { collectionName: name, count: deleted });
   } catch (e) { console.error(e); showToast('מחיקה מרוכזת נכשלה — לא נמחק בלי גיבוי.', null, null, 4500); }
 }
 
@@ -2731,11 +2897,13 @@ async function retryCloudFailedWrites() {
   }
 }
 async function runCloudTask(actionName, task) {
-  return mustCloudWrite(actionName, () => executeCloudTask(task), { failedTask: task });
+  const ok = await mustCloudWrite(actionName, () => executeCloudTask(task), { failedTask: task });
+  if (ok) logCloudActionIfNeeded(actionName, task);
+  return ok;
 }
 async function runCloudTaskSilent(actionName, task) {
   if (!db) { addCloudFailedWrite(actionName, new Error('אין חיבור לענן'), task); showToast('שינוי לא נשמר בענן — נשמר ביומן פעולות', null, null, 3000); return false; }
-  try { await executeCloudTask(task); return true; }
+  try { await executeCloudTask(task); logSilentCloudActionIfNeeded(actionName, task); return true; }
   catch (e) { console.error(actionName || 'silent cloud write failed', e); addCloudFailedWrite(actionName, e, task); showToast('שינוי לא נשמר בענן — אפשר לנסות שוב מהכפתור הצהוב', null, null, 3500); return false; }
 }
 function showCloudBusy(text) {
@@ -2797,6 +2965,7 @@ async function hardDeleteDocWithBackup(name, id, data, reason) {
     });
     batch.delete(doc(db, 'artifacts', appId, 'public', 'data', name, id));
     await batch.commit();
+    logAction('delete', 'מחיקה לסל מחזור', trashLabel(name) + ' · ' + (backup.name || backup.title || backup.originalId || id), { collectionName: name, originalId: id, reason: reason || 'delete' });
     return true;
   } catch (e) {
     console.error('safe delete failed', name, id, e);
@@ -5216,6 +5385,7 @@ $('contactList').addEventListener('click', (e) => { const b = e.target.closest('
 
 app.addEventListener('input', (e) => {
   const t = e.target; const role = t.getAttribute && t.getAttribute('data-role');
+  if (role === 'device-name') { setDeviceNameLocal(t.value); return; }
   if (ADMIN_INPUT_ROLES.has(role) && !isAdminMode()) {
     restoreLockedAdminInput(t);
     if (t.blur) t.blur();
@@ -5366,6 +5536,8 @@ app.addEventListener('click', (e) => {
   else if (role === 'go-trash') setView('trash');
   else if (role === 'go-health') setView('health');
   else if (role === 'go-backup') setView('backup');
+  else if (role === 'go-action-log') setView('actionLog');
+  else if (role === 'action-log-refresh') renderActionLog();
   else if (role === 'backup-export') exportFullBackup();
   else if (role === 'backup-pick') pickBackupFile();
   else if (role === 'backup-cancel-import') { pendingBackupImport = null; pendingBackupFileName = ''; renderBackup(); }
