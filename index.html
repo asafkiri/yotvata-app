@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v98 קיזוז תעודות חכם</title>
+    <title>הזמנות יטבתה - v98.1 תקינות חזרות</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v98 קיזוז תעודות</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v98.1 תקינות חזרות</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -1714,10 +1714,16 @@ function buildSystemHealth() {
     actionRole: (!contacts.length || badContacts.length) ? 'go-contacts' : null,
     actionText: 'אנשי קשר'
   });
+  const hasOrderOrReceiptDraft = !!(drafts.orderCount || drafts.receiptIsOpen);
+  const hasReturnsDraftOnly = !!(drafts.returnsCount && !hasOrderOrReceiptDraft);
   items.push({
-    status: (drafts.orderCount || drafts.returnsCount || drafts.receiptIsOpen) ? 'warn' : 'ok',
-    title: 'טיוטות פתוחות',
-    text: (drafts.orderCount || drafts.returnsCount || drafts.receiptIsOpen) ? 'יש טיוטה פתוחה במכשיר הזה — כדאי לסיים או לנקות אותה.' : 'אין טיוטות פתוחות במכשיר הזה.',
+    status: hasOrderOrReceiptDraft ? 'warn' : (hasReturnsDraftOnly ? 'info' : 'ok'),
+    title: hasReturnsDraftOnly ? 'חזרות בתהליך' : 'טיוטות פתוחות',
+    text: hasOrderOrReceiptDraft
+      ? 'יש טיוטת הזמנה או קליטה פתוחה — כדאי לסיים או לנקות אותה.'
+      : (hasReturnsDraftOnly
+        ? ('יש ' + drafts.returnsCount + ' פריטים שממתינים להחזרה שבועית. זה תקין אם עוד לא סוגרים תעודת חזרות.')
+        : 'אין טיוטות פתוחות במכשיר הזה.'),
     detail: 'הזמנה: ' + drafts.orderCount + ' · חזרות: ' + drafts.returnsCount + ' · קליטה: ' + drafts.receiptCount + (drafts.receiptNotesCount ? (' · סכומי תעודה: ' + drafts.receiptNotesCount) : '')
   });
   items.push({
