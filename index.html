@@ -5112,7 +5112,7 @@ function receiptRangeData(from, to) {
   });
   meEx = r2(meEx);
   let openShortEx = 0, openOverEx = 0, openCnt = 0;
-  recs.forEach(r => { const di = receiptDiscrepancyInfo(r); if (di.open) { openCnt++; openShortEx += di.shortVal; openOverEx += di.overVal; } });
+  recs.forEach(r => { if (r.offsetClosed) return; const di = receiptDiscrepancyInfo(r); if (di.open) { openCnt++; openShortEx += di.shortVal; openOverEx += di.overVal; } });
   openShortEx = r2(openShortEx); openOverEx = r2(openOverEx);
   const openSupplierCredits = openSupplierCreditClaims(recs);
   const deferredDueCredits = supplierCreditClaimsDeferredDue(receipts, from, to);
