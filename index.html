@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v99.2 דרישות זיכוי ספק</title>
+    <title>הזמנות יטבתה - v99.3 אימות מרכזת ספק</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v99.2 דרישות זיכוי ספק</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v99.3 אימות מרכזת ספק</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -1031,7 +1031,7 @@ function adminClickActionName(role) {
   };
   return map[role] || 'פעולה זו דורשת מנהל';
 }
-const ADMIN_CLICK_ROLES = new Set(['cfg-save','add-product','del-product','toggle-hidden','del-contact','clear-history','clear-returns-history','clear-receipts','rc-fix-open','rc-fix-save','pcat-add','pcat-up','pcat-down','pcat-del','promo-new','pe-save','pe-delete','trash-delete','trash-clear','trash-restore','del-receipt','backup-import-confirm','rc-credit-verify','rc-credit-cancel']);
+const ADMIN_CLICK_ROLES = new Set(['cfg-save','add-product','del-product','toggle-hidden','del-contact','clear-history','clear-returns-history','clear-receipts','rc-fix-open','rc-fix-save','pcat-add','pcat-up','pcat-down','pcat-del','promo-new','pe-save','pe-delete','trash-delete','trash-clear','trash-restore','del-receipt','backup-import-confirm','rc-credit-verify','rc-credit-cancel','rc-credit-defer','rc-supplier-verify-open']);
 const ADMIN_INPUT_ROLES = new Set(['price-set','pcat-name','pcat-pct','cat-set','avg','avg-set','box-set']);
 function restoreLockedAdminInput(t) {
   const role = t && t.getAttribute && t.getAttribute('data-role');
@@ -1376,7 +1376,7 @@ async function logAction(type, title, details, meta) {
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'actionLog', id), {
       timestamp: Date.now(), type: type || 'system', title: title || 'פעולה', details: details || '',
       deviceName: actionDeviceLabel(), uid: (auth && auth.currentUser && auth.currentUser.uid) || '',
-      appVersion: 'v99_2_supplier_credit_claims', meta: cloneSafe(meta || {})
+      appVersion: 'v99_3_supplier_statement_verify', meta: cloneSafe(meta || {})
     });
   } catch (e) { console.warn('action log failed', e); }
 }
@@ -1460,7 +1460,7 @@ async function exportFullBackup() {
       backupType: 'yotvata-firestore-full',
       backupVersion: 1,
       appId,
-      appVersion: 'v99_2_supplier_credit_claims',
+      appVersion: 'v99_3_supplier_statement_verify',
       exportedAt: Date.now(),
       exportedAtIso: new Date().toISOString(),
       collections: {},
@@ -4223,7 +4223,66 @@ function supplierCreditClaimOpen(rc) {
   const c = rc && rc.supplierCreditClaim;
   return !!(c && c.status === 'open' && (Number(c.amount) || 0) > 0);
 }
+function supplierCreditClaimDeferred(rc) {
+  const c = rc && rc.supplierCreditClaim;
+  return !!(c && c.status === 'deferred' && (Number(c.amount) || 0) > 0);
+}
+function supplierCreditClaimVerified(rc) {
+  const c = rc && rc.supplierCreditClaim;
+  return !!(c && c.status === 'verified' && (Number(c.amount) || 0) > 0);
+}
+function supplierCreditClaimAmountAny(rc) {
+  const c = rc && rc.supplierCreditClaim;
+  return c ? r2(Number(c.amount) || 0) : 0;
+}
 function supplierCreditClaimAmount(rc) { return supplierCreditClaimOpen(rc) ? r2(Number(rc.supplierCreditClaim.amount) || 0) : 0; }
+function monthKeyFromDateStr(d) {
+  d = (d || '').toString();
+  if (/^\d{4}-\d{2}/.test(d)) return d.slice(0, 7);
+  try { return new Date().toISOString().slice(0, 7); } catch (e) { return todayStr().slice(0, 7); }
+}
+function monthKeyFromTs(ts) {
+  const d = ts ? new Date(ts) : new Date();
+  const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, '0');
+  return y + '-' + m;
+}
+function nextMonthKey(base) {
+  const k = (base || todayStr()).toString().slice(0, 7);
+  const parts = k.split('-');
+  let y = parseInt(parts[0], 10), m = parseInt(parts[1], 10);
+  if (!isFinite(y) || !isFinite(m)) { const d = new Date(); y = d.getFullYear(); m = d.getMonth() + 1; }
+  m += 1; if (m > 12) { m = 1; y += 1; }
+  return y + '-' + String(m).padStart(2, '0');
+}
+function formatMonthKey(k) {
+  if (!k) return '';
+  const parts = String(k).split('-');
+  const y = parts[0], m = parseInt(parts[1], 10);
+  const names = ['','ינואר','פברואר','מרץ','אפריל','מאי','יוני','יולי','אוגוסט','ספטמבר','אוקטובר','נובמבר','דצמבר'];
+  return (names[m] || k) + ' ' + y;
+}
+function rangeMonthBounds(from, to) {
+  const a = from ? monthKeyFromDateStr(from) : '';
+  const b = to ? monthKeyFromDateStr(to) : '';
+  const cur = monthKeyFromDateStr(todayStr());
+  return { fromM: a || b || cur, toM: b || a || cur };
+}
+function monthInRange(k, from, to) {
+  if (!k) return false;
+  const b = rangeMonthBounds(from, to);
+  return k >= b.fromM && k <= b.toM;
+}
+function supplierCreditClaimsDeferredDue(allReceipts, from, to) {
+  return (allReceipts || []).filter(r => supplierCreditClaimDeferred(r) && monthInRange((r.supplierCreditClaim || {}).dueMonth, from, to));
+}
+function supplierCreditClaimsVerifiedInRange(allReceipts, fromT, toT) {
+  return (allReceipts || []).filter(r => {
+    if (!supplierCreditClaimVerified(r)) return false;
+    const c = r.supplierCreditClaim || {};
+    const ts = Number(c.verifiedAt || r.timestamp || 0);
+    return ts >= fromT && ts <= toT;
+  });
+}
 function supplierCreditClaimItemsText(c) {
   const items = (c && Array.isArray(c.items)) ? c.items : [];
   return items.map(x => (x.name || '') + (x.expectedDiscount ? ' ₪' + fmtMoney(x.expectedDiscount) : '')).filter(Boolean).join(' · ');
@@ -4232,14 +4291,61 @@ async function setReceiptSupplierCreditStatus(id, status) {
   const rc = receipts.find(x => x.id === id); if (!rc || !rc.supplierCreditClaim) return;
   const claim = cloneSafe(rc.supplierCreditClaim);
   claim.status = status;
-  if (status === 'verified') claim.verifiedAt = Date.now();
+  if (status === 'verified') {
+    claim.verifiedAt = Date.now();
+    claim.verifiedMonth = monthKeyFromTs(Date.now());
+  }
   if (status === 'cancelled') claim.cancelledAt = Date.now();
+  if (status === 'deferred') {
+    const base = claim.dueMonth || monthKeyFromDateStr(todayStr());
+    claim.deferredAt = Date.now();
+    claim.dueMonth = nextMonthKey(base);
+    claim.note = 'הספק הודיע שהזיכוי יופיע בחודש הבא';
+  }
   claim.updatedAt = Date.now();
-  const ok = await runCloudTask(status === 'verified' ? 'verify supplier promo credit' : 'cancel supplier promo credit', { op: 'update', path: dataPath('receipts', id), data: { supplierCreditClaim: claim }, operationId: makeOperationId('supplier_credit') });
-  if (ok) showToast(status === 'verified' ? 'דרישת הזיכוי סומנה כזוכתה ✓' : 'דרישת הזיכוי בוטלה/סומנה כלא מגיעה', null, null, 2500);
+  let actionName = 'update supplier promo credit';
+  if (status === 'verified') actionName = 'verify supplier promo credit';
+  else if (status === 'cancelled') actionName = 'cancel supplier promo credit';
+  else if (status === 'deferred') actionName = 'defer supplier promo credit';
+  const ok = await runCloudTask(actionName, { op: 'update', path: dataPath('receipts', id), data: { supplierCreditClaim: claim }, operationId: makeOperationId('supplier_credit') });
+  if (ok) {
+    if (status === 'verified') showToast('דרישת הזיכוי סומנה כזוכתה ✓', null, null, 2500);
+    else if (status === 'deferred') showToast('הזיכוי הועבר לבדיקה בחודש הבא: ' + formatMonthKey(claim.dueMonth), null, null, 3500);
+    else showToast('דרישת הזיכוי בוטלה/סומנה כלא מגיעה', null, null, 2500);
+  }
+}
+async function bulkVerifySupplierCredits(ids) {
+  ids = (ids || []).filter(Boolean);
+  const writes = [];
+  ids.forEach(id => {
+    const rc = receipts.find(x => x.id === id);
+    if (!rc || !rc.supplierCreditClaim) return;
+    const claim = cloneSafe(rc.supplierCreditClaim);
+    claim.status = 'verified'; claim.verifiedAt = Date.now(); claim.verifiedMonth = monthKeyFromTs(Date.now()); claim.updatedAt = Date.now();
+    writes.push({ op: 'update', path: dataPath('receipts', id), data: { supplierCreditClaim: claim } });
+  });
+  if (!writes.length) { showToast('לא נמצאו דרישות זיכוי לסגירה', null, null, 2500); return; }
+  const ok = await runCloudTask('verify supplier promo credit', { op: 'batch', writes, operationId: makeOperationId('supplier_credit_bulk') });
+  if (ok) showToast('סומנו כזוכים ' + writes.length + ' זיכויים פתוחים ✓', null, null, 3500);
 }
 function openSupplierCreditClaims(list) {
   return (list || []).filter(supplierCreditClaimOpen);
+}
+function supplierCreditClaimCardHtml(rc) {
+  const c = rc && rc.supplierCreditClaim;
+  if (!c || !(Number(c.amount) > 0)) return '';
+  const amount = fmtMoney(Number(c.amount) || 0);
+  const items = supplierCreditClaimItemsText(c);
+  if (c.status === 'open') {
+    return '<div class="mt-2 bg-orange-50 border-2 border-orange-300 rounded-xl p-3 text-xs text-orange-900"><div class="font-black text-sm mb-1"><i class="fa-solid fa-triangle-exclamation"></i> ממתין לזיכוי ספק — לא לפספס בסיכום!</div><div class="font-black text-base">סכום זיכוי פתוח: ₪' + amount + '</div><div class="font-bold mt-1">' + items + '</div><div class="text-[11px] mt-1">הסכום לא הופחת מהתשלום עד אימות מול תעודת זיכוי או מרכזת ספק.</div><div class="grid grid-cols-3 gap-2 mt-2"><button data-role="rc-credit-verify" data-id="' + rc.id + '" class="btn-tap bg-emerald-600 text-white rounded-lg py-2 font-black text-xs"><i class="fa-solid fa-check-double"></i> זוכה</button><button data-role="rc-credit-defer" data-id="' + rc.id + '" class="btn-tap bg-blue-600 text-white rounded-lg py-2 font-black text-xs">חודש הבא</button><button data-role="rc-credit-cancel" data-id="' + rc.id + '" class="btn-tap bg-white border border-orange-200 text-orange-700 rounded-lg py-2 font-black text-xs">לא מגיע</button></div></div>';
+  }
+  if (c.status === 'deferred') {
+    return '<div class="mt-2 bg-blue-50 border-2 border-blue-200 rounded-xl p-3 text-xs text-blue-900"><div class="font-black text-sm mb-1"><i class="fa-solid fa-calendar-days"></i> זיכוי הועבר לחודש הבא</div><div class="font-black text-base">₪' + amount + ' · יעד: ' + formatMonthKey(c.dueMonth) + '</div><div class="font-bold mt-1">' + items + '</div><div class="text-[11px] mt-1">יופיע באימות מרכזת ספק של חודש היעד עד שתסמן שהזיכוי הגיע.</div><div class="flex gap-2 mt-2"><button data-role="rc-credit-verify" data-id="' + rc.id + '" class="btn-tap flex-1 bg-emerald-600 text-white rounded-lg py-2 font-black text-xs"><i class="fa-solid fa-check-double"></i> סמן שזוכה</button><button data-role="rc-credit-defer" data-id="' + rc.id + '" class="btn-tap flex-1 bg-white border border-blue-200 text-blue-700 rounded-lg py-2 font-black text-xs">עדיין לא הגיע</button></div></div>';
+  }
+  if (c.status === 'verified') {
+    return '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800"><div class="font-black"><i class="fa-solid fa-circle-check"></i> זיכוי ספק התקבל ואומת</div><div class="font-bold mt-1">₪' + amount + (c.verifiedAt ? ' · ' + new Date(c.verifiedAt).toLocaleDateString('he-IL') : '') + '</div></div>';
+  }
+  return '';
 }
 function supplierCreditWarningHtml(list, compact) {
   const open = openSupplierCreditClaims(list);
@@ -4800,7 +4906,7 @@ function renderReceiptsHistory() {
         '</div>' : '') +
         ((di.priceOffsets && di.priceOffsets.length) ? '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800"><div class="font-black mb-1"><i class="fa-solid fa-scale-balanced"></i> קיזוז פנימי לפי מחיר זהה</div>' + di.priceOffsets.map(o => '<div class="font-bold">' + receiptSideText(o.shortItems) + ' ⇄ ' + receiptSideText(o.overItems) + ' · ₪' + fmtMoney(o.price) + '</div>').join('') + '</div>' : '') +
         ((Number(rc.supplierDiscount) || 0) > 0 ? '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800"><div class="font-black mb-1"><i class="fa-solid fa-percent"></i> אומתה עם מבצע / הנחת ספק</div><div class="font-bold">הנחה: −₪' + fmtMoney(rc.supplierDiscount) + ((rc.grossExVat != null) ? ' · לפני מבצע: ₪' + fmtMoney(rc.grossExVat) : '') + '</div>' + ((rc.supplierPromoItems || []).length ? '<div class="text-[11px] mt-1">כוכבית: ' + (rc.supplierPromoItems || []).map(x => x.name).join(' · ') + '</div>' : '') + '</div>' : '') +
-        (supplierCreditClaimOpen(rc) ? '<div class="mt-2 bg-orange-50 border-2 border-orange-300 rounded-xl p-3 text-xs text-orange-900"><div class="font-black text-sm mb-1"><i class="fa-solid fa-triangle-exclamation"></i> ממתין לזיכוי ספק — לא לפספס בסיכום!</div><div class="font-black text-base">סכום זיכוי פתוח: ₪' + fmtMoney(supplierCreditClaimAmount(rc)) + '</div><div class="font-bold mt-1">' + supplierCreditClaimItemsText(rc.supplierCreditClaim) + '</div><div class="text-[11px] mt-1">הסכום לא הופחת מהתשלום עד אימות מול תעודת זיכוי.</div><div class="flex gap-2 mt-2"><button data-role="rc-credit-verify" data-id="' + rc.id + '" class="btn-tap flex-1 bg-emerald-600 text-white rounded-lg py-2 font-black text-xs"><i class="fa-solid fa-check-double"></i> סמן שזוכה</button><button data-role="rc-credit-cancel" data-id="' + rc.id + '" class="btn-tap flex-1 bg-white border border-orange-200 text-orange-700 rounded-lg py-2 font-black text-xs">לא מגיע / בטל</button></div></div>' : '') +
+        supplierCreditClaimCardHtml(rc) +
         (((rc.supplierPromoMismatchItems || []).length) ? '<div class="mt-2 bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-xs text-amber-800"><div class="font-black mb-1"><i class="fa-solid fa-triangle-exclamation"></i> מבצע מוגדר במערכת אך לא הופיע אצל הספק</div><div class="font-bold">' + (rc.supplierPromoMismatchItems || []).map(x => x.name).join(' · ') + '</div></div>' : '') +
         (rc.offsetClosed ? '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs font-black text-emerald-700"><i class="fa-solid fa-scale-balanced"></i> קוזז מול תעודה אחרת — סגור</div>' :
           (function () { const m = findOffsetMatch(rc); if (!m) return ''; const od = new Date(m.other.timestamp).toLocaleDateString('he-IL');
@@ -4829,10 +4935,7 @@ function renderReceiptsHistory() {
   const supplierCreditBanner = supplierCreditWarningHtml(receipts, true);
   app.innerHTML = head + supplierCreditBanner + recBalBanner + receiptsRangeHtml() + '<div class="space-y-2.5 pb-6">' + items + '</div>';
 }
-function calcReceiptRange() {
-  const fromEl = $('rcFrom'), toEl = $('rcTo'), out = $('rcRangeResult');
-  if (!out) return;
-  const from = fromEl ? fromEl.value : '', to = toEl ? toEl.value : '';
+function receiptRangeData(from, to) {
   const fromT = from ? new Date(from + 'T00:00:00').getTime() : -Infinity;
   const toT = to ? new Date(to + 'T23:59:59').getTime() : Infinity;
   const recs = receipts.filter(r => r.timestamp >= fromT && r.timestamp <= toT);
@@ -4842,7 +4945,6 @@ function calcReceiptRange() {
   let retEx = 0, retInc = 0;
   rets.forEach(r => { const t = returnTotals(r); retEx += t.ex; retInc += t.inc; });
   retEx = r2(retEx); retInc = r2(retInc);
-  // הנחות מרכזת — צפי לפי מבצעי סוף חודש שחלים על מוצרי התעודות
   const meMap = {}; let meEx = 0;
   recs.forEach(r => {
     (r.items || []).forEach(l => {
@@ -4859,27 +4961,86 @@ function calcReceiptRange() {
   let openShortEx = 0, openOverEx = 0, openCnt = 0;
   recs.forEach(r => { const di = receiptDiscrepancyInfo(r); if (di.open) { openCnt++; openShortEx += di.shortVal; openOverEx += di.overVal; } });
   openShortEx = r2(openShortEx); openOverEx = r2(openOverEx);
-  const meList = Object.values(meMap);
-  const meHtml = meEx > 0
-    ? '<div class="flex items-center justify-between text-sm font-bold text-rose-700 mt-1"><span><i class="fa-solid fa-clock-rotate-left"></i> הנחות מרכזת (צפי)</span><span>− ₪' + fmtMoney(meEx) + '</span></div>' +
-      meList.map(s => '<div class="flex items-center justify-between text-[11px] text-rose-600/80 pr-3"><span>· ' + s.name + ' ' + s.pct + '%</span><span>− ₪' + fmtMoney(r2(s.ex)) + '</span></div>').join('')
-    : '';
   const openSupplierCredits = openSupplierCreditClaims(recs);
-  const openSupplierCreditEx = r2(openSupplierCredits.reduce((a, r) => a + supplierCreditClaimAmount(r), 0));
-  const supplierCreditHtml = openSupplierCredits.length ? supplierCreditWarningHtml(openSupplierCredits, false) : '';
-  const netEx = r2(recEx - retEx - meEx);
+  const deferredDueCredits = supplierCreditClaimsDeferredDue(receipts, from, to);
+  const verifiedSupplierCredits = supplierCreditClaimsVerifiedInRange(receipts, fromT, toT);
+  const openSupplierCreditEx = r2(openSupplierCredits.reduce((a, r) => a + supplierCreditClaimAmountAny(r), 0));
+  const deferredSupplierCreditEx = r2(deferredDueCredits.reduce((a, r) => a + supplierCreditClaimAmountAny(r), 0));
+  const verifiedSupplierCreditEx = r2(verifiedSupplierCredits.reduce((a, r) => a + supplierCreditClaimAmountAny(r), 0));
+  const netBeforeVerifiedCredits = r2(recEx - retEx - meEx);
+  const netEx = r2(netBeforeVerifiedCredits - verifiedSupplierCreditEx);
   const vatAmount = r2(netEx * VAT);
   const netInc = r2(netEx + vatAmount);
-  out.innerHTML = supplierCreditHtml +
-    '<div class="text-[11px] font-bold text-amber-900/70 mb-2">' + recs.length + ' תעודות קליטה · ' + rets.length + ' תעודות חזרה</div>' +
-    '<div class="flex items-center justify-between text-sm font-bold text-amber-900"><span>קליטה</span><span>₪' + fmtMoney(recEx) + '</span></div>' +
-    '<div class="flex items-center justify-between text-sm font-bold text-emerald-700 mt-1"><span>חזרות / זיכוי</span><span>− ₪' + fmtMoney(retEx) + '</span></div>' +
-    meHtml +
-    '<div class="flex items-center justify-between text-sm font-bold text-amber-900 mt-1.5 pt-1.5 border-t border-amber-200"><span>סה"כ ללא מע"מ</span><span>₪' + fmtMoney(netEx) + '</span></div>' +
-    '<div class="flex items-center justify-between text-sm font-bold text-amber-900 mt-1"><span>מע"מ (' + Math.round(VAT * 100) + '%)</span><span>₪' + fmtMoney(vatAmount) + '</span></div>' +
-    '<div class="flex items-center justify-between text-xl font-black text-amber-900 mt-1.5 pt-1.5 border-t border-amber-200"><span>סה"כ כולל מע"מ</span><span>₪' + fmtMoney(netInc) + '</span></div>' +
-    (meEx > 0 ? '<div class="text-[11px] text-rose-700/80 font-bold mt-2 bg-rose-50 rounded-lg p-2"><i class="fa-solid fa-triangle-exclamation"></i> הנחות מרכזת הן צפי — ודא שהספק זיכה אותן בחשבון החודשי</div>' : '') +
-    (openCnt ? '<div class="text-[11px] text-rose-700/80 font-bold mt-2 bg-rose-50 rounded-lg p-2"><i class="fa-solid fa-clipboard-question"></i> ' + openCnt + ' תעודות עם הפרש פתוח · חוסר ₪' + fmtMoney(openShortEx) + (openOverEx > 0 ? ' · עודף ₪' + fmtMoney(openOverEx) : '') + ' (לא משולם — הספק חייב להשלים/לזכות)</div>' : '');
+  return { from, to, fromT, toT, recs, rets, recEx, recInc, retEx, retInc, meMap, meList: Object.values(meMap), meEx, openCnt, openShortEx, openOverEx, openSupplierCredits, openSupplierCreditEx, deferredDueCredits, deferredSupplierCreditEx, verifiedSupplierCredits, verifiedSupplierCreditEx, netBeforeVerifiedCredits, netEx, vatAmount, netInc };
+}
+function supplierCreditMiniList(list) {
+  if (!list || !list.length) return '';
+  return '<div class="mt-2 space-y-1">' + list.slice(0, 6).map(r => {
+    const c = r.supplierCreditClaim || {};
+    return '<div class="bg-white/70 rounded-lg px-2 py-1.5 text-xs font-bold flex justify-between gap-2"><span class="truncate">' + (supplierCreditClaimItemsText(c) || 'מבצע ספק') + '</span><span class="shrink-0">₪' + fmtMoney(c.amount || 0) + '</span></div>';
+  }).join('') + (list.length > 6 ? '<div class="text-xs font-bold">ועוד ' + (list.length - 6) + '...</div>' : '') + '</div>';
+}
+function supplierStatementVerifyHtml(d) {
+  const ids = (d.openSupplierCredits || []).concat(d.deferredDueCredits || []).map(r => r.id).filter(Boolean).join(',');
+  return '<div class="mt-3 bg-white border-2 border-slate-200 rounded-xl p-3">' +
+    '<div class="font-black text-slate-800 text-sm flex items-center gap-2"><i class="fa-solid fa-file-circle-check text-blue-600"></i> אימות מרכזת ספק</div>' +
+    '<div class="text-[11px] text-slate-500 font-bold mt-1 leading-relaxed">הקלד את הסכום שיצא במרכזת של הספק <b>ללא מע״מ</b>. המערכת תשווה מול הסיכום שלה ותנסה להסביר את הפער לפי הנחות מרכזת וזיכויים פתוחים.</div>' +
+    '<div class="flex gap-2 mt-2"><div class="flex-1 flex items-center gap-1 border-2 border-slate-200 rounded-xl px-2 focus-within:border-blue-500 bg-white"><span class="text-slate-400 font-black">₪</span><input id="rcSupplierEx" type="text" inputmode="decimal" placeholder="סכום ספק ללא מע״מ" class="w-full h-11 text-center font-black outline-none bg-transparent"></div><button data-role="rc-supplier-compare" data-ids="' + ids + '" class="btn-tap px-4 rounded-xl bg-blue-600 text-white font-black text-sm">השווה</button></div>' +
+    '<div id="rcSupplierCompareResult" class="hidden mt-2"></div>' +
+  '</div>';
+}
+function compareSupplierStatement() {
+  const inp = $('rcSupplierEx'), out = $('rcSupplierCompareResult');
+  if (!inp || !out) return;
+  const supplierEx = parseNoteVal(inp.value);
+  if (supplierEx == null) { showToast('הכנס סכום מרכזת ספק ללא מע״מ', null, null, 2500); return; }
+  const from = $('rcFrom') ? $('rcFrom').value : '';
+  const to = $('rcTo') ? $('rcTo').value : '';
+  const d = receiptRangeData(from, to);
+  const diff = r2(supplierEx - d.netEx); // חיובי = הספק מבקש יותר מהמערכת
+  const abs = Math.abs(diff);
+  const openAndDue = (d.openSupplierCredits || []).concat(d.deferredDueCredits || []);
+  const openAndDueEx = r2((d.openSupplierCreditEx || 0) + (d.deferredSupplierCreditEx || 0));
+  const ids = openAndDue.map(r => r.id).filter(Boolean).join(',');
+  let html = '';
+  if (abs <= 1) {
+    html = '<div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-emerald-800 text-xs font-bold"><div class="font-black text-sm"><i class="fa-solid fa-circle-check"></i> המרכזת של הספק תואמת לסיכום המערכת</div><div class="mt-1">לפי המערכת: ₪' + fmtMoney(d.netEx) + ' · לפי הספק: ₪' + fmtMoney(supplierEx) + '</div></div>';
+  } else if (diff > 0) {
+    const meMatch = d.meEx > 0 && Math.abs(diff - d.meEx) <= 1;
+    html = '<div class="bg-rose-50 border-2 border-rose-200 rounded-xl p-3 text-rose-800 text-xs font-bold"><div class="font-black text-sm"><i class="fa-solid fa-triangle-exclamation"></i> הספק גבוה מהמערכת ב־₪' + fmtMoney(diff) + '</div><div class="mt-1">לפי המערכת: ₪' + fmtMoney(d.netEx) + ' · לפי הספק: ₪' + fmtMoney(supplierEx) + '</div>' +
+      (meMatch ? '<div class="mt-2 bg-white/80 rounded-lg p-2 text-rose-700"><b>הפער דומה להנחות המרכזת הצפויות.</b><br>כנראה שהמרכזת לא הורידה מבצע סוף חודש. בדוק מול הספק או העבר את הזיכוי לחודש הבא.</div>' : '<div class="mt-2 bg-white/80 rounded-lg p-2">בדוק הנחות מרכזת, זיכויים שלא הופיעו, תעודות חסרות או סכום שהוקלד לא נכון.</div>') + '</div>';
+  } else {
+    const lower = r2(-diff);
+    const creditMatch = openAndDueEx > 0 && Math.abs(lower - openAndDueEx) <= 1;
+    html = '<div class="bg-blue-50 border-2 border-blue-200 rounded-xl p-3 text-blue-900 text-xs font-bold"><div class="font-black text-sm"><i class="fa-solid fa-circle-info"></i> הספק נמוך מהמערכת ב־₪' + fmtMoney(lower) + '</div><div class="mt-1">לפי המערכת: ₪' + fmtMoney(d.netEx) + ' · לפי הספק: ₪' + fmtMoney(supplierEx) + '</div>' +
+      (creditMatch ? '<div class="mt-2 bg-white/80 rounded-lg p-2"><b>הפער תואם לזיכויים פתוחים/זיכויים שהועברו לחודש הזה.</b><br>אם הזיכוי באמת הופיע במרכזת, אפשר לסמן אותם כזוכו.</div>' + supplierCreditMiniList(openAndDue) + '<button data-role="rc-supplier-verify-open" data-ids="' + ids + '" class="btn-tap mt-2 w-full bg-emerald-600 text-white rounded-xl py-2.5 font-black"><i class="fa-solid fa-check-double"></i> סמן זיכויים אלה כזוכו</button>' : '<div class="mt-2 bg-white/80 rounded-lg p-2">ייתכן שהספק הוריד זיכוי/הנחה שלא סומנה במערכת. בדוק מול המרכזת לפני סגירה.</div>') + '</div>';
+  }
+  out.innerHTML = html;
+  out.classList.remove('hidden');
+}
+function calcReceiptRange() {
+  const fromEl = $('rcFrom'), toEl = $('rcTo'), out = $('rcRangeResult');
+  if (!out) return;
+  const from = fromEl ? fromEl.value : '', to = toEl ? toEl.value : '';
+  const d = receiptRangeData(from, to);
+  const meHtml = d.meEx > 0
+    ? '<div class="flex items-center justify-between text-sm font-bold text-rose-700 mt-1"><span><i class="fa-solid fa-clock-rotate-left"></i> הנחות מרכזת (צפי)</span><span>− ₪' + fmtMoney(d.meEx) + '</span></div>' +
+      d.meList.map(s => '<div class="flex items-center justify-between text-[11px] text-rose-600/80 pr-3"><span>· ' + s.name + ' ' + s.pct + '%</span><span>− ₪' + fmtMoney(r2(s.ex)) + '</span></div>').join('')
+    : '';
+  const supplierCreditHtml = d.openSupplierCredits.length ? supplierCreditWarningHtml(d.openSupplierCredits, false) : '';
+  const deferredHtml = d.deferredDueCredits.length ? '<div class="bg-blue-600 text-white rounded-2xl p-4 mb-3 shadow-lg border-2 border-blue-300"><div class="font-black text-lg flex items-center gap-2"><i class="fa-solid fa-calendar-days fa-beat"></i> זיכויים מחודש קודם שממתינים לאימות</div><div class="font-black text-2xl mt-1">₪' + fmtMoney(d.deferredSupplierCreditEx) + '</div><div class="text-xs text-white/95 mt-1 font-bold">הספק התחייב להוציא אותם בחודש הזה. ודא מול המרכזת לפני סגירת חשבון.</div>' + supplierCreditMiniList(d.deferredDueCredits) + '</div>' : '';
+  const verifiedHtml = d.verifiedSupplierCreditEx > 0 ? '<div class="flex items-center justify-between text-sm font-bold text-emerald-700 mt-1"><span><i class="fa-solid fa-check-double"></i> זיכויי מבצע שאומתו</span><span>− ₪' + fmtMoney(d.verifiedSupplierCreditEx) + '</span></div>' : '';
+  out.innerHTML = supplierCreditHtml + deferredHtml +
+    '<div class="text-[11px] font-bold text-amber-900/70 mb-2">' + d.recs.length + ' תעודות קליטה · ' + d.rets.length + ' תעודות חזרה</div>' +
+    '<div class="flex items-center justify-between text-sm font-bold text-amber-900"><span>קליטה</span><span>₪' + fmtMoney(d.recEx) + '</span></div>' +
+    '<div class="flex items-center justify-between text-sm font-bold text-emerald-700 mt-1"><span>חזרות / זיכוי</span><span>− ₪' + fmtMoney(d.retEx) + '</span></div>' +
+    meHtml + verifiedHtml +
+    '<div class="flex items-center justify-between text-sm font-bold text-amber-900 mt-1.5 pt-1.5 border-t border-amber-200"><span>סה"כ ללא מע"מ</span><span>₪' + fmtMoney(d.netEx) + '</span></div>' +
+    '<div class="flex items-center justify-between text-sm font-bold text-amber-900 mt-1"><span>מע"מ (' + Math.round(VAT * 100) + '%)</span><span>₪' + fmtMoney(d.vatAmount) + '</span></div>' +
+    '<div class="flex items-center justify-between text-xl font-black text-amber-900 mt-1.5 pt-1.5 border-t border-amber-200"><span>סה"כ כולל מע"מ</span><span>₪' + fmtMoney(d.netInc) + '</span></div>' +
+    (d.meEx > 0 ? '<div class="text-[11px] text-rose-700/80 font-bold mt-2 bg-rose-50 rounded-lg p-2"><i class="fa-solid fa-triangle-exclamation"></i> הנחות מרכזת הן צפי — ודא שהספק זיכה אותן בחשבון החודשי</div>' : '') +
+    (d.openCnt ? '<div class="text-[11px] text-rose-700/80 font-bold mt-2 bg-rose-50 rounded-lg p-2"><i class="fa-solid fa-clipboard-question"></i> ' + d.openCnt + ' תעודות עם הפרש פתוח · חוסר ₪' + fmtMoney(d.openShortEx) + (d.openOverEx > 0 ? ' · עודף ₪' + fmtMoney(d.openOverEx) : '') + ' (לא משולם — הספק חייב להשלים/לזכות)</div>' : '') +
+    supplierStatementVerifyHtml(d);
   out.classList.remove('hidden');
 }
 
@@ -6156,7 +6317,10 @@ app.addEventListener('click', (e) => {
   else if (role === 'rc-fix-open') openReceiptFix(id);
   else if (role === 'rc-offset') { const otherId = t.dataset.other; const rc = receipts.find(x => x.id === id); const other = receipts.find(x => x.id === otherId); const m = rc ? findOffsetMatch(rc) : null; if (m && other) showConfirm('אישור קיזוז', m.qty + ' × ' + m.name + ' מתקזזים מול תעודת ' + new Date(other.timestamp).toLocaleDateString('he-IL') + '. שתי התעודות ייסגרו ויצאו מהמאזן הפתוח.', 'אשר קיזוז', () => applyOffset(id, otherId)); }
   else if (role === 'rc-credit-verify') showConfirm('אימות זיכוי ספק', 'סמן שהספק הוציא תעודת זיכוי/תיקון עבור הדרישה הזאת? רק אחרי שיש זיכוי אמיתי.', 'סמן שזוכה', () => setReceiptSupplierCreditStatus(id, 'verified'));
+  else if (role === 'rc-credit-defer') showConfirm('העברת זיכוי לחודש הבא', 'הספק אמר שהזיכוי לא יופיע החודש אלא בחודש הבא? הדרישה לא תיעלם — היא תופיע באימות מרכזת של חודש היעד.', 'העבר לחודש הבא', () => setReceiptSupplierCreditStatus(id, 'deferred'));
   else if (role === 'rc-credit-cancel') showConfirm('ביטול דרישת זיכוי', 'לבטל את דרישת הזיכוי או לסמן שהמבצע לא מגיע?', 'בטל דרישה', () => setReceiptSupplierCreditStatus(id, 'cancelled'));
+  else if (role === 'rc-supplier-compare') compareSupplierStatement();
+  else if (role === 'rc-supplier-verify-open') { const ids = ((t.dataset.ids || '').split(',')).filter(Boolean); showConfirm('אימות זיכויים מהמרכזת', 'לסמן את הזיכויים הפתוחים/הנדחים האלה כזוכו לפי המרכזת של הספק?', 'סמן כזוכה', () => bulkVerifySupplierCredits(ids)); }
   else if (role === 'rc-fix-minus') receiptFixStepQty(id, -1);
   else if (role === 'rc-fix-plus') receiptFixStepQty(id, 1);
   else if (role === 'rc-fix-note-minus') receiptFixStepNote(id, -1);
