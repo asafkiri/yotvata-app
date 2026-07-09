@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v102 שלטי הדפסה</title>
+    <title>הזמנות יטבתה - v102.1 שלטים</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v102 שלטי הדפסה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v102.1 שלטים</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5876,7 +5876,7 @@ function renderSignPreview() {
     '<div class="px-1 mt-4 mb-1.5 flex items-center justify-between"><div class="text-xs font-black text-slate-500"><i class="fa-solid fa-eye"></i> תצוגה מקדימה של הדף</div>' +
       '<div class="flex gap-1"><button data-role="sign-pp" data-pp="4" class="btn-tap px-3 py-1.5 rounded-lg text-[11px] font-black ' + (signMaker.perPage === 4 ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-600') + '">4 בדף</button>' +
       '<button data-role="sign-pp" data-pp="2" class="btn-tap px-3 py-1.5 rounded-lg text-[11px] font-black ' + (signMaker.perPage === 2 ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-600') + '">2 בדף (גדול)</button>' +
-      '<button data-role="sign-pp" data-pp="1" class="btn-tap px-3 py-1.5 rounded-lg text-[11px] font-black ' + (signMaker.perPage === 1 ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-600') + '">1 בדף (ענק)</button></div></div>' +
+      '<button data-role="sign-pp" data-pp="1" class="btn-tap px-3 py-1.5 rounded-lg text-[11px] font-black ' + (signMaker.perPage === 1 ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-600') + '">1 בדף (רוחב)</button></div></div>' +
     '<div class="bg-slate-200 rounded-2xl p-2.5 mb-3"><canvas id="signCanvas" class="w-full rounded-lg shadow"></canvas></div>' +
     '<div class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 p-3 flex gap-2 z-40">' +
       '<button data-role="sign-back" class="btn-tap px-4 py-3 rounded-xl font-black bg-slate-100 text-slate-600"><i class="fa-solid fa-arrow-right"></i></button>' +
@@ -5896,7 +5896,8 @@ function signWrapText(ctx, text, maxW) {
 }
 function drawSignCanvas() {
   const cv = $('signCanvas'); if (!cv || !signMaker) return;
-  const W = 1240, H = 1754; // A4 ביחס ~1:1.414, רזולוציה טובה להדפסה
+  const singleLandscape = signMaker.perPage === 1; // שלט בודד — דף לרוחב, כמו שלט חלון אמיתי
+  const W = singleLandscape ? 1754 : 1240, H = singleLandscape ? 1240 : 1754;
   cv.width = W; cv.height = H;
   const ctx = cv.getContext('2d');
   ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
@@ -5954,9 +5955,16 @@ function drawSignCanvas() {
       const m = {}; Object.keys(B).forEach(k => m[k] = Math.max(10, Math.round(B[k] * f)));
       const listF = Math.min(f, 1.6); // רשימת הברקודים לא מתנפחת כמו הכותרת — נשארת כתב קטן וקריא
       ['listHead', 'list', 'listSmall', 'listLH'].forEach(k => m[k] = Math.max(10, Math.round(B[k] * listF)));
-      ctx.font = '900 ' + m.title + 'px Heebo, Arial';
-      let tl = signWrapText(ctx, s.title || '', widthAvail).slice(0, 2);
-      if (f < 0.8 && tl.length > 1) tl = [tl[0].replace(/\s+\S*$/, '') + '…'];
+      // כותרת: מקטינים את פונט הכותרת עד שכל הטקסט נכנס (עד 3 שורות) — לא חותכים מילים
+      let tl;
+      for (;;) {
+        ctx.font = '900 ' + m.title + 'px Heebo, Arial';
+        tl = signWrapText(ctx, s.title || '', widthAvail);
+        if (tl.length <= 3 || m.title <= 26) break;
+        m.title = Math.max(26, Math.round(m.title * 0.88));
+        m.titleLH = Math.round(m.title * 1.07);
+      }
+      if (tl.length > 3) { tl = tl.slice(0, 3); tl[2] = tl[2].replace(/\s+\S*$/, '') + '…'; } // רק אם גם בפונט המינימלי לא נכנס
       // התנגשות בתג/בתוקף: קודם מנסים להסיט שמאלה למרווח הפנוי; יורדים שורה רק אם אין ברירה
       const t0w = tl.length ? ctx.measureText(tl[0]).width : 0;
       const titleTopRel = m.topPad - Math.round(m.title * 0.75);
