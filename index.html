@@ -6490,7 +6490,10 @@ app.addEventListener('click', (e) => {
   else if (role === 'ret-manual') openManualReturn();
   else if (role === 'ret-plus') changeReturnQty(id, 1);
   else if (role === 'ret-minus') changeReturnQty(id, -1);
-  else if (role === 'ret-remove') removeReturn(id);
+  else if (role === 'ret-remove') {
+    const rIt = returnsList.find(x => x.productId === id);
+    if (rIt) showConfirm('הסרה מהחזרות', 'להסיר את "' + (rIt.name || 'הפריט') + '" (כמות: ' + (rIt.qty || 0) + ') מרשימת החזרות?', 'הסר', () => removeReturn(id));
+  }
   else if (role === 'edit-barcode') openBarcodePrompt(id, true);
   else if (role === 'rv-verify-inline') { const inp = $('rvNote_' + id); const v = inp ? parseNoteVal(inp.value) : null; if (v == null) { showToast('הקלד את סכום תעודת הזיכוי', null, null, 2000); return; } const rr = returns.find(x => x.id === id); if (!rr) return; const sentEx = returnTotals(rr).ex; if (Math.abs(v - sentEx) <= 1) markReturnVerified(id, v); else openReturnVerify(id, v); }
   else if (role === 'rv-add-note') { const inp = $('rvAdd_' + id); const v = inp ? parseNoteVal(inp.value) : null; if (v == null) { showToast('הקלד את סכום תעודת הזיכוי המשלימה', null, null, 2200); return; } addCreditNote(id, v); }
