@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v102.1 שלטים</title>
+    <title>הזמנות יטבתה - v102.3 שלטים</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v102.1 שלטים</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v102.3 שלטים</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5936,21 +5936,21 @@ function drawSignCanvas() {
     const hasValid = !!(s.validUntil && s.validUntil.trim());
     const widthAvail = x1 - x0 - 80;
     const innerH = slotH - 22; // גובה שימושי עד השוליים התחתונים
-    // תג מיתוג קבוע בפינה — לא תופס שורה; הכותרת עוקפת אותו רק אם היא רחבה
-    let badgeFont = 34;
+    // הפונטים הבסיסיים כוילו למשבצת של 1/5 דף (~316px) — במשבצות גדולות מתחילים גדול יותר לפי היחס
+    const slotScale = Math.max(1, slotH / 316);
+    // תג מיתוג בפינה — גדל עם השלט (עד פי 2.2) אבל נשאר תג פינתי, לא כותרת
+    let badgeFont = Math.round(34 * Math.min(slotScale, 2.2));
     ctx.font = '800 ' + badgeFont + 'px Heebo, Arial';
     let badgeTextW = ctx.measureText('🛒 ' + storeName).width;
     while (badgeTextW > (x1 - x0) * 0.45 && badgeFont > 18) { badgeFont -= 2; ctx.font = '800 ' + badgeFont + 'px Heebo, Arial'; badgeTextW = ctx.measureText('🛒 ' + storeName).width; }
     const badgeH = Math.round(badgeFont * 1.5), badgeW = Math.round(badgeTextW) + 30;
     const badgeX1 = x1 - 14, badgeX0v = badgeX1 - badgeW, badgeTopY = y0 + 14, badgeBottomRel = 14 + badgeH;
-    const validFont = 20;
+    const validFont = Math.round(20 * Math.min(slotScale, 2));
     ctx.font = '900 ' + validFont + 'px Heebo, Arial';
     const validW = hasValid ? ctx.measureText('בתוקף עד ' + s.validUntil.trim()).width : 0;
     // קנה-מידה רציף: מתחילים גדול ומקטינים רק עד שהכל נכנס — הפונט תמיד הגדול ביותר האפשרי
     const B = { title: 58, titleLH: 62, big: 96, bigPad: 26, bigAfter: 44, old: 30, note: 30, listHead: 24, list: 24, listSmall: 19, listLH: 28, topPad: 78 };
     let M = null, titleLines = null, fitsAll = false, linesOut = [], lineCounts = [], brandShift = 0, titleCx = cx;
-    // הפונטים הבסיסיים כוילו למשבצת של 1/5 דף (~316px) — במשבצות גדולות מתחילים גדול יותר לפי היחס
-    const slotScale = Math.max(1, slotH / 316);
     for (let f = r2(slotScale); f >= 0.4; f = r2(f * 0.92)) {
       const m = {}; Object.keys(B).forEach(k => m[k] = Math.max(10, Math.round(B[k] * f)));
       const listF = Math.min(f, 1.6); // רשימת הברקודים לא מתנפחת כמו הכותרת — נשארת כתב קטן וקריא
@@ -6054,10 +6054,18 @@ function drawSignCanvas() {
         ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = Math.max(2, Math.round(M.old / 10));
         ctx.beginPath(); ctx.moveTo(oldCx - ow / 2 - 4, by - 4 - M.old * 0.32); ctx.lineTo(oldCx + ow / 2 + 4, by - 4 - M.old * 0.32); ctx.stroke();
       }
-      if (s.note) { by += M.note + 16; ctx.fillStyle = '#475569'; ctx.font = '900 ' + M.note + 'px Heebo, Arial'; ctx.fillText('* ' + s.note, cx, by); }
+      if (s.note) {
+        by += M.note + 16; ctx.fillStyle = '#475569';
+        let noteF = M.note; ctx.font = '900 ' + noteF + 'px Heebo, Arial';
+        while (ctx.measureText('* ' + s.note).width > widthAvail && noteF > 14) { noteF--; ctx.font = '900 ' + noteF + 'px Heebo, Arial'; } // ההערה מתכווצת עד שכולה נכנסת
+        ctx.fillText('* ' + s.note, cx, by);
+      }
     } else if (s.note) {
       // אין מחיר — ההערה ממורכזת ברצועה
       ctx.fillStyle = '#475569'; ctx.font = '900 ' + M.note + 'px Heebo, Arial';
+      let noteF2 = M.note;
+      ctx.font = '900 ' + noteF2 + 'px Heebo, Arial';
+      while (ctx.measureText('* ' + s.note).width > widthAvail && noteF2 > 14) { noteF2--; ctx.font = '900 ' + noteF2 + 'px Heebo, Arial'; }
       ctx.fillText('* ' + s.note, cx, bandTop + Math.floor((bandBottom - bandTop) / 2));
     }
     // בלוק הרשימה — צמוד לתחתית, בעוגן שחושב מראש
