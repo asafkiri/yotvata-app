@@ -5952,6 +5952,8 @@ function drawSignCanvas() {
     const slotScale = Math.max(1, slotH / 316);
     for (let f = r2(slotScale); f >= 0.4; f = r2(f * 0.92)) {
       const m = {}; Object.keys(B).forEach(k => m[k] = Math.max(10, Math.round(B[k] * f)));
+      const listF = Math.min(f, 1.6); // רשימת הברקודים לא מתנפחת כמו הכותרת — נשארת כתב קטן וקריא
+      ['listHead', 'list', 'listSmall', 'listLH'].forEach(k => m[k] = Math.max(10, Math.round(B[k] * listF)));
       ctx.font = '900 ' + m.title + 'px Heebo, Arial';
       let tl = signWrapText(ctx, s.title || '', widthAvail).slice(0, 2);
       if (f < 0.8 && tl.length > 1) tl = [tl[0].replace(/\s+\S*$/, '') + '…'];
@@ -5971,7 +5973,7 @@ function drawSignCanvas() {
       // רשימת ברקודים באריזה לפי רוחב, בפונט הקטן
       const bl = buildLines('900 ' + m.listSmall + 'px Heebo, Arial');
       const top = shift + m.topPad + tl.length * m.titleLH + (big ? m.bigPad + m.bigAfter : 0) + (s.note ? 20 : 0);
-      const listH = prods.length ? 12 + (m.listHead + 16) + bl.out.length * m.listLH + 14 : 0;
+      const listH = prods.length ? 12 + (m.listHead - 6 + m.listLH) + bl.out.length * m.listLH + 14 : 0;
       M = m; titleLines = tl; linesOut = bl.out; lineCounts = bl.counts; brandShift = shift; titleCx = tCx;
       if (top + listH <= innerH) { fitsAll = true; break; }
     }
@@ -5996,7 +5998,7 @@ function drawSignCanvas() {
     ctx.fillStyle = '#0f172a'; ctx.font = '900 ' + M.title + 'px Heebo, Arial';
     titleLines.forEach(ln => { ctx.fillText(ln, titleCx, y); y += M.titleLH; });
     // --- מחשבים קודם את עוגן הרשימה, כדי שהמחיר ידע כמה מקום יש לו למלא ---
-    const headH = M.listHead + 16;
+    const headH = (M.listHead - 6) + M.listLH; // רווח כותרת→שורה ראשונה גדל עם הפונט — היה קבוע וגרם לחפיפה בשלטים גדולים
     const yAfterMiddlePred = y + (big ? M.bigPad + M.bigAfter : 0) + (s.note ? 20 : 0);
     let shown = [], hasMore = false, moreCount = 0, lyAnchor = null;
     if (prods.length) {
@@ -6026,7 +6028,7 @@ function drawSignCanvas() {
       const ow = oldTxt ? ctx.measureText(oldTxt).width : 0;
       const oldSpan = oldTxt ? ow + 24 : 0;
       const measureBig = (sz) => { if (segs) return measurePriceSegs(ctx, segs, sz); ctx.font = '900 ' + sz + 'px Heebo, Arial'; return ctx.measureText(big).width; };
-      let bigSize = Math.max(M.big, Math.min(190, Math.floor((bandH - noteH) / 0.85)));
+      let bigSize = Math.max(M.big, Math.min(Math.round(190 * slotScale), Math.floor((bandH - noteH) / 0.85)));
       while (measureBig(bigSize) + oldSpan > widthAvail && bigSize > Math.round(M.big * 0.7)) { bigSize -= 4; }
       const bw = measureBig(bigSize);
       const groupH = Math.round(bigSize * 0.78) + noteH;
