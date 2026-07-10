@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v103.2 בדיקה ידנית</title>
+    <title>הזמנות יטבתה - v103.3 בדיקה ידנית</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v103.2 בדיקה ידנית</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v103.3 בדיקה ידנית</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -2175,7 +2175,7 @@ function renderReturnsHistory() {
       const openGap = credited && r.creditStatus === 'open';
       const credDate = r.creditedAt ? new Date(r.creditedAt).toLocaleDateString('he-IL') : '';
       const statusBar = !credited
-        ? '<div class="bg-amber-400 text-amber-900 px-4 py-2.5 flex items-center gap-2 font-black"><i class="fa-solid fa-hourglass-half"></i> ממתין לאימות זיכוי</div>'
+        ? '<div class="bg-amber-400 text-amber-900 px-4 py-2.5 flex items-center gap-2 font-black"><i class="fa-solid fa-hourglass-half"></i> ממתין לאימות זיכוי<button data-role="ret-resend" data-id="' + r.id + '" class="btn-tap mr-auto text-[11px] bg-white/80 text-amber-900 border border-amber-500/40 rounded-lg px-2.5 py-1 font-black"><i class="fa-brands fa-whatsapp"></i> שלח שוב</button></div>'
         : (openGap
           ? '<div class="bg-rose-500 text-white px-4 py-2.5 flex items-center gap-2 font-black"><i class="fa-solid fa-triangle-exclamation"></i> אומת — נותר פער בזיכוי</div>'
           : '<div class="bg-green-500 text-white px-4 py-2.5 flex items-center gap-2 font-black"><i class="fa-solid fa-circle-check"></i> הזיכוי אומת' + (credDate ? ' · ' + credDate : '') + '</div>');
@@ -2583,6 +2583,12 @@ function openResend(order) {
   sendCtx = { type: 'order', items, resetCurrent: false };
   renderSendModal(items, 'שליחה חוזרת', 'order');
 }
+function openReturnsResend(r) {
+  const items = (r.items || []).map(i => ({ name: i.name, barcode: i.barcode || '', qty: i.qty }));
+  if (!items.length) return;
+  sendCtx = { type: 'returns', items: items, resetCurrent: false, resendExisting: true };
+  renderSendModal(items, 'שליחה חוזרת — חזרות', 'returns');
+}
 function hideSend() { const m = $('sendModal'); m.classList.add('hidden'); m.classList.remove('flex'); }
 async function performSend(contact) {
   if (!sendCtx || !sendCtx.items.length) return;
@@ -2591,6 +2597,13 @@ async function performSend(contact) {
   let phone = (contact.phone || '').replace(/[-+\s]/g, '');
   if (phone.startsWith('0')) phone = '972' + phone.substring(1);
   if (type === 'returns') {
+    if (sendCtx.resendExisting) {
+      // שליחה חוזרת של תעודה קיימת — רק וואטסאפ, בלי ליצור רשומה חדשה ובלי לגעת בטיוטה
+      const msg = buildReturnsMessage(items, note);
+      const url = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg);
+      sendCtx = null; hideSend(); window.location.href = url;
+      return;
+    }
     const opId = sendCtx.operationId || (sendCtx.operationId = makeOperationId('returns'));
     const data = {
       timestamp: Date.now(), sentTo: contact.name, items, credited: false,
@@ -6620,6 +6633,7 @@ app.addEventListener('click', (e) => {
   else if (role === 'add-contact') addContact();
   else if (role === 'del-contact') { const c = contacts.find(x => x.id === id); showConfirm('מחיקת איש קשר', 'למחוק את "' + (c ? c.name : '') + '"?', 'מחק', () => delContact(id)); }
   else if (role === 'resend') { const o = history.find(x => x.id === id); if (o) openResend(o); }
+  else if (role === 'ret-resend') { const r = returns.find(x => x.id === id); if (r) openReturnsResend(r); }
   else if (role === 'add-note') addNote();
   else if (role === 'done-note') doneNote(id);
   else if (role === 'ret-add') addReturn(id);
