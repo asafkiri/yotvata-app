@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v104 מחיר זיכוי</title>
+    <title>הזמנות יטבתה - v105 כרטיס מוצר מאוחד</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v104 מחיר זיכוי</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v105 כרטיס מוצר מאוחד</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -194,7 +194,7 @@
     <div id="newProductModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm items-center justify-center p-4 z-[70]">
       <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
         <div class="p-5">
-          <div class="flex items-center gap-2 mb-1"><i class="fa-solid fa-plus text-blue-600 text-xl"></i><h3 class="font-black text-lg text-slate-800">מוצר חדש</h3></div>
+          <div class="flex items-center gap-2 mb-1"><i class="fa-solid fa-shekel-sign text-blue-600 text-xl"></i><h3 id="npr_title" class="font-black text-lg text-slate-800">השלמת מחיר</h3></div>
           <p class="text-slate-500 text-sm mb-3">ברקוד: <span id="npr_code" class="font-bold text-slate-700"></span></p>
           <label class="text-[11px] text-slate-400 font-bold block mb-1">שם המוצר</label>
           <input id="npr_name" type="text" autocomplete="off" class="w-full p-3 rounded-xl border-2 border-slate-200 outline-none font-bold focus:border-blue-500 mb-3 disabled:bg-slate-100 disabled:text-slate-500" placeholder="שם המוצר">
@@ -204,7 +204,7 @@
         </div>
         <div class="flex gap-2 p-4 pt-0">
           <button id="npr_cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">ביטול</button>
-          <button id="npr_ok" class="btn-tap flex-1 py-3 rounded-xl font-black bg-blue-600 text-white">שמור והוסף</button>
+          <button id="npr_ok" class="btn-tap flex-1 py-3 rounded-xl font-black bg-blue-600 text-white">שמור והמשך</button>
         </div>
       </div>
     </div>
@@ -272,37 +272,86 @@
       </div>
     </div>
 
-    <!-- חלון עריכת מוצר (עדכון מחירים) -->
+    <!-- כרטיס מוצר מאוחד — יצירה ועריכה -->
     <div id="prodModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm items-center justify-center p-4 z-[70]">
-      <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
-        <div class="p-5">
-          <div class="flex items-center gap-2 mb-3"><i class="fa-solid fa-tag text-blue-600 text-xl"></i><h3 id="prodTitle" class="font-black text-lg text-slate-800">עדכון מוצר</h3></div>
-          <label class="text-[11px] text-slate-400 font-bold block mb-1">שם המוצר</label>
-          <input id="prod_name" type="text" autocomplete="off" class="w-full p-3 rounded-xl border-2 border-slate-200 outline-none font-bold focus:border-blue-500 mb-3" placeholder="שם המוצר">
-          <label class="text-[11px] text-slate-400 font-bold block mb-1">ברקוד</label>
-          <div class="flex items-center gap-2 mb-3">
-            <input id="prod_barcode" type="text" inputmode="numeric" autocomplete="off" class="flex-1 p-3 rounded-xl border-2 border-slate-200 outline-none font-bold tracking-wide text-center focus:border-blue-500" placeholder="ללא ברקוד">
-            <button id="pr_scanbc" class="btn-tap shrink-0 px-4 py-3 rounded-xl font-black bg-blue-50 text-blue-700 flex items-center gap-2"><i class="fa-solid fa-camera"></i></button>
-          </div>
-          <label class="text-[11px] text-slate-400 font-bold block mb-1">מחיר ליחידה (ללא מע"מ)</label>
-          <div class="flex items-center gap-2"><span class="text-slate-400 font-bold text-lg">₪</span><input id="prod_price" type="text" inputmode="decimal" class="flex-1 p-3 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-blue-500" placeholder="0.00"></div>
-          <div class="mt-2.5 bg-slate-50 rounded-xl p-2.5 border border-slate-100">
-            <div class="text-[11px] text-slate-500 font-bold mb-1.5"><i class="fa-solid fa-calculator"></i> מחשבון: מחיר ארגז ← מחיר ליחידה</div>
-            <div class="flex items-center gap-2">
-              <input id="prod_cartonPrice" type="text" inputmode="decimal" class="flex-1 w-full p-2 rounded-lg border-2 border-slate-200 outline-none text-center font-bold text-sm focus:border-blue-500" placeholder="מחיר לארגז">
-              <span class="text-slate-400 font-black">÷</span>
-              <input id="prod_cartonUnits" type="text" inputmode="numeric" class="flex-1 w-full p-2 rounded-lg border-2 border-slate-200 outline-none text-center font-bold text-sm focus:border-blue-500" placeholder="יח׳ בארגז">
-            </div>
-            <div id="prod_cartonResult" class="text-[11px] text-emerald-700 font-bold mt-1.5 min-h-[15px]"></div>
-          </div>
-          <label class="text-[11px] text-slate-400 font-bold block mb-1 mt-2.5">מחיר זיכוי בחזרות — רק אם שונה ממחיר הקנייה (למשל: קונים במחיר מארז, מזוכים במחיר בודד)</label>
-          <div class="flex items-center gap-2"><span class="text-slate-400 font-bold text-lg">₪</span><input id="prod_creditPrice" type="text" inputmode="decimal" class="flex-1 p-3 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-amber-500" placeholder="ריק = כמו מחיר הקנייה"></div>
-          <button id="prod_del" class="btn-tap hidden mt-3 w-full py-2.5 rounded-xl font-black bg-red-50 text-red-600 flex items-center justify-center gap-2"><i class="fa-solid fa-trash-can"></i> מחק מוצר</button>
+      <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden max-h-[92vh] flex flex-col">
+        <div class="p-5 pb-3 shrink-0 border-b border-slate-100">
+          <div class="flex items-center gap-2"><i class="fa-solid fa-box-open text-blue-600 text-xl"></i><h3 id="prodTitle" class="font-black text-lg text-slate-800">כרטיס מוצר</h3></div>
+          <p class="text-[11px] text-slate-400 font-bold mt-1">כל פרטי המוצר נשמרים יחד בענן</p>
         </div>
-        <div class="px-4 pb-2"><button id="prod_again" class="btn-tap hidden w-full py-3.5 rounded-xl font-black bg-blue-600 text-white flex items-center justify-center gap-2 text-base"><i class="fa-solid fa-barcode"></i> שמור וסרוק הבא</button></div>
-        <div class="flex gap-2 p-4 pt-2">
+        <div id="prodFormScroll" class="px-5 py-4 overflow-y-auto space-y-4">
+          <section class="bg-white border border-slate-200 rounded-2xl p-3">
+            <div class="font-black text-sm text-slate-700 mb-3"><i class="fa-solid fa-tag text-blue-600 ml-1"></i> פרטי המוצר</div>
+            <label class="text-[11px] text-slate-400 font-bold block mb-1">שם המוצר *</label>
+            <input id="prod_name" type="text" autocomplete="off" class="w-full p-3 rounded-xl border-2 border-slate-200 outline-none font-bold focus:border-blue-500 mb-3" placeholder="שם המוצר">
+            <label class="text-[11px] text-slate-400 font-bold block mb-1">ברקוד</label>
+            <div class="flex items-center gap-2 mb-3">
+              <input id="prod_barcode" type="text" inputmode="numeric" autocomplete="off" class="flex-1 min-w-0 p-3 rounded-xl border-2 border-slate-200 outline-none font-bold tracking-wide text-center focus:border-blue-500" placeholder="ללא ברקוד">
+              <button id="pr_scanbc" class="btn-tap shrink-0 w-12 h-12 rounded-xl font-black bg-blue-50 text-blue-700 flex items-center justify-center" title="סרוק ברקוד"><i class="fa-solid fa-camera"></i></button>
+            </div>
+            <label class="text-[11px] text-slate-400 font-bold block mb-1">קבוצה במסך ההזמנה *</label>
+            <select id="prod_category" class="w-full p-3 rounded-xl border-2 border-slate-200 outline-none font-bold bg-white focus:border-blue-500"></select>
+            <div class="text-[10px] text-slate-400 font-bold mt-1.5">הקבוצה קובעת גם את הסדר ואת מחיר המכירה המומלץ לפי אחוז הרווח שלה.</div>
+          </section>
+
+          <section class="bg-white border border-slate-200 rounded-2xl p-3">
+            <div class="font-black text-sm text-slate-700 mb-3"><i class="fa-solid fa-shekel-sign text-emerald-600 ml-1"></i> מחירים</div>
+            <label class="text-[11px] text-slate-400 font-bold block mb-1">מחיר קנייה ליחידה (ללא מע״מ) *</label>
+            <div class="flex items-center gap-2"><span class="text-slate-400 font-bold text-lg">₪</span><input id="prod_price" type="text" inputmode="decimal" class="flex-1 p-3 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-blue-500" placeholder="0.00"></div>
+            <div id="prod_recHint" class="hidden text-[11px] font-black text-emerald-700 text-center mt-2"></div>
+            <details id="prod_cartonCalc" class="mt-3 bg-slate-50 rounded-xl border border-slate-100">
+              <summary class="p-2.5 flex items-center justify-between text-[11px] text-slate-600 font-black"><span><i class="fa-solid fa-calculator"></i> יש לי מחיר של ארגז</span><i class="fa-solid fa-chevron-down hist-chevron"></i></summary>
+              <div class="px-2.5 pb-2.5">
+                <div class="text-[10px] text-slate-400 font-bold mb-1.5">המחשבון ממלא אוטומטית את מחיר היחידה.</div>
+                <div class="flex items-center gap-2">
+                  <input id="prod_cartonPrice" type="text" inputmode="decimal" class="flex-1 w-full p-2 rounded-lg border-2 border-slate-200 outline-none text-center font-bold text-sm focus:border-blue-500" placeholder="מחיר לארגז">
+                  <span class="text-slate-400 font-black">÷</span>
+                  <input id="prod_cartonUnits" type="text" inputmode="numeric" class="flex-1 w-full p-2 rounded-lg border-2 border-slate-200 outline-none text-center font-bold text-sm focus:border-blue-500" placeholder="יח׳ בארגז">
+                </div>
+                <div id="prod_cartonResult" class="text-[11px] text-emerald-700 font-bold mt-1.5 min-h-[15px]"></div>
+              </div>
+            </details>
+            <details id="prod_morePrices" class="mt-2 bg-amber-50/60 rounded-xl border border-amber-100">
+              <summary class="p-2.5 flex items-center justify-between text-[11px] text-amber-800 font-black"><span>אפשרויות מחיר נוספות</span><i class="fa-solid fa-chevron-down hist-chevron"></i></summary>
+              <div class="px-2.5 pb-2.5">
+                <label class="text-[11px] text-slate-500 font-bold block mb-1">מחיר זיכוי בחזרות — רק אם שונה ממחיר הקנייה</label>
+                <div class="flex items-center gap-2"><span class="text-slate-400 font-bold text-lg">₪</span><input id="prod_creditPrice" type="text" inputmode="decimal" class="flex-1 p-2.5 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-amber-500" placeholder="ריק = כמו מחיר הקנייה"></div>
+              </div>
+            </details>
+          </section>
+
+          <section class="bg-white border border-slate-200 rounded-2xl p-3">
+            <div class="font-black text-sm text-slate-700 mb-3"><i class="fa-solid fa-cart-shopping text-amber-600 ml-1"></i> הגדרות הזמנה</div>
+            <label class="text-[11px] text-slate-400 font-bold block mb-1.5">איך מזמינים בדרך כלל?</label>
+            <input id="prod_defaultUnit" type="hidden" value="carton">
+            <div class="flex bg-slate-100 rounded-xl p-1 mb-3">
+              <button id="prod_unit_carton" type="button" class="btn-tap flex-1 py-2.5 rounded-lg text-sm font-black flex items-center justify-center gap-1.5"><i class="fa-solid fa-box"></i> ארגז</button>
+              <button id="prod_unit_unit" type="button" class="btn-tap flex-1 py-2.5 rounded-lg text-sm font-black flex items-center justify-center gap-1.5"><i class="fa-solid fa-hashtag"></i> יחידות</button>
+            </div>
+            <label id="prod_averageLabel" class="text-[11px] text-slate-400 font-bold block mb-1">כמות מומלצת להזמנה</label>
+            <input id="prod_average" type="text" inputmode="numeric" class="w-full p-3 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-blue-500 mb-3" placeholder="לדוגמה 1">
+            <label class="flex items-start gap-2 p-3 rounded-xl bg-amber-50 border border-amber-100 cursor-pointer">
+              <input id="prod_wholeCarton" type="checkbox" class="mt-1 w-4 h-4 accent-amber-600">
+              <span><span class="block text-sm font-black text-amber-900">המוצר מתקבל רק בארגזים שלמים</span><span class="block text-[10px] text-amber-700 font-bold mt-0.5">משמש את הבלש כדי לבדוק רק כפולות של ארגז שלם.</span></span>
+            </label>
+            <div id="prod_boxSizeWrap" class="hidden mt-2.5">
+              <label class="text-[11px] text-slate-500 font-bold block mb-1">כמה יחידות יש בארגז?</label>
+              <input id="prod_boxSize" type="text" inputmode="numeric" class="w-full p-3 rounded-xl border-2 border-amber-200 bg-amber-50 outline-none text-center font-black focus:border-amber-500" placeholder="לדוגמה 12">
+            </div>
+            <label class="flex items-center justify-between gap-3 mt-3 p-3 rounded-xl bg-slate-50 border border-slate-100 cursor-pointer">
+              <span><span class="block text-sm font-black text-slate-700">הצג במסך ההזמנה</span><span class="block text-[10px] text-slate-400 font-bold">כיבוי מסתיר רק מההזמנה; המוצר נשאר בקליטה ובחזרות.</span></span>
+              <input id="prod_visible" type="checkbox" class="w-5 h-5 accent-blue-600" checked>
+            </label>
+          </section>
+
+          <button id="prod_del" class="btn-tap hidden w-full py-2.5 rounded-xl font-black bg-red-50 text-red-600 flex items-center justify-center gap-2"><i class="fa-solid fa-trash-can"></i> מחק מוצר</button>
+        </div>
+        <div class="p-4 pt-3 shrink-0 border-t border-slate-100 bg-white">
+          <button id="prod_again" class="btn-tap hidden w-full py-3 rounded-xl font-black bg-blue-600 text-white flex items-center justify-center gap-2 text-sm mb-2"><i class="fa-solid fa-plus"></i> שמור והוסף מוצר נוסף</button>
+          <div class="flex gap-2">
           <button id="prod_cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">ביטול</button>
-          <button id="prod_save" class="btn-tap flex-1 py-3 rounded-xl font-black bg-green-600 text-white">שמור</button>
+          <button id="prod_save" class="btn-tap flex-1 py-3 rounded-xl font-black bg-green-600 text-white">שמור מוצר</button>
+          </div>
         </div>
       </div>
     </div>
@@ -452,11 +501,13 @@ let pendingScanBarcode = null;   // ברקוד חדש שממתין ליצירת 
 let npMode = 'create', npProductId = null, npTarget = 'receipt'; // מצב + יעד חלון מוצר חדש
 let promoEditId = null;          // מוצר בעריכת מבצע
 let qtyProduct = null, qtyTarget = 'receipt'; // חלון כמות בסריקה
-let priceEditId = null, priceFromScan = false, priceQuery = ''; // עדכון מחירים
+let priceEditId = null, priceFromScan = false, priceQuery = ''; // מוצרים ומחירים
+let productCreateId = null, prodAfterSaveTarget = null, productEditorScanReturn = false;
 let promoUnitMode = 'unit'; // יחידת סף המבצע: 'unit' | 'carton'
 let promos = [], promoEdit = null, promoSearch = ''; // מבצעי סל
 let promoType = 'receipt'; // סוג מבצע בעורך: 'receipt' (בתעודה) | 'monthEnd' (מרכזת)
 const priceTimers = {};
+const pendingUnitIntents = {};
 
 const $ = (id) => document.getElementById(id);
 const app = $('app');
@@ -465,11 +516,25 @@ function buzz(ms) { try { if (navigator.vibrate) navigator.vibrate(ms); } catch 
 
 // ===== טיוטת הזמנה =====
 function saveDraft() {
-  if (!draftReady) { draftReady = true; return; }
+  draftReady = true;
   try { localStorage.setItem(ORDER_DRAFT_KEY, JSON.stringify(orderState)); } catch (e) {}
+}
+function saveDraftPassive() {
+  // סנכרון רקע לא מוחק כמות פעילה שנכתבה בטאב אחר של אותו מכשיר.
+  try {
+    const disk = JSON.parse(localStorage.getItem(ORDER_DRAFT_KEY) || '{}') || {};
+    const merged = { ...orderState };
+    Object.keys(disk).forEach(id => {
+      if (hasEnteredAmount(disk[id] && disk[id].amount) && !hasEnteredAmount(merged[id] && merged[id].amount)) merged[id] = disk[id];
+    });
+    orderState = merged;
+    localStorage.setItem(ORDER_DRAFT_KEY, JSON.stringify(orderState));
+    draftReady = true;
+  } catch (e) { saveDraft(); }
 }
 function restoreDraft() {
   try { const s = localStorage.getItem(ORDER_DRAFT_KEY); if (s) { const o = JSON.parse(s); if (o && typeof o === 'object') orderState = { ...orderState, ...o }; } } catch (e) {}
+  draftReady = true;
 }
 function saveReturnsDraft() {
   try { localStorage.setItem(RETURNS_DRAFT_KEY, JSON.stringify(returnsList)); } catch (e) {}
@@ -528,7 +593,7 @@ if (auth) {
 
 function fallbackLocal() {
   products = INITIAL_PRODUCTS.slice(); contacts = INITIAL_CONTACTS.slice();
-  products.forEach(p => { if (!orderState[p.id]) orderState[p.id] = { amount: '', unit: p.defaultUnit }; });
+  products.forEach(p => { if (!orderState[p.id]) orderState[p.id] = { amount: '', unit: normalizeOrderUnit(p.defaultUnit) }; });
   renderView();
 }
 
@@ -550,8 +615,37 @@ function startListeners() {
     arr.sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
     products = arr;
     let changed = false;
-    products.forEach(p => { if (!orderState[p.id]) { orderState[p.id] = { amount: '', unit: p.defaultUnit }; changed = true; } });
-    if (changed) saveDraft();
+    const repainted = [];
+    products.forEach(p => {
+      const pending = pendingUnitIntents[p.id];
+      const cloudUpdatedAt = Number(p.defaultUnitUpdatedAt) || 0;
+      if (pending && pending.updatedAt > cloudUpdatedAt) {
+        // כתיבה שנדחתה/ממתינה נשארת הבחירה המקומית עד ניסיון חוזר; rollback מהענן לא יקפיץ את הכפתור אחורה.
+        p.defaultUnit = pending.unit;
+        p.defaultUnitUpdatedAt = pending.updatedAt;
+      } else if (pending && cloudUpdatedAt >= pending.updatedAt && normalizeOrderUnit(p.defaultUnit) === normalizeOrderUnit(pending.unit)) {
+        delete pendingUnitIntents[p.id];
+      } else if (pending && cloudUpdatedAt > pending.updatedAt) {
+        // מכשיר אחר שמר בחירה חדשה יותר — הכוונה המקומית הישנה מבוטלת.
+        delete pendingUnitIntents[p.id];
+        const queued = cloudFailedWrites.find(x => x.operationId === 'default_unit_' + p.id);
+        if (queued) removeCloudFailedWrite(queued.id);
+      }
+      const cloudUnit = normalizeOrderUnit(p.defaultUnit);
+      const st = orderState[p.id];
+      if (!st) {
+        orderState[p.id] = { amount: '', unit: cloudUnit };
+        changed = true;
+        repainted.push(p.id);
+      } else if (Number(p.defaultUnitUpdatedAt) > 0 && !hasEnteredAmount(st.amount) && normalizeOrderUnit(st.unit) !== cloudUnit) {
+        // שינוי חדש שסונכרן מהענן: מעדכנים רק שורה ריקה, לא הזמנה שכבר הוזנה בה כמות.
+        st.unit = cloudUnit;
+        changed = true;
+        repainted.push(p.id);
+      }
+    });
+    if (changed) saveDraftPassive();
+    repainted.forEach(paintOrderUnitButtonById);
     rerender();
   }, console.error);
 
@@ -591,8 +685,12 @@ function startListeners() {
   onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'pricing'), (snap) => {
     const d = snap.data();
     const incoming = (d && Array.isArray(d.categories)) ? d.categories : [];
-    if (JSON.stringify(incoming) === JSON.stringify(pricingCats)) return;
+    pricingCatsLoaded = true;
+    const pricingChanged = JSON.stringify(incoming) !== JSON.stringify(pricingCats);
     pricingCats = incoming;
+    const prodModalOpen = $('prodModal') && !$('prodModal').classList.contains('hidden');
+    if (prodModalOpen) fillProdCategoryOptions(($('prod_category') && $('prod_category').value) || '');
+    if (!pricingChanged) return;
     if ((currentView === 'prices' || currentView === 'order' || currentView === 'settings')) {
       const a = document.activeElement;
       if (!(a && app.contains(a) && (a.tagName === 'INPUT' || a.tagName === 'SELECT'))) rerender();
@@ -755,7 +853,7 @@ function buildOrderRowsGrouped(visible) {
   return html;
 }
 function buildOrderRow(p) {
-  const st = orderState[p.id] || { amount: '', unit: p.defaultUnit };
+  const st = orderState[p.id] || { amount: '', unit: normalizeOrderUnit(p.defaultUnit) };
   const sel = parseInt(st.amount, 10) > 0;
   const isCarton = st.unit !== 'unit';
   const rec = parseInt(p.average, 10) || 0;
@@ -791,7 +889,8 @@ function refreshRowSelected(id) {
 }
 
 function setAmount(id, val) {
-  const st = orderState[id] || (orderState[id] = { amount: '', unit: 'carton' });
+  const p = products.find(x => x.id === id);
+  const st = orderState[id] || (orderState[id] = { amount: '', unit: normalizeOrderUnit(p && p.defaultUnit) });
   let v = (val === '' || val == null) ? '' : String(parseInt(val, 10) || 0);
   if (v === '0') v = '';
   st.amount = v;
@@ -860,9 +959,9 @@ function applySearch(q) {
 
 function clearOrder() {
   const prev = {};
-  products.forEach(p => { const st = orderState[p.id] || {}; prev[p.id] = { amount: st.amount || '', unit: st.unit || p.defaultUnit }; });
+  products.forEach(p => { const st = orderState[p.id] || {}; prev[p.id] = { amount: st.amount || '', unit: normalizeOrderUnit(st.unit || p.defaultUnit) }; });
   orderState = {};
-  products.forEach(p => orderState[p.id] = { amount: '', unit: p.defaultUnit });
+  products.forEach(p => orderState[p.id] = { amount: '', unit: normalizeOrderUnit(p.defaultUnit) });
   saveDraft();
   renderOrder();
   updateCart();
@@ -1025,7 +1124,7 @@ function adminSettingsHtml() {
 }
 function adminClickActionName(role) {
   const map = {
-    'cfg-save': 'שמירת הגדרות מערכת', 'add-product': 'הוספת מוצר', 'del-product': 'מחיקת מוצר', 'toggle-hidden': 'הסתרת/הצגת מוצר',
+    'cfg-save': 'שמירת הגדרות מערכת', 'add-product': 'הוספת מוצר', 'del-product': 'מחיקת מוצר', 'toggle-hidden': 'הסתרת/הצגת מוצר', 'sync-local-units': 'סנכרון ארגז/יחידה לענן',
     'del-contact': 'מחיקת איש קשר', 'clear-history': 'מחיקת היסטוריית הזמנות', 'clear-returns-history': 'מחיקת היסטוריית חזרות', 'clear-receipts': 'מחיקת תעודות קליטה',
     'rc-fix-open': 'תיקון תעודה מההיסטוריה', 'rc-fix-save': 'שמירת תיקון תעודה', 'pcat-add': 'עריכת קטגוריות רווחיות', 'pcat-up': 'עריכת קטגוריות רווחיות',
     'pcat-down': 'עריכת קטגוריות רווחיות', 'pcat-del': 'מחיקת קטגוריה רווחית', 'promo-new': 'יצירת מבצע', 'pe-save': 'שמירת מבצע', 'pe-delete': 'מחיקת מבצע',
@@ -1033,7 +1132,7 @@ function adminClickActionName(role) {
   };
   return map[role] || 'פעולה זו דורשת מנהל';
 }
-const ADMIN_CLICK_ROLES = new Set(['cfg-save','add-product','del-product','toggle-hidden','del-contact','clear-history','clear-returns-history','clear-receipts','rc-fix-open','rc-fix-save','pcat-add','pcat-up','pcat-down','pcat-del','promo-new','pe-save','pe-delete','trash-delete','trash-clear','trash-restore','del-receipt','backup-import-confirm','rc-credit-verify','rc-credit-cancel','rc-credit-defer','rc-credit-offset','rc-supplier-verify-open','rc-supplier-defer-open']);
+const ADMIN_CLICK_ROLES = new Set(['cfg-save','add-product','del-product','toggle-hidden','sync-local-units','del-contact','clear-history','clear-returns-history','clear-receipts','rc-fix-open','rc-fix-save','pcat-add','pcat-up','pcat-down','pcat-del','promo-new','pe-save','pe-delete','trash-delete','trash-clear','trash-restore','del-receipt','backup-import-confirm','rc-credit-verify','rc-credit-cancel','rc-credit-defer','rc-credit-offset','rc-supplier-verify-open','rc-supplier-defer-open']);
 const ADMIN_INPUT_ROLES = new Set(['price-set','pcat-name','pcat-pct','cat-set','avg','avg-set','box-set']);
 function restoreLockedAdminInput(t) {
   const role = t && t.getAttribute && t.getAttribute('data-role');
@@ -1051,7 +1150,7 @@ function restoreLockedAdminInput(t) {
 function settingsRowHtml(p) {
   return '<div class="prod-item flex items-center gap-2 p-2.5 ' + (p.hidden ? 'bg-slate-50 opacity-70' : 'bg-white') + ' border border-slate-100 rounded-xl" data-id="' + p.id + '">' +
       '<button data-role="move" data-id="' + p.id + '" class="btn-tap shrink-0 w-9 h-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center" title="העבר מוצר"><i class="fa-solid fa-up-down text-sm"></i></button>' +
-      '<div class="flex-1 min-w-0 font-bold text-sm ' + (p.hidden ? 'text-slate-400 line-through' : 'text-slate-800') + ' leading-tight">' + p.name + (p.hidden ? ' <span class="text-[10px] text-amber-500 font-black no-underline">(אזל)</span>' : '') + '</div>' +
+      '<button data-role="edit-prod" data-id="' + p.id + '" class="btn-tap flex-1 min-w-0 text-right font-bold text-sm ' + (p.hidden ? 'text-slate-400 line-through' : 'text-slate-800') + ' leading-tight">' + p.name + (p.hidden ? ' <span class="text-[10px] text-amber-500 font-black no-underline">(אזל)</span>' : '') + ' <i class="fa-solid fa-pen text-[9px] text-slate-300"></i></button>' +
       '<input data-role="avg-set" data-id="' + p.id + '" type="text" inputmode="numeric" value="' + (p.average || '') + '" placeholder="0" class="w-14 bg-slate-100 rounded-lg p-1.5 text-center font-bold text-sm outline-none">' +
       '<input data-role="box-set" data-id="' + p.id + '" type="text" inputmode="numeric" value="' + (p.boxSize || '') + '" placeholder="📦" title="יח׳ בארגז — רק למוצרים שמגיעים אך ורק בארגזים" class="w-12 bg-amber-50 border border-amber-100 rounded-lg p-1.5 text-center font-bold text-sm outline-none">' +
       '<button data-role="toggle-hidden" data-id="' + p.id + '" class="btn-tap shrink-0 p-2 ' + (p.hidden ? 'text-amber-500' : 'text-slate-300') + '" title="' + (p.hidden ? 'הצג מוצר' : 'הסתר (אזל במלאי)') + '"><i class="fa-solid ' + (p.hidden ? 'fa-eye-slash' : 'fa-eye') + '"></i></button>' +
@@ -1075,6 +1174,32 @@ function buildSettingsRowsGrouped() {
   if (noCat.length) { html += settingsCatHeaderHtml('ללא מחלקה', true); html += sortByOrder(noCat).map(settingsRowHtml).join(''); }
   return html;
 }
+function legacyLocalUnitMismatches() {
+  return products.filter(p => {
+    const st = orderState[p.id];
+    return st && !(Number(p.defaultUnitUpdatedAt) > 0) && normalizeOrderUnit(st.unit) !== normalizeOrderUnit(p.defaultUnit);
+  });
+}
+function legacyUnitSyncCardHtml() {
+  const count = legacyLocalUnitMismatches().length;
+  if (!count) return '';
+  return '<div class="bg-amber-50 border-2 border-amber-200 rounded-2xl p-4 mb-4">' +
+    '<div class="font-black text-amber-900 flex items-center gap-2"><i class="fa-solid fa-mobile-screen"></i> ' + count + ' בחירות ארגז/יחידה קיימות רק במכשיר הזה</div>' +
+    '<div class="text-xs text-amber-800 font-bold mt-1.5 leading-relaxed">אם זה המכשיר שבו ההגדרות נכונות, אפשר להעביר אותן פעם אחת לענן ולשאר המכשירים. הפעולה אינה משנה שורות שכבר הוזנה בהן כמות.</div>' +
+    '<button data-role="sync-local-units" class="btn-tap w-full mt-3 py-3 rounded-xl bg-amber-600 text-white font-black"><i class="fa-solid fa-cloud-arrow-up"></i> סנכרן מהמכשיר הזה לענן</button>' +
+  '</div>';
+}
+async function syncLegacyUnitsFromThisDevice() {
+  const list = legacyLocalUnitMismatches();
+  if (!list.length) { showToast('כל בחירות היחידה כבר מסונכרנות', null, null, 2500); return; }
+  const stamp = Date.now();
+  const writes = list.map(p => ({ op: 'update', path: dataPath('products', p.id), data: { defaultUnit: normalizeOrderUnit(orderState[p.id].unit), defaultUnitUpdatedAt: stamp } }));
+  const saved = await runCloudTask('sync legacy default units', { op: 'batch', writes, operationId: makeOperationId('sync_units') });
+  if (!saved) return;
+  list.forEach(p => { p.defaultUnit = normalizeOrderUnit(orderState[p.id].unit); p.defaultUnitUpdatedAt = stamp; });
+  showToast('בחירות ארגז/יחידה סונכרנו לענן ✓', null, null, 3200);
+  if (currentView === 'settings') renderSettings();
+}
 function renderSettings() {
   if (movingId) { renderMoveMode(); return; }
   const rows = buildSettingsRowsGrouped();
@@ -1090,6 +1215,7 @@ function renderSettings() {
       '</div>' +
     '</div>' +
     adminSettingsHtml() +
+    legacyUnitSyncCardHtml() +
     '<button data-role="go-health" class="btn-tap w-full bg-white border border-slate-200 p-4 rounded-2xl flex items-center justify-center gap-3 mb-3 shadow-sm">' +
       '<div class="bg-indigo-100 p-3 rounded-full text-indigo-600"><i class="fa-solid fa-heart-pulse text-2xl"></i></div>' +
       '<span class="font-black text-slate-700 text-lg">בדיקת תקינות מערכת</span>' +
@@ -1125,11 +1251,9 @@ function renderSettings() {
     '<div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">' +
       '<div class="bg-slate-100 p-4 border-b border-slate-200 flex items-center justify-between gap-2"><h2 class="font-black text-lg text-slate-800">עריכת מוצרים</h2><span class="text-[11px] text-slate-500 font-medium flex items-center gap-1"><i class="fa-solid fa-up-down"></i> לחץ ⬍ להעברה</span></div>' +
       '<div class="px-4 py-2 bg-amber-50/60 border-b border-slate-200 text-[11px] font-bold text-slate-500">העמודה האפורה: כמות מומלצת להזמנה · עמודת 📦: יח׳ בארגז — מלא <b>רק</b> למוצרים שמגיעים אך ורק בארגזים שלמים (משמש את הבלש בהשוואת תעודה)</div>' +
-      '<div class="p-4 bg-blue-50 border-b border-slate-200 flex flex-wrap gap-2 items-end">' +
-        '<div class="flex-1 min-w-[150px]"><label class="block text-xs font-bold text-slate-500 mb-1">שם</label><input id="npName" type="text" class="w-full p-2 rounded-lg border border-slate-200 outline-none bg-white"></div>' +
-        '<div class="w-16"><label class="block text-xs font-bold text-slate-500 mb-1">מומלץ</label><input id="npAvg" type="text" inputmode="numeric" class="w-full p-2 rounded-lg border border-slate-200 outline-none text-center bg-white"></div>' +
-        '<div class="w-20"><label class="block text-xs font-bold text-slate-500 mb-1">ברירת מחדל</label><select id="npUnit" class="w-full p-2 rounded-lg border border-slate-200 outline-none bg-white"><option value="carton">ארגז</option><option value="unit">יחידה</option></select></div>' +
-        '<button data-role="add-product" class="btn-tap bg-blue-600 text-white p-2.5 rounded-lg font-bold self-end mb-[1px]"><i class="fa-solid fa-plus"></i></button>' +
+      '<div class="p-4 bg-blue-50 border-b border-slate-200">' +
+        '<div class="text-xs text-blue-800 font-bold mb-2">מוצר חדש מוסיפים בכרטיס מלא אחד: ברקוד, מחיר, קבוצה, מומלץ, ארגז ויחידה.</div>' +
+        '<button data-role="add-product" class="btn-tap w-full bg-blue-600 text-white py-3 rounded-xl font-black flex items-center justify-center gap-2"><i class="fa-solid fa-plus"></i> הוסף מוצר חדש</button>' +
       '</div>' +
       '<div id="prodList" class="p-2 space-y-2">' + rows + '</div>' +
     '</div>';
@@ -1323,6 +1447,9 @@ function actionTitleFromCloud(actionName, task) {
     'save receipt fix': ['receipt', 'תיקון תעודה'],
     'save return verification': ['returns', 'אימות תעודת זיכוי'],
     'add product': ['product', 'הוספת מוצר'],
+    'create product': ['product', 'הוספת מוצר'],
+    'save product': ['product', 'עריכת מוצר'],
+    'sync legacy default units': ['product', 'סנכרון ארגז/יחידה לענן'],
     'add contact': ['contact', 'הוספת איש קשר'],
     'toggle product hidden': ['product', 'הסתרת/הצגת מוצר'],
     'save app config': ['settings', 'שמירת הגדרות מערכת'],
@@ -1346,7 +1473,8 @@ function actionDetailsFromCloud(actionName, task) {
   if (actionName === 'save receipt before clearing draft') return 'שורות: ' + (d.count || 0) + ' · סה״כ ללא מע״מ: ₪' + fmtMoney(d.totalExVat || 0) + ' · סטטוס: ' + (d.status || 'ok');
   if (actionName === 'save receipt fix') return 'תעודה עודכנה · שורות: ' + (d.count || 0) + ' · סה״כ: ₪' + fmtMoney(d.totalExVat || 0) + ' · סטטוס: ' + (d.status || 'ok');
   if (actionName === 'save return verification') return d.creditStatus === 'open' ? 'נשמר עם פער פתוח בזיכוי' : 'הזיכוי אומת ללא פער פתוח';
-  if (actionName === 'add product') return d.name ? ('מוצר: ' + d.name + ' · מומלץ: ' + (d.average || 0)) : '';
+  if (actionName === 'add product' || actionName === 'create product' || actionName === 'save product') return d.name ? ('מוצר: ' + d.name + ' · מומלץ: ' + (d.average || 0) + ' · ברירת מחדל: ' + (d.defaultUnit === 'unit' ? 'יחידות' : 'ארגז')) : '';
+  if (actionName === 'sync legacy default units') return 'סונכרנו בחירות ארגז/יחידה מהמכשיר הזה לענן';
   if (actionName === 'add contact') return d.name ? ('איש קשר: ' + d.name + ' · ' + (d.phone || '')) : '';
   if (actionName === 'toggle product hidden') {
     const id = task && task.path ? task.path[task.path.length - 1] : '';
@@ -1358,7 +1486,7 @@ function actionDetailsFromCloud(actionName, task) {
   return '';
 }
 function shouldLogSilentCloudAction(actionName) {
-  return ['save product price','save price from reconcile','save average','save box size','save product category','save pricing categories'].includes(actionName);
+  return ['save product price','save price from reconcile','save average','save box size','save product category','save default unit','save pricing categories'].includes(actionName);
 }
 function silentActionDetails(actionName, task) {
   const d = (task && task.data) || {};
@@ -1368,6 +1496,7 @@ function silentActionDetails(actionName, task) {
   if (actionName === 'save average') return (p ? p.name + ' · ' : '') + 'מומלץ: ' + (d.average || 0);
   if (actionName === 'save box size') return (p ? p.name + ' · ' : '') + 'יח׳ בארגז: ' + (d.boxSize || 0);
   if (actionName === 'save product category') return (p ? p.name + ' · ' : '') + 'קטגוריה עודכנה';
+  if (actionName === 'save default unit') return (p ? p.name + ' · ' : '') + 'ברירת מחדל: ' + (d.defaultUnit === 'unit' ? 'יחידות' : 'ארגז');
   if (actionName === 'save pricing categories') return 'קטגוריות רווחיות עודכנו · ' + (((d.categories || []).length) || 0) + ' קטגוריות';
   return '';
 }
@@ -1378,7 +1507,7 @@ async function logAction(type, title, details, meta) {
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'actionLog', id), {
       timestamp: Date.now(), type: type || 'system', title: title || 'פעולה', details: details || '',
       deviceName: actionDeviceLabel(), uid: (auth && auth.currentUser && auth.currentUser.uid) || '',
-      appVersion: 'v100_simplified_summary', meta: cloneSafe(meta || {})
+      appVersion: 'v105_unified_product', meta: cloneSafe(meta || {})
     });
   } catch (e) { console.warn('action log failed', e); }
 }
@@ -1390,7 +1519,7 @@ function logCloudActionIfNeeded(actionName, task) {
 function logSilentCloudActionIfNeeded(actionName, task) {
   if (!shouldLogSilentCloudAction(actionName)) return;
   const type = (actionName === 'save product price' || actionName === 'save price from reconcile') ? 'price' : 'product';
-  const titleMap = { 'save product price': 'שינוי מחיר מוצר', 'save price from reconcile': 'שינוי מחיר מהשוואת תעודה', 'save average': 'שינוי כמות מומלצת', 'save box size': 'שינוי יחידות בארגז', 'save product category': 'שינוי קטגוריית מוצר', 'save pricing categories': 'שינוי קטגוריות רווחיות' };
+  const titleMap = { 'save product price': 'שינוי מחיר מוצר', 'save price from reconcile': 'שינוי מחיר מהשוואת תעודה', 'save average': 'שינוי כמות מומלצת', 'save box size': 'שינוי יחידות בארגז', 'save product category': 'שינוי קטגוריית מוצר', 'save default unit': 'שינוי ארגז/יחידה', 'save pricing categories': 'שינוי קטגוריות רווחיות' };
   logAction(type, titleMap[actionName] || 'שינוי מוצר', silentActionDetails(actionName, task), { actionName, operationId: task && task.operationId });
 }
 
@@ -1462,7 +1591,7 @@ async function exportFullBackup() {
       backupType: 'yotvata-firestore-full',
       backupVersion: 1,
       appId,
-      appVersion: 'v100_simplified_summary',
+      appVersion: 'v105_unified_product',
       exportedAt: Date.now(),
       exportedAtIso: new Date().toISOString(),
       collections: {},
@@ -2093,6 +2222,8 @@ async function savePrompt() {
   if (!id) { hidePrompt(); return; }
   const val = ($('promptInput').value || '').trim();
   if (!val) { hidePrompt(); return; }
+  const duplicate = products.find(x => x.id !== id && String(x.barcode || '').trim() === val);
+  if (duplicate) { showToast('הברקוד כבר שייך למוצר: ' + duplicate.name, null, null, 3800); $('promptInput').focus(); return; }
   const saved = await runCloudTask('save product barcode', { op: 'update', path: dataPath('products', id), data: { barcode: val }, operationId: makeOperationId('barcode') });
   if (!saved) return;
   const p = products.find(x => x.id === id); if (p) p.barcode = val;
@@ -2483,18 +2614,7 @@ function saveBoxSize(id, val) {
   clearTimeout(boxTimers[id]);
   boxTimers[id] = setTimeout(() => { runCloudTaskSilent('save box size', { op: 'update', path: dataPath('products', id), data: { boxSize: box }, operationId: makeOperationId('box') }); }, 700);
 }
-async function addProduct() {
-  const nameEl = $('npName'); if (!nameEl) return;
-  const name = nameEl.value.trim(); if (!name || !db) return;
-  const avg = parseInt(($('npAvg').value || '').replace(/[^0-9]/g, ''), 10) || 0;
-  const unit = $('npUnit').value;
-  const maxIdx = products.length ? Math.max(...products.map(p => p.orderIndex || 0)) : -1;
-  const newId = makeOperationId('prod');
-  const data = { name, average: avg, defaultUnit: unit, orderIndex: maxIdx + 1, operationId: newId };
-  const saved = await runCloudTask('add product', { op: 'set', path: dataPath('products', newId), data, operationId: newId });
-  if (!saved) return;
-  nameEl.value = ''; $('npAvg').value = '';
-}
+function addProduct() { openProdModal(null, false, ''); }
 async function delProduct(id) {
   const p = products.find(x => x.id === id);
   const backup = p ? { ...p } : null;
@@ -2518,16 +2638,42 @@ async function delContact(id) {
 }
 
 // ===== החלפת יחידה =====
-function toggleUnit(id, btn) {
-  const st = orderState[id] || (orderState[id] = { amount: '', unit: 'carton' });
-  st.unit = (st.unit === 'unit') ? 'carton' : 'unit';
-  const isCarton = st.unit !== 'unit';
+function normalizeOrderUnit(unit) { return unit === 'unit' ? 'unit' : 'carton'; }
+function hasEnteredAmount(v) { return (parseInt(v, 10) || 0) > 0; }
+function paintOrderUnitButton(btn, unit) {
+  if (!btn) return;
+  const isCarton = normalizeOrderUnit(unit) === 'carton';
   btn.classList.toggle('bg-amber-100', isCarton);
   btn.classList.toggle('text-amber-800', isCarton);
   btn.classList.toggle('bg-emerald-100', !isCarton);
   btn.classList.toggle('text-emerald-800', !isCarton);
   btn.innerHTML = '<i class="fa-solid ' + (isCarton ? 'fa-box' : 'fa-hashtag') + ' text-xs"></i><span class="text-[11px]">' + (isCarton ? 'ארגז' : "יח'") + '</span>';
-  saveDraft();
+}
+function paintOrderUnitButtonById(id) {
+  const btn = app && app.querySelector('[data-role="unit"][data-id="' + id + '"]');
+  const st = orderState[id];
+  if (btn && st) paintOrderUnitButton(btn, st.unit);
+}
+function toggleUnit(id, btn) {
+  const p = products.find(x => x.id === id);
+  const st = orderState[id] || (orderState[id] = { amount: '', unit: normalizeOrderUnit(p && p.defaultUnit) });
+  const nextUnit = (st.unit === 'unit') ? 'carton' : 'unit';
+  st.unit = nextUnit;
+  const updatedAt = Date.now();
+  if (p) { p.defaultUnit = nextUnit; p.defaultUnitUpdatedAt = updatedAt; }
+  saveDraftPassive();
+  paintOrderUnitButton(btn, (orderState[id] && orderState[id].unit) || nextUnit);
+  if (!p) return;
+  const task = {
+    op: 'update', path: dataPath('products', id),
+    data: { defaultUnit: nextUnit, defaultUnitUpdatedAt: updatedAt },
+    operationId: 'default_unit_' + id
+  };
+  // Firestore שומר את סדר הכתיבות מאותו מכשיר; לא ממתינים לאישור כדי לא לחסום החלפה נוספת במצב לא מקוון.
+  pendingUnitIntents[id] = { unit: nextUnit, updatedAt };
+  runCloudTaskSilent('save default unit', task).then(ok => {
+    if (ok && pendingUnitIntents[id] && pendingUnitIntents[id].updatedAt === updatedAt) delete pendingUnitIntents[id];
+  });
 }
 
 // ===== שליחה =====
@@ -2629,7 +2775,7 @@ async function performSend(contact) {
   const url = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg);
   if (resetCurrent) {
     orderState = {};
-    products.forEach(p => orderState[p.id] = { amount: '', unit: p.defaultUnit });
+    products.forEach(p => orderState[p.id] = { amount: '', unit: normalizeOrderUnit(p.defaultUnit) });
     try { localStorage.removeItem(ORDER_DRAFT_KEY); } catch (e) {}
   }
   sendCtx = null;
@@ -2770,7 +2916,7 @@ function onScanned(val) {
   val = (val || '').toString().trim();
   if (!val) { if (barcodeDetector && scanStream) scanTimer = setTimeout(scanTick, 250); return; }
   if (scanPurpose === 'price') { buzz(40); handlePriceScan(val); return; }
-  if (scanPurpose === 'prodbarcode') { buzz(40); const b = $('prod_barcode'); if (b) b.value = val; closeScanner(); const pm = $('prodModal'); if (pm) { pm.classList.remove('hidden'); pm.classList.add('flex'); } return; }
+  if (scanPurpose === 'prodbarcode') { buzz(40); const b = $('prod_barcode'); if (b) b.value = val; closeScanner(); return; }
   if (scanPurpose === 'receiving' || scanPurpose === 'returns') {
     const now = Date.now();
     if (val === lastScanCode && (now - lastScanTime) < 1400) {
@@ -2788,11 +2934,16 @@ function onScanned(val) {
   closeScanner();
 }
 function closeScanner() {
+  const restoreProductEditor = productEditorScanReturn;
+  productEditorScanReturn = false;
   if (scanTimer) { clearTimeout(scanTimer); scanTimer = null; }
   zxingActive = false;
   if (zxingReader) { try { zxingReader.reset(); } catch (e) {} }
   if (scanStream) { try { scanStream.getTracks().forEach(tr => tr.stop()); } catch (e) {} scanStream = null; }
   const v = $('scanVideo'); if (v) { try { v.pause(); v.srcObject = null; } catch (e) {} }
+  if (restoreProductEditor) {
+    const pm = $('prodModal'); if (pm) { pm.classList.remove('hidden'); pm.classList.add('flex'); }
+  }
   const ov = $('scanOverlay'); if (ov) ov.classList.add('hidden');
   const m = $('scanModal'); if (m) { m.classList.add('hidden'); m.classList.remove('flex'); }
   scanPurpose = 'field';
@@ -2841,6 +2992,15 @@ function loadCloudFailedWrites() {
   try { const raw = localStorage.getItem(CLOUD_FAILED_KEY); cloudFailedWrites = raw ? (JSON.parse(raw) || []) : []; }
   catch (e) { cloudFailedWrites = []; }
 }
+function restorePendingUnitIntentsFromFailedWrites() {
+  cloudFailedWrites.forEach(item => {
+    if (item.actionName !== 'save default unit' || !item.task || !item.task.path) return;
+    const id = item.task.path[item.task.path.length - 1];
+    const unit = normalizeOrderUnit(item.task.data && item.task.data.defaultUnit);
+    const updatedAt = Number(item.task.data && item.task.data.defaultUnitUpdatedAt) || 0;
+    if (id && updatedAt && (!pendingUnitIntents[id] || pendingUnitIntents[id].updatedAt < updatedAt)) pendingUnitIntents[id] = { unit, updatedAt };
+  });
+}
 function saveCloudFailedWrites() {
   try { localStorage.setItem(CLOUD_FAILED_KEY, JSON.stringify(cloudFailedWrites.slice(0, 30))); } catch (e) {}
   updateCloudFailButton();
@@ -2858,6 +3018,30 @@ function addCloudFailedWrite(actionName, err, task) {
 function removeCloudFailedWrite(id) {
   cloudFailedWrites = cloudFailedWrites.filter(x => x.id !== id);
   saveCloudFailedWrites();
+}
+function clearSupersededProductFailedWrites(productId) {
+  if (!productId) return;
+  delete pendingUnitIntents[productId];
+  if (!cloudFailedWrites.length) return;
+  const directActions = new Set([
+    'save product', 'save product price', 'save price from reconcile', 'save scanned product price',
+    'save average', 'save box size', 'save product category', 'save default unit',
+    'save product barcode', 'toggle product hidden'
+  ]);
+  let changed = false;
+  cloudFailedWrites = cloudFailedWrites.filter(item => {
+    const task = item && item.task;
+    if (item.actionName === 'sync legacy default units' && task && task.op === 'batch') {
+      const before = (task.writes || []).length;
+      task.writes = (task.writes || []).filter(w => !w.path || w.path[w.path.length - 1] !== productId);
+      if (task.writes.length !== before) changed = true;
+      return task.writes.length > 0;
+    }
+    const targetsProduct = task && task.path && task.path[task.path.length - 1] === productId;
+    if (targetsProduct && directActions.has(item.actionName)) { changed = true; return false; }
+    return true;
+  });
+  if (changed) saveCloudFailedWrites();
 }
 function updateCloudFailButton() {
   let b = document.getElementById('cloudFailBtn');
@@ -2897,6 +3081,32 @@ async function executeCloudTask(task) {
   if (task.op === 'delete') return deleteDoc(ref);
   throw new Error('פעולת ענן לא מוכרת: ' + task.op);
 }
+function retryTaskWithoutStaleUnitWrites(item) {
+  if (!item || !item.task) return null;
+  const task = cloneSafe(item.task);
+  if (item.actionName === 'save default unit' && task.path) {
+    const id = task.path[task.path.length - 1];
+    const p = products.find(x => x.id === id);
+    const queuedAt = Number(task.data && task.data.defaultUnitUpdatedAt) || 0;
+    if (p && Number(p.defaultUnitUpdatedAt) > queuedAt) return null;
+  }
+  if (item.actionName === 'sync legacy default units' && task.op === 'batch') {
+    task.writes = (task.writes || []).filter(w => {
+      const id = w.path && w.path[w.path.length - 1];
+      const p = products.find(x => x.id === id);
+      const queuedAt = Number(w.data && w.data.defaultUnitUpdatedAt) || 0;
+      return !(p && Number(p.defaultUnitUpdatedAt) > queuedAt);
+    });
+    if (!task.writes.length) return null;
+  }
+  return task;
+}
+function clearPendingUnitIntentForTask(actionName, task) {
+  if (actionName !== 'save default unit' || !task || !task.path) return;
+  const id = task.path[task.path.length - 1];
+  const at = Number(task.data && task.data.defaultUnitUpdatedAt) || 0;
+  if (pendingUnitIntents[id] && pendingUnitIntents[id].updatedAt <= at) delete pendingUnitIntents[id];
+}
 async function retryCloudFailedWrites() {
   if (!cloudFailedWrites.length) return;
   if (!db) { showToast('אין חיבור לענן — נסה שוב כשהאפליקציה מחוברת', null, null, 3500); return; }
@@ -2907,7 +3117,15 @@ async function retryCloudFailedWrites() {
   try {
     const list = cloudFailedWrites.slice().reverse(); // הישן קודם
     for (const item of list) {
-      try { await executeCloudTask(item.task); removeCloudFailedWrite(item.id); ok++; }
+      try {
+        const retryTask = retryTaskWithoutStaleUnitWrites(item);
+        if (!retryTask) { clearPendingUnitIntentForTask(item.actionName, item.task); removeCloudFailedWrite(item.id); ok++; continue; }
+        await executeCloudTask(retryTask);
+        clearPendingUnitIntentForTask(item.actionName, retryTask);
+        if (shouldLogSilentCloudAction(item.actionName)) logSilentCloudActionIfNeeded(item.actionName, retryTask);
+        else logCloudActionIfNeeded(item.actionName, retryTask);
+        removeCloudFailedWrite(item.id); ok++;
+      }
       catch (e) { item.error = errText(e); item.tries = (item.tries || 0) + 1; item.updatedAt = Date.now(); fail++; }
     }
     saveCloudFailedWrites();
@@ -2919,12 +3137,21 @@ async function retryCloudFailedWrites() {
 }
 async function runCloudTask(actionName, task) {
   const ok = await mustCloudWrite(actionName, () => executeCloudTask(task), { failedTask: task });
-  if (ok) logCloudActionIfNeeded(actionName, task);
+  if (ok) {
+    const queued = task && task.operationId ? cloudFailedWrites.find(x => x.operationId === task.operationId) : null;
+    if (queued) removeCloudFailedWrite(queued.id);
+    logCloudActionIfNeeded(actionName, task);
+  }
   return ok;
 }
 async function runCloudTaskSilent(actionName, task) {
   if (!db) { addCloudFailedWrite(actionName, new Error('אין חיבור לענן'), task); showToast('שינוי לא נשמר בענן — נשמר ביומן פעולות', null, null, 3000); return false; }
-  try { await executeCloudTask(task); logSilentCloudActionIfNeeded(actionName, task); return true; }
+  try {
+    await executeCloudTask(task);
+    const queued = task && task.operationId ? cloudFailedWrites.find(x => x.operationId === task.operationId) : null;
+    if (queued) removeCloudFailedWrite(queued.id);
+    logSilentCloudActionIfNeeded(actionName, task); return true;
+  }
   catch (e) { console.error(actionName || 'silent cloud write failed', e); addCloudFailedWrite(actionName, e, task); showToast('שינוי לא נשמר בענן — אפשר לנסות שוב מהכפתור הצהוב', null, null, 3500); return false; }
 }
 function showCloudBusy(text) {
@@ -2970,6 +3197,7 @@ async function mustCloudWrite(actionName, fn, opts) {
   }
 }
 loadCloudFailedWrites();
+restorePendingUnitIntentsFromFailedWrites();
 updateCloudFailButton();
 async function hardDeleteDocWithBackup(name, id, data, reason) {
   if (!db || !id) return false;
@@ -3150,7 +3378,7 @@ function updateScanOverlay(name) {
 function handleReceivingScan(code) {
   code = (code || '').trim(); if (!code) return;
   const p = products.find(x => (x.barcode || '') === code);
-  if (!p) { buzz([120, 80, 120]); showToast('❌ המוצר לא נמצא במערכת', null, null, 3500); return; }
+  if (!p) { buzz([120, 80, 120]); promptNewProduct(code, 'receipt'); return; }
   if (p.price == null || p.price === '') { promptSetPrice(p); return; }
   promptQty(p, 'receipt');
 }
@@ -3195,7 +3423,7 @@ function openReturnsScanner() {
 function handleReturnsScan(code) {
   code = (code || '').trim(); if (!code) return;
   const p = products.find(x => (x.barcode || '') === code);
-  if (!p) { buzz([120, 80, 120]); showToast('❌ המוצר לא נמצא במערכת — למוצר ללא ברקוד השתמש ב"הוסף מוצר ידני"', null, null, 4000); return; }
+  if (!p) { buzz([120, 80, 120]); promptNewProduct(code, 'returns'); return; }
   if (p.price == null || p.price === '') { promptSetPrice(p, 'returns'); return; }
   promptQty(p, 'returns');
 }
@@ -3281,7 +3509,7 @@ function renderReceiving() {
   const banner = openRecs.length ? '<button data-role="rc-history" class="btn-tap w-full bg-rose-50 border border-rose-200 text-rose-700 rounded-xl py-2.5 px-3 font-bold text-sm flex items-center justify-between gap-2 mb-3"><span><i class="fa-solid fa-clipboard-question"></i> ' + openRecs.length + ' תעודות עם הפרש פתוח</span><span class="text-xs font-black bg-rose-100 px-2 py-0.5 rounded-lg">לטיפול ←</span></button>' : '';
   const topButtons =
     '<div class="flex gap-2 mb-3">' +
-      '<button data-role="rc-prices" class="btn-tap flex-1 bg-white border border-slate-200 rounded-xl py-2.5 font-black text-slate-700 text-xs flex items-center justify-center gap-1.5"><i class="fa-solid fa-tags text-blue-600"></i> מחירים</button>' +
+      '<button data-role="rc-prices" class="btn-tap flex-1 bg-white border border-slate-200 rounded-xl py-2.5 font-black text-slate-700 text-xs flex items-center justify-center gap-1.5"><i class="fa-solid fa-tags text-blue-600"></i> מוצרים ומחירים</button>' +
       '<button data-role="rc-promos" class="btn-tap flex-1 bg-white border border-slate-200 rounded-xl py-2.5 font-black text-slate-700 text-xs flex items-center justify-center gap-1.5"><i class="fa-solid fa-percent text-rose-600"></i> מבצעים</button>' +
       '<button data-role="rc-history" class="btn-tap flex-1 bg-white border border-slate-200 rounded-xl py-2.5 font-black text-slate-700 text-xs flex items-center justify-center gap-1.5"><i class="fa-solid fa-folder-open text-blue-600"></i> תעודות</button>' +
     '</div>';
@@ -3409,13 +3637,8 @@ function removeReceiptLine(productId) {
 
 // --- מוצר חדש / מחיר חסר (בזמן סריקה) ---
 function promptNewProduct(code, target) {
-  npMode = 'create'; npProductId = null; npTarget = target || 'receipt'; pendingScanBarcode = code;
   closeScanner();
-  $('npr_code').textContent = code || 'ללא ברקוד';
-  $('npr_name').value = ''; $('npr_name').disabled = false;
-  $('npr_price').value = '';
-  const m = $('newProductModal'); m.classList.remove('hidden'); m.classList.add('flex');
-  setTimeout(() => { const i = $('npr_name'); if (i) i.focus(); }, 80);
+  openProdModal(null, false, code || '', target || 'receipt');
 }
 function promptSetPrice(p, target) {
   npMode = 'setprice'; npProductId = p.id; npTarget = target || 'receipt'; pendingScanBarcode = p.barcode || '';
@@ -3447,28 +3670,15 @@ async function saveNewProduct() {
   const target = npTarget;
   const priceStr = ($('npr_price').value || '').trim().replace(',', '.');
   const price = parseFloat(priceStr);
-  if (!(price >= 0)) { $('npr_price').focus(); return; }
-  if (npMode === 'setprice') {
-    const id = npProductId; const p = products.find(x => x.id === id);
-    if (!p) { hideNewProduct(); return; }
-    const saved = await runCloudTask('save scanned product price', { op: 'update', path: dataPath('products', id), data: { price: r2(price) }, operationId: makeOperationId('scan_price') });
-    if (!saved) return;
-    p.price = r2(price);
-    hideNewProduct();
-    promptQty(p, target);
-    return;
-  }
-  const name = ($('npr_name').value || '').trim();
-  if (!name) { $('npr_name').focus(); return; }
-  const code = pendingScanBarcode || '';
-  const maxIdx = products.length ? Math.max(...products.map(p => p.orderIndex || 0)) : -1;
-  const newId = makeOperationId('prod');
-  const data = { name, barcode: code, price: r2(price), average: 0, defaultUnit: 'carton', orderIndex: maxIdx + 1, operationId: newId };
-  const saved = await runCloudTask('create scanned product', { op: 'set', path: dataPath('products', newId), data, operationId: newId });
+  if (!(price > 0)) { showToast('הזן מחיר קנייה גדול מ-0', null, null, 2600); $('npr_price').focus(); return; }
+  if (npMode !== 'setprice') { hideNewProduct(); return; }
+  const id = npProductId; const p = products.find(x => x.id === id);
+  if (!p) { hideNewProduct(); return; }
+  const saved = await runCloudTask('save scanned product price', { op: 'update', path: dataPath('products', id), data: { price: r2(price) }, operationId: makeOperationId('scan_price') });
   if (!saved) return;
+  p.price = r2(price);
   hideNewProduct();
-  if (!products.find(x => x.id === newId)) { products.push({ id: newId, ...data }); orderState[newId] = orderState[newId] || { amount: '', unit: 'carton' }; }
-  promptQty({ id: newId, ...data }, target);
+  promptQty(p, target);
 }
 
 // --- סיכום ואישור תעודה ---
@@ -5534,7 +5744,7 @@ function calcReceiptRange() {
   out.classList.remove('hidden');
 }
 
-// --- עדכון מחירים ---
+// --- מוצרים ומחירים ---
 function priceRowHtml(p) {
   const op = promoForProduct(p.id);
   const onNow = promoActive(op, todayStr());
@@ -5573,7 +5783,7 @@ function priceRowHtml(p) {
 // ===== מחיר מומלץ לפי קטגוריות רווחיות =====
 // עלות (ללא מע"מ) × (1 + אחוז/100) × מע"מ 18% → עיגול לחוק ה-X.90:
 // עד X.2 מעגלים מטה ל-(X-1).90, מעל X.2 מעגלים ל-X.90
-let pricingCats = [];
+let pricingCats = [], pricingCatsLoaded = false;
 let pricingCatsTimer = null, pricingCatsOpen = false;
 function recommendedPrice(cost, pct) {
   if (!(cost > 0)) return null;
@@ -5623,9 +5833,12 @@ function pricingCatsCardHtml() {
   '</div>';
 }
 function renderPrices() {
-  app.innerHTML = '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">עדכון מחירים</h2><p class="text-sm text-slate-400 font-bold mt-1">מחירים ללא מע"מ · סרוק לעדכון מהיר או חפש מוצר</p></div>' +
+  app.innerHTML = '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">מוצרים ומחירים</h2><p class="text-sm text-slate-400 font-bold mt-1">הוספה ועריכת מוצר במקום אחד · המחירים ללא מע״מ</p></div>' +
     pricingCatsCardHtml() +
-    '<button data-role="pr-scan" class="btn-tap w-full bg-blue-600 text-white rounded-2xl py-3.5 font-black text-base flex items-center justify-center gap-2 mb-3"><i class="fa-solid fa-barcode text-xl"></i> סרוק לעדכון מחיר</button>' +
+    '<div class="grid grid-cols-2 gap-2 mb-3">' +
+      '<button data-role="pr-new" class="btn-tap bg-emerald-600 text-white rounded-2xl py-3.5 px-2 font-black text-sm flex items-center justify-center gap-2"><i class="fa-solid fa-plus text-lg"></i> מוצר חדש</button>' +
+      '<button data-role="pr-scan" class="btn-tap bg-blue-600 text-white rounded-2xl py-3.5 px-2 font-black text-sm flex items-center justify-center gap-2"><i class="fa-solid fa-barcode text-lg"></i> סרוק מוצר</button>' +
+    '</div>' +
     '<div class="relative mb-3"><i class="fa-solid fa-magnifying-glass absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i><input id="priceSearch" type="text" inputmode="search" autocomplete="off" value="' + (priceQuery || '').replace(/"/g, '&quot;') + '" placeholder="חפש לפי שם או ברקוד..." class="w-full bg-white border border-slate-200 rounded-xl py-3 pr-9 pl-3 text-sm font-bold outline-none focus:border-blue-500"></div>' +
     '<div id="pricesListEl" class="space-y-2.5 pb-24"></div>';
   refreshPricesList(priceQuery);
@@ -5655,22 +5868,94 @@ function handlePriceScan(code) {
   const p = products.find(x => (x.barcode || '') === code);
   openProdModal(p || null, true, code);
 }
-function openProdModal(p, fromScan, presetCode) {
+function setProdDefaultUnit(unit) {
+  unit = normalizeOrderUnit(unit);
+  const hidden = $('prod_defaultUnit'); if (hidden) hidden.value = unit;
+  const carton = $('prod_unit_carton'), single = $('prod_unit_unit');
+  const base = 'btn-tap flex-1 py-2.5 rounded-lg text-sm font-black flex items-center justify-center gap-1.5 ';
+  if (carton) carton.className = base + (unit === 'carton' ? 'bg-white text-amber-800 shadow' : 'text-slate-500');
+  if (single) single.className = base + (unit === 'unit' ? 'bg-white text-emerald-800 shadow' : 'text-slate-500');
+  const label = $('prod_averageLabel');
+  if (label) label.textContent = 'כמות מומלצת להזמנה (' + (unit === 'unit' ? 'יחידות' : 'ארגזים') + ')';
+}
+function refreshProdWholeCartonUi() {
+  const on = !!($('prod_wholeCarton') && $('prod_wholeCarton').checked);
+  const wrap = $('prod_boxSizeWrap'); if (wrap) wrap.classList.toggle('hidden', !on);
+  if (on) {
+    const box = $('prod_boxSize'), calcUnits = $('prod_cartonUnits');
+    if (box && !box.value && calcUnits) {
+      const n = parseInt((calcUnits.value || '').replace(/[^0-9]/g, ''), 10) || 0;
+      if (n >= 2) box.value = String(n);
+    }
+  }
+}
+function updateProdRecHint() {
+  const out = $('prod_recHint'), catId = ($('prod_category') || {}).value || '';
+  if (!out) return;
+  const cat = pricingCats.find(c => c.id === catId);
+  const cost = parseFloat((($('prod_price') || {}).value || '').replace(',', '.'));
+  if (!cat) { out.classList.add('hidden'); return; }
+  if ((Number(cat.pct) || 0) === 0) {
+    out.textContent = cat.name + ' — ללא המלצת מחיר (0%)'; out.classList.remove('hidden'); return;
+  }
+  if (!(cost > 0)) {
+    out.textContent = 'הזן מחיר קנייה לקבלת מחיר מכירה מומלץ'; out.classList.remove('hidden'); return;
+  }
+  const rec = recommendedPrice(cost, cat.pct);
+  out.textContent = '💡 מומלץ למכירה: ₪' + rec.toFixed(2) + ' (' + cat.name + ' · ' + cat.pct + '%)';
+  out.classList.remove('hidden');
+}
+function fillProdCategoryOptions(selectedCategory) {
+  const select = $('prod_category'); if (!select) return;
+  selectedCategory = selectedCategory || '';
+  const missingCurrentCategory = selectedCategory && !pricingCats.some(c => c.id === selectedCategory)
+    ? '<option value="' + htmlEscape(selectedCategory) + '" selected>הקבוצה השמורה כרגע</option>' : '';
+  const loadingText = !pricingCatsLoaded ? 'טוען קבוצות...' : 'בחר קבוצה...';
+  select.innerHTML = '<option value="">' + loadingText + '</option>' + missingCurrentCategory + pricingCats.map(c => '<option value="' + htmlEscape(c.id) + '"' + (selectedCategory === c.id ? ' selected' : '') + '>' + htmlEscape(c.name) + ' (' + (Number(c.pct) || 0) + '%)</option>').join('');
+  updateProdRecHint();
+}
+function openProdModal(p, fromScan, presetCode, afterSaveTarget) {
   priceEditId = p ? p.id : null;
   priceFromScan = !!fromScan;
-  $('prodTitle').textContent = p ? 'עדכון מוצר' : 'מוצר חדש';
+  productCreateId = p ? null : makeOperationId('prod');
+  prodAfterSaveTarget = afterSaveTarget || null;
+  productEditorScanReturn = false;
+  $('prodTitle').textContent = p ? 'עריכת מוצר' : 'מוצר חדש';
   $('prod_name').value = p ? (p.name || '') : '';
   $('prod_barcode').value = p ? (p.barcode || '') : (presetCode || '');
   $('prod_price').value = (p && p.price != null) ? p.price : '';
-  $('prod_creditPrice').value = (p && p.creditPrice != null) ? p.creditPrice : '';
-  $('prod_cartonPrice').value = ''; $('prod_cartonUnits').value = ''; $('prod_cartonResult').textContent = '';
+  $('prod_creditPrice').value = (p && Number(p.creditPrice) > 0) ? p.creditPrice : '';
+  const selectedCategory = p ? (p.category || '') : '';
+  fillProdCategoryOptions(selectedCategory);
+  $('prod_average').value = p ? (p.average != null ? p.average : '') : '1';
+  setProdDefaultUnit(p ? p.defaultUnit : 'carton');
+  const boxSize = p ? (parseInt(p.boxSize, 10) || 0) : 0;
+  $('prod_wholeCarton').checked = boxSize >= 2;
+  $('prod_boxSize').value = boxSize >= 2 ? String(boxSize) : '';
+  $('prod_visible').checked = !(p && p.hidden);
+  $('prod_cartonPrice').value = '';
+  $('prod_cartonUnits').value = boxSize >= 2 ? String(boxSize) : '';
+  $('prod_cartonResult').textContent = '';
+  $('prod_cartonCalc').open = false;
+  $('prod_morePrices').open = !!(p && Number(p.creditPrice) > 0);
+  refreshProdWholeCartonUi();
+  updateProdRecHint();
   $('prod_del').classList.toggle('hidden', !p);
-  $('prod_again').classList.toggle('hidden', !fromScan);
+  const again = $('prod_again');
+  again.classList.toggle('hidden', !!prodAfterSaveTarget || (!!p && !fromScan));
+  again.innerHTML = fromScan
+    ? '<i class="fa-solid fa-barcode"></i> שמור וסרוק הבא'
+    : '<i class="fa-solid fa-plus"></i> שמור והוסף מוצר נוסף';
   closeScanner();
   const m = $('prodModal'); m.classList.remove('hidden'); m.classList.add('flex');
-  setTimeout(() => { const i = $(p ? 'prod_price' : 'prod_name'); if (i) { i.focus(); if (i.select) i.select(); } }, 80);
+  const scroll = $('prodFormScroll'); if (scroll) scroll.scrollTop = 0;
+  const focusId = p ? (fromScan ? 'prod_price' : '') : 'prod_name';
+  if (focusId) setTimeout(() => { const i = $(focusId); if (i) { i.focus(); if (i.select) i.select(); } }, 80);
 }
-function hideProdModal() { const m = $('prodModal'); m.classList.add('hidden'); m.classList.remove('flex'); priceEditId = null; priceFromScan = false; }
+function hideProdModal() {
+  const m = $('prodModal'); m.classList.add('hidden'); m.classList.remove('flex');
+  priceEditId = null; priceFromScan = false; productCreateId = null; prodAfterSaveTarget = null; productEditorScanReturn = false;
+}
 function calcCartonPrice() {
   const cp = parseFloat(($('prod_cartonPrice').value || '').toString().replace(',', '.'));
   const cu = parseInt(($('prod_cartonUnits').value || '').replace(/[^0-9]/g, ''), 10) || 0;
@@ -5680,9 +5965,12 @@ function calcCartonPrice() {
     $('prod_price').value = per;
     if (out) out.textContent = 'מחיר לארגז ' + fmtMoney(cp) + ' ₪ ÷ ' + cu + ' = ' + fmtMoney(per) + ' ₪ ליחידה';
   } else if (out) { out.textContent = ''; }
+  if ($('prod_wholeCarton').checked && !$('prod_boxSize').value && cu >= 2) $('prod_boxSize').value = String(cu);
+  updateProdRecHint();
 }
 function scanProdBarcode() {
   scanPurpose = 'prodbarcode';
+  productEditorScanReturn = true;
   const m = $('prodModal'); m.classList.add('hidden'); m.classList.remove('flex');
   openScanner();
 }
@@ -5691,30 +5979,60 @@ async function saveProd(again) {
   const barcode = ($('prod_barcode').value || '').trim();
   const raw = ($('prod_price').value || '').toString().replace(',', '.').trim();
   const num = parseFloat(raw);
-  const price = (raw === '') ? null : (num >= 0 ? r2(num) : null);
+  if (raw !== '' && !(num >= 0)) { showToast('מחיר הקנייה אינו תקין', null, null, 2500); $('prod_price').focus(); return; }
+  const price = (raw === '') ? null : r2(num);
   const rawCp = ($('prod_creditPrice').value || '').toString().replace(',', '.').trim();
   const numCp = parseFloat(rawCp);
-  const creditPrice = (rawCp === '') ? null : (numCp >= 0 ? r2(numCp) : null);
+  if (rawCp !== '' && !(numCp > 0)) { showToast('מחיר הזיכוי צריך להיות מספר חיובי או ריק', null, null, 2800); $('prod_creditPrice').focus(); return; }
+  const creditPrice = (rawCp === '') ? null : r2(numCp);
   if (!name) { $('prod_name').focus(); return; }
   const id = priceEditId;
+  if (!id && price == null) { showToast('הזן מחיר קנייה למוצר החדש', null, null, 2800); $('prod_price').focus(); return; }
+  if (!id && prodAfterSaveTarget && !(price > 0)) { showToast('בקליטה או בחזרה חייבים מחיר קנייה גדול מ-0', null, null, 3200); $('prod_price').focus(); return; }
+  const docId = id || productCreateId || (productCreateId = makeOperationId('prod'));
+  const duplicate = barcode && products.find(x => x.id !== docId && String(x.barcode || '').trim() === barcode);
+  if (duplicate) { showToast('הברקוד כבר שייך למוצר: ' + duplicate.name, null, null, 3800); $('prod_barcode').focus(); return; }
+  const category = ($('prod_category').value || '').trim() || null;
+  if (!id && !pricingCatsLoaded) { showToast('הקבוצות עדיין נטענות — המתן רגע ונסה שוב', null, null, 3000); return; }
+  if (!id && pricingCats.length && !category) { showToast('בחר קבוצה למוצר', null, null, 2500); $('prod_category').focus(); return; }
+  const avgRaw = ($('prod_average').value || '').replace(/[^0-9]/g, '');
+  const average = avgRaw ? (parseInt(avgRaw, 10) || 0) : 0;
+  const defaultUnit = normalizeOrderUnit($('prod_defaultUnit').value);
+  const wholeCarton = !!$('prod_wholeCarton').checked;
+  const parsedBoxSize = parseInt(($('prod_boxSize').value || '').replace(/[^0-9]/g, ''), 10) || 0;
+  if (wholeCarton && parsedBoxSize < 2) { showToast('הזן כמה יחידות יש בארגז', null, null, 2800); $('prod_boxSize').focus(); return; }
+  const boxSize = wholeCarton ? parsedBoxSize : 0;
+  const hidden = !$('prod_visible').checked;
+  const unitUpdatedAt = Date.now();
+  const data = { name, barcode, price, creditPrice, category, average, defaultUnit, defaultUnitUpdatedAt: unitUpdatedAt, boxSize, hidden };
+  clearTimeout(priceTimers[docId]); clearTimeout(avgTimers[docId]); clearTimeout(boxTimers[docId]);
+  let savedProduct = null;
   if (id) {
-    const data = { name, barcode, price, creditPrice };
     const saved = await runCloudTask('save product', { op: 'update', path: dataPath('products', id), data, operationId: makeOperationId('product_save') });
     if (!saved) return;
     const p = products.find(x => x.id === id);
-    if (p) Object.assign(p, data);
+    if (p) { Object.assign(p, data); savedProduct = p; }
   } else {
     const maxIdx = products.length ? Math.max(...products.map(p => p.orderIndex || 0)) : -1;
-    const newId = makeOperationId('prod');
-    const data = { name, barcode, price, creditPrice, average: 0, defaultUnit: 'carton', orderIndex: maxIdx + 1, operationId: newId };
-    const saved = await runCloudTask('create product', { op: 'set', path: dataPath('products', newId), data, operationId: newId });
+    const pendingExisting = products.find(x => x.id === docId);
+    Object.assign(data, { orderIndex: pendingExisting ? (pendingExisting.orderIndex || 0) : maxIdx + 1, operationId: docId });
+    const saved = await runCloudTask('create product', { op: 'set', path: dataPath('products', docId), data, operationId: docId });
     if (!saved) return;
-    if (!products.find(x => x.id === newId)) { products.push({ id: newId, ...data }); orderState[newId] = orderState[newId] || { amount: '', unit: 'carton' }; }
+    savedProduct = products.find(x => x.id === docId) || { id: docId, ...data };
+    if (!products.find(x => x.id === docId)) products.push(savedProduct);
   }
+  // השמירה המאוחדת היא העדכנית ביותר; ניסיון ישן של שדה בודד לא יורשה לדרוס אותה אחר כך.
+  clearSupersededProductFailedWrites(docId);
+  const st = orderState[docId] || (orderState[docId] = { amount: '', unit: defaultUnit });
+  if (!hasEnteredAmount(st.amount)) st.unit = defaultUnit;
+  saveDraftPassive();
+  const wasFromScan = priceFromScan, afterTarget = prodAfterSaveTarget;
   hideProdModal();
   if (currentView === 'prices') renderPrices();
+  else if (currentView === 'settings') renderSettings();
   showToast(id ? 'המוצר עודכן' : 'המוצר נוסף', null, null, 1600);
-  if (again) openPriceScanner();
+  if (afterTarget && savedProduct) { promptQty(savedProduct, afterTarget); return; }
+  if (again) { if (wasFromScan) openPriceScanner(); else openProdModal(null, false, ''); }
 }
 function delProdFromModal() {
   const id = priceEditId; if (!id) { hideProdModal(); return; }
@@ -6403,7 +6721,7 @@ $('promptInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e
 $('npr_price').addEventListener('input', updateNprRecHint);
 $('promptScan').addEventListener('click', () => { scanPurpose = 'field'; openScanner(); });
 $('npr_cancel').addEventListener('click', hideNewProduct);
-$('npr_ok').addEventListener('click', () => requireAdmin('יצירת מוצר חדש', saveNewProduct));
+$('npr_ok').addEventListener('click', () => requireAdmin('שמירת מחיר מוצר', saveNewProduct));
 $('piClose').addEventListener('click', hidePromoInfo);
 $('rs_cancel').addEventListener('click', hideReceiptSummary);
 $('rs_ok').addEventListener('click', confirmReceipt);
@@ -6422,6 +6740,11 @@ $('prod_save').addEventListener('click', () => requireAdmin('שמירת מוצר
 $('prod_again').addEventListener('click', () => requireAdmin('שמירת מוצר/מחיר', () => saveProd(true)));
 $('prod_del').addEventListener('click', () => requireAdmin('מחיקת מוצר', delProdFromModal));
 $('pr_scanbc').addEventListener('click', scanProdBarcode);
+$('prod_unit_carton').addEventListener('click', () => setProdDefaultUnit('carton'));
+$('prod_unit_unit').addEventListener('click', () => setProdDefaultUnit('unit'));
+$('prod_wholeCarton').addEventListener('change', refreshProdWholeCartonUi);
+$('prod_category').addEventListener('change', updateProdRecHint);
+$('prod_price').addEventListener('input', updateProdRecHint);
 $('prod_cartonPrice').addEventListener('input', calcCartonPrice);
 $('prod_cartonUnits').addEventListener('input', calcCartonPrice);
 $('scanClose').addEventListener('click', closeScanner);
@@ -6545,7 +6868,13 @@ app.addEventListener('input', (e) => {
   }
   if (role === 'amount') {
     const id = t.dataset.id; let v = t.value.replace(/[^0-9]/g, ''); if (v !== t.value) t.value = v;
-    (orderState[id] = orderState[id] || { amount: '', unit: 'carton' }).amount = (v === '0' ? '' : v);
+    const p = products.find(x => x.id === id);
+    const st = (orderState[id] = orderState[id] || { amount: '', unit: normalizeOrderUnit(p && p.defaultUnit) });
+    st.amount = (v === '0' ? '' : v);
+    if (!hasEnteredAmount(st.amount) && p && Number(p.defaultUnitUpdatedAt) > 0) {
+      st.unit = normalizeOrderUnit(p.defaultUnit);
+      paintOrderUnitButtonById(id);
+    }
     refreshRowSelected(id); updateCart(); saveDraft();
     clearTimeout(advanceTimer);
     if (v.length >= 2) { advanceFrom(id); }
@@ -6630,6 +6959,7 @@ app.addEventListener('click', (e) => {
   else if (role === 'backup-import-confirm') confirmRestoreBackup();
   else if (role === 'go-settings') setView('settings');
   else if (role === 'add-product') addProduct();
+  else if (role === 'sync-local-units') showConfirm('סנכרון בחירות מהמכשיר הזה', 'להגדיר בענן את בחירות ארגז/יחידה ששמורות במכשיר הזה? בצע זאת רק אם זה המכשיר שבו ההגדרות נכונות.', 'סנכרן לענן', syncLegacyUnitsFromThisDevice);
   else if (role === 'del-product') { const p = products.find(x => x.id === id); showConfirm('מחיקת מוצר', 'למחוק את "' + (p ? p.name : '') + '"?', 'מחק', () => delProduct(id)); }
   else if (role === 'toggle-hidden') toggleHidden(id);
   else if (role === 'move') startMove(id);
@@ -6883,6 +7213,7 @@ app.addEventListener('click', (e) => {
   else if (role === 'rc-fix-save') saveReceiptFix();
   else if (role === 'rc-prices') setView('prices');
   else if (role === 'rc-promos') setView('promos');
+  else if (role === 'pr-new') openProdModal(null, false, '');
   else if (role === 'pr-scan') openPriceScanner();
   else if (role === 'pcat-toggle') { pricingCatsOpen = !pricingCatsOpen; if (currentView === 'prices') renderPrices(); }
   else if (role === 'pcat-add') { pricingCats.push({ id: 'cat_' + Date.now(), name: '', pct: 30 }); savePricingCats(); if (currentView === 'prices') renderPrices(); }
