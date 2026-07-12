@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v103.3 בדיקה ידנית</title>
+    <title>הזמנות יטבתה - v104 מחיר זיכוי</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v103.3 בדיקה ידנית</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v104 מחיר זיכוי</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -295,6 +295,8 @@
             </div>
             <div id="prod_cartonResult" class="text-[11px] text-emerald-700 font-bold mt-1.5 min-h-[15px]"></div>
           </div>
+          <label class="text-[11px] text-slate-400 font-bold block mb-1 mt-2.5">מחיר זיכוי בחזרות — רק אם שונה ממחיר הקנייה (למשל: קונים במחיר מארז, מזוכים במחיר בודד)</label>
+          <div class="flex items-center gap-2"><span class="text-slate-400 font-bold text-lg">₪</span><input id="prod_creditPrice" type="text" inputmode="decimal" class="flex-1 p-3 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-amber-500" placeholder="ריק = כמו מחיר הקנייה"></div>
           <button id="prod_del" class="btn-tap hidden mt-3 w-full py-2.5 rounded-xl font-black bg-red-50 text-red-600 flex items-center justify-center gap-2"><i class="fa-solid fa-trash-can"></i> מחק מוצר</button>
         </div>
         <div class="px-4 pb-2"><button id="prod_again" class="btn-tap hidden w-full py-3.5 rounded-xl font-black bg-blue-600 text-white flex items-center justify-center gap-2 text-base"><i class="fa-solid fa-barcode"></i> שמור וסרוק הבא</button></div>
@@ -2130,7 +2132,7 @@ function addManualReturn() {
 }
 function openReturnsSend() {
   if (!returnsList.length) return;
-  const items = returnsList.map(it => { const p = products.find(x => x.id === it.productId); const unit = r2(it.manual ? (Number(it.unitPrice) || 0) : (Number(p && p.price) || 0)); return { name: it.name, barcode: it.barcode || '', qty: it.qty, unitPrice: unit, lineTotal: r2(unit * it.qty) }; });
+  const items = returnsList.map(it => { const p = products.find(x => x.id === it.productId); const unit = r2(it.manual ? (Number(it.unitPrice) || 0) : (Number(p && (Number(p.creditPrice) > 0 ? p.creditPrice : p.price)) || 0)); return { name: it.name, barcode: it.barcode || '', qty: it.qty, unitPrice: unit, lineTotal: r2(unit * it.qty) }; }); // מחיר זיכוי גובר על מחיר קנייה בחזרות
   const ex = r2(items.reduce((a, l) => a + l.lineTotal, 0));
   sendCtx = { type: 'returns', items, resetCurrent: false, totalExVat: ex, totalIncVat: ex };
   renderSendModal(items, 'רשימת חזרות', 'returns');
@@ -3126,7 +3128,7 @@ function returnTotals(r) {
   let ex = 0;
   ((r && r.items) || []).forEach(it => {
     let unit = Number(it.unitPrice);
-    if (!(unit > 0)) { const p = products.find(x => (it.barcode && x.barcode === it.barcode) || x.name === it.name); unit = Number(p && p.price) || 0; }
+    if (!(unit > 0)) { const p = products.find(x => (it.barcode && x.barcode === it.barcode) || x.name === it.name); unit = Number(p && (Number(p.creditPrice) > 0 ? p.creditPrice : p.price)) || 0; }
     ex += unit * (Number(it.qty) || 0);
   });
   ex = r2(ex);
@@ -5660,6 +5662,7 @@ function openProdModal(p, fromScan, presetCode) {
   $('prod_name').value = p ? (p.name || '') : '';
   $('prod_barcode').value = p ? (p.barcode || '') : (presetCode || '');
   $('prod_price').value = (p && p.price != null) ? p.price : '';
+  $('prod_creditPrice').value = (p && p.creditPrice != null) ? p.creditPrice : '';
   $('prod_cartonPrice').value = ''; $('prod_cartonUnits').value = ''; $('prod_cartonResult').textContent = '';
   $('prod_del').classList.toggle('hidden', !p);
   $('prod_again').classList.toggle('hidden', !fromScan);
@@ -5689,10 +5692,13 @@ async function saveProd(again) {
   const raw = ($('prod_price').value || '').toString().replace(',', '.').trim();
   const num = parseFloat(raw);
   const price = (raw === '') ? null : (num >= 0 ? r2(num) : null);
+  const rawCp = ($('prod_creditPrice').value || '').toString().replace(',', '.').trim();
+  const numCp = parseFloat(rawCp);
+  const creditPrice = (rawCp === '') ? null : (numCp >= 0 ? r2(numCp) : null);
   if (!name) { $('prod_name').focus(); return; }
   const id = priceEditId;
   if (id) {
-    const data = { name, barcode, price };
+    const data = { name, barcode, price, creditPrice };
     const saved = await runCloudTask('save product', { op: 'update', path: dataPath('products', id), data, operationId: makeOperationId('product_save') });
     if (!saved) return;
     const p = products.find(x => x.id === id);
@@ -5700,7 +5706,7 @@ async function saveProd(again) {
   } else {
     const maxIdx = products.length ? Math.max(...products.map(p => p.orderIndex || 0)) : -1;
     const newId = makeOperationId('prod');
-    const data = { name, barcode, price, average: 0, defaultUnit: 'carton', orderIndex: maxIdx + 1, operationId: newId };
+    const data = { name, barcode, price, creditPrice, average: 0, defaultUnit: 'carton', orderIndex: maxIdx + 1, operationId: newId };
     const saved = await runCloudTask('create product', { op: 'set', path: dataPath('products', newId), data, operationId: newId });
     if (!saved) return;
     if (!products.find(x => x.id === newId)) { products.push({ id: newId, ...data }); orderState[newId] = orderState[newId] || { amount: '', unit: 'carton' }; }
