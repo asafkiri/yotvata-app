@@ -362,7 +362,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebas
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import {
   initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager,
-  collection, onSnapshot, doc, deleteDoc, addDoc, updateDoc, setDoc, writeBatch, query, orderBy, limit, getDocs, where
+  collection, onSnapshot, doc, deleteDoc, addDoc, updateDoc, setDoc, writeBatch, query, orderBy, limit, getDocs, where, runTransaction
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -511,6 +511,81 @@ const pendingUnitIntents = {};
 
 const $ = (id) => document.getElementById(id);
 const app = $('app');
+let barcodeDuplicateNotice = { product: '', prompt: '' };
+
+// משווים ברקודים בצורה עקבית בלבד — בלי לשנות את הערך השמור במוצר.
+// כך "123-456" ו־"123456", או ברקוד עם רווח נסתר, אינם פותחים מוצר נוסף.
+function normalizeBarcode(value) {
+  const raw = String(value == null ? '' : value).replace(/[\s\u200B-\u200D\uFEFF]/g, '').trim();
+  return /^[0-9-]+$/.test(raw) ? raw.replace(/-/g, '') : raw;
+}
+function findProductByBarcode(value, exceptId) {
+  const key = normalizeBarcode(value);
+  if (!key) return null;
+  return products.find(p => p.id !== exceptId && normalizeBarcode(p.barcode) === key) || null;
+}
+function duplicateBarcodeMessage(product) {
+  return 'הפריט כבר קיים' + (product && product.name ? ': ' + product.name : '');
+}
+function showDuplicateBarcode(product, input) {
+  if (!product) return false;
+  showToast(duplicateBarcodeMessage(product), null, null, 3800);
+  if (input) { input.setCustomValidity('הפריט כבר קיים'); input.focus(); }
+  return true;
+}
+function setProductBarcodeBlocked(blocked) {
+  ['prod_save', 'prod_again'].forEach(id => {
+    const btn = $(id); if (!btn) return;
+    btn.disabled = !!blocked;
+    btn.style.opacity = blocked ? '0.55' : '';
+    btn.style.pointerEvents = blocked ? 'none' : '';
+  });
+}
+function setPromptBarcodeBlocked(blocked) {
+  const btn = $('promptOk'); if (!btn) return;
+  btn.disabled = !!blocked;
+  btn.style.opacity = blocked ? '0.55' : '';
+  btn.style.pointerEvents = blocked ? 'none' : '';
+}
+function syncBarcodeDuplicateState(scope, input, exceptId, notify) {
+  const duplicate = findProductByBarcode(input && input.value, exceptId);
+  const key = duplicate ? (normalizeBarcode(input && input.value) + '|' + duplicate.id) : '';
+  if (input) input.setCustomValidity(duplicate ? 'הפריט כבר קיים' : '');
+  if (scope === 'product') setProductBarcodeBlocked(!!duplicate);
+  else setPromptBarcodeBlocked(!!duplicate);
+  if (duplicate && notify && barcodeDuplicateNotice[scope] !== key) {
+    barcodeDuplicateNotice[scope] = key;
+    showToast(duplicateBarcodeMessage(duplicate), null, null, 3800);
+  }
+  if (!duplicate) barcodeDuplicateNotice[scope] = '';
+  return duplicate;
+}
+function syncProductBarcodeDuplicate(notify) {
+  return syncBarcodeDuplicateState('product', $('prod_barcode'), priceEditId, notify);
+}
+function syncPromptBarcodeDuplicate(notify) {
+  return syncBarcodeDuplicateState('prompt', $('promptInput'), pendingBarcodeProductId, notify);
+}
+// לפני שמירה בודקים גם את הרשימה העדכנית בענן, למקרה שמכשיר אחר הוסיף מוצר
+// רגע לפני שהמסך המקומי התעדכן. אין כאן שינוי למבנה הנתונים הקיים.
+async function findCloudProductByBarcode(value, exceptId) {
+  const key = normalizeBarcode(value);
+  if (!key || !db || !navigator.onLine) return null;
+  try {
+    const ref = collection(db, 'artifacts', appId, 'public', 'data', 'products');
+    const snap = await getDocs(ref);
+    const hit = snap.docs.find(d => d.id !== exceptId && normalizeBarcode((d.data() || {}).barcode) === key);
+    return hit ? { id: hit.id, ...hit.data() } : null;
+  } catch (e) {
+    // החסימה המקומית עדיין פעילה גם אם בדיקת הרענון לא זמינה.
+    console.warn('barcode freshness check failed', e);
+    return null;
+  }
+}
+function barcodeProductId(value) {
+  const key = normalizeBarcode(value);
+  return key ? ('barcode_' + encodeURIComponent(key)) : '';
+}
 
 function buzz(ms) { try { if (navigator.vibrate) navigator.vibrate(ms); } catch (e) {} }
 
@@ -1346,6 +1421,10 @@ async function restoreTrashItem(trashId) {
   if (!it || !it.collectionName || !it.originalId || !it.data) { showToast('לא ניתן לשחזר את הרשומה הזאת', null, null, 3000); return; }
   const data = cloneSafe(it.data);
   data.id = it.originalId;
+  if (it.collectionName === 'products' && data.barcode) {
+    const duplicate = findProductByBarcode(data.barcode, it.originalId) || await findCloudProductByBarcode(data.barcode, it.originalId);
+    if (duplicate) { showDuplicateBarcode(duplicate); return; }
+  }
   const task = {
     op: 'batch', operationId: makeOperationId('trash_restore'), writes: [
       { op: 'set', path: dataPath(it.collectionName, it.originalId), data },
@@ -1736,11 +1815,11 @@ function healthDraftCounts() {
 function duplicateBarcodeGroups() {
   const m = {};
   products.forEach(p => {
-    const bc = String(p.barcode || '').trim();
-    if (!bc) return;
-    (m[bc] = m[bc] || []).push(p);
+    const key = normalizeBarcode(p.barcode);
+    if (!key) return;
+    (m[key] = m[key] || []).push(p);
   });
-  return Object.keys(m).filter(bc => m[bc].length > 1).map(bc => ({ barcode: bc, products: m[bc] }));
+  return Object.keys(m).filter(key => m[key].length > 1).map(key => ({ barcode: m[key][0].barcode || key, products: m[key] }));
 }
 function healthStatusMeta(status) {
   const map = {
@@ -2208,22 +2287,31 @@ function removeReturn(id) {
 function openBarcodePrompt(productId, isEdit) {
   const p = products.find(x => x.id === productId); if (!p) return;
   pendingBarcodeProductId = productId; pendingBarcodeEdit = !!isEdit;
+  barcodeDuplicateNotice.prompt = '';
   $('promptTitle').textContent = isEdit ? 'עריכת ברקוד' : 'הוספת ברקוד';
   $('promptSub').textContent = p.name;
   $('promptInput').value = p.barcode || '';
+  syncPromptBarcodeDuplicate(false);
   $('promptScan').classList.remove('hidden');
   const m = $('promptModal'); m.classList.remove('hidden'); m.classList.add('flex');
   setTimeout(() => { const i = $('promptInput'); if (i) { i.focus(); i.select(); } }, 60);
 }
-function hidePrompt() { const m = $('promptModal'); m.classList.add('hidden'); m.classList.remove('flex'); pendingBarcodeProductId = null; }
+function hidePrompt() {
+  const m = $('promptModal'); m.classList.add('hidden'); m.classList.remove('flex');
+  barcodeDuplicateNotice.prompt = '';
+  setPromptBarcodeBlocked(false);
+  pendingBarcodeProductId = null;
+}
 async function savePrompt() {
   const id = pendingBarcodeProductId;
   const wasEdit = pendingBarcodeEdit;
   if (!id) { hidePrompt(); return; }
   const val = ($('promptInput').value || '').trim();
   if (!val) { hidePrompt(); return; }
-  const duplicate = products.find(x => x.id !== id && String(x.barcode || '').trim() === val);
-  if (duplicate) { showToast('הברקוד כבר שייך למוצר: ' + duplicate.name, null, null, 3800); $('promptInput').focus(); return; }
+  const duplicate = findProductByBarcode(val, id);
+  if (duplicate) { syncPromptBarcodeDuplicate(false); showDuplicateBarcode(duplicate, $('promptInput')); return; }
+  const cloudDuplicate = await findCloudProductByBarcode(val, id);
+  if (cloudDuplicate) { setPromptBarcodeBlocked(true); showDuplicateBarcode(cloudDuplicate, $('promptInput')); return; }
   const saved = await runCloudTask('save product barcode', { op: 'update', path: dataPath('products', id), data: { barcode: val }, operationId: makeOperationId('barcode') });
   if (!saved) return;
   const p = products.find(x => x.id === id); if (p) p.barcode = val;
@@ -2916,7 +3004,13 @@ function onScanned(val) {
   val = (val || '').toString().trim();
   if (!val) { if (barcodeDetector && scanStream) scanTimer = setTimeout(scanTick, 250); return; }
   if (scanPurpose === 'price') { buzz(40); handlePriceScan(val); return; }
-  if (scanPurpose === 'prodbarcode') { buzz(40); const b = $('prod_barcode'); if (b) b.value = val; closeScanner(); return; }
+  if (scanPurpose === 'prodbarcode') {
+    buzz(40);
+    const b = $('prod_barcode');
+    if (b) { b.value = val; syncProductBarcodeDuplicate(true); }
+    closeScanner();
+    return;
+  }
   if (scanPurpose === 'receiving' || scanPurpose === 'returns') {
     const now = Date.now();
     if (val === lastScanCode && (now - lastScanTime) < 1400) {
@@ -2930,7 +3024,7 @@ function onScanned(val) {
     return;
   }
   buzz(40);
-  const inp = $('promptInput'); if (inp) inp.value = val;
+  const inp = $('promptInput'); if (inp) { inp.value = val; syncPromptBarcodeDuplicate(true); }
   closeScanner();
 }
 function closeScanner() {
@@ -2963,8 +3057,12 @@ function showToast(msg, actionLabel, actionFn, duration) {
 }
 function hideToast() { const t = $('toast'); if (t) { t.classList.add('hidden'); t.classList.remove('flex'); } undoAction = null; clearTimeout(toastTimer); }
 function doUndo() { const fn = undoAction; hideToast(); if (fn) fn(); }
-function restoreDoc(name, obj) {
+async function restoreDoc(name, obj) {
   if (!obj || !obj.id) return;
+  if (name === 'products' && obj.barcode) {
+    const duplicate = findProductByBarcode(obj.barcode, obj.id) || await findCloudProductByBarcode(obj.barcode, obj.id);
+    if (duplicate) { showDuplicateBarcode(duplicate); return; }
+  }
   runCloudTask('restore deleted ' + name, { op: 'set', path: dataPath(name, obj.id), data: obj, operationId: makeOperationId('restore') });
 }
 
@@ -3076,6 +3174,18 @@ async function executeCloudTask(task) {
     return;
   }
   const ref = doc(db, ...task.path);
+  if (task.op === 'create-if-absent') {
+    return runTransaction(db, async (transaction) => {
+      const existing = await transaction.get(ref);
+      if (existing.exists()) {
+        const err = new Error('הפריט כבר קיים');
+        err.code = 'duplicate-barcode';
+        err.product = { id: existing.id, ...existing.data() };
+        throw err;
+      }
+      transaction.set(ref, task.data || {});
+    });
+  }
   if (task.op === 'set') return task.merge ? setDoc(ref, task.data || {}, { merge: true }) : setDoc(ref, task.data || {});
   if (task.op === 'update') return updateDoc(ref, task.data || {});
   if (task.op === 'delete') return deleteDoc(ref);
@@ -3113,7 +3223,7 @@ async function retryCloudFailedWrites() {
   if (cloudWriteInFlight) { showToast('פעולה קודמת עדיין נשמרת — המתן רגע', null, null, 2500); return; }
   cloudWriteInFlight = true;
   showCloudBusy('שומר פעולות שנכשלו...');
-  let ok = 0, fail = 0;
+  let ok = 0, fail = 0, duplicate = 0;
   try {
     const list = cloudFailedWrites.slice().reverse(); // הישן קודם
     for (const item of list) {
@@ -3126,17 +3236,24 @@ async function retryCloudFailedWrites() {
         else logCloudActionIfNeeded(item.actionName, retryTask);
         removeCloudFailedWrite(item.id); ok++;
       }
-      catch (e) { item.error = errText(e); item.tries = (item.tries || 0) + 1; item.updatedAt = Date.now(); fail++; }
+      catch (e) {
+        if (e && e.code === 'duplicate-barcode') { removeCloudFailedWrite(item.id); duplicate++; continue; }
+        item.error = errText(e); item.tries = (item.tries || 0) + 1; item.updatedAt = Date.now(); fail++;
+      }
     }
     saveCloudFailedWrites();
-    showToast(fail ? ('נשמרו ' + ok + ', נשארו ' + fail + ' פעולות שלא נשמרו') : 'כל הפעולות נשמרו לענן ✓', null, null, 4000);
+    const retryMessage = fail
+      ? ('נשמרו ' + ok + ', נשארו ' + fail + ' פעולות שלא נשמרו' + (duplicate ? ' · ' + duplicate + ' נחסמו: הפריט כבר קיים' : ''))
+      : (duplicate ? (duplicate + ' פעולות נחסמו: הפריט כבר קיים') : 'כל הפעולות נשמרו לענן ✓');
+    showToast(retryMessage, null, null, 4000);
   } finally {
     cloudWriteInFlight = false;
     hideCloudBusy();
   }
 }
-async function runCloudTask(actionName, task) {
-  const ok = await mustCloudWrite(actionName, () => executeCloudTask(task), { failedTask: task });
+async function runCloudTask(actionName, task, opts) {
+  opts = opts || {};
+  const ok = await mustCloudWrite(actionName, () => executeCloudTask(task), { failedTask: task, onDuplicateBarcode: opts.onDuplicateBarcode });
   if (ok) {
     const queued = task && task.operationId ? cloudFailedWrites.find(x => x.operationId === task.operationId) : null;
     if (queued) removeCloudFailedWrite(queued.id);
@@ -3187,6 +3304,10 @@ async function mustCloudWrite(actionName, fn, opts) {
     await fn();
     return true;
   } catch (e) {
+    if (e && e.code === 'duplicate-barcode') {
+      if (typeof opts.onDuplicateBarcode === 'function') opts.onDuplicateBarcode(e);
+      return false;
+    }
     console.error(actionName || 'Cloud write failed', e);
     addCloudFailedWrite(actionName, e, opts.failedTask);
     showToast('השמירה בענן נכשלה — לא ניקיתי את הטיוטה. נסה שוב כשיש חיבור יציב.', null, null, 5500);
@@ -3377,7 +3498,7 @@ function updateScanOverlay(name) {
 }
 function handleReceivingScan(code) {
   code = (code || '').trim(); if (!code) return;
-  const p = products.find(x => (x.barcode || '') === code);
+  const p = findProductByBarcode(code);
   if (!p) { buzz([120, 80, 120]); promptNewProduct(code, 'receipt'); return; }
   if (p.price == null || p.price === '') { promptSetPrice(p); return; }
   promptQty(p, 'receipt');
@@ -3422,7 +3543,7 @@ function openReturnsScanner() {
 }
 function handleReturnsScan(code) {
   code = (code || '').trim(); if (!code) return;
-  const p = products.find(x => (x.barcode || '') === code);
+  const p = findProductByBarcode(code);
   if (!p) { buzz([120, 80, 120]); promptNewProduct(code, 'returns'); return; }
   if (p.price == null || p.price === '') { promptSetPrice(p, 'returns'); return; }
   promptQty(p, 'returns');
@@ -5849,7 +5970,7 @@ function refreshPricesList(q) {
   let list = products.slice().sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
   if (q) list = list.filter(p => (p.name || '').includes(q) || (p.barcode || '').includes(q));
   let head = '';
-  if (q && /^\d{6,}$/.test(q) && !products.some(p => (p.barcode || '') === q)) {
+  if (q && /^\d{6,}$/.test(normalizeBarcode(q)) && !findProductByBarcode(q)) {
     head = '<button data-role="pr-create" data-code="' + q + '" class="btn-tap w-full bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl py-3 font-black flex items-center justify-center gap-2 mb-1"><i class="fa-solid fa-plus"></i> צור מוצר חדש (ברקוד ' + q + ')</button>';
   }
   box.innerHTML = head + (list.length ? list.map(priceRowHtml).join('') : (q ? '<div class="text-center text-slate-400 py-8">לא נמצא מוצר</div>' : '<div class="text-center text-slate-400 py-8">אין מוצרים</div>'));
@@ -5865,7 +5986,7 @@ function savePrice(id, val) {
 function openPriceScanner() { scanPurpose = 'price'; openScanner(); }
 function handlePriceScan(code) {
   code = (code || '').trim(); if (!code) return;
-  const p = products.find(x => (x.barcode || '') === code);
+  const p = findProductByBarcode(code);
   openProdModal(p || null, true, code);
 }
 function setProdDefaultUnit(unit) {
@@ -5920,9 +6041,11 @@ function openProdModal(p, fromScan, presetCode, afterSaveTarget) {
   productCreateId = p ? null : makeOperationId('prod');
   prodAfterSaveTarget = afterSaveTarget || null;
   productEditorScanReturn = false;
+  barcodeDuplicateNotice.product = '';
   $('prodTitle').textContent = p ? 'עריכת מוצר' : 'מוצר חדש';
   $('prod_name').value = p ? (p.name || '') : '';
   $('prod_barcode').value = p ? (p.barcode || '') : (presetCode || '');
+  syncProductBarcodeDuplicate(false);
   $('prod_price').value = (p && p.price != null) ? p.price : '';
   $('prod_creditPrice').value = (p && Number(p.creditPrice) > 0) ? p.creditPrice : '';
   const selectedCategory = p ? (p.category || '') : '';
@@ -5954,6 +6077,8 @@ function openProdModal(p, fromScan, presetCode, afterSaveTarget) {
 }
 function hideProdModal() {
   const m = $('prodModal'); m.classList.add('hidden'); m.classList.remove('flex');
+  barcodeDuplicateNotice.product = '';
+  setProductBarcodeBlocked(false);
   priceEditId = null; priceFromScan = false; productCreateId = null; prodAfterSaveTarget = null; productEditorScanReturn = false;
 }
 function calcCartonPrice() {
@@ -5989,9 +6114,12 @@ async function saveProd(again) {
   const id = priceEditId;
   if (!id && price == null) { showToast('הזן מחיר קנייה למוצר החדש', null, null, 2800); $('prod_price').focus(); return; }
   if (!id && prodAfterSaveTarget && !(price > 0)) { showToast('בקליטה או בחזרה חייבים מחיר קנייה גדול מ-0', null, null, 3200); $('prod_price').focus(); return; }
-  const docId = id || productCreateId || (productCreateId = makeOperationId('prod'));
-  const duplicate = barcode && products.find(x => x.id !== docId && String(x.barcode || '').trim() === barcode);
-  if (duplicate) { showToast('הברקוד כבר שייך למוצר: ' + duplicate.name, null, null, 3800); $('prod_barcode').focus(); return; }
+  const createOperationId = productCreateId || (productCreateId = makeOperationId('prod'));
+  const docId = id || barcodeProductId(barcode) || createOperationId;
+  const duplicate = findProductByBarcode(barcode, docId);
+  if (duplicate) { syncProductBarcodeDuplicate(false); showDuplicateBarcode(duplicate, $('prod_barcode')); return; }
+  const cloudDuplicate = await findCloudProductByBarcode(barcode, docId);
+  if (cloudDuplicate) { setProductBarcodeBlocked(true); showDuplicateBarcode(cloudDuplicate, $('prod_barcode')); return; }
   const category = ($('prod_category').value || '').trim() || null;
   if (!id && !pricingCatsLoaded) { showToast('הקבוצות עדיין נטענות — המתן רגע ונסה שוב', null, null, 3000); return; }
   if (!id && pricingCats.length && !category) { showToast('בחר קבוצה למוצר', null, null, 2500); $('prod_category').focus(); return; }
@@ -6015,9 +6143,18 @@ async function saveProd(again) {
   } else {
     const maxIdx = products.length ? Math.max(...products.map(p => p.orderIndex || 0)) : -1;
     const pendingExisting = products.find(x => x.id === docId);
-    Object.assign(data, { orderIndex: pendingExisting ? (pendingExisting.orderIndex || 0) : maxIdx + 1, operationId: docId });
-    const saved = await runCloudTask('create product', { op: 'set', path: dataPath('products', docId), data, operationId: docId });
-    if (!saved) return;
+    Object.assign(data, { orderIndex: pendingExisting ? (pendingExisting.orderIndex || 0) : maxIdx + 1, operationId: createOperationId });
+    let transactionDuplicate = null;
+    const saved = await runCloudTask('create product', {
+      op: barcode ? 'create-if-absent' : 'set',
+      path: dataPath('products', docId),
+      data,
+      operationId: createOperationId
+    }, { onDuplicateBarcode: (err) => { transactionDuplicate = err && err.product ? err.product : null; } });
+    if (!saved) {
+      if (transactionDuplicate) { setProductBarcodeBlocked(true); showDuplicateBarcode(transactionDuplicate, $('prod_barcode')); }
+      return;
+    }
     savedProduct = products.find(x => x.id === docId) || { id: docId, ...data };
     if (!products.find(x => x.id === docId)) products.push(savedProduct);
   }
@@ -6718,6 +6855,7 @@ $('cartBtn').addEventListener('click', () => { if (mainMode === 'returns') openR
 $('promptCancel').addEventListener('click', hidePrompt);
 $('promptOk').addEventListener('click', savePrompt);
 $('promptInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); savePrompt(); } });
+$('promptInput').addEventListener('input', () => syncPromptBarcodeDuplicate(true));
 $('npr_price').addEventListener('input', updateNprRecHint);
 $('promptScan').addEventListener('click', () => { scanPurpose = 'field'; openScanner(); });
 $('npr_cancel').addEventListener('click', hideNewProduct);
@@ -6740,6 +6878,7 @@ $('prod_save').addEventListener('click', () => requireAdmin('שמירת מוצר
 $('prod_again').addEventListener('click', () => requireAdmin('שמירת מוצר/מחיר', () => saveProd(true)));
 $('prod_del').addEventListener('click', () => requireAdmin('מחיקת מוצר', delProdFromModal));
 $('pr_scanbc').addEventListener('click', scanProdBarcode);
+$('prod_barcode').addEventListener('input', () => syncProductBarcodeDuplicate(true));
 $('prod_unit_carton').addEventListener('click', () => setProdDefaultUnit('carton'));
 $('prod_unit_unit').addEventListener('click', () => setProdDefaultUnit('unit'));
 $('prod_wholeCarton').addEventListener('change', refreshProdWholeCartonUi);
