@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v105 כרטיס מוצר מאוחד</title>
+    <title>הזמנות יטבתה - v107 קליטה משופרת</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v105 כרטיס מוצר מאוחד</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v107 קליטה משופרת</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -238,6 +238,7 @@
         <div class="p-5 text-center">
           <div class="flex items-center justify-center gap-2 mb-1"><i class="fa-solid fa-cubes text-blue-600 text-xl"></i><h3 class="font-black text-lg text-slate-800">כמות</h3></div>
           <p id="qtyName" class="text-slate-700 font-bold text-sm"></p>
+          <p id="qtyRecommended" class="hidden text-[11px] text-emerald-700 font-black mt-1"></p>
           <div id="qtyExisting" class="hidden"></div>
           <div class="flex items-center justify-center gap-3 mt-4">
             <button id="qty_minus" class="btn-tap w-14 h-14 rounded-2xl bg-slate-100 text-slate-700 flex items-center justify-center text-2xl"><i class="fa-solid fa-minus"></i></button>
@@ -467,6 +468,8 @@ let rvOrigin = 'returnsHistory';  // מאיזה מסך נפתח אימות הז�
 let signMaker = null;             // הכנת שלטי מבצע (בחירה + עריכה + תצוגה)
 let receiptDupConfirmed = false; // אישור שמירה למרות חשד לכפילות
 const RECEIPT_DRAFT_KEY = 'yt_receipt_draft';
+let receivingDigitsMissTimer = null;
+let receivingDigitsMissNotified = '';
 let VAT = 0.18;                  // מע"מ — ניתן לשינוי בהגדרות (נשמר בענן)
 let signMarginPct = 25;          // % רווח מומלץ למבצעים — ניתן לשינוי בהגדרות
 let storeName = 'מיני מרקט שלום'; // שם החנות לשלטים — ניתן לשינוי בהגדרות
@@ -1586,7 +1589,7 @@ async function logAction(type, title, details, meta) {
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'actionLog', id), {
       timestamp: Date.now(), type: type || 'system', title: title || 'פעולה', details: details || '',
       deviceName: actionDeviceLabel(), uid: (auth && auth.currentUser && auth.currentUser.uid) || '',
-      appVersion: 'v105_unified_product', meta: cloneSafe(meta || {})
+      appVersion: 'v107_receiving_improvements', meta: cloneSafe(meta || {})
     });
   } catch (e) { console.warn('action log failed', e); }
 }
@@ -1670,7 +1673,7 @@ async function exportFullBackup() {
       backupType: 'yotvata-firestore-full',
       backupVersion: 1,
       appId,
-      appVersion: 'v105_unified_product',
+      appVersion: 'v107_receiving_improvements',
       exportedAt: Date.now(),
       exportedAtIso: new Date().toISOString(),
       collections: {},
@@ -3485,6 +3488,11 @@ function returnTotals(r) {
 }
 
 // --- סורק קליטה ---
+const RECEIVING_UNKNOWN_BARCODE_MSG = '❌ ברקוד לא קיים במערכת — הוסף את המוצר במסך מוצרים ומחירים וסרוק שוב';
+function rejectUnknownReceivingBarcode() {
+  buzz([120, 80, 120]);
+  showToast(RECEIVING_UNKNOWN_BARCODE_MSG, null, null, 5000);
+}
 function openReceivingScanner() {
   scanPurpose = 'receiving';
   scanCount = 0; lastScanCode = ''; lastScanTime = 0;
@@ -3499,17 +3507,37 @@ function updateScanOverlay(name) {
 function handleReceivingScan(code) {
   code = (code || '').trim(); if (!code) return;
   const p = findProductByBarcode(code);
-  if (!p) { buzz([120, 80, 120]); promptNewProduct(code, 'receipt'); return; }
+  if (!p) { rejectUnknownReceivingBarcode(); return; }
   if (p.price == null || p.price === '') { promptSetPrice(p); return; }
   promptQty(p, 'receipt');
 }
 // הקלדה ידנית של סיומת ברקוד — כשהסורק לא קורא
 function refreshReceivingDigits(qRaw) {
   const box = $('rcDigitsList'); if (!box) return;
+  clearTimeout(receivingDigitsMissTimer);
   const q = (qRaw || '').replace(/[^0-9]/g, '');
-  if (q.length < 4) { box.innerHTML = q.length ? '<div class="text-center text-slate-300 py-1 text-[11px] font-bold">הקלד לפחות 4 ספרות</div>' : ''; return; }
+  if (q.length < 4) {
+    receivingDigitsMissNotified = '';
+    box.innerHTML = q.length ? '<div class="text-center text-slate-300 py-1 text-[11px] font-bold">הקלד לפחות 4 ספרות</div>' : '';
+    return;
+  }
   const list = products.filter(p => (p.barcode || '').endsWith(q)).slice(0, 6);
-  if (!list.length) { box.innerHTML = '<div class="text-center text-slate-400 py-2 text-xs font-bold">לא נמצא מוצר שהברקוד שלו מסתיים ב-' + q + '</div>'; return; }
+  if (!list.length) {
+    box.innerHTML = '<div class="text-center text-slate-400 py-2 text-xs font-bold">לא נמצא מוצר שהברקוד שלו מסתיים ב-' + q + '</div>';
+    if (receivingDigitsMissNotified !== q) {
+      receivingDigitsMissTimer = setTimeout(() => {
+        const inp = $('rcDigits');
+        const current = ((inp && inp.value) || '').replace(/[^0-9]/g, '');
+        const stillMissing = !products.some(p => (p.barcode || '').endsWith(q));
+        if (current === q && stillMissing) {
+          receivingDigitsMissNotified = q;
+          rejectUnknownReceivingBarcode();
+        }
+      }, 500);
+    }
+    return;
+  }
+  receivingDigitsMissNotified = '';
   box.innerHTML = list.map(p => {
     const b = p.barcode || '';
     const pre = b.slice(0, b.length - q.length);
@@ -3518,16 +3546,26 @@ function refreshReceivingDigits(qRaw) {
 }
 function receivingDigitsPick(pid) {
   const p = products.find(x => x.id === pid); if (!p) return;
+  clearTimeout(receivingDigitsMissTimer);
+  receivingDigitsMissNotified = '';
   const inp = $('rcDigits'); if (inp) inp.value = '';
   const box = $('rcDigitsList'); if (box) box.innerHTML = '';
   buzz(30);
   if (p.price == null || p.price === '') { promptSetPrice(p); return; }
   promptQty(p, 'receipt');
 }
+function addReceiptQtyToTop(p, qty) {
+  const idx = receiptList.findIndex(it => it.productId === p.id);
+  if (idx >= 0) {
+    const ex = receiptList.splice(idx, 1)[0];
+    ex.qty += qty;
+    receiptList.unshift(ex);
+  } else {
+    receiptList.unshift({ productId: p.id, name: p.name, barcode: p.barcode || '', qty: qty });
+  }
+}
 function addScannedToReceipt(p) {
-  const ex = receiptList.find(it => it.productId === p.id);
-  if (ex) ex.qty += 1;
-  else receiptList.push({ productId: p.id, name: p.name, barcode: p.barcode || '', qty: 1 });
+  addReceiptQtyToTop(p, 1);
   scanCount += 1;
   saveReceiptDraft();
   if (currentView === 'receiving') refreshReceipt();
@@ -3582,6 +3620,17 @@ function promptQty(p, target) {
   qtyProduct = p; qtyTarget = target || 'receipt';
   closeScanner();
   $('qtyName').textContent = p.name;
+  const recEl = $('qtyRecommended');
+  const shelfRec = qtyTarget === 'receipt' ? shelfRecommendedPrice(p) : null;
+  if (recEl) {
+    if (shelfRec != null) {
+      recEl.textContent = '🏷️ מומלץ למדף: ₪' + fmtMoney(shelfRec);
+      recEl.classList.remove('hidden');
+    } else {
+      recEl.textContent = '';
+      recEl.classList.add('hidden');
+    }
+  }
   const ex = (qtyTarget === 'returns' ? returnsList : receiptList).find(it => it.productId === p.id);
   const exEl = $('qtyExisting');
   if (exEl) {
@@ -3604,8 +3653,7 @@ function addQtyToTarget(p, q, target) {
     saveReturnsDraft();
     if (currentView === 'returns') refreshReturnsList();
   } else {
-    const ex = receiptList.find(it => it.productId === p.id);
-    if (ex) ex.qty += q; else receiptList.push({ productId: p.id, name: p.name, barcode: p.barcode || '', qty: q });
+    addReceiptQtyToTop(p, q);
     saveReceiptDraft();
     if (currentView === 'receiving') refreshReceipt();
   }
@@ -3700,6 +3748,8 @@ function buildReceiptRow(it) {
   const p = products.find(x => x.id === it.productId);
   const day = todayStr();
   const unit = p ? effectivePrice(p, it.qty, day) : 0;
+  const shelfRec = shelfRecommendedPrice(p);
+  const shelfRecTag = shelfRec != null ? '<span class="font-bold text-emerald-700">· מומלץ: ₪' + fmtMoney(shelfRec) + '</span>' : '';
   const pr = p ? promoForProduct(p.id) : null;
   const active = promoActive(pr, day);
   const triggered = promoTriggered(pr, day);
@@ -3714,6 +3764,7 @@ function buildReceiptRow(it) {
         '<div class="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1.5 flex-wrap">' +
           '<span><i class="fa-solid fa-barcode"></i> ' + (it.barcode || 'ללא ברקוד') + '</span>' +
           '<span>· ₪' + fmtMoney(unit) + ' ליח׳</span>' +
+          shelfRecTag +
           promoTag +
         '</div>' +
       '</div>' +
@@ -6291,6 +6342,13 @@ function roundNine(v) {
   let out = f > 0.2 ? i + 0.9 : i - 0.1;
   if (out < 0.9) out = 0.9;
   return r2(out);
+}
+function shelfRecommendedPrice(p) {
+  const cost = Number(p && p.price);
+  if (!(cost > 0)) return null;
+  const category = pricingCatOf(p);
+  if (category) return recForProduct(p);
+  return recommendedPrice(cost, Number(signMarginPct) || 0);
 }
 function signRecommend(s) {
   const pr = promos.find(p => p.id === s.promoId);
