@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v107 קליטה משופרת</title>
+    <title>הזמנות יטבתה - v107.1 קליטה משופרת</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v107 קליטה משופרת</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v107.1 קליטה משופרת</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -3582,7 +3582,7 @@ function openReturnsScanner() {
 function handleReturnsScan(code) {
   code = (code || '').trim(); if (!code) return;
   const p = findProductByBarcode(code);
-  if (!p) { buzz([120, 80, 120]); promptNewProduct(code, 'returns'); return; }
+  if (!p) { buzz([120, 80, 120]); showToast('❌ ברקוד לא קיים במערכת — הוסף את המוצר במסך מוצרים ומחירים, או השתמש ב\'הוסף מוצר ידני\'', null, null, 5000); return; }
   if (p.price == null || p.price === '') { promptSetPrice(p, 'returns'); return; }
   promptQty(p, 'returns');
 }
