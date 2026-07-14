@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v108 עוגני נייר והמרות</title>
+    <title>הזמנות יטבתה - v109 בלש הזוגות</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v108 עוגני נייר והמרות</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v109 בלש הזוגות</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -4288,6 +4288,58 @@ function ensureReconcileLine(pid) {
   reconcileData.unshift(l);
   return l;
 }
+// בלש הזוגות: כשעוגן השורות אומר שחסרות בדיוק 2 שורות ויש עוגן יחידות —
+// מחפשים זוג מוצרים מהקטלוג שסוגר בו-זמנית 4 אילוצים: 2 שורות, סך יחידות, סכום כסף, וכפולות ארגז.
+function detectivePairSuggestions() {
+  const gap = reconcileGap();
+  if (!(gap > 1)) return null;
+  const lGap = reconcileLinesGap(), uGap = reconcileUnitsGap();
+  if (lGap !== 2 || uGap == null || !(uGap >= 2)) return null;
+  const inRec = {}; (reconcileData || []).forEach(l => inRec[l.productId] = 1);
+  const cands = products.filter(x => !inRec[x.id] && !x.hidden && Number(x.price) > 0);
+  const qtysFor = (px, maxQ) => {
+    const bs = parseInt(px.boxSize, 10) || 0;
+    const out = [];
+    if (bs > 0) { for (let q = bs; q <= maxQ; q += bs) out.push(q); }
+    else { for (let q = 1; q <= Math.min(maxQ, 24); q++) out.push(q); }
+    return out;
+  };
+  const byKey = {};
+  for (let i = 0; i < cands.length; i++) {
+    const A = cands[i];
+    for (const qa of qtysFor(A, uGap - 1)) {
+      const qb = uGap - qa; if (qb < 1) continue;
+      const rem = r2(gap - qa * A.price);
+      if (rem <= 0) continue;
+      for (let j = 0; j < cands.length; j++) {
+        if (j === i) continue;
+        const B = cands[j];
+        const bsB = parseInt(B.boxSize, 10) || 0;
+        if (bsB > 0 && qb % bsB !== 0) continue;
+        if (bsB === 0 && qb > 24) continue;
+        const diff = Math.abs(r2(qb * B.price) - rem);
+        if (diff > 0.05) continue;
+        const key = [A.id, B.id].sort().join('|') + '_' + Math.min(qa, qb) + '_' + Math.max(qa, qb);
+        const boxOk = ((parseInt(A.boxSize, 10) || 0) > 0) && (bsB > 0);
+        const entry = { a: { id: A.id, name: A.name, qty: qa, price: Number(A.price) }, b: { id: B.id, name: B.name, qty: qb, price: Number(B.price) }, diff: diff, boxOk: boxOk };
+        const ex = byKey[key];
+        if (!ex || diff < ex.diff - 1e-9 || (Math.abs(diff - ex.diff) < 1e-9 && boxOk && !ex.boxOk)) byKey[key] = entry;
+      }
+    }
+  }
+  let pairs = Object.values(byKey);
+  if (!pairs.length) return null;
+  pairs.sort((x, y) => ((y.boxOk ? 1 : 0) - (x.boxOk ? 1 : 0)) || (x.diff - y.diff) || (x.a.name || '').localeCompare(y.a.name || '', 'he'));
+  return { pairs: pairs.slice(0, 4), gap: gap, uGap: uGap };
+}
+function detectiveApplyPair(i) {
+  const s = detectivePairSuggestions(); if (!s) return;
+  const pr = s.pairs[i]; if (!pr) return;
+  [pr.a, pr.b].forEach(x => { const l = ensureReconcileLine(x.id); if (l) l.noteQty = (Number(l.noteQty) || 0) + x.qty; });
+  buzz(18);
+  showToast('שויכו שתי שורות: ' + pr.a.qty + ' × ' + pr.a.name + ' + ' + pr.b.qty + ' × ' + pr.b.name, null, null, 3400);
+  refreshReconcile();
+}
 function detectiveApply(gi, pid) {
   const s = detectiveSuggestions(); if (!s) return;
   const g = s.list[gi]; if (!g) return;
@@ -4536,7 +4588,8 @@ function renderReconcile() {
     if (absGap <= 1) rcStep = 'balanced';
     else {
       const ds = detectiveSuggestions();
-      rcStep = (ds && (ds.stepReady || ds.askReady)) ? 'detective' : 'choose';
+      const dp = detectivePairSuggestions();
+      rcStep = ((dp && dp.pairs.length) || (ds && (ds.stepReady || ds.askReady))) ? 'detective' : 'choose';
     }
   }
   // אם התאזן בכל שלב — עוברים ל"מאוזן"
@@ -4597,8 +4650,24 @@ function renderReconcile() {
     }
   }
   else if (rcStep === 'detective') {
-    const s = detectiveSuggestions();
-    if (!s || (!s.stepReady && !s.askReady)) { rcStep = 'barcodes'; return renderReconcile(); }
+    const dp = detectivePairSuggestions();
+    if (dp && dp.pairs.length) {
+      const rows = dp.pairs.map((pr, i) =>
+        '<button data-role="detective-pair" data-i="' + i + '" class="btn-tap w-full text-right p-3 rounded-xl border-2 ' + (i === 0 ? 'border-indigo-300 bg-indigo-50' : 'border-indigo-100 bg-indigo-50/40') + ' mt-1.5">' +
+          '<div class="font-black text-slate-800 text-sm leading-snug">' + pr.a.qty + ' × ' + pr.a.name + '<span class="text-slate-400"> + </span>' + pr.b.qty + ' × ' + pr.b.name + (pr.boxOk ? ' <span class="text-[10px]">📦</span>' : '') + (i === 0 ? ' <span class="text-[10px] font-black text-white bg-indigo-600 px-1.5 py-0.5 rounded">הכי סביר</span>' : '') + '</div>' +
+          '<div class="text-[11px] text-slate-400 font-bold mt-0.5">₪' + fmtMoney(r2(pr.a.qty * pr.a.price)) + ' + ₪' + fmtMoney(r2(pr.b.qty * pr.b.price)) + ' = ₪' + fmtMoney(r2(pr.a.qty * pr.a.price + pr.b.qty * pr.b.price)) + '</div>' +
+        '</button>').join('');
+      body = '<div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 shadow-sm mb-24">' +
+        '<div class="text-xs font-black text-slate-400 mb-1">שלב 1 מתוך 3 · בלש הזוגות</div>' +
+        '<div class="font-black text-lg text-slate-800 mb-1"><i class="fa-solid fa-anchor text-indigo-500"></i> העוגנים מזהים: חסרות 2 שורות (' + dp.uGap + ' יח׳, ₪' + fmtMoney(dp.gap) + ')</div>' +
+        '<div class="text-xs text-slate-500 font-bold mb-2 leading-relaxed">הצירופים הבאים סוגרים בדיוק את השורות, היחידות והסכום — בחר לפי תעודת הנייר:</div>' +
+        rows +
+        '<button data-role="rc-goto-choose" class="btn-tap w-full bg-white border-2 border-slate-200 text-slate-600 rounded-xl py-2.5 font-black text-sm mt-3">אף אחד מאלה — בדיקה אחרת</button>' +
+      '</div>';
+    }
+    const s = (dp && dp.pairs.length) ? null : detectiveSuggestions();
+    if (!body && (!s || (!s.stepReady && !s.askReady))) { rcStep = 'barcodes'; return renderReconcile(); }
+    if (!body) {
     const g = s.list[0];
     const pc = detectivePromoConflict();
     const promoCard = pc
@@ -4653,6 +4722,7 @@ function renderReconcile() {
         itemBtns +
         '<button data-role="rc-goto-choose" class="btn-tap w-full bg-white border-2 border-slate-200 text-slate-600 rounded-xl py-2.5 font-black text-sm mt-3">אף אחד מאלה — בדיקה אחרת</button>' +
       '</div>';
+    }
     }
   }
   else if (rcStep === 'choose') {
@@ -7336,6 +7406,7 @@ app.addEventListener('click', (e) => {
   else if (role === 'rc-add-item') reconcileAddItem(id);
   else if (role === 'detective-toggle') { detectiveOpen = !detectiveOpen; if (currentView === 'reconcile') renderReconcile(); }
   else if (role === 'detective-pick') detectiveApply(parseInt(t.dataset.g, 10) || 0, id);
+  else if (role === 'detective-pair') detectiveApplyPair(parseInt(t.dataset.i, 10) || 0);
   else if (role === 'detective-promo') {
     const pc = detectivePromoConflict();
     if (pc) {
