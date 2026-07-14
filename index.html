@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v109 בלש הזוגות</title>
+    <title>הזמנות יטבתה - v109.1 בלש הזוגות</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v109 בלש הזוגות</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v109.1 בלש הזוגות</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -4067,8 +4067,8 @@ function ncRowHtml(r, i, needQty) {
     const line = (reconcileData || []).find(x => x.productId === r.pid);
     const notScanned = !(line && (Number(line.received) || 0) > 0);
     return '<div class="flex items-center gap-2">' +
-      '<input data-role="nc-qty" data-i="' + i + '" type="text" inputmode="numeric" value="' + (r.q != null ? r.q : '') + '" placeholder="כמות" dir="ltr" onfocus="this.select()" class="w-20 h-12 text-center text-lg font-black border-2 rounded-xl outline-none ' + (notScanned ? 'border-rose-300 bg-rose-50 focus:border-rose-500' : 'border-indigo-300 bg-white focus:border-indigo-500') + '">' +
-      '<div class="flex-1 min-w-0"><div class="font-black text-sm truncate ' + (notScanned ? 'text-rose-700' : 'text-slate-700') + '">' + (notScanned ? '🔴 ' : '') + nm + '</div><div class="text-[11px] text-slate-400 mt-0.5" dir="ltr">' + r.d + (notScanned ? ' · לא נסרק' : '') + ' · ₪<input data-role="rc-qty-price" data-id="' + r.pid + '" type="text" inputmode="decimal" value="' + price + '" class="w-12 text-center border border-slate-200 rounded px-1 outline-none focus:border-blue-500"> ליח׳</div></div>' +
+      '<input data-role="nc-qty" data-i="' + i + '" type="text" inputmode="numeric" value="' + (r.q != null ? r.q : '') + '" placeholder="כמות" dir="ltr" onfocus="this.select()" class="w-20 h-12 text-center text-lg font-black border-2 rounded-xl outline-none border-indigo-300 bg-white focus:border-indigo-500">' +
+      '<div class="flex-1 min-w-0"><div class="font-black text-sm truncate text-slate-700">' + nm + '</div><div class="text-[11px] text-slate-400 mt-0.5" dir="ltr">' + r.d + (notScanned ? ' · לא נסרק' : '') + ' · ₪<input data-role="rc-qty-price" data-id="' + r.pid + '" type="text" inputmode="decimal" value="' + price + '" class="w-12 text-center border border-slate-200 rounded px-1 outline-none focus:border-blue-500"> ליח׳</div></div>' +
     '</div>';
   }
   // מצב ברקודים רגיל
@@ -4151,7 +4151,7 @@ function detectiveSuggestions() {
     const rec = bs > 0 ? 0 : recOf(l.productId);
     const key = price.toFixed(2) + '_' + qty;
     if (!groups[key]) groups[key] = { qty: qty, price: price, diff: diff, items: [] };
-    groups[key].items.push({ productId: l.productId, name: l.name, boxOk: (bs > 0 && qty % bs === 0), boxes: (bs > 0 ? qty / bs : 0), recOk: (rec > 0 && qty % rec === 0) });
+    groups[key].items.push({ productId: l.productId, name: l.name, bs: bs, boxOk: (bs > 0 && qty % bs === 0), boxes: (bs > 0 ? qty / bs : 0), recOk: (rec > 0 && qty % rec === 0) });
   });
   // הרחבה: כשחסר בנייר — ייתכן שמוצר שלם לא נסרק בכלל, סורקים גם את מאגר המוצרים
   // מועמד מהמאגר (לא נסרק) חייב התאמה מדויקת לחלוטין — שם מרחב הניחושים גדול
@@ -4176,7 +4176,7 @@ function detectiveSuggestions() {
       const rec = bs > 0 ? 0 : Math.max(0, parseInt(p.average, 10) || 0);
       const key = price.toFixed(2) + '_' + qty;
       if (!groups[key]) groups[key] = { qty: qty, price: price, diff: diff, items: [] };
-      groups[key].items.push({ productId: p.id, name: p.name, ext: true, boxOk: (bs > 0 && qty % bs === 0), boxes: (bs > 0 ? qty / bs : 0), recOk: (rec > 0 && qty % rec === 0) });
+      groups[key].items.push({ productId: p.id, name: p.name, ext: true, bs: bs, boxOk: (bs > 0 && qty % bs === 0), boxes: (bs > 0 ? qty / bs : 0), recOk: (rec > 0 && qty % rec === 0) });
     });
   }
   let list = Object.values(groups);
@@ -4238,7 +4238,7 @@ function detectivePromoConflict() {
   return { total: total, items: items };
 }
 function detectiveTagsHtml(l) {
-  return (l.boxOk ? ' <span class="text-[10px] font-black text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">📦 ' + (l.boxes > 1 ? l.boxes + ' ארגזים' : 'ארגז שלם') + '</span>' : '') +
+  return (l.boxOk ? ' <span class="text-[10px] font-black text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">📦 כפולות של ' + (l.bs || '') + ' יח׳</span>' : '') +
     (l.recOk ? ' <span class="text-[10px] font-black text-teal-700 bg-teal-50 px-1.5 py-0.5 rounded">🎯 תואם הזמנה רגילה</span>' : '') +
     (l.ext ? ' <span class="text-[10px] font-bold text-slate-400">(לא נסרק)</span>' : '');
 }
