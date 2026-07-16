@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v111 בלש יחידות משולב</title>
+    <title>הזמנות יטבתה - v112 בלש מדויק וממוקד</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v111 בלש יחידות משולב</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v112 בלש מדויק וממוקד</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -4006,6 +4006,7 @@ function openReconcile() {
   // מיון חד-פעמי בפתיחה: שורות חריגות (חסר/עודף) למעלה — לא ממוין מחדש תוך כדי עבודה
   reconcileData.sort((a, b) => ((Number(a.noteQty) || 0) === (Number(a.received) || 0) ? 1 : 0) - ((Number(b.noteQty) || 0) === (Number(b.received) || 0) ? 1 : 0));
   detectiveOpen = false; noteCheckOpen = false; noteCheckAuto = false; noteCheckRows = []; noteCheckRes = null; reconcileCheckMode = false; noteCheckQtyMode = false; rcStep = null; noteCheckForceQty = false; ncPromoResult = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; manualSearchTerm = ''; manualAssigned = []; manualSearchOpen = false; manualPromoMarks = {};
+  resetDetectiveQuestions();
   setView('reconcile');
 }
 function reconcileReceivedInc() { let ex = 0; (reconcileData || []).forEach(l => ex += (Number(l.price) || 0) * (Number(l.received) || 0)); return r2(ex); }
@@ -4035,6 +4036,19 @@ function reconcileAssignedHtml() {
 }
 // ===== "הבלש" — מציע מי אחראי להפרש שלא שויך =====
 let detectiveOpen = false;
+let detectiveScope = null; // בשלב שאחרי הברקודים: מגביל את החיפוש רק למה שאומת על הנייר
+let detectiveQuestionState = { fingerprint: '', asked: 0, constraints: [] };
+function resetDetectiveQuestions() { detectiveQuestionState = { fingerprint: '', asked: 0, constraints: [] }; }
+function detectiveQuestionFingerprint() {
+  return [receiptNoteTotal, receiptNoteUnits, Number(reconcileSupplierDiscount) || 0]
+    .concat((reconcileData || []).map(l => [l.productId, Number(l.received) || 0, Number(l.noteQty) || 0, Number(l.price) || 0].join(':')).sort())
+    .join('|');
+}
+function detectiveEnsureQuestionState() {
+  if (detectiveScope) return;
+  const fp = detectiveQuestionFingerprint();
+  if (detectiveQuestionState.fingerprint !== fp) detectiveQuestionState = { fingerprint: fp, asked: 0, constraints: [] };
+}
 // ===== בדיקת תעודה מלאה (הקלדת סיומות מהנייר) — רק במקרה חסר =====
 let noteCheckOpen = false, noteCheckAuto = false, noteCheckRows = [], noteCheckRes = null;
 let noteCheckQtyMode = false; // שכבה שלישית: הזנת כמויות ליד הברקודים כשהחישוב לא סגר לבד
@@ -4150,7 +4164,9 @@ function noteCheckHtml(gap) {
     ncResultsHtml() +
   '</div>';
 }
-const DETECTIVE_MONEY_TOL_CENTS = 100; // אותה סבילות של מסך האימות: עד שקל אחד; היחידות תמיד חייבות להיסגר בדיוק
+const DETECTIVE_MONEY_TOL_CENTS = 100; // הגבול האחרון בלבד; החיפוש עצמו מתקדם 0 → 5 → 100 אגורות
+const DETECTIVE_TOLERANCE_STEPS = [0, 5, 100];
+const DETECTIVE_QUESTION_POOL_LIMIT = 96; // שואלים רק כשכל סט האפשרויות נאסף; מעבר לכך עוברים לברקודים
 function detectiveEffectiveProductPrice(p) {
   if (!p) return { price: 0, promoOn: false, promoPct: 0 };
   const base = r2(Number(p.price) || 0);
@@ -4177,22 +4193,35 @@ function detectiveBuildPriceGroups() {
   };
   (reconcileData || []).forEach(l => {
     inRec[l.productId] = 1;
+    if (detectiveScope && !detectiveScope.paperIds.has(l.productId) && !detectiveScope.extraIds.has(l.productId)) return;
     const p = products.find(x => x.id === l.productId);
     add({ productId: l.productId, name: l.name || (p && p.name) || '', price: r2(Number(l.price) || 0), inRec: true, ext: false,
       noteQty: Number(l.noteQty) || 0, received: Number(l.received) || 0, hidden: !!(p && p.hidden), bs: Math.max(0, parseInt(p && p.boxSize, 10) || 0),
-      average: Math.max(0, parseInt(p && p.average, 10) || 0), promoOn: !!l.promoOn, history: history[l.productId] || 0 });
+      average: Math.max(0, parseInt(p && p.average, 10) || 0), promoOn: !!l.promoOn, history: history[l.productId] || 0,
+      paperKnown: !!(detectiveScope && detectiveScope.paperIds.has(l.productId)), wholeExtra: !!(detectiveScope && detectiveScope.extraIds.has(l.productId)) });
   });
   (products || []).forEach(p => {
-    if (inRec[p.id] || p.hidden) return; // מוצר מוסתר שלא נסרק אינו מועמד חדש
+    if (inRec[p.id]) return;
+    if (detectiveScope) {
+      if (!detectiveScope.paperIds.has(p.id)) return; // אחרי הברקודים — רק מוצר שאומת על הנייר רשאי להיכנס
+    } else if (p.hidden) return; // מוצר מוסתר שלא נסרק אינו מועמד חדש
     const ep = detectiveEffectiveProductPrice(p);
-    add({ productId: p.id, name: p.name || '', price: ep.price, inRec: false, ext: true, noteQty: 0, received: 0, hidden: false,
-      bs: Math.max(0, parseInt(p.boxSize, 10) || 0), average: Math.max(0, parseInt(p.average, 10) || 0), promoOn: ep.promoOn, history: history[p.id] || 0 });
+    add({ productId: p.id, name: p.name || '', price: ep.price, inRec: false, ext: true, noteQty: 0, received: 0, hidden: !!p.hidden,
+      bs: Math.max(0, parseInt(p.boxSize, 10) || 0), average: Math.max(0, parseInt(p.average, 10) || 0), promoOn: ep.promoOn, history: history[p.id] || 0,
+      paperKnown: !!detectiveScope, wholeExtra: false });
   });
   return Array.from(byPrice.values()).sort((a, b) => a.priceCents - b.priceCents);
 }
 function detectiveActorCanMove(a, delta) {
   if (!a || !Number.isInteger(delta) || delta === 0) return false;
   if (a.bs > 0 && Math.abs(delta) % a.bs !== 0) return false; // כפולת ארגז היא עובדה, לא רמז
+  if (detectiveScope) {
+    if (a.wholeExtra) return delta === -(Number(a.noteQty) || 0); // לא מופיע בנייר: כל הכמות שנסרקה היא עודף
+    if (!a.paperKnown) return false;
+    if (delta < 0) return !!a.inRec && (-delta) < (Number(a.noteQty) || 0); // הברקוד קיים בנייר, לכן חייבת להישאר לפחות יחידה אחת
+    if (receiptNoteUnits != null && (Number(a.noteQty) || 0) + delta > receiptNoteUnits) return false;
+    return true;
+  }
   if (delta < 0) return !!a.inRec && (-delta) <= (Number(a.noteQty) || 0);
   if (!a.inRec && a.hidden) return false;
   if (receiptNoteUnits != null && (Number(a.noteQty) || 0) + delta > receiptNoteUnits) return false;
@@ -4266,6 +4295,36 @@ function detectiveAllocations(group, delta, maxMoves) {
   out.sort((a, b) => (a.moves.length - b.moves.length) || (b.score - a.score) || (detectiveAllocationKey(a)).localeCompare(detectiveAllocationKey(b)));
   group.allocCache.set(cacheKey, out); return out;
 }
+function detectiveFilterComponentsByProduct(components, constraint) {
+  const sign = constraint.sign || 1;
+  const exactDelta = constraint.exactDelta;
+  let matched = false;
+  for (const c of components) {
+    if (Math.sign(c.delta) !== sign) continue;
+    const hasProduct = (a) => a.moves.some(m => m.productId === constraint.productId && (exactDelta == null || m.delta === exactDelta));
+    if (constraint.required) {
+      const kept = c.allocations.filter(hasProduct);
+      if (kept.length) { c.allocations = kept; matched = true; }
+    } else {
+      c.allocations = c.allocations.filter(a => !hasProduct(a));
+      if (!c.allocations.length) return false;
+    }
+  }
+  return constraint.required ? matched : true;
+}
+function detectiveFilterComponentsByQuantity(components, productId, quantity) {
+  const line = (reconcileData || []).find(x => x.productId === productId);
+  const current = Number(line && line.noteQty) || 0;
+  const delta = quantity - current;
+  if (delta === 0) {
+    for (const c of components) {
+      c.allocations = c.allocations.filter(a => !a.moves.some(m => m.productId === productId));
+      if (!c.allocations.length) return false;
+    }
+    return true;
+  }
+  return detectiveFilterComponentsByProduct(components, { productId, sign: Math.sign(delta), exactDelta: delta, required: true });
+}
 function detectiveMakeSolution(parts, residualCents) {
   const minMoves = [], raw = [];
   parts.forEach(part => {
@@ -4292,18 +4351,37 @@ function detectiveMakeSolution(parts, residualCents) {
     if (!allocations.length) return null;
     components.push({ delta: parts[i].delta, price: parts[i].group.price, priceCents: parts[i].group.priceCents, allocations });
   }
+  // תשובות לשאלות הממוקדות הן אילוצים קשיחים. "כן" מחייב שהמוצר יהיה בתוך הפתרון;
+  // "לא" מסיר רק את דרכי השיוך שמכילות אותו, בלי למחוק חלופות אחרות באותו מחיר.
+  if (!detectiveScope) {
+    for (const c of (detectiveQuestionState.constraints || [])) {
+      if (c.type === 'quantity') {
+        if (!detectiveFilterComponentsByQuantity(components, c.productId, c.quantity)) return null;
+      } else if (!detectiveFilterComponentsByProduct(components, { productId: c.productId, sign: 1, required: !!c.answer })) return null;
+    }
+  } else {
+    // אחרי הברקודים נוכחות המוצר בנייר היא עובדה: כל מוצר שלא נסרק חייב להיכלל בחוסר,
+    // וכל מוצר שנסרק ואינו בנייר חייב להיכלל במלואו בעודף.
+    for (const pid of detectiveScope.missingIds) {
+      if (!detectiveFilterComponentsByProduct(components, { productId: pid, sign: 1, required: true })) return null;
+    }
+    for (const pid of detectiveScope.extraIds) {
+      const l = (reconcileData || []).find(x => x.productId === pid);
+      if (!detectiveFilterComponentsByProduct(components, { productId: pid, sign: -1, exactDelta: -(Number(l && l.noteQty) || 0), required: true })) return null;
+    }
+  }
   components.sort((a, b) => (a.priceCents - b.priceCents) || (a.delta - b.delta));
   const signature = components.map(c => c.delta + '@' + c.priceCents).join('|');
   const likelihood = components.reduce((a, c) => a + Math.max(...c.allocations.map(x => x.score)), 0);
   return { signature, components, residualCents: Math.abs(residualCents), score: likelihood - components.length * 18 - Math.abs(residualCents) * 2 };
 }
-function detectiveFinishStage(found, gap, unitGap, level) {
+function detectiveFinishStage(found, gap, unitGap, level, toleranceCents, complete) {
   const bySig = new Map();
   found.forEach(s => { const old = bySig.get(s.signature); if (!old || s.score > old.score) bySig.set(s.signature, s); });
   const list = Array.from(bySig.values());
   list.sort((a, b) => (b.score - a.score) || (a.residualCents - b.residualCents) || a.signature.localeCompare(b.signature));
-  if (list.length > 4) return { gap, unitGap, level, overflow: true, solutions: [] };
-  return { gap, unitGap, level, overflow: false, solutions: list };
+  if (complete === false || list.length > DETECTIVE_QUESTION_POOL_LIMIT) return { gap, unitGap, level, toleranceCents, complete: false, overflow: true, solutions: [] };
+  return { gap, unitGap, level, toleranceCents, complete: true, overflow: list.length > 4, solutions: list };
 }
 function detectivePairDeltas(aPrice, bPrice, targetUnits, targetMoney, tol) {
   const out = [];
@@ -4319,9 +4397,81 @@ function detectivePairDeltas(aPrice, bPrice, targetUnits, targetMoney, tol) {
   }
   return out;
 }
+function detectiveSolveTier(groups, gap, gapCents, unitGap, toleranceCents) {
+  // 1) שינוי אחד — היחידות קובעות את הכמות בדיוק.
+  if (unitGap !== 0) {
+    const singles = [];
+    groups.forEach(g => {
+      const residual = g.priceCents * unitGap - gapCents;
+      if (Math.abs(residual) > toleranceCents) return;
+      const s = detectiveMakeSolution([{ group: g, delta: unitGap }], residual);
+      if (s) singles.push(s);
+    });
+    if (singles.length) return detectiveFinishStage(singles, gap, unitGap, 1, toleranceCents, true);
+  }
+
+  // 2) שני מחירים — פותר בו-זמנית כסף ויחידות; תומך גם בחוסר+עודף ובחוסר מלא+חלקי.
+  const pairs = [], pairSigs = new Set();
+  let pairTruncated = false;
+  for (let i = 0; i < groups.length && !pairTruncated; i++) {
+    for (let j = i + 1; j < groups.length && !pairTruncated; j++) {
+      const A = groups[i], B = groups[j];
+      detectivePairDeltas(A.priceCents, B.priceCents, unitGap, gapCents, toleranceCents).forEach(x => {
+        if (pairTruncated || !detectiveDeltaGloballyPossible(x.da) || !detectiveDeltaGloballyPossible(x.db)) return;
+        const s = detectiveMakeSolution([{ group: A, delta: x.da }, { group: B, delta: x.db }], x.residual);
+        if (s && !pairSigs.has(s.signature)) {
+          pairSigs.add(s.signature); pairs.push(s);
+          if (pairSigs.size > DETECTIVE_QUESTION_POOL_LIMIT) pairTruncated = true;
+        }
+      });
+    }
+  }
+  if (pairTruncated) return detectiveFinishStage(pairs, gap, unitGap, 2, toleranceCents, false);
+  if (pairs.length) return detectiveFinishStage(pairs, gap, unitGap, 2, toleranceCents, true);
+
+  // 3) עד שלושה שינויים. כל מחיר הוא רכיב מתמטי אחד; מוצרים זהים במחיר מקובצים בתוכו.
+  const positiveCap = Math.max(0, Number(receiptNoteUnits) || 0); // גבול קשיח: מוצר חסר לא יכול לעבור את כל יחידות הנייר
+  const deltaCache = new Map();
+  const deltasFor = (g) => {
+    if (deltaCache.has(g.priceCents)) return deltaCache.get(g.priceCents);
+    const maxNeg = Math.max(0, ...g.actors.filter(a => a.inRec).map(a => Number(a.noteQty) || 0));
+    const vals = [];
+    for (let d = -maxNeg; d <= positiveCap; d++) if (d && detectiveAllocations(g, d, 1).length) vals.push(d);
+    deltaCache.set(g.priceCents, vals); return vals;
+  };
+  const triples = [], tripleSigs = new Set();
+  let incomplete = false, tripleChecks = 0;
+  const tripleBudget = detectiveScope ? 100000 : 15000; // אחרי הברקודים המאגר כבר מצומצם ואפשר להשלים חיפוש עמוק יותר; לפני כן מגינים על הטלפון
+  for (let i = 0; i < groups.length && !incomplete; i++) {
+    for (let j = i + 1; j < groups.length && !incomplete; j++) {
+      for (let k = j + 1; k < groups.length && !incomplete; k++) {
+        const trio = [groups[i], groups[j], groups[k]].sort((a, b) => deltasFor(a).length - deltasFor(b).length);
+        const A = trio[0], B = trio[1], C = trio[2];
+        for (const da of deltasFor(A)) {
+          if (++tripleChecks > tripleBudget) { incomplete = true; break; }
+          const remU = unitGap - da, remM = gapCents - A.priceCents * da;
+          detectivePairDeltas(B.priceCents, C.priceCents, remU, remM, toleranceCents).forEach(x => {
+            if (incomplete) return;
+            if (++tripleChecks > tripleBudget) { incomplete = true; return; }
+            const residual = A.priceCents * da + B.priceCents * x.da + C.priceCents * x.db - gapCents;
+            const s = detectiveMakeSolution([{ group: A, delta: da }, { group: B, delta: x.da }, { group: C, delta: x.db }], residual);
+            if (s && !tripleSigs.has(s.signature)) {
+              tripleSigs.add(s.signature); triples.push(s);
+              if (tripleSigs.size > DETECTIVE_QUESTION_POOL_LIMIT) incomplete = true;
+            }
+          });
+          if (incomplete) break;
+        }
+      }
+    }
+  }
+  if (incomplete) return detectiveFinishStage(triples, gap, unitGap, 3, toleranceCents, false);
+  return triples.length ? detectiveFinishStage(triples, gap, unitGap, 3, toleranceCents, true) : null;
+}
 function detectiveSolutions() {
   const gap = reconcileGap(), gapCents = Math.round(gap * 100), unitGap = reconcileUnitsGap();
   if (reconcileIsBalanced()) return null;
+  if (!detectiveScope) detectiveEnsureQuestionState();
   const groups = detectiveBuildPriceGroups();
   if (!groups.length) return null;
   // תעודות ישנות ללא עוגן יחידות: שומרים את התנהגות המוצר הבודד, בלי לנחש צירופים.
@@ -4335,72 +4485,14 @@ function detectiveSolutions() {
         if (s) found.push(s);
       }
     });
-    return found.length ? detectiveFinishStage(found, gap, null, 1) : null;
+    return found.length ? detectiveFinishStage(found, gap, null, 1, 5, true) : null;
   }
-  // 1) שינוי אחד — היחידות קובעות את הכמות בדיוק.
-  if (unitGap !== 0) {
-    const singles = [];
-    groups.forEach(g => {
-      const residual = g.priceCents * unitGap - gapCents;
-      if (Math.abs(residual) > DETECTIVE_MONEY_TOL_CENTS) return;
-      const s = detectiveMakeSolution([{ group: g, delta: unitGap }], residual);
-      if (s) singles.push(s);
-    });
-    if (singles.length) return detectiveFinishStage(singles, gap, unitGap, 1);
+  // הסבילות היא הלולאה החיצונית: כל פתרון מדויק של 1/2/3 שינויים קודם לכל פתרון מקורב.
+  for (const toleranceCents of DETECTIVE_TOLERANCE_STEPS) {
+    const result = detectiveSolveTier(groups, gap, gapCents, unitGap, toleranceCents);
+    if (result) return result;
   }
-  // 2) שני מחירים — פותר בו-זמנית כסף ויחידות; תומך גם בחוסר+עודף ובחוסר מלא+חלקי.
-  const pairs = [], pairSigs = new Set();
-  let pairOverflow = false;
-  for (let i = 0; i < groups.length && !pairOverflow; i++) {
-    for (let j = i + 1; j < groups.length && !pairOverflow; j++) {
-      const A = groups[i], B = groups[j];
-      detectivePairDeltas(A.priceCents, B.priceCents, unitGap, gapCents, DETECTIVE_MONEY_TOL_CENTS).forEach(x => {
-        if (pairOverflow || !detectiveDeltaGloballyPossible(x.da) || !detectiveDeltaGloballyPossible(x.db)) return;
-        const s = detectiveMakeSolution([{ group: A, delta: x.da }, { group: B, delta: x.db }], x.residual);
-        if (s && !pairSigs.has(s.signature)) {
-          pairSigs.add(s.signature); pairs.push(s);
-          if (pairSigs.size > 4) pairOverflow = true;
-        }
-      });
-    }
-  }
-  if (pairOverflow) return { gap, unitGap, level: 2, overflow: true, solutions: [] };
-  if (pairs.length) return detectiveFinishStage(pairs, gap, unitGap, 2);
-  // 3) עד שלושה שינויים. כל מחיר הוא רכיב מתמטי אחד; מוצרים זהים במחיר מקובצים בתוכו.
-  const positiveCap = Math.max(0, Number(receiptNoteUnits) || 0); // גבול קשיח: מוצר חסר לא יכול לעבור את כל יחידות הנייר
-  const deltaCache = new Map();
-  const deltasFor = (g) => {
-    if (deltaCache.has(g.priceCents)) return deltaCache.get(g.priceCents);
-    const maxNeg = Math.max(0, ...g.actors.filter(a => a.inRec).map(a => Number(a.noteQty) || 0));
-    const vals = [];
-    for (let d = -maxNeg; d <= positiveCap; d++) if (d && detectiveAllocations(g, d, 1).length) vals.push(d);
-    deltaCache.set(g.priceCents, vals); return vals;
-  };
-  const triples = [];
-  let overflow = false, tripleChecks = 0;
-  const tripleBudget = 15000; // בטלפון עדיף לעבור לברקודים מאשר להקפיא את הממשק בחיפוש חריג
-  for (let i = 0; i < groups.length && !overflow; i++) {
-    for (let j = i + 1; j < groups.length && !overflow; j++) {
-      for (let k = j + 1; k < groups.length && !overflow; k++) {
-        const trio = [groups[i], groups[j], groups[k]].sort((a, b) => deltasFor(a).length - deltasFor(b).length);
-        const A = trio[0], B = trio[1], C = trio[2];
-        for (const da of deltasFor(A)) {
-          if (++tripleChecks > tripleBudget) { overflow = true; break; }
-          const remU = unitGap - da, remM = gapCents - A.priceCents * da;
-          detectivePairDeltas(B.priceCents, C.priceCents, remU, remM, DETECTIVE_MONEY_TOL_CENTS).forEach(x => {
-            if (overflow) return;
-            if (++tripleChecks > tripleBudget) { overflow = true; return; }
-            const residual = A.priceCents * da + B.priceCents * x.da + C.priceCents * x.db - gapCents;
-            const s = detectiveMakeSolution([{ group: A, delta: da }, { group: B, delta: x.da }, { group: C, delta: x.db }], residual);
-            if (s && !triples.some(t => t.signature === s.signature)) { triples.push(s); if (triples.length > 4) overflow = true; }
-          });
-          if (overflow) break;
-        }
-      }
-    }
-  }
-  if (overflow) return { gap, unitGap, level: 3, overflow: true, solutions: [] };
-  return triples.length ? detectiveFinishStage(triples, gap, unitGap, 3) : null;
+  return null;
 }
 // התנגשות מבצע: יש מבצע פעיל במערכת שעוד לא בתוך מחירי השורות, וסכומו הצפוי קרוב להפרש (±₪1).
 // הנחת מבצע מקטינה את סכום הנייר מול השורות — לכן זה רלוונטי רק כשהנייר נמוך מהשורות (gap שלילי, "עודף").
@@ -4451,15 +4543,116 @@ function ensureReconcileLine(pid) {
 function detectiveAllocationLabel(a) {
   return a.moves.map(m => Math.abs(m.delta) + ' × ' + m.name).join(' + ');
 }
-function detectiveSolutionsHtml(result) {
+function detectiveSolutionAcceptsProduct(sol, productId, answer) {
+  const components = sol.components.map(c => ({ ...c, allocations: c.allocations.slice() }));
+  return detectiveFilterComponentsByProduct(components, { productId, sign: 1, required: !!answer });
+}
+function detectiveSolutionProductQuantities(sol, productId) {
+  const line = (reconcileData || []).find(x => x.productId === productId);
+  const current = Number(line && line.noteQty) || 0;
+  const values = new Set([current]);
+  sol.components.forEach(c => c.allocations.forEach(a => {
+    const move = a.moves.find(m => m.productId === productId);
+    if (move) values.add(current + move.delta);
+  }));
+  return values;
+}
+function detectiveSolutionAcceptsQuantity(sol, productId, quantity) {
+  const components = sol.components.map(c => ({ ...c, allocations: c.allocations.slice() }));
+  return detectiveFilterComponentsByQuantity(components, productId, quantity);
+}
+function detectiveBestQuestion(result) {
+  if (!result || !result.complete || !result.overflow || !result.solutions.length || detectiveQuestionState.asked >= 2) return null;
+  const asked = new Set((detectiveQuestionState.constraints || []).map(x => x.productId));
+  const ids = new Set(), allMoveIds = new Set();
+  result.solutions.forEach(sol => sol.components.forEach(c => {
+    c.allocations.forEach(a => a.moves.forEach(m => {
+      if (!asked.has(m.productId)) allMoveIds.add(m.productId);
+      if (c.delta > 0 && m.ext && !asked.has(m.productId)) ids.add(m.productId);
+    }));
+  }));
+  const history = detectiveHistoryCounts();
+  let best = null;
+  ids.forEach(pid => {
+    let yes = 0, no = 0;
+    result.solutions.forEach(sol => {
+      if (detectiveSolutionAcceptsProduct(sol, pid, true)) yes++;
+      if (detectiveSolutionAcceptsProduct(sol, pid, false)) no++;
+    });
+    // שאלה טובה חייבת לפסול לפחות אפשרות אחת בכל אחת משתי התשובות האפשריות.
+    if (!yes || !no || yes >= result.solutions.length || no >= result.solutions.length) return;
+    const p = products.find(x => x.id === pid);
+    const score = (result.solutions.length - Math.max(yes, no)) * 1000 + Math.min(yes, no) * 10 + Math.min(9, history[pid] || 0);
+    if (!best || score > best.score) best = { kind: 'presence', productId: pid, name: (p && p.name) || 'המוצר', yesCount: yes, noCount: no, score };
+  });
+  // אם שאלה על נוכחות אינה מפרידה מספיק, שאלה אחת על כמות של מוצר מסוים יכולה
+  // לחסוך הזנת כמויות של כל השורות. היא נספרת בתוך אותו גבול קשיח של שתי שאלות.
+  allMoveIds.forEach(pid => {
+    const values = new Set();
+    result.solutions.forEach(sol => detectiveSolutionProductQuantities(sol, pid).forEach(v => values.add(v)));
+    if (values.size < 2) return;
+    let worst = 0;
+    values.forEach(q => {
+      const count = result.solutions.filter(sol => detectiveSolutionAcceptsQuantity(sol, pid, q)).length;
+      worst = Math.max(worst, count);
+    });
+    if (worst >= result.solutions.length) return;
+    const p = products.find(x => x.id === pid);
+    const score = (result.solutions.length - worst) * 1000 + Math.min(9, history[pid] || 0) - 100; // בשוויון מעדיפים שאלת כן/לא הקלה יותר
+    if (!best || score > best.score) best = { kind: 'quantity', productId: pid, name: (p && p.name) || 'המוצר', values: Array.from(values).sort((a, b) => a - b), score };
+  });
+  return best;
+}
+function detectiveQuestionHtml(result, question) {
+  if (!question) return '';
+  const questionUi = question.kind === 'quantity'
+    ? '<div class="rounded-xl bg-indigo-50 border border-indigo-200 p-3 font-black text-slate-800 mb-3">מה הכמות הכוללת של <span class="text-indigo-700">' + htmlEscape(question.name) + '</span> שרשומה בתעודה?</div>' +
+      '<div class="flex gap-2 mb-2"><input id="detectiveQuestionQty" type="text" inputmode="numeric" placeholder="כמות" class="flex-1 min-w-0 h-12 text-center text-lg font-black border-2 border-indigo-200 rounded-xl outline-none focus:border-indigo-500"><button data-role="detective-question-quantity" data-id="' + question.productId + '" class="btn-tap bg-indigo-600 text-white rounded-xl px-5 font-black">בדוק</button></div>'
+    : '<div class="rounded-xl bg-indigo-50 border border-indigo-200 p-3 font-black text-slate-800 mb-3">האם <span class="text-indigo-700">' + htmlEscape(question.name) + '</span> מופיע בתעודת הספק?</div>' +
+      '<button data-role="detective-question-answer" data-id="' + question.productId + '" data-answer="yes" class="btn-tap w-full bg-indigo-600 text-white rounded-xl py-3 font-black mb-2"><i class="fa-solid fa-check"></i> כן, מופיע בתעודה</button>' +
+      '<button data-role="detective-question-answer" data-id="' + question.productId + '" data-answer="no" class="btn-tap w-full bg-white border-2 border-slate-200 text-slate-700 rounded-xl py-3 font-black mb-2"><i class="fa-solid fa-xmark"></i> לא מופיע בתעודה</button>';
+  return '<div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 shadow-sm mb-24">' +
+    '<div class="text-xs font-black text-slate-400 mb-1">שאלה ' + (detectiveQuestionState.asked + 1) + ' מתוך 2 · צמצום לפני ברקודים</div>' +
+    '<div class="font-black text-lg text-slate-800"><i class="fa-solid fa-wand-magic-sparkles text-indigo-500"></i> הבלש מצא ' + result.solutions.length + ' אפשרויות</div>' +
+    '<div class="text-xs text-slate-500 font-bold mt-1 mb-3">תשובה אחת יכולה לצמצם את האפשרויות בלי להקליד את כל התעודה.</div>' +
+    questionUi +
+    '<button data-role="rc-goto-barcodes" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">לא בטוח — עבור לברקודים</button>' +
+  '</div>';
+}
+function detectiveStepForResult(result) {
+  if (result && !result.overflow && result.solutions.length) return 'detective';
+  if (result && result.overflow && result.complete && detectiveBestQuestion(result)) return 'detective-question';
+  if (result && result.overflow) return detectivePromoConflict() ? 'choose' : 'barcodes';
+  if (!result && detectiveQuestionState.asked > 0) return 'barcodes';
+  return 'choose';
+}
+function postBarcodeSolutions() {
+  if (!noteCheckRes || receiptNoteUnits == null || noteCheckForceQty) return null;
+  const paperIds = new Set(noteCheckRows.filter(r => r.st === 'ok' && r.pid != null).map(r => r.pid));
+  if (!paperIds.size) return null;
+  const missingIds = new Set((noteCheckRes.missing || []).map(p => p.id));
+  paperIds.forEach(pid => {
+    const l = (reconcileData || []).find(x => x.productId === pid);
+    if (!l || (Number(l.noteQty) || 0) <= 0) missingIds.add(pid); // גם שורת 0 קיימת היא חוסר מלא אם הברקוד כן מופיע בנייר
+  });
+  const extraIds = new Set((noteCheckRes.extra || []).map(l => l.productId));
+  const previousScope = detectiveScope;
+  detectiveScope = { paperIds, missingIds, extraIds };
+  try { return detectiveSolutions(); }
+  finally { detectiveScope = previousScope; }
+}
+function detectiveSolutionsHtml(result, opts) {
   if (!result || result.overflow || !result.solutions.length) return '';
+  opts = opts || {};
+  const selectPrefix = opts.postBarcode ? 'postDetOpt_' : 'detOpt_';
+  const buttonRole = opts.postBarcode ? 'post-detective-solution' : 'detective-solution';
   const promoCard = detectivePromoCardHtml();
   const rows = result.solutions.map((sol, si) => {
     const comps = sol.components.map((c, ci) => {
       const dir = c.delta > 0 ? 'חסר' : 'עודף';
       const optionUi = c.allocations.length === 1
         ? '<div class="font-black text-slate-800 text-sm">' + detectiveAllocationLabel(c.allocations[0]) + '</div>'
-        : '<select id="detOpt_' + si + '_' + ci + '" class="w-full h-11 mt-1 px-2 border-2 border-indigo-200 rounded-xl bg-white font-black text-sm text-slate-700">' +
+        : '<select id="' + selectPrefix + si + '_' + ci + '" class="w-full h-11 mt-1 px-2 border-2 border-indigo-200 rounded-xl bg-white font-black text-sm text-slate-700">' +
           c.allocations.map((a, ai) => '<option value="' + ai + '">' + detectiveAllocationLabel(a) + '</option>').join('') + '</select>';
       const boxTag = c.allocations.every(a => a.moves.every(m => m.bs > 0)) ? ' · 📦 כפולות ארגז' : '';
       return '<div class="rounded-xl bg-indigo-50/70 border border-indigo-100 p-2.5 mt-1.5">' +
@@ -4470,24 +4663,25 @@ function detectiveSolutionsHtml(result) {
     return '<div class="rounded-2xl border-2 ' + (si === 0 ? 'border-indigo-300 bg-indigo-50/30' : 'border-slate-200 bg-white') + ' p-3 mt-2">' +
       '<div class="font-black text-slate-800 text-sm">אפשרות ' + (si + 1) + (si === 0 ? ' <span class="text-[10px] text-white bg-indigo-600 px-1.5 py-0.5 rounded">הכי סבירה</span>' : '') + residual + '</div>' +
       comps +
-      '<button data-role="detective-solution" data-i="' + si + '" class="btn-tap w-full bg-indigo-600 text-white rounded-xl py-2.5 font-black text-sm mt-2"><i class="fa-solid fa-check"></i> זה מה שקרה — אשר</button>' +
+      '<button data-role="' + buttonRole + '" data-i="' + si + '" class="btn-tap w-full bg-indigo-600 text-white rounded-xl py-2.5 font-black text-sm mt-2"><i class="fa-solid fa-check"></i> זה מה שקרה — אשר</button>' +
     '</div>';
   }).join('');
   return '<div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 shadow-sm mb-24">' +
-    '<div class="text-xs font-black text-slate-400 mb-1">שלב 1 מתוך 3 · הבלש המשולב</div>' +
+    '<div class="text-xs font-black text-slate-400 mb-1">' + (opts.postBarcode ? 'אחרי הברקודים · הבלש בדק שוב' : 'שלב 1 מתוך 3 · הבלש המשולב') + '</div>' +
     '<div class="font-black text-lg text-slate-800"><i class="fa-solid fa-magnifying-glass text-indigo-500"></i> נמצאו ' + result.solutions.length + ' אפשרויות שסוגרות גם סכום וגם יחידות</div>' +
-    '<div class="text-xs text-slate-500 font-bold mt-1">האפשרויות מסודרות מהסבירה ביותר. מוצרים באותו מחיר מרוכזים באותה אפשרות — בחר את המוצר שמופיע בנייר.</div>' +
-    promoCard +
+    '<div class="text-xs text-slate-500 font-bold mt-1">' + (opts.postBarcode ? 'החיפוש הוגבל רק למוצרים שאומתו בתעודת הנייר. אין צורך להקליד כמויות אם אחת האפשרויות נכונה.' : 'האפשרויות מסודרות מהסבירה ביותר. מוצרים באותו מחיר מרוכזים באותה אפשרות — בחר את המוצר שמופיע בנייר.') + '</div>' +
+    (opts.postBarcode ? '' : promoCard) +
     rows +
-    '<button data-role="rc-goto-barcodes" class="btn-tap w-full bg-white border-2 border-slate-200 text-slate-600 rounded-xl py-2.5 font-black text-sm mt-3">אף אחת — בדוק לפי הברקודים</button>' +
+    (opts.postBarcode
+      ? '<button data-role="nc-force-qty" class="btn-tap w-full bg-white border-2 border-slate-200 text-slate-600 rounded-xl py-2.5 font-black text-sm mt-3">אף אחת — המשך להזנת כמויות</button>'
+      : '<button data-role="rc-goto-barcodes" class="btn-tap w-full bg-white border-2 border-slate-200 text-slate-600 rounded-xl py-2.5 font-black text-sm mt-3">אף אחת — בדוק לפי הברקודים</button>') +
   '</div>';
 }
-function detectiveApplySolution(i) {
-  const result = detectiveSolutions();
+function detectiveApplyResolvedResult(result, i, selectPrefix) {
   if (!result || result.overflow || !result.solutions[i]) return;
   const sol = result.solutions[i], chosen = [], totals = new Map();
   sol.components.forEach((c, ci) => {
-    const sel = $('detOpt_' + i + '_' + ci);
+    const sel = $(selectPrefix + i + '_' + ci);
     const ai = sel ? Math.max(0, parseInt(sel.value, 10) || 0) : 0;
     const alloc = c.allocations[ai] || c.allocations[0];
     if (alloc) alloc.moves.forEach(m => { chosen.push(m); totals.set(m.productId, (totals.get(m.productId) || 0) + m.delta); });
@@ -4500,9 +4694,22 @@ function detectiveApplySolution(i) {
     if (cur + delta < 0 || (bs > 0 && Math.abs(delta) % bs !== 0)) { showToast('הפתרון השתנה — הבלש מחשב מחדש', null, null, 2400); refreshReconcile(); return; }
   }
   totals.forEach((delta, pid) => { const l = ensureReconcileLine(pid); if (l) l.noteQty = (Number(l.noteQty) || 0) + delta; });
-  detectiveOpen = false; buzz(18);
+  return chosen;
+}
+function detectiveApplySolution(i) {
+  const chosen = detectiveApplyResolvedResult(detectiveSolutions(), i, 'detOpt_');
+  if (!chosen) return;
+  detectiveOpen = false; resetDetectiveQuestions(); buzz(18);
   showToast('הפתרון שויך — הסכום והיחידות נבדקו יחד', null, null, 2800);
   refreshReconcile();
+}
+function postBarcodeApplySolution(i) {
+  const chosen = detectiveApplyResolvedResult(postBarcodeSolutions(), i, 'postDetOpt_');
+  if (!chosen) return;
+  noteCheckRes = ncCompute(); noteCheckForceQty = false; buzz(18);
+  rcStep = reconcileIsBalanced() ? 'balanced' : (reconcileUnitsBalanced() ? 'prices' : 'barcodes');
+  showToast('הפתרון נמצא אחרי הברקודים — לא צריך להקליד את כל הכמויות', null, null, 3000);
+  if (currentView === 'reconcile') renderReconcile();
 }
 // בדיקה ידנית: העובד מוצא בנייר את המוצר החסר/העודף ומשייך אותו — בלי ברקודים
 let manualSearchTerm = '';
@@ -4758,7 +4965,7 @@ function renderReconcile() {
     if (balanced) rcStep = 'balanced';
     else {
       const ds = detectiveSolutions();
-      rcStep = ds && ds.overflow ? (detectivePromoConflict() ? 'choose' : 'barcodes') : (ds && ds.solutions.length ? 'detective' : 'choose');
+      rcStep = detectiveStepForResult(ds);
     }
   }
   // אם התאזן בכל שלב — עוברים ל"מאוזן"
@@ -4819,8 +5026,14 @@ function renderReconcile() {
   }
   else if (rcStep === 'detective') {
     const ds = detectiveSolutions();
-    if (!ds || ds.overflow || !ds.solutions.length) { rcStep = ds && ds.overflow && !detectivePromoConflict() ? 'barcodes' : 'choose'; return renderReconcile(); }
+    if (!ds || ds.overflow || !ds.solutions.length) { rcStep = detectiveStepForResult(ds); return renderReconcile(); }
     body = detectiveSolutionsHtml(ds);
+  }
+  else if (rcStep === 'detective-question') {
+    const ds = detectiveSolutions();
+    const q = detectiveBestQuestion(ds);
+    if (!ds || !ds.overflow || !q) { rcStep = detectiveStepForResult(ds); return renderReconcile(); }
+    body = detectiveQuestionHtml(ds, q);
   }
   else if (rcStep === 'choose') {
     // הבלש לא הצליח לזהות — העובד בוחר איך לבדוק
@@ -4858,9 +5071,13 @@ function renderReconcile() {
   else if (rcStep === 'barcodes') {
     if (!noteCheckRows.length || noteCheckRows[noteCheckRows.length - 1].d) noteCheckRows.push({ d: '', pid: null, st: 'empty' });
     const filled = noteCheckRows.filter(r => r.st === 'ok').length;
-    // אחרי השוואה — קודם מנסים לפתור הכל בוודאות (אלא אם המשתמש ביקש הזנה ידנית)
-    const certain = (noteCheckRes && !noteCheckForceQty) ? solveMissingCertain() : null;
-    if (certain) {
+    // אחרי השוואה — קודם מריצים שוב את הבלש המדורג, הפעם רק על המוצרים שאומתו בנייר.
+    // רק אם הוא לא מצא פתרון, נשמרת בדיקת הוודאות הישנה כגיבוי.
+    const postDetective = (noteCheckRes && !noteCheckForceQty) ? postBarcodeSolutions() : null;
+    const certain = (noteCheckRes && !noteCheckForceQty && !postDetective) ? solveMissingCertain() : null;
+    if (postDetective && !postDetective.overflow && postDetective.solutions.length) {
+      body = detectiveSolutionsHtml(postDetective, { postBarcode: true });
+    } else if (certain) {
       const lines = Object.keys(certain.missing).map(pid => { const p = products.find(x => x.id === pid); const ep = detectiveEffectiveProductPrice(p); return { name: p ? p.name : '', qty: certain.missing[pid], price: ep.price }; });
       const extraLines = (certain.extra || []).map(x => '<div class="bg-amber-50 rounded-xl p-3 mb-2 flex items-center justify-between"><span class="font-black text-amber-800">עודף ' + x.qty + ' × ' + x.name + '</span><span class="text-xs text-slate-500">₪' + fmtMoney(x.price) + ' ליח׳</span></div>').join('');
       body = '<div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 shadow-sm mb-24">' +
@@ -7718,6 +7935,28 @@ app.addEventListener('click', (e) => {
   else if (role === 'rc-add-item') reconcileAddItem(id);
   else if (role === 'detective-toggle') { detectiveOpen = !detectiveOpen; if (currentView === 'reconcile') renderReconcile(); }
   else if (role === 'detective-solution') detectiveApplySolution(parseInt(t.dataset.i, 10) || 0);
+  else if (role === 'post-detective-solution') postBarcodeApplySolution(parseInt(t.dataset.i, 10) || 0);
+  else if (role === 'detective-question-answer') {
+    const ds = detectiveSolutions();
+    const q = detectiveBestQuestion(ds);
+    if (!q || q.productId !== id || detectiveQuestionState.asked >= 2) { rcStep = detectiveStepForResult(ds); if (currentView === 'reconcile') renderReconcile(); return; }
+    detectiveQuestionState.constraints.push({ type: 'presence', productId: id, answer: t.dataset.answer === 'yes' });
+    detectiveQuestionState.asked++;
+    rcStep = null; buzz(12);
+    if (currentView === 'reconcile') renderReconcile();
+  }
+  else if (role === 'detective-question-quantity') {
+    const ds = detectiveSolutions();
+    const q = detectiveBestQuestion(ds);
+    const inp = $('detectiveQuestionQty');
+    const raw = inp ? (inp.value || '').replace(/[^0-9]/g, '') : '';
+    if (!q || q.kind !== 'quantity' || q.productId !== id || detectiveQuestionState.asked >= 2) { rcStep = detectiveStepForResult(ds); if (currentView === 'reconcile') renderReconcile(); return; }
+    if (raw === '') { showToast('הקלד את הכמות שרשומה בתעודה', null, null, 2200); if (inp) inp.focus(); return; }
+    detectiveQuestionState.constraints.push({ type: 'quantity', productId: id, quantity: parseInt(raw, 10) || 0 });
+    detectiveQuestionState.asked++;
+    rcStep = null; buzz(12);
+    if (currentView === 'reconcile') renderReconcile();
+  }
   else if (role === 'detective-promo') {
     const pc = detectivePromoConflict();
     if (pc) {
@@ -7752,7 +7991,7 @@ app.addEventListener('click', (e) => {
     if (currentView === 'reconcile') renderReconcile();
   }
   else if (role === 'nc-force-qty') { noteCheckForceQty = true; if (currentView === 'reconcile') renderReconcile(); }
-  else if (role === 'rc-goto-barcodes') { rcStep = 'barcodes'; noteCheckRes = null; if (currentView === 'reconcile') renderReconcile(); }
+  else if (role === 'rc-goto-barcodes') { rcStep = 'barcodes'; noteCheckRes = null; resetDetectiveQuestions(); if (currentView === 'reconcile') renderReconcile(); }
   else if (role === 'rc-goto-choose') { rcStep = 'choose'; if (currentView === 'reconcile') renderReconcile(); }
   else if (role === 'rc-goto-manual') { rcStep = 'manual'; manualSearchTerm = ''; manualAssigned = []; if (currentView === 'reconcile') renderReconcile(); }
   else if (role === 'manual-pick') manualApplyProduct(id);
