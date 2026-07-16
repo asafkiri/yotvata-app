@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v109.2 תעודות משולבות</title>
+    <title>הזמנות יטבתה - v110 קיזוז מדויק</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v109.2 תעודות משולבות</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v110 קיזוז מדויק</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -372,7 +372,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebas
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import {
   initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager,
-  collection, onSnapshot, doc, deleteDoc, addDoc, updateDoc, setDoc, writeBatch, query, orderBy, limit, getDocs, where, runTransaction
+  collection, onSnapshot, doc, getDoc, deleteDoc, addDoc, updateDoc, setDoc, writeBatch, query, orderBy, limit, getDocs, where, runTransaction
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -465,6 +465,7 @@ let returnsDraftTimer = null;
 // ===== מצב קליטת תעודות =====
 let receiptList = [];            // שורות התעודה הנוכחית: {productId,name,barcode,qty}
 let receipts = [];               // היסטוריית תעודות
+const legacyOffsetMigrationBusy = new Set(); // זוגות קיזוז ישנים שנמצאים כעת בשחזור
 let pendingReceipt = null;       // תעודה הממתינה לאישור בסיכום
 let receiptNoteTotal = null;     // סכום התעודה מהספק (ללא מע"מ) — סכום כל התעודות
 let receiptNotes = [];           // פירוט סכומי תעודות הספק (למקרה שהמשלוח מחולק)
@@ -848,7 +849,8 @@ function startListeners() {
   const rcQ = query(rcRef, orderBy('timestamp', 'desc'), limit(100));
   onSnapshot(rcQ, (snap) => {
     receipts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    if (currentView === 'receiptsHistory') rerender();
+    if (currentView === 'receiptsHistory' || currentView === 'receiving' || currentView === 'health') rerender();
+    setTimeout(migrateLegacyReceiptOffsets, 0);
   }, console.error);
 
   const prmRef = collection(db, 'artifacts', appId, 'public', 'data', 'promos');
@@ -1917,7 +1919,7 @@ function buildSystemHealth() {
   const dupBc = duplicateBarcodeGroups();
   const badContacts = contacts.filter(c => normalizePhoneDigits(c.phone).length < 9);
   const drafts = healthDraftCounts();
-  const openReceipts = receipts.filter(rc => !rc.offsetClosed && receiptDiscrepancyInfo(rc).open);
+  const openReceipts = receipts.filter(rc => receiptDiscrepancyInfo(rc).open);
   const now = new Date();
   const cloudOk = !!(db && auth && auth.currentUser && navigator.onLine);
   const items = [];
@@ -3762,7 +3764,7 @@ function commitQty(again) {
 function renderReceiving() {
   const t = receiptTotals();
   const opened = receiptOpened || receiptList.length > 0;
-  const openRecs = receipts.filter(r => !r.offsetClosed && receiptDiscrepancyInfo(r).open);
+  const openRecs = receipts.filter(r => receiptDiscrepancyInfo(r).open);
   const banner = openRecs.length ? '<button data-role="rc-history" class="btn-tap w-full bg-rose-50 border border-rose-200 text-rose-700 rounded-xl py-2.5 px-3 font-bold text-sm flex items-center justify-between gap-2 mb-3"><span><i class="fa-solid fa-clipboard-question"></i> ' + openRecs.length + ' תעודות עם הפרש פתוח</span><span class="text-xs font-black bg-rose-100 px-2 py-0.5 rounded-lg">לטיפול ←</span></button>' : '';
   const topButtons =
     '<div class="flex gap-2 mb-3">' +
@@ -5572,22 +5574,40 @@ function presentReconcileSummary(lines, ex, open, extra) {
 // ===== תיקון תעודה פתוחה (מההיסטוריה) =====
 function openReceiptFix(id) {
   const rc = receipts.find(x => x.id === id); if (!rc) return;
-  receiptFix = { id: rc.id, noteTotalInc: (rc.noteTotalInc != null ? rc.noteTotalInc : null), items: (rc.items || []).map(l => { const up = r2(Number(l.unitPrice) || 0); const pct = Number(l.promoPct) || 0; const on = pct > 0; const base = on ? r2(up / (1 - pct / 100)) : up; return { productId: l.productId, name: l.name, barcode: l.barcode || '', qty: Number(l.qty) || 0, noteQty: (l.noteQty != null ? Number(l.noteQty) : (Number(l.qty) || 0)), unitPrice: up, basePrice: base, promoPct: pct, promoOn: on }; }) };
-  // מיון חד-פעמי בפתיחה: שורות עם הפרש שמור למעלה
-  receiptFix.items.sort((a, b) => ((Number(a.noteQty) || 0) === (Number(a.qty) || 0) ? 1 : 0) - ((Number(b.noteQty) || 0) === (Number(b.qty) || 0) ? 1 : 0));
+  if (rc.offsetClosed && Number(rc.offsetSchemaVersion || 0) < 2) { showToast('משחזר קודם את הקיזוז הישן — נסה שוב בעוד רגע', null, null, 3000); migrateLegacyReceiptOffsets(); return; }
+  receiptFix = { id: rc.id, noteTotalInc: (rc.noteTotalInc != null ? rc.noteTotalInc : null), externalOffsets: cloneSafe(Array.isArray(rc.externalOffsets) ? rc.externalOffsets : []), items: (rc.items || []).map(l => { const up = r2(Number(l.unitPrice) || 0); const pct = Number(l.promoPct) || 0; const on = pct > 0; const base = on ? r2(up / (1 - pct / 100)) : up; return { productId: l.productId, name: l.name, barcode: l.barcode || '', qty: Number(l.qty) || 0, noteQty: (l.noteQty != null ? Number(l.noteQty) : (Number(l.qty) || 0)), unitPrice: up, basePrice: base, promoPct: pct, promoOn: on }; }) };
+  // מיון חד-פעמי בפתיחה: רק הפרשים שעדיין פתוחים עולים לראש; שורות שקוזזו נשארות כמידע נעול.
+  const openIds = new Set(receiptFixOpenLines().map(x => x.productId));
+  receiptFix.items.sort((a, b) => (openIds.has(a.productId) ? 0 : 1) - (openIds.has(b.productId) ? 0 : 1));
   setView('receiptFix');
 }
 function receiptFixTotals() {
   let ex = 0; (receiptFix.items || []).forEach(l => ex += (Number(l.unitPrice) || 0) * (Number(l.qty) || 0)); ex = r2(ex);
   return { ex };
 }
-function receiptFixOpenLines() { return (receiptFix.items || []).filter(l => (Number(l.noteQty) || 0) !== (Number(l.qty) || 0)); }
+function receiptFixEffectiveInfo(items) {
+  if (!receiptFix) return { open: false, shortItems: [], overItems: [], externalOffsets: [] };
+  return receiptDiscrepancyInfo({ items: items || receiptFix.items || [], externalOffsets: receiptFix.externalOffsets || [] });
+}
+function receiptFixOpenLines() {
+  const di = receiptFixEffectiveInfo();
+  const ids = new Set((di.shortItems || []).concat(di.overItems || []).map(x => x.productId));
+  return (receiptFix.items || []).filter(l => ids.has(l.productId));
+}
+function receiptFixLineState(productId) {
+  const di = receiptFixEffectiveInfo();
+  const sh = (di.shortItems || []).find(x => x.productId === productId);
+  const ov = (di.overItems || []).find(x => x.productId === productId);
+  const offsets = (di.externalOffsets || []).filter(x => x.productId === productId);
+  return { d: sh ? Number(sh.n) || 0 : (ov ? -(Number(ov.n) || 0) : 0), offsets, offsetQty: r2(offsets.reduce((a, x) => a + (Number(x.qty) || 0), 0)), locked: offsets.length > 0 };
+}
 function receiptFixRowHtml(l) {
   const qty = Number(l.qty) || 0, noteQty = Number(l.noteQty) || 0;
-  const d = noteQty - qty;
+  const ls = receiptFixLineState(l.productId), d = ls.d;
   let tag = '<span class="text-emerald-600 text-[11px] font-bold">תואם</span>';
   if (d > 0) tag = '<span class="text-rose-600 font-black text-[11px]">חסר ' + d + '</span>';
   else if (d < 0) tag = '<span class="text-amber-600 font-black text-[11px]">עודף ' + (-d) + '</span>';
+  else if (ls.locked) tag = '<span class="text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-lg font-black text-[11px]"><i class="fa-solid fa-scale-balanced"></i> קוזז ' + ls.offsetQty + ' מול תעודה אחרת</span>';
   const pct = Number(l.promoPct) || 0;
   const promoUi = pct > 0 ? ('<div class="flex items-center gap-1.5 mt-1 flex-wrap">' +
     (l.promoOn ? '<span class="text-[10px] font-black text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded">מבצע ' + pct + '%</span>'
@@ -5601,19 +5621,20 @@ function receiptFixRowHtml(l) {
     '<div class="flex items-center justify-between gap-2">' +
       '<span class="text-slate-500 font-bold text-xs">התקבל (בפועל):</span>' +
       '<div class="flex items-center gap-1.5">' +
-        '<button data-role="rc-fix-minus" data-id="' + l.productId + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-minus text-xs"></i></button>' +
-        '<input data-role="rc-fix-qty" data-id="' + l.productId + '" type="text" inputmode="numeric" value="' + qty + '" class="w-12 h-8 text-center font-black border-2 ' + (d !== 0 ? 'border-rose-300' : 'border-slate-200') + ' rounded-lg outline-none focus:border-blue-500">' +
-        '<button data-role="rc-fix-plus" data-id="' + l.productId + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-plus text-xs"></i></button>' +
+        '<button data-role="rc-fix-minus" data-id="' + l.productId + '" ' + (ls.locked ? 'disabled' : '') + ' class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center ' + (ls.locked ? 'opacity-35' : '') + '"><i class="fa-solid fa-minus text-xs"></i></button>' +
+        '<input data-role="rc-fix-qty" data-id="' + l.productId + '" type="text" inputmode="numeric" value="' + qty + '" ' + (ls.locked ? 'disabled' : '') + ' class="w-12 h-8 text-center font-black border-2 ' + (d !== 0 ? 'border-rose-300' : 'border-slate-200') + ' rounded-lg outline-none focus:border-blue-500 ' + (ls.locked ? 'opacity-50 bg-slate-100' : '') + '">' +
+        '<button data-role="rc-fix-plus" data-id="' + l.productId + '" ' + (ls.locked ? 'disabled' : '') + ' class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center ' + (ls.locked ? 'opacity-35' : '') + '"><i class="fa-solid fa-plus text-xs"></i></button>' +
       '</div>' +
     '</div>' +
     '<div class="flex items-center justify-between gap-2 mt-1.5">' +
       '<span class="text-slate-500 font-bold text-xs">בתעודה (בנייר):</span>' +
       '<div class="flex items-center gap-1.5">' +
-        '<button data-role="rc-fix-note-minus" data-id="' + l.productId + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-minus text-xs"></i></button>' +
-        '<input data-role="rc-fix-note" data-id="' + l.productId + '" type="text" inputmode="numeric" value="' + noteQty + '" class="w-12 h-8 text-center font-black border-2 ' + (d !== 0 ? 'border-rose-300' : 'border-slate-200') + ' rounded-lg outline-none focus:border-blue-500">' +
-        '<button data-role="rc-fix-note-plus" data-id="' + l.productId + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-plus text-xs"></i></button>' +
+        '<button data-role="rc-fix-note-minus" data-id="' + l.productId + '" ' + (ls.locked ? 'disabled' : '') + ' class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center ' + (ls.locked ? 'opacity-35' : '') + '"><i class="fa-solid fa-minus text-xs"></i></button>' +
+        '<input data-role="rc-fix-note" data-id="' + l.productId + '" type="text" inputmode="numeric" value="' + noteQty + '" ' + (ls.locked ? 'disabled' : '') + ' class="w-12 h-8 text-center font-black border-2 ' + (d !== 0 ? 'border-rose-300' : 'border-slate-200') + ' rounded-lg outline-none focus:border-blue-500 ' + (ls.locked ? 'opacity-50 bg-slate-100' : '') + '">' +
+        '<button data-role="rc-fix-note-plus" data-id="' + l.productId + '" ' + (ls.locked ? 'disabled' : '') + ' class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center ' + (ls.locked ? 'opacity-35' : '') + '"><i class="fa-solid fa-plus text-xs"></i></button>' +
       '</div>' +
     '</div>' +
+    (ls.locked ? '<div class="mt-2 text-[10px] font-bold text-indigo-600"><i class="fa-solid fa-lock"></i> הכמויות נעולות כדי לשמור על הקיזוז שאושר מול התעודה השנייה</div>' : '') +
   '</div>';
 }
 function renderReceiptFix() {
@@ -5646,6 +5667,7 @@ function refreshReceiptFixHeader() {
   if (st) { st.className = 'mt-1.5 pt-1.5 border-t border-slate-100 text-sm font-black ' + (open ? 'text-rose-600' : 'text-emerald-600'); st.innerHTML = open ? '<i class="fa-solid fa-triangle-exclamation"></i> ' + open + ' שורות עם הפרש' : '<i class="fa-solid fa-circle-check"></i> הכל תואם — אפשר לסגור'; }
 }
 function receiptFixStepQty(productId, delta) {
+  if (receiptFixLineState(productId).locked) { showToast('השורה נעולה כי קוזזה מול תעודה אחרת', null, null, 2200); return; }
   const l = (receiptFix.items || []).find(x => x.productId === productId); if (!l) return;
   l.qty = Math.max(0, (Number(l.qty) || 0) + delta); renderReceiptFix();
 }
@@ -5665,15 +5687,18 @@ function receiptFixAddItem(pid) {
   renderReceiptFix();
 }
 function receiptFixStepNote(productId, delta) {
+  if (receiptFixLineState(productId).locked) { showToast('השורה נעולה כי קוזזה מול תעודה אחרת', null, null, 2200); return; }
   const l = (receiptFix.items || []).find(x => x.productId === productId); if (!l) return;
   l.noteQty = Math.max(0, (Number(l.noteQty) || 0) + delta); renderReceiptFix();
 }
 function receiptFixSetNoteLive(productId, val) {
+  if (receiptFixLineState(productId).locked) return;
   const l = (receiptFix.items || []).find(x => x.productId === productId); if (!l) return;
   let q = parseInt((val || '').toString().replace(/[^0-9]/g, ''), 10); if (isNaN(q) || q < 0) q = 0;
   l.noteQty = q; refreshReceiptFixHeader();
 }
 function receiptFixSetQtyLive(productId, val) {
+  if (receiptFixLineState(productId).locked) return;
   const l = (receiptFix.items || []).find(x => x.productId === productId); if (!l) return;
   let q = parseInt((val || '').toString().replace(/[^0-9]/g, ''), 10); if (isNaN(q) || q < 0) q = 0;
   l.qty = q; refreshReceiptFixHeader();
@@ -5698,7 +5723,7 @@ async function saveReceiptFix() {
     return line;
   }).filter(l => (Number(l.qty) || 0) > 0 || l.noteQty != null);
   const ex = r2(items.reduce((a, l) => a + l.lineTotal, 0));
-  const open = items.some(l => l.noteQty != null && l.noteQty !== l.qty);
+  const open = receiptFixEffectiveInfo(items).open;
   const id = receiptFix.id;
   const updateData = { items, count: items.length, totalExVat: ex, totalIncVat: ex, status: open ? 'open' : 'ok' };
   const opId = makeOperationId('receipt_fix');
@@ -5721,7 +5746,7 @@ async function confirmReceipt() {
   hideReceiptSummary();
   receiptList = []; pendingReceipt = null; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; reconcileData = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; receiptDupConfirmed = false; saveReceiptDraft();
   setView('receiptsHistory');
-  const newOpen = receipts.filter(r => !r.offsetClosed && receiptDiscrepancyInfo(r).open).find(r => findOffsetMatch(r));
+  const newOpen = receipts.filter(r => receiptDiscrepancyInfo(r).open).find(r => findOffsetMatch(r));
   if (newOpen) showToast('💡 זוהה קיזוז אפשרי מול תעודה קודמת — ראה בכרטיס התעודה', null, null, 3500);
   else showToast('התעודה נקלטה ✓', null, null, 2200);
 }
@@ -5808,7 +5833,36 @@ function consumeReceiptDiffQty(list, qty) {
 function receiptSideText(items) {
   return (items || []).map(x => (Number(x.n) || 0) + ' × ' + (x.name || '')).join(' + ');
 }
-function receiptDiscrepancyInfo(rc) {
+function mergeReceiptExternalOffsets(existing, additions) {
+  const out = [], seen = new Set();
+  (Array.isArray(existing) ? existing : []).concat(Array.isArray(additions) ? additions : []).forEach(x => {
+    if (!x || !(Number(x.qty) > 0) || !x.productId) return;
+    const key = x.id || [x.otherId || '', x.productId, x.dir || '', Number(x.qty) || 0].join('|');
+    if (seen.has(key)) return;
+    seen.add(key); out.push({ ...x, id: key, qty: r2(Number(x.qty) || 0) });
+  });
+  return out;
+}
+function consumeStoredReceiptOffsets(rc, shortItems, overItems) {
+  const applied = [], seen = new Set();
+  (Array.isArray(rc && rc.externalOffsets) ? rc.externalOffsets : []).forEach(x => {
+    if (!x || !(Number(x.qty) > 0) || !x.productId) return;
+    const key = x.id || [x.otherId || '', x.productId, x.dir || '', Number(x.qty) || 0].join('|');
+    if (seen.has(key)) return;
+    seen.add(key);
+    const list = x.dir === 'short' ? shortItems : (x.dir === 'over' ? overItems : []);
+    let left = Number(x.qty) || 0, used = 0;
+    list.filter(it => it.productId === x.productId && (Number(it.n) || 0) > 0).forEach(it => {
+      if (left <= 0) return;
+      const take = Math.min(Number(it.n) || 0, left);
+      if (take > 0) { it.n = r2((Number(it.n) || 0) - take); left = r2(left - take); used = r2(used + take); }
+    });
+    if (used > 0) applied.push({ ...x, id: key, qty: used });
+  });
+  return applied;
+}
+function receiptDiscrepancyInfo(rc, opts) {
+  opts = opts || {};
   const rawShort = [], rawOver = [];
   (rc.items || []).forEach(l => {
     if (l.noteQty == null) return;
@@ -5837,16 +5891,18 @@ function receiptDiscrepancyInfo(rc) {
     }
   });
 
+  // קיזוז בין תעודות נשמר ברמת מוצר וכמות. הוא צורך רק את ההפרש שאושר,
+  // ולעולם אינו מסתיר חוסר/עודף אחר שנשאר באותה תעודה.
+  const externalOffsets = opts.skipExternal ? [] : consumeStoredReceiptOffsets(rc, shortItems, overItems);
   const finalShort = shortItems.filter(x => (Number(x.n) || 0) > 0);
   const finalOver = overItems.filter(x => (Number(x.n) || 0) > 0);
   const shortVal = finalShort.reduce((a, x) => a + (Number(x.n) || 0) * (Number(x.price) || 0), 0);
   const overVal = finalOver.reduce((a, x) => a + (Number(x.n) || 0) * (Number(x.price) || 0), 0);
-  return { open: !!(finalShort.length || finalOver.length), shortItems: finalShort, overItems: finalOver, priceOffsets, shortVal: r2(shortVal), overVal: r2(overVal) };
+  return { open: !!(finalShort.length || finalOver.length), shortItems: finalShort, overItems: finalOver, priceOffsets, externalOffsets, shortVal: r2(shortVal), overVal: r2(overVal) };
 }
 function receiptsBalance() {
   let bal = 0, n = 0;
   receipts.forEach(rc => {
-    if (rc.offsetClosed) return; // תעודה שקוזזה — יצאה מהמאזן הפתוח
     const di = receiptDiscrepancyInfo(rc);
     if (di.open) { bal += di.shortVal - di.overVal; n++; }
   });
@@ -5862,15 +5918,16 @@ function receiptOffsets(rc) {
   (di.overItems || []).forEach(l => out.push({ productId: l.productId, name: l.name, d: -(Number(l.n) || 0), price: Number(l.price) || 0 }));
   return out;
 }
-function findOffsetMatch(rc) {
-  if (!rc || rc.offsetClosed) return null;
+function findOffsetMatch(rc, preferredOtherId, preferredProductId) {
+  if (!rc) return null;
   const mine = receiptOffsets(rc);
   if (!mine.length) return null;
   // מחפשים תעודה פתוחה אחרת שבה אותו מוצר בכמות הפוכה מדויקת
   for (const other of receipts) {
-    if (other.id === rc.id || other.offsetClosed) continue;
+    if (other.id === rc.id || (preferredOtherId && other.id !== preferredOtherId)) continue;
     const theirs = receiptOffsets(other);
     for (const a of mine) {
+      if (preferredProductId && a.productId !== preferredProductId) continue;
       for (const b of theirs) {
         if (a.productId === b.productId && a.d === -b.d && a.d !== 0) {
           return { other: other, productId: a.productId, name: a.name, qty: Math.abs(a.d),
@@ -5881,25 +5938,92 @@ function findOffsetMatch(rc) {
   }
   return null;
 }
-async function applyOffset(rcId, otherId) {
+function crossOffsetId(aId, bId, productId) {
+  return 'xo2|' + [aId, bId].sort().join('|') + '|' + productId;
+}
+function exactLegacyOffsetMatches(a, b) {
+  const ad = receiptDiscrepancyInfo(a, { skipExternal: true });
+  const bd = receiptDiscrepancyInfo(b, { skipExternal: true });
+  const out = [];
+  const add = (mine, theirs, myDir) => {
+    mine.forEach(x => {
+      const y = theirs.find(z => z.productId && z.productId === x.productId && (Number(z.n) || 0) === (Number(x.n) || 0));
+      if (!y || !(Number(x.n) > 0)) return;
+      if (out.some(m => m.productId === x.productId)) return;
+      out.push({ productId: x.productId, name: x.name || y.name || '', qty: Number(x.n) || 0, aDir: myDir });
+    });
+  };
+  add(ad.shortItems || [], bd.overItems || [], 'short');
+  add(ad.overItems || [], bd.shortItems || [], 'over');
+  return out;
+}
+async function getReceiptForLegacyMigration(id) {
+  const local = receipts.find(x => x.id === id); if (local) return local;
+  if (!db || !id) return null;
+  try {
+    const snap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'receipts', id));
+    return snap.exists() ? { id: snap.id, ...snap.data() } : null;
+  } catch (e) { console.warn('legacy receipt offset partner unavailable', e); return null; }
+}
+async function migrateLegacyReceiptOffsets() {
+  if (!db) return;
+  const candidates = receipts.filter(rc => rc && rc.offsetClosed && rc.offsetWith && Number(rc.offsetSchemaVersion || 0) < 2);
+  const processedPairs = new Set();
+  for (const rc of candidates) {
+    const pairKey = [rc.id, rc.offsetWith].sort().join('|');
+    if (processedPairs.has(pairKey) || legacyOffsetMigrationBusy.has(pairKey)) continue;
+    processedPairs.add(pairKey);
+    legacyOffsetMigrationBusy.add(pairKey);
+    try {
+      const other = await getReceiptForLegacyMigration(rc.offsetWith);
+      if (!other) continue; // לא מנחשים בלי התעודה השנייה; בינתיים הדגל הישן כבר לא מסתיר את ההפרשים
+      const matches = exactLegacyOffsetMatches(rc, other);
+      const stamp = Date.now(), aAdds = [], bAdds = [];
+      matches.forEach(m => {
+        const oid = crossOffsetId(rc.id, other.id, m.productId);
+        aAdds.push({ id: oid, otherId: other.id, productId: m.productId, name: m.name, qty: m.qty, dir: m.aDir, at: Number(rc.offsetAt) || stamp, source: 'legacy-v1' });
+        bAdds.push({ id: oid, otherId: rc.id, productId: m.productId, name: m.name, qty: m.qty, dir: m.aDir === 'short' ? 'over' : 'short', at: Number(other.offsetAt) || Number(rc.offsetAt) || stamp, source: 'legacy-v1' });
+      });
+      const aOffsets = mergeReceiptExternalOffsets(rc.externalOffsets, aAdds);
+      const bOffsets = mergeReceiptExternalOffsets(other.externalOffsets, bAdds);
+      const review = matches.length === 0;
+      await runCloudTaskSilent('migrate legacy receipt offset', {
+        op: 'batch', operationId: 'offset_migration_v2_' + pairKey,
+        writes: [
+          { op: 'update', path: dataPath('receipts', rc.id), data: { externalOffsets: aOffsets, offsetClosed: false, offsetSchemaVersion: 2, legacyOffsetMigratedAt: stamp, offsetNeedsReview: review } },
+          { op: 'update', path: dataPath('receipts', other.id), data: { externalOffsets: bOffsets, offsetClosed: false, offsetSchemaVersion: 2, legacyOffsetMigratedAt: stamp, offsetNeedsReview: review } }
+        ]
+      });
+    } finally { legacyOffsetMigrationBusy.delete(pairKey); }
+  }
+}
+async function applyOffset(rcId, otherId, productId) {
   const rc = receipts.find(x => x.id === rcId);
   const other = receipts.find(x => x.id === otherId);
   if (!rc || !other) return;
+  const m = findOffsetMatch(rc, otherId, productId);
+  if (!m || m.other.id !== otherId) { showToast('הקיזוז כבר אינו תואם — רענן ובדוק שוב', null, null, 2800); return; }
   const stamp = Date.now();
-  rc.offsetClosed = true; rc.offsetWith = otherId; rc.offsetAt = stamp;
-  other.offsetClosed = true; other.offsetWith = rcId; other.offsetAt = stamp;
+  const oid = crossOffsetId(rcId, otherId, m.productId);
+  const mine = { id: oid, otherId, productId: m.productId, name: m.name, qty: m.qty, dir: m.myDir, at: stamp, source: 'manual' };
+  const theirs = { id: oid, otherId: rcId, productId: m.productId, name: m.name, qty: m.qty, dir: m.myDir === 'short' ? 'over' : 'short', at: stamp, source: 'manual' };
+  const rcOffsets = mergeReceiptExternalOffsets(rc.externalOffsets, [mine]);
+  const otherOffsets = mergeReceiptExternalOffsets(other.externalOffsets, [theirs]);
   if (db) {
     const saved = await runCloudTask('apply receipt offset', {
       op: 'batch', operationId: makeOperationId('offset'),
       writes: [
-        { op: 'update', path: dataPath('receipts', rcId), data: { offsetClosed: true, offsetWith: otherId, offsetAt: stamp } },
-        { op: 'update', path: dataPath('receipts', otherId), data: { offsetClosed: true, offsetWith: rcId, offsetAt: stamp } }
+        { op: 'update', path: dataPath('receipts', rcId), data: { externalOffsets: rcOffsets, offsetClosed: false, offsetWith: otherId, offsetAt: stamp, offsetSchemaVersion: 2 } },
+        { op: 'update', path: dataPath('receipts', otherId), data: { externalOffsets: otherOffsets, offsetClosed: false, offsetWith: rcId, offsetAt: stamp, offsetSchemaVersion: 2 } }
       ]
     });
-    if (!saved) { rc.offsetClosed = false; other.offsetClosed = false; if (currentView === 'receiptsHistory') renderReceiptsHistory(); return; }
+    if (!saved) { if (currentView === 'receiptsHistory') renderReceiptsHistory(); return; }
   }
+  rc.externalOffsets = rcOffsets; rc.offsetClosed = false; rc.offsetSchemaVersion = 2;
+  other.externalOffsets = otherOffsets; other.offsetClosed = false; other.offsetSchemaVersion = 2;
   buzz(18);
-  showToast('הקיזוז אושר — שתי התעודות נסגרו', null, null, 2600);
+  const stillOpen = receiptDiscrepancyInfo(rc).open || receiptDiscrepancyInfo(other).open;
+  showToast(stillOpen ? 'הקיזוז לפריט אושר — נשאר הפרש פתוח לטיפול' : 'הקיזוז לפריט אושר — שתי התעודות מאוזנות', null, null, 3200);
   if (currentView === 'receiptsHistory') renderReceiptsHistory();
 }
 function renderReceiptsHistory() {
@@ -5911,7 +6035,8 @@ function renderReceiptsHistory() {
     const d = new Date(rc.timestamp);
     const dateStr = d.toLocaleDateString('he-IL') + ' · ' + d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
     const di = receiptDiscrepancyInfo(rc);
-    const effectiveOpen = !rc.offsetClosed && di.open;
+    const effectiveOpen = di.open;
+    const legacyRecovering = !!(rc.offsetClosed && Number(rc.offsetSchemaVersion || 0) < 2);
     const rows = (rc.items || []).map(l =>
       '<div class="flex items-center justify-between gap-2 py-1 border-b border-slate-100 last:border-0">' +
         '<div class="min-w-0"><div class="text-sm font-bold text-slate-700 truncate">' + l.name + '</div><div class="text-[11px] text-slate-400">' + l.qty + ' × ₪' + fmtMoney(l.unitPrice) + (l.promoPct ? ' · מבצע ' + l.promoPct + '%' : '') + '</div></div>' +
@@ -5926,7 +6051,7 @@ function renderReceiptsHistory() {
       borderCls = 'border-rose-300';
       statusTxt = '<i class="fa-solid fa-triangle-exclamation"></i> הפרש פתוח';
       metaStatus = ' · <span class="text-rose-600 font-black">הפרש פתוח</span>';
-    } else if (rc.offsetClosed) {
+    } else if ((di.externalOffsets || []).length) {
       statusTxt = '<i class="fa-solid fa-circle-check"></i> אומתה · קיזוז מול תעודה אחרת';
       metaStatus = ' · <span class="text-emerald-700 font-black">קיזוז מול תעודה אחרת</span>';
     } else if (hasInternalOffset) {
@@ -5968,14 +6093,15 @@ function renderReceiptsHistory() {
         ((Number(rc.supplierDiscount) || 0) > 0 ? '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800"><div class="font-black mb-1"><i class="fa-solid fa-percent"></i> אומתה עם מבצע / הנחת ספק</div><div class="font-bold">הנחה: −₪' + fmtMoney(rc.supplierDiscount) + ((rc.grossExVat != null) ? ' · לפני מבצע: ₪' + fmtMoney(rc.grossExVat) : '') + '</div>' + ((rc.supplierPromoItems || []).length ? '<div class="text-[11px] mt-1">כוכבית: ' + (rc.supplierPromoItems || []).map(x => x.name).join(' · ') + '</div>' : '') + '</div>' : '') +
         supplierCreditClaimCardHtml(rc) +
         (((rc.supplierPromoMismatchItems || []).length) ? '<div class="mt-2 bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-xs text-amber-800"><div class="font-black mb-1"><i class="fa-solid fa-triangle-exclamation"></i> מבצע מוגדר במערכת אך לא הופיע אצל הספק</div><div class="font-bold">' + (rc.supplierPromoMismatchItems || []).map(x => x.name).join(' · ') + '</div></div>' : '') +
-        (rc.offsetClosed ? '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs font-black text-emerald-700"><i class="fa-solid fa-scale-balanced"></i> קוזז מול תעודה אחרת — סגור</div>' :
-          (function () { const m = findOffsetMatch(rc); if (!m) return ''; const od = new Date(m.other.timestamp).toLocaleDateString('he-IL');
+        ((di.externalOffsets || []).length ? '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800"><div class="font-black mb-1"><i class="fa-solid fa-scale-balanced"></i> קיזוזים שאושרו מול תעודה אחרת</div>' + (di.externalOffsets || []).map(o => '<div class="font-bold">' + (Number(o.qty) || 0) + ' × ' + (o.name || '') + ' — קוזז</div>').join('') + (effectiveOpen ? '<div class="mt-1 pt-1 border-t border-emerald-200 text-rose-700 font-black"><i class="fa-solid fa-triangle-exclamation"></i> נשארו הפרשים נוספים — התעודה עדיין פתוחה</div>' : '<div class="mt-1 font-black">כל ההפרשים בתעודה הזאת טופלו ✓</div>') + '</div>' : '') +
+        (legacyRecovering ? '<div class="mt-2 bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-xs font-black text-amber-800"><i class="fa-solid fa-rotate"></i> משחזר קיזוז ישן ובודק מחדש את שאר החוסרים…</div>' : '') +
+        (legacyRecovering ? '' : (function () { const m = findOffsetMatch(rc); if (!m) return ''; const od = new Date(m.other.timestamp).toLocaleDateString('he-IL');
             return '<div class="mt-2 bg-indigo-50 border-2 border-indigo-200 rounded-xl p-3">' +
               '<div class="text-xs font-black text-indigo-900 mb-1.5"><i class="fa-solid fa-lightbulb"></i> קיזוז מזוהה</div>' +
               '<div class="text-xs font-bold text-slate-700 mb-2">' + m.qty + ' × ' + m.name + ' ' + (m.myDir === 'over' ? 'שקיבלת בעודף' : 'שחסרו') + ' כאן מתקזזים בדיוק מול תעודת ' + od + '</div>' +
-              '<button data-role="rc-offset" data-id="' + rc.id + '" data-other="' + m.other.id + '" class="btn-tap w-full bg-indigo-600 text-white rounded-xl py-2 font-black text-sm"><i class="fa-solid fa-check"></i> אשר קיזוז — סגור שתי התעודות</button>' +
+              '<button data-role="rc-offset" data-id="' + rc.id + '" data-other="' + m.other.id + '" data-product="' + m.productId + '" class="btn-tap w-full bg-indigo-600 text-white rounded-xl py-2 font-black text-sm"><i class="fa-solid fa-check"></i> אשר קיזוז לפריט הזה</button>' +
             '</div>'; })()) +
-        (rc.offsetClosed ? '' : '<button data-role="rc-fix-open" data-id="' + rc.id + '" class="btn-tap mt-2 w-full font-black py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 ' + (effectiveOpen ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700') + '"><i class="fa-solid ' + (effectiveOpen ? 'fa-wrench' : 'fa-pen') + '"></i> ' + (effectiveOpen ? 'תקן הפרשים' : 'ערוך תעודה') + '</button>') +
+        (legacyRecovering ? '<button disabled class="mt-2 w-full font-black py-2.5 rounded-xl text-sm bg-slate-100 text-slate-400"><i class="fa-solid fa-spinner fa-spin"></i> ממתין לשחזור הקיזוז</button>' : '<button data-role="rc-fix-open" data-id="' + rc.id + '" class="btn-tap mt-2 w-full font-black py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 ' + (effectiveOpen ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700') + '"><i class="fa-solid ' + (effectiveOpen ? 'fa-wrench' : 'fa-pen') + '"></i> ' + (effectiveOpen ? 'תקן הפרשים' : 'ערוך תעודה') + '</button>') +
         '<button data-role="del-receipt" data-id="' + rc.id + '" class="btn-tap mt-2 w-full bg-red-50 text-red-600 font-bold py-2 rounded-xl text-sm flex items-center justify-center gap-2"><i class="fa-solid fa-trash-can"></i> מחק תעודה</button>' +
       '</div>' +
     '</details>';
@@ -6019,7 +6145,7 @@ function receiptRangeData(from, to) {
   });
   meEx = r2(meEx);
   let openShortEx = 0, openOverEx = 0, openCnt = 0;
-  recs.forEach(r => { if (r.offsetClosed) return; const di = receiptDiscrepancyInfo(r); if (di.open) { openCnt++; openShortEx += di.shortVal; openOverEx += di.overVal; } });
+  recs.forEach(r => { const di = receiptDiscrepancyInfo(r); if (di.open) { openCnt++; openShortEx += di.shortVal; openOverEx += di.overVal; } });
   openShortEx = r2(openShortEx); openOverEx = r2(openOverEx);
   const openSupplierCredits = openSupplierCreditClaims(recs);
   const deferredDueCredits = supplierCreditClaimsDeferredDue(receipts, from, to);
@@ -7654,7 +7780,7 @@ app.addEventListener('click', (e) => {
   else if (role === 'rc-recon-cancel') { reconcileData = null; setView('receiving'); }
   else if (role === 'rc-recon-save') saveReconciledReceipt();
   else if (role === 'rc-fix-open') openReceiptFix(id);
-  else if (role === 'rc-offset') { const otherId = t.dataset.other; const rc = receipts.find(x => x.id === id); const other = receipts.find(x => x.id === otherId); const m = rc ? findOffsetMatch(rc) : null; if (m && other) showConfirm('אישור קיזוז', m.qty + ' × ' + m.name + ' מתקזזים מול תעודת ' + new Date(other.timestamp).toLocaleDateString('he-IL') + '. שתי התעודות ייסגרו ויצאו מהמאזן הפתוח.', 'אשר קיזוז', () => applyOffset(id, otherId)); }
+  else if (role === 'rc-offset') { const otherId = t.dataset.other, productId = t.dataset.product; const rc = receipts.find(x => x.id === id); const other = receipts.find(x => x.id === otherId); const m = rc ? findOffsetMatch(rc, otherId, productId) : null; if (m && other) showConfirm('אישור קיזוז לפריט', m.qty + ' × ' + m.name + ' מתקזזים מול תעודת ' + new Date(other.timestamp).toLocaleDateString('he-IL') + '. הקיזוז יחול רק על הפריט הזה; כל חוסר או עודף אחר יישאר פתוח לטיפול.', 'אשר קיזוז לפריט', () => applyOffset(id, otherId, productId)); }
   else if (role === 'rc-credit-verify') setReceiptSupplierCreditStatus(id, 'verified');
   else if (role === 'rc-credit-defer') showConfirm('העברת זיכוי לחודש הבא', 'הספק אמר שהזיכוי לא יופיע החודש אלא בחודש הבא? הדרישה לא תיעלם — היא תופיע באימות מרכזת של חודש היעד.', 'העבר לחודש הבא', () => setReceiptSupplierCreditStatus(id, 'deferred'));
   else if (role === 'rc-credit-cancel') setReceiptSupplierCreditStatus(id, 'cancelled');
