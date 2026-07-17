@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v112 בלש מדויק וממוקד</title>
+    <title>הזמנות יטבתה - v113 בלש טהור לפני משולב</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v112 בלש מדויק וממוקד</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v113 בלש טהור לפני משולב</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -4244,17 +4244,66 @@ function detectiveActorScore(a, delta) {
   s += Math.min(14, Number(a.history) || 0);
   return s;
 }
+// סדר החיפוש חשוב לא פחות מהמתמטיקה:
+// כשגם הכסף וגם היחידות מצביעים לאותו כיוון, קודם בודקים הסבר "טהור".
+// חוסר+עודף יחד נפתח רק אם לא נמצא הסבר טהור לאותו כיוון.
+const DETECTIVE_SEARCH_MIXED = 'mixed';
+const DETECTIVE_SEARCH_PURE_SURPLUS = 'pure-surplus';
+const DETECTIVE_SEARCH_PURE_SHORT_COMPLETE = 'pure-short-complete';
+const DETECTIVE_SEARCH_PURE_SHORT = 'pure-short';
+function detectiveStageAllowsDelta(delta, stage) {
+  if (stage === DETECTIVE_SEARCH_PURE_SURPLUS) return delta < 0;
+  if (stage === DETECTIVE_SEARCH_PURE_SHORT_COMPLETE || stage === DETECTIVE_SEARCH_PURE_SHORT) return delta > 0;
+  return true;
+}
+function detectiveActorFitsStage(a, delta, stage) {
+  if (!detectiveStageAllowsDelta(delta, stage)) return false;
+  // reconcileData עשוי להכיל גם שורת חוסר שנוספה לבדיקה (received: 0).
+  // עודף טהור חייב להיבדק רק מול מה שנסרק בפועל, ולא מול כל שורה שקיימת במסך.
+  if (stage === DETECTIVE_SEARCH_PURE_SURPLUS) return (Number(a.received) || 0) > 0;
+  // "חוסר שלם" פירושו מוצר שלא נסרק כלל; גם אם כבר נוספה לו שורת בדיקה,
+  // הוא נשאר חוסר שלם כל עוד received הוא 0.
+  if (stage === DETECTIVE_SEARCH_PURE_SHORT_COMPLETE) return (Number(a.received) || 0) === 0;
+  return true;
+}
+function detectivePreferredStages(gapCents, unitGap) {
+  // אחרי ברקודים יש כבר עובדות קשיחות על הנייר, ולכן שומרים את החיפוש הקיים ללא שינוי.
+  if (detectiveScope || unitGap == null || unitGap === 0) return [DETECTIVE_SEARCH_MIXED];
+  const moneySign = Math.sign(gapCents);
+  const unitSign = Math.sign(unitGap);
+  // כסף ויחידות בכיוון הפוך הם בדיוק המקרה המורכב — אין בו "טהור" אמין להתחיל ממנו.
+  if (unitSign < 0 && moneySign < 0) return [DETECTIVE_SEARCH_PURE_SURPLUS, DETECTIVE_SEARCH_MIXED];
+  if (unitSign > 0 && moneySign > 0) return [DETECTIVE_SEARCH_PURE_SHORT_COMPLETE, DETECTIVE_SEARCH_PURE_SHORT, DETECTIVE_SEARCH_MIXED];
+  return [DETECTIVE_SEARCH_MIXED];
+}
+function detectiveStageMeta(stage, gapCents, unitGap) {
+  if (stage === DETECTIVE_SEARCH_PURE_SURPLUS) {
+    return { step: 'שלב 1 מתוך 3 · עודף בלבד', text: 'הבלש בדק קודם רק מוצרים שנסרקו בפועל — בלי לחפש בכלל במאגר המלא.' };
+  }
+  if (stage === DETECTIVE_SEARCH_PURE_SHORT_COMPLETE) {
+    return { step: 'שלב 1 מתוך 3 · חוסר של מוצר שלם', text: 'הבלש בדק קודם רק מוצרים שלא נסרקו כלל, כי זה סוג החוסר הנפוץ אצלך.' };
+  }
+  if (stage === DETECTIVE_SEARCH_PURE_SHORT) {
+    return { step: 'שלב 1 מתוך 3 · חוסר בלבד', text: 'לא נמצא מוצר שלם שחסר, לכן הבלש בדק חוסר בלבד — כולל כמות חלקית של מוצר שנסרק.' };
+  }
+  const hasPureDirection = unitGap != null && unitGap !== 0 && Math.sign(gapCents) !== 0 && Math.sign(gapCents) === Math.sign(unitGap);
+  if (!hasPureDirection) {
+    return { step: 'שלב 1 מתוך 3 · חוסר ועודף יחד', text: 'הסכום והיחידות לא מצביעים על כיוון טהור אחד, לכן הבלש בדק חוסר ועודף יחד.' };
+  }
+  return { step: 'שלב 2 מתוך 3 · חוסר ועודף יחד', text: 'לא נמצא פתרון טהור, לכן רק עכשיו הבלש בדק אפשרות של חוסר ועודף יחד.' };
+}
 function detectiveAllocationKey(a) {
   return a.moves.map(m => m.productId + ':' + m.delta).sort().join('|');
 }
 // מחזיר את דרכי השיוך באותו מחיר: מוצרים יחידים וגם פיצול בין עד שלושה מוצרים,
 // למשל 12 עודף מסוג פרו אחד או 6+6 משני סוגי פרו — כולן אותה אפשרות מתמטית במחיר הזה.
-function detectiveAllocations(group, delta, maxMoves) {
+function detectiveAllocations(group, delta, maxMoves, stage) {
   maxMoves = Math.max(1, Math.min(3, maxMoves || 1));
-  const cacheKey = delta + ':' + maxMoves;
+  stage = stage || DETECTIVE_SEARCH_MIXED;
+  const cacheKey = delta + ':' + maxMoves + ':' + stage;
   if (group.allocCache.has(cacheKey)) return group.allocCache.get(cacheKey);
-  if (!detectiveDeltaGloballyPossible(delta)) { group.allocCache.set(cacheKey, []); return []; }
-  const singles = group.actors.filter(a => detectiveActorCanMove(a, delta)).map(a => ({
+  if (!detectiveDeltaGloballyPossible(delta) || !detectiveStageAllowsDelta(delta, stage)) { group.allocCache.set(cacheKey, []); return []; }
+  const singles = group.actors.filter(a => detectiveActorFitsStage(a, delta, stage) && detectiveActorCanMove(a, delta)).map(a => ({
     moves: [{ productId: a.productId, name: a.name, delta, bs: a.bs, ext: a.ext, promoOn: a.promoOn }],
     score: detectiveActorScore(a, delta)
   }));
@@ -4265,7 +4314,10 @@ function detectiveAllocations(group, delta, maxMoves) {
   // גם כשמוצר יחיד יכול להסביר את הכמות, שומרים את הפיצולים האפשריים בין מוצרים באותו מחיר.
   // מבחינה כספית אלה אותה אפשרות, אך כך העובד יכול לבחור למשל 6+6 משני סוגי פרו במקום 12 מסוג אחד.
   const sign = delta > 0 ? 1 : -1, target = Math.abs(delta), out = singles.slice(), seen = new Set(singles.map(detectiveAllocationKey));
-  const actors = group.actors.filter(a => sign > 0 ? detectiveActorCanMove(a, a.bs > 0 ? a.bs : 1) : (a.inRec && (Number(a.noteQty) || 0) > 0));
+  const actors = group.actors.filter(a => {
+    const step = a.bs > 0 ? a.bs : 1;
+    return detectiveActorFitsStage(a, sign * step, stage) && detectiveActorCanMove(a, sign * step);
+  });
   function dfs(start, left, moves, score) {
     if (left === 0) {
       if (moves.length >= 2) {
@@ -4282,7 +4334,7 @@ function detectiveAllocations(group, delta, maxMoves) {
       if (sign < 0) cap = Math.min(cap, Number(a.noteQty) || 0);
       for (let q = step; q <= cap; q += step) {
         const d = sign * q;
-        if (!detectiveActorCanMove(a, d)) continue;
+        if (!detectiveActorFitsStage(a, d, stage) || !detectiveActorCanMove(a, d)) continue;
         moves.push({ productId: a.productId, name: a.name, delta: d, bs: a.bs, ext: a.ext, promoOn: a.promoOn });
         dfs(i + 1, left - q, moves, score + detectiveActorScore(a, d));
         moves.pop();
@@ -4325,11 +4377,12 @@ function detectiveFilterComponentsByQuantity(components, productId, quantity) {
   }
   return detectiveFilterComponentsByProduct(components, { productId, sign: Math.sign(delta), exactDelta: delta, required: true });
 }
-function detectiveMakeSolution(parts, residualCents) {
+function detectiveMakeSolution(parts, residualCents, stage) {
+  stage = stage || DETECTIVE_SEARCH_MIXED;
   const minMoves = [], raw = [];
   parts.forEach(part => {
     const maxForPart = 4 - parts.length;
-    const allocs = detectiveAllocations(part.group, part.delta, maxForPart);
+    const allocs = detectiveAllocations(part.group, part.delta, maxForPart, stage);
     raw.push(allocs); minMoves.push(allocs.length ? Math.min(...allocs.map(a => a.moves.length)) : 99);
   });
   const baseMoves = minMoves.reduce((a, n) => a + n, 0);
@@ -4373,15 +4426,15 @@ function detectiveMakeSolution(parts, residualCents) {
   components.sort((a, b) => (a.priceCents - b.priceCents) || (a.delta - b.delta));
   const signature = components.map(c => c.delta + '@' + c.priceCents).join('|');
   const likelihood = components.reduce((a, c) => a + Math.max(...c.allocations.map(x => x.score)), 0);
-  return { signature, components, residualCents: Math.abs(residualCents), score: likelihood - components.length * 18 - Math.abs(residualCents) * 2 };
+  return { signature, components, residualCents: Math.abs(residualCents), score: likelihood - components.length * 18 - Math.abs(residualCents) * 2, searchStage: stage };
 }
-function detectiveFinishStage(found, gap, unitGap, level, toleranceCents, complete) {
+function detectiveFinishStage(found, gap, unitGap, level, toleranceCents, complete, searchStage) {
   const bySig = new Map();
   found.forEach(s => { const old = bySig.get(s.signature); if (!old || s.score > old.score) bySig.set(s.signature, s); });
   const list = Array.from(bySig.values());
   list.sort((a, b) => (b.score - a.score) || (a.residualCents - b.residualCents) || a.signature.localeCompare(b.signature));
-  if (complete === false || list.length > DETECTIVE_QUESTION_POOL_LIMIT) return { gap, unitGap, level, toleranceCents, complete: false, overflow: true, solutions: [] };
-  return { gap, unitGap, level, toleranceCents, complete: true, overflow: list.length > 4, solutions: list };
+  if (complete === false || list.length > DETECTIVE_QUESTION_POOL_LIMIT) return { gap, unitGap, level, toleranceCents, complete: false, overflow: true, solutions: [], searchStage: searchStage || DETECTIVE_SEARCH_MIXED };
+  return { gap, unitGap, level, toleranceCents, complete: true, overflow: list.length > 4, solutions: list, searchStage: searchStage || DETECTIVE_SEARCH_MIXED };
 }
 function detectivePairDeltas(aPrice, bPrice, targetUnits, targetMoney, tol) {
   const out = [];
@@ -4397,17 +4450,18 @@ function detectivePairDeltas(aPrice, bPrice, targetUnits, targetMoney, tol) {
   }
   return out;
 }
-function detectiveSolveTier(groups, gap, gapCents, unitGap, toleranceCents) {
+function detectiveSolveTier(groups, gap, gapCents, unitGap, toleranceCents, searchStage) {
+  searchStage = searchStage || DETECTIVE_SEARCH_MIXED;
   // 1) שינוי אחד — היחידות קובעות את הכמות בדיוק.
-  if (unitGap !== 0) {
+  if (unitGap !== 0 && detectiveStageAllowsDelta(unitGap, searchStage)) {
     const singles = [];
     groups.forEach(g => {
       const residual = g.priceCents * unitGap - gapCents;
       if (Math.abs(residual) > toleranceCents) return;
-      const s = detectiveMakeSolution([{ group: g, delta: unitGap }], residual);
+      const s = detectiveMakeSolution([{ group: g, delta: unitGap }], residual, searchStage);
       if (s) singles.push(s);
     });
-    if (singles.length) return detectiveFinishStage(singles, gap, unitGap, 1, toleranceCents, true);
+    if (singles.length) return detectiveFinishStage(singles, gap, unitGap, 1, toleranceCents, true, searchStage);
   }
 
   // 2) שני מחירים — פותר בו-זמנית כסף ויחידות; תומך גם בחוסר+עודף ובחוסר מלא+חלקי.
@@ -4417,8 +4471,8 @@ function detectiveSolveTier(groups, gap, gapCents, unitGap, toleranceCents) {
     for (let j = i + 1; j < groups.length && !pairTruncated; j++) {
       const A = groups[i], B = groups[j];
       detectivePairDeltas(A.priceCents, B.priceCents, unitGap, gapCents, toleranceCents).forEach(x => {
-        if (pairTruncated || !detectiveDeltaGloballyPossible(x.da) || !detectiveDeltaGloballyPossible(x.db)) return;
-        const s = detectiveMakeSolution([{ group: A, delta: x.da }, { group: B, delta: x.db }], x.residual);
+        if (pairTruncated || !detectiveDeltaGloballyPossible(x.da) || !detectiveDeltaGloballyPossible(x.db) || !detectiveStageAllowsDelta(x.da, searchStage) || !detectiveStageAllowsDelta(x.db, searchStage)) return;
+        const s = detectiveMakeSolution([{ group: A, delta: x.da }, { group: B, delta: x.db }], x.residual, searchStage);
         if (s && !pairSigs.has(s.signature)) {
           pairSigs.add(s.signature); pairs.push(s);
           if (pairSigs.size > DETECTIVE_QUESTION_POOL_LIMIT) pairTruncated = true;
@@ -4426,8 +4480,8 @@ function detectiveSolveTier(groups, gap, gapCents, unitGap, toleranceCents) {
       });
     }
   }
-  if (pairTruncated) return detectiveFinishStage(pairs, gap, unitGap, 2, toleranceCents, false);
-  if (pairs.length) return detectiveFinishStage(pairs, gap, unitGap, 2, toleranceCents, true);
+  if (pairTruncated) return detectiveFinishStage(pairs, gap, unitGap, 2, toleranceCents, false, searchStage);
+  if (pairs.length) return detectiveFinishStage(pairs, gap, unitGap, 2, toleranceCents, true, searchStage);
 
   // 3) עד שלושה שינויים. כל מחיר הוא רכיב מתמטי אחד; מוצרים זהים במחיר מקובצים בתוכו.
   const positiveCap = Math.max(0, Number(receiptNoteUnits) || 0); // גבול קשיח: מוצר חסר לא יכול לעבור את כל יחידות הנייר
@@ -4435,8 +4489,10 @@ function detectiveSolveTier(groups, gap, gapCents, unitGap, toleranceCents) {
   const deltasFor = (g) => {
     if (deltaCache.has(g.priceCents)) return deltaCache.get(g.priceCents);
     const maxNeg = Math.max(0, ...g.actors.filter(a => a.inRec).map(a => Number(a.noteQty) || 0));
+    const minDelta = searchStage === DETECTIVE_SEARCH_PURE_SURPLUS ? -maxNeg : (searchStage === DETECTIVE_SEARCH_MIXED ? -maxNeg : 1);
+    const maxDelta = searchStage === DETECTIVE_SEARCH_PURE_SURPLUS ? -1 : positiveCap;
     const vals = [];
-    for (let d = -maxNeg; d <= positiveCap; d++) if (d && detectiveAllocations(g, d, 1).length) vals.push(d);
+    for (let d = minDelta; d <= maxDelta; d++) if (d && detectiveAllocations(g, d, 1, searchStage).length) vals.push(d);
     deltaCache.set(g.priceCents, vals); return vals;
   };
   const triples = [], tripleSigs = new Set();
@@ -4453,8 +4509,9 @@ function detectiveSolveTier(groups, gap, gapCents, unitGap, toleranceCents) {
           detectivePairDeltas(B.priceCents, C.priceCents, remU, remM, toleranceCents).forEach(x => {
             if (incomplete) return;
             if (++tripleChecks > tripleBudget) { incomplete = true; return; }
+            if (!detectiveStageAllowsDelta(x.da, searchStage) || !detectiveStageAllowsDelta(x.db, searchStage)) return;
             const residual = A.priceCents * da + B.priceCents * x.da + C.priceCents * x.db - gapCents;
-            const s = detectiveMakeSolution([{ group: A, delta: da }, { group: B, delta: x.da }, { group: C, delta: x.db }], residual);
+            const s = detectiveMakeSolution([{ group: A, delta: da }, { group: B, delta: x.da }, { group: C, delta: x.db }], residual, searchStage);
             if (s && !tripleSigs.has(s.signature)) {
               tripleSigs.add(s.signature); triples.push(s);
               if (tripleSigs.size > DETECTIVE_QUESTION_POOL_LIMIT) incomplete = true;
@@ -4465,8 +4522,8 @@ function detectiveSolveTier(groups, gap, gapCents, unitGap, toleranceCents) {
       }
     }
   }
-  if (incomplete) return detectiveFinishStage(triples, gap, unitGap, 3, toleranceCents, false);
-  return triples.length ? detectiveFinishStage(triples, gap, unitGap, 3, toleranceCents, true) : null;
+  if (incomplete) return detectiveFinishStage(triples, gap, unitGap, 3, toleranceCents, false, searchStage);
+  return triples.length ? detectiveFinishStage(triples, gap, unitGap, 3, toleranceCents, true, searchStage) : null;
 }
 function detectiveSolutions() {
   const gap = reconcileGap(), gapCents = Math.round(gap * 100), unitGap = reconcileUnitsGap();
@@ -4481,16 +4538,20 @@ function detectiveSolutions() {
       const center = gapCents / g.priceCents;
       for (let d = Math.floor(center) - 1; d <= Math.ceil(center) + 1; d++) {
         if (!d || Math.abs(g.priceCents * d - gapCents) > 5) continue;
-        const s = detectiveMakeSolution([{ group: g, delta: d }], g.priceCents * d - gapCents);
+        const s = detectiveMakeSolution([{ group: g, delta: d }], g.priceCents * d - gapCents, DETECTIVE_SEARCH_MIXED);
         if (s) found.push(s);
       }
     });
-    return found.length ? detectiveFinishStage(found, gap, null, 1, 5, true) : null;
+    return found.length ? detectiveFinishStage(found, gap, null, 1, 5, true, DETECTIVE_SEARCH_MIXED) : null;
   }
-  // הסבילות היא הלולאה החיצונית: כל פתרון מדויק של 1/2/3 שינויים קודם לכל פתרון מקורב.
+  // קודם בודקים הסבר טהור לפי כיוון ההפרש; חוסר+עודף יחד הוא גיבוי בלבד.
+  // שומרים על כלל הבטיחות הישן: פתרון מדויק תמיד קודם לפתרון מקורב,
+  // גם אם ההסבר המקורב הוא "טהור" יותר.
   for (const toleranceCents of DETECTIVE_TOLERANCE_STEPS) {
-    const result = detectiveSolveTier(groups, gap, gapCents, unitGap, toleranceCents);
-    if (result) return result;
+    for (const searchStage of detectivePreferredStages(gapCents, unitGap)) {
+      const result = detectiveSolveTier(groups, gap, gapCents, unitGap, toleranceCents, searchStage);
+      if (result) return result;
+    }
   }
   return null;
 }
@@ -4646,6 +4707,7 @@ function detectiveSolutionsHtml(result, opts) {
   opts = opts || {};
   const selectPrefix = opts.postBarcode ? 'postDetOpt_' : 'detOpt_';
   const buttonRole = opts.postBarcode ? 'post-detective-solution' : 'detective-solution';
+  const stageMeta = detectiveStageMeta(result.searchStage, Math.round((Number(result.gap) || 0) * 100), result.unitGap);
   const promoCard = detectivePromoCardHtml();
   const rows = result.solutions.map((sol, si) => {
     const comps = sol.components.map((c, ci) => {
@@ -4667,9 +4729,9 @@ function detectiveSolutionsHtml(result, opts) {
     '</div>';
   }).join('');
   return '<div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 shadow-sm mb-24">' +
-    '<div class="text-xs font-black text-slate-400 mb-1">' + (opts.postBarcode ? 'אחרי הברקודים · הבלש בדק שוב' : 'שלב 1 מתוך 3 · הבלש המשולב') + '</div>' +
+    '<div class="text-xs font-black text-slate-400 mb-1">' + (opts.postBarcode ? 'אחרי הברקודים · הבלש בדק שוב' : stageMeta.step) + '</div>' +
     '<div class="font-black text-lg text-slate-800"><i class="fa-solid fa-magnifying-glass text-indigo-500"></i> נמצאו ' + result.solutions.length + ' אפשרויות שסוגרות גם סכום וגם יחידות</div>' +
-    '<div class="text-xs text-slate-500 font-bold mt-1">' + (opts.postBarcode ? 'החיפוש הוגבל רק למוצרים שאומתו בתעודת הנייר. אין צורך להקליד כמויות אם אחת האפשרויות נכונה.' : 'האפשרויות מסודרות מהסבירה ביותר. מוצרים באותו מחיר מרוכזים באותה אפשרות — בחר את המוצר שמופיע בנייר.') + '</div>' +
+    '<div class="text-xs text-slate-500 font-bold mt-1">' + (opts.postBarcode ? 'החיפוש הוגבל רק למוצרים שאומתו בתעודת הנייר. אין צורך להקליד כמויות אם אחת האפשרויות נכונה.' : stageMeta.text + ' האפשרויות מסודרות מהסבירה ביותר.') + '</div>' +
     (opts.postBarcode ? '' : promoCard) +
     rows +
     (opts.postBarcode
