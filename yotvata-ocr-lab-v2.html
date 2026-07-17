@@ -1,0 +1,921 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#2563eb">
+  <title>מעבדת OCR יטבתה v2</title>
+  <style>
+    :root{--blue:#2563eb;--blue2:#4f46e5;--ink:#172033;--muted:#64748b;--line:#dbe4f0;--bg:#f3f6fb;--good:#047857;--warn:#b45309;--bad:#dc2626}
+    *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:Arial,"Noto Sans Hebrew",sans-serif;-webkit-tap-highlight-color:transparent}
+    button,input{font:inherit}.shell{max-width:820px;margin:auto;padding:16px 14px 60px}.hero{background:linear-gradient(135deg,var(--blue),var(--blue2));color:#fff;border-radius:24px;padding:20px;box-shadow:0 12px 30px #1d4ed833}
+    .hero h1{font-size:26px;margin:0 0 6px}.hero p{margin:0;line-height:1.55;color:#e7edff}.safe{display:inline-flex;gap:7px;align-items:center;margin-top:14px;padding:8px 12px;border:1px solid #ffffff55;border-radius:999px;background:#ffffff18;font-size:14px;font-weight:700}
+    .card{background:#fff;border:1px solid var(--line);border-radius:22px;margin-top:14px;padding:16px;box-shadow:0 5px 18px #3341550b}.card h2{font-size:20px;margin:0 0 12px}.note{font-size:14px;color:var(--muted);line-height:1.55}.privacy{background:#ecfdf5;border-color:#a7f3d0;color:#065f46}.privacy strong{display:block;margin-bottom:4px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.btn{border:0;border-radius:15px;padding:13px 14px;font-weight:800;cursor:pointer;min-height:48px}.btn:disabled{opacity:.45;cursor:not-allowed}.primary{background:var(--blue);color:#fff}.secondary{background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe}.ghost{background:#f8fafc;color:#334155;border:1px solid var(--line)}.danger{background:#fff1f2;color:#be123c;border:1px solid #fecdd3}
+    .fileBtn{display:flex;align-items:center;justify-content:center;gap:9px;background:#eff6ff;color:#1d4ed8;border:2px dashed #93c5fd;border-radius:18px;padding:20px;font-weight:800;cursor:pointer}.fileBtn input{display:none}.filename{margin-top:8px;text-align:center;color:var(--muted);font-size:13px;overflow-wrap:anywhere}
+    .controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px}.controls .btn{flex:1;padding:9px;min-height:42px}.rangeRow{display:flex;align-items:center;gap:10px;margin:12px 0}.rangeRow input{flex:1}.rangeValue{font-variant-numeric:tabular-nums;color:var(--blue);font-weight:800;min-width:44px}
+    .canvasWrap{position:relative;overflow:auto;max-height:62vh;background:#0f172a;border-radius:16px;border:1px solid #0f172a;margin-top:12px}.canvasWrap canvas{display:block;width:100%;height:auto}.empty{padding:42px 14px;text-align:center;color:#94a3b8}
+    .status{display:none;margin-top:12px;border-radius:16px;padding:12px;background:#eff6ff;color:#1e40af}.status.show{display:block}.status.error{background:#fef2f2;color:#991b1b}.bar{height:9px;background:#dbeafe;border-radius:99px;overflow:hidden;margin-top:9px}.bar span{display:block;height:100%;width:0;background:linear-gradient(90deg,#2563eb,#7c3aed);transition:width .2s}
+    .chips{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:12px}.chip{background:#f8fafc;border:1px solid var(--line);border-radius:14px;padding:11px}.chip b{display:block;font-size:22px;font-variant-numeric:tabular-nums}.chip small{color:var(--muted)}.chip.good b{color:var(--good)}.chip.warn b{color:var(--warn)}.chip.bad b{color:var(--bad)}
+    .result{border:1px solid var(--line);border-right:6px solid #94a3b8;border-radius:17px;padding:12px;margin-top:9px;background:#fff}.result.good{border-right-color:var(--good);background:#f0fdf8}.result.warn{border-right-color:#f59e0b;background:#fffbeb}.result.bad{border-right-color:var(--bad);background:#fef2f2}.resultHead{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}.result h3{font-size:17px;margin:0}.badge{border-radius:999px;padding:5px 8px;font-size:12px;font-weight:800;white-space:nowrap}.good .badge{background:#d1fae5;color:#065f46}.warn .badge{background:#fef3c7;color:#92400e}.bad .badge{background:#fee2e2;color:#991b1b}.meta{color:var(--muted);font-size:13px;margin-top:6px;line-height:1.5;overflow-wrap:anywhere}.numbers{font-weight:700;color:#334155;margin-top:7px;font-variant-numeric:tabular-nums}.raw{margin-top:8px;padding:8px;border-radius:10px;background:#ffffffaa;color:#64748b;font:12px/1.4 monospace;direction:ltr;text-align:left;white-space:pre-wrap;overflow-wrap:anywhere}
+    details{margin-top:12px}summary{cursor:pointer;font-weight:700;color:#475569}.hidden{display:none!important}.footer{text-align:center;color:#94a3b8;font-size:12px;margin-top:18px}.catalogOk{color:var(--good);font-weight:700}.catalogInput{margin-top:10px}.catalogInput input{width:100%;padding:10px;border:1px solid var(--line);border-radius:12px;background:#fff}
+    @media(min-width:650px){.chips{grid-template-columns:repeat(4,minmax(0,1fr))}.shell{padding-top:24px}.hero{padding:25px}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <h1>🧪 מעבדת סריקת תעודות</h1>
+      <p>ניסוי עצמאי לזיהוי שורות, ברקודים, כמויות ומחירים מתמונה.</p>
+      <span class="safe">✓ לא מחובר לאפליקציה · לא שומר תעודות</span>
+    </section>
+
+    <section class="card privacy">
+      <strong>הניסוי הפיך לחלוטין</strong>
+      התמונה מעובדת במכשיר בלבד. אין Firebase, אין שמירה ואין שינוי בנתוני האפליקציה. רענון הדף מוחק את תוצאות הניסוי.
+      <div style="margin-top:7px">⚠️ בקובץ מוטמעים קטלוג המוצרים ומחירי העלות מהגיבוי. אל תשתף את הקובץ או את כתובת הניסוי עם אחרים.</div>
+    </section>
+
+    <section class="card">
+      <h2>1. העלאת תמונה</h2>
+      <label class="fileBtn">📷 בחר תמונה או צלם תעודה
+        <input id="imageInput" type="file" accept="image/*" capture="environment">
+      </label>
+      <div id="fileName" class="filename">לא נבחרה תמונה</div>
+      <div class="controls">
+        <button id="rotateLeft" class="btn ghost" disabled>↺ סובב שמאלה</button>
+        <button id="rotateRight" class="btn ghost" disabled>↻ סובב ימינה</button>
+      </div>
+      <div class="rangeRow">
+        <label for="sensitivity">רגישות חלוקה</label>
+        <input id="sensitivity" type="range" min="65" max="135" value="100" disabled>
+        <span id="sensitivityValue" class="rangeValue">100%</span>
+      </div>
+      <div class="grid">
+        <button id="detectBtn" class="btn secondary" disabled>▤ חלק לשורות</button>
+        <button id="ocrBtn" class="btn primary" disabled>🔍 הפעל OCR</button>
+      </div>
+      <div class="controls"><button id="resetBtn" class="btn danger">אפס את הניסוי</button></div>
+      <div id="canvasWrap" class="canvasWrap"><div class="empty">התמונה והחלוקה לשורות יופיעו כאן</div></div>
+      <canvas id="workCanvas" class="hidden"></canvas>
+      <div id="detectNote" class="note" style="margin-top:10px"></div>
+    </section>
+
+    <section id="statusBox" class="status">
+      <div id="statusText">מתכונן…</div>
+      <div class="bar"><span id="progressBar"></span></div>
+    </section>
+
+    <section id="summaryCard" class="card hidden">
+      <h2>תוצאות הניסוי</h2>
+      <div class="chips">
+        <div class="chip"><b id="sumRows">0</b><small>שורות שנמצאו</small></div>
+        <div class="chip good"><b id="sumGreen">0</b><small>אומתו</small></div>
+        <div class="chip warn"><b id="sumYellow">0</b><small>תוקנו/הושלמו</small></div>
+        <div class="chip bad"><b id="sumRed">0</b><small>דורשים בדיקה</small></div>
+      </div>
+      <div id="sumUnits" class="note" style="margin-top:10px"></div>
+      <div id="results"></div>
+    </section>
+
+    <section class="card">
+      <h2>קטלוג לקריאה בלבד</h2>
+      <div class="note">בקובץ מוטמע צילום מצב של <span class="catalogOk">179 מוצרים</span> מהגיבוי שסיפקת. אפשר לבחור גיבוי חדש לניסוי בלבד.</div>
+      <label class="catalogInput"><input id="catalogInput" type="file" accept="application/json,.json"></label>
+      <div id="catalogStatus" class="filename">משתמש בקטלוג המוטמע</div>
+    </section>
+
+    <div class="footer">מעבדת OCR יטבתה v2 · ניסוי בלבד</div>
+  </main>
+
+  <script>/*! For license information please see tesseract.min.js.LICENSE.txt */
+!function(t,r){"object"==typeof exports&&"object"==typeof module?module.exports=r():"function"==typeof define&&define.amd?define([],r):"object"==typeof exports?exports.Tesseract=r():t.Tesseract=r()}(self,(()=>(()=>{var t={30:(t,r,e)=>{function n(t){return n="function"==typeof Symbol&&"symbol"==typeof Symbol.iterator?function(t){return typeof t}:function(t){return t&&"function"==typeof Symbol&&t.constructor===Symbol&&t!==Symbol.prototype?"symbol":typeof t},n(t)}var o=function(t){"use strict";var r,e=Object.prototype,o=e.hasOwnProperty,i=Object.defineProperty||function(t,r,e){t[r]=e.value},a="function"==typeof Symbol?Symbol:{},c=a.iterator||"@@iterator",u=a.asyncIterator||"@@asyncIterator",f=a.toStringTag||"@@toStringTag";function s(t,r,e){return Object.defineProperty(t,r,{value:e,enumerable:!0,configurable:!0,writable:!0}),t[r]}try{s({},"")}catch(t){s=function(t,r,e){return t[r]=e}}function l(t,r,e,n){var o=r&&r.prototype instanceof m?r:m,a=Object.create(o.prototype),c=new N(n||[]);return i(a,"_invoke",{value:P(t,e,c)}),a}function h(t,r,e){try{return{type:"normal",arg:t.call(r,e)}}catch(t){return{type:"throw",arg:t}}}t.wrap=l;var p="suspendedStart",y="suspendedYield",v="executing",d="completed",g={};function m(){}function b(){}function w(){}var L={};s(L,c,(function(){return this}));var x=Object.getPrototypeOf,E=x&&x(x(A([])));E&&E!==e&&o.call(E,c)&&(L=E);var O=w.prototype=m.prototype=Object.create(L);function S(t){["next","throw","return"].forEach((function(r){s(t,r,(function(t){return this._invoke(r,t)}))}))}function j(t,r){function e(i,a,c,u){var f=h(t[i],t,a);if("throw"!==f.type){var s=f.arg,l=s.value;return l&&"object"===n(l)&&o.call(l,"__await")?r.resolve(l.__await).then((function(t){e("next",t,c,u)}),(function(t){e("throw",t,c,u)})):r.resolve(l).then((function(t){s.value=t,c(s)}),(function(t){return e("throw",t,c,u)}))}u(f.arg)}var a;i(this,"_invoke",{value:function(t,n){function o(){return new r((function(r,o){e(t,n,r,o)}))}return a=a?a.then(o,o):o()}})}function P(t,r,e){var n=p;return function(o,i){if(n===v)throw new Error("Generator is already running");if(n===d){if("throw"===o)throw i;return G()}for(e.method=o,e.arg=i;;){var a=e.delegate;if(a){var c=_(a,e);if(c){if(c===g)continue;return c}}if("next"===e.method)e.sent=e._sent=e.arg;else if("throw"===e.method){if(n===p)throw n=d,e.arg;e.dispatchException(e.arg)}else"return"===e.method&&e.abrupt("return",e.arg);n=v;var u=h(t,r,e);if("normal"===u.type){if(n=e.done?d:y,u.arg===g)continue;return{value:u.arg,done:e.done}}"throw"===u.type&&(n=d,e.method="throw",e.arg=u.arg)}}}function _(t,e){var n=e.method,o=t.iterator[n];if(o===r)return e.delegate=null,"throw"===n&&t.iterator.return&&(e.method="return",e.arg=r,_(t,e),"throw"===e.method)||"return"!==n&&(e.method="throw",e.arg=new TypeError("The iterator does not provide a '"+n+"' method")),g;var i=h(o,t.iterator,e.arg);if("throw"===i.type)return e.method="throw",e.arg=i.arg,e.delegate=null,g;var a=i.arg;return a?a.done?(e[t.resultName]=a.value,e.next=t.nextLoc,"return"!==e.method&&(e.method="next",e.arg=r),e.delegate=null,g):a:(e.method="throw",e.arg=new TypeError("iterator result is not an object"),e.delegate=null,g)}function k(t){var r={tryLoc:t[0]};1 in t&&(r.catchLoc=t[1]),2 in t&&(r.finallyLoc=t[2],r.afterLoc=t[3]),this.tryEntries.push(r)}function T(t){var r=t.completion||{};r.type="normal",delete r.arg,t.completion=r}function N(t){this.tryEntries=[{tryLoc:"root"}],t.forEach(k,this),this.reset(!0)}function A(t){if(t){var e=t[c];if(e)return e.call(t);if("function"==typeof t.next)return t;if(!isNaN(t.length)){var n=-1,i=function e(){for(;++n<t.length;)if(o.call(t,n))return e.value=t[n],e.done=!1,e;return e.value=r,e.done=!0,e};return i.next=i}}return{next:G}}function G(){return{value:r,done:!0}}return b.prototype=w,i(O,"constructor",{value:w,configurable:!0}),i(w,"constructor",{value:b,configurable:!0}),b.displayName=s(w,f,"GeneratorFunction"),t.isGeneratorFunction=function(t){var r="function"==typeof t&&t.constructor;return!!r&&(r===b||"GeneratorFunction"===(r.displayName||r.name))},t.mark=function(t){return Object.setPrototypeOf?Object.setPrototypeOf(t,w):(t.__proto__=w,s(t,f,"GeneratorFunction")),t.prototype=Object.create(O),t},t.awrap=function(t){return{__await:t}},S(j.prototype),s(j.prototype,u,(function(){return this})),t.AsyncIterator=j,t.async=function(r,e,n,o,i){void 0===i&&(i=Promise);var a=new j(l(r,e,n,o),i);return t.isGeneratorFunction(e)?a:a.next().then((function(t){return t.done?t.value:a.next()}))},S(O),s(O,f,"Generator"),s(O,c,(function(){return this})),s(O,"toString",(function(){return"[object Generator]"})),t.keys=function(t){var r=Object(t),e=[];for(var n in r)e.push(n);return e.reverse(),function t(){for(;e.length;){var n=e.pop();if(n in r)return t.value=n,t.done=!1,t}return t.done=!0,t}},t.values=A,N.prototype={constructor:N,reset:function(t){if(this.prev=0,this.next=0,this.sent=this._sent=r,this.done=!1,this.delegate=null,this.method="next",this.arg=r,this.tryEntries.forEach(T),!t)for(var e in this)"t"===e.charAt(0)&&o.call(this,e)&&!isNaN(+e.slice(1))&&(this[e]=r)},stop:function(){this.done=!0;var t=this.tryEntries[0].completion;if("throw"===t.type)throw t.arg;return this.rval},dispatchException:function(t){if(this.done)throw t;var e=this;function n(n,o){return c.type="throw",c.arg=t,e.next=n,o&&(e.method="next",e.arg=r),!!o}for(var i=this.tryEntries.length-1;i>=0;--i){var a=this.tryEntries[i],c=a.completion;if("root"===a.tryLoc)return n("end");if(a.tryLoc<=this.prev){var u=o.call(a,"catchLoc"),f=o.call(a,"finallyLoc");if(u&&f){if(this.prev<a.catchLoc)return n(a.catchLoc,!0);if(this.prev<a.finallyLoc)return n(a.finallyLoc)}else if(u){if(this.prev<a.catchLoc)return n(a.catchLoc,!0)}else{if(!f)throw new Error("try statement without catch or finally");if(this.prev<a.finallyLoc)return n(a.finallyLoc)}}}},abrupt:function(t,r){for(var e=this.tryEntries.length-1;e>=0;--e){var n=this.tryEntries[e];if(n.tryLoc<=this.prev&&o.call(n,"finallyLoc")&&this.prev<n.finallyLoc){var i=n;break}}i&&("break"===t||"continue"===t)&&i.tryLoc<=r&&r<=i.finallyLoc&&(i=null);var a=i?i.completion:{};return a.type=t,a.arg=r,i?(this.method="next",this.next=i.finallyLoc,g):this.complete(a)},complete:function(t,r){if("throw"===t.type)throw t.arg;return"break"===t.type||"continue"===t.type?this.next=t.arg:"return"===t.type?(this.rval=this.arg=t.arg,this.method="return",this.next="end"):"normal"===t.type&&r&&(this.next=r),g},finish:function(t){for(var r=this.tryEntries.length-1;r>=0;--r){var e=this.tryEntries[r];if(e.finallyLoc===t)return this.complete(e.completion,e.afterLoc),T(e),g}},catch:function(t){for(var r=this.tryEntries.length-1;r>=0;--r){var e=this.tryEntries[r];if(e.tryLoc===t){var n=e.completion;if("throw"===n.type){var o=n.arg;T(e)}return o}}throw new Error("illegal catch attempt")},delegateYield:function(t,e,n){return this.delegate={iterator:A(t),resultName:e,nextLoc:n},"next"===this.method&&(this.arg=r),g}},t}("object"===n(t=e.nmd(t))?t.exports:{});try{regeneratorRuntime=o}catch(t){"object"===("undefined"==typeof globalThis?"undefined":n(globalThis))?globalThis.regeneratorRuntime=o:Function("r","regeneratorRuntime = r")(o)}},35:(t,r,e)=>{"use strict";function n(t){return n="function"==typeof Symbol&&"symbol"==typeof Symbol.iterator?function(t){return typeof t}:function(t){return t&&"function"==typeof Symbol&&t.constructor===Symbol&&t!==Symbol.prototype?"symbol":typeof t},n(t)}function o(t,r){var e=Object.keys(t);if(Object.getOwnPropertySymbols){var n=Object.getOwnPropertySymbols(t);r&&(n=n.filter((function(r){return Object.getOwnPropertyDescriptor(t,r).enumerable}))),e.push.apply(e,n)}return e}function i(t,r,e){return(r=function(t){var r=function(t){if("object"!=n(t)||!t)return t;var r=t[Symbol.toPrimitive];if(void 0!==r){var e=r.call(t,"string");if("object"!=n(e))return e;throw new TypeError("@@toPrimitive must return a primitive value.")}return String(t)}(t);return"symbol"==n(r)?r:r+""}(r))in t?Object.defineProperty(t,r,{value:e,enumerable:!0,configurable:!0,writable:!0}):t[r]=e,t}var a="browser"===e(938)("type")?function(t){return new URL(t,window.location.href).href}:function(t){return t};t.exports=function(t){var r=function(t){for(var r=1;r<arguments.length;r++){var e=null!=arguments[r]?arguments[r]:{};r%2?o(Object(e),!0).forEach((function(r){i(t,r,e[r])})):Object.getOwnPropertyDescriptors?Object.defineProperties(t,Object.getOwnPropertyDescriptors(e)):o(Object(e)).forEach((function(r){Object.defineProperty(t,r,Object.getOwnPropertyDescriptor(e,r))}))}return t}({},t);return["corePath","workerPath","langPath"].forEach((function(e){t[e]&&(r[e]=a(r[e]))})),r}},65:function(t,r){"use strict";var e=this,n=!1;r.logging=n,r.setLogging=function(t){n=t},r.log=function(){for(var t=arguments.length,r=new Array(t),o=0;o<t;o++)r[o]=arguments[o];return n?console.log.apply(e,r):null}},70:t=>{"use strict";t.exports=function(t,r){return"".concat(t,"-").concat(r,"-").concat(Math.random().toString(16).slice(3,8))}},130:t=>{"use strict";function r(t){return r="function"==typeof Symbol&&"symbol"==typeof Symbol.iterator?function(t){return typeof t}:function(t){return t&&"function"==typeof Symbol&&t.constructor===Symbol&&t!==Symbol.prototype?"symbol":typeof t},r(t)}function e(){e=function(){return n};var t,n={},o=Object.prototype,i=o.hasOwnProperty,a=Object.defineProperty||function(t,r,e){t[r]=e.value},c="function"==typeof Symbol?Symbol:{},u=c.iterator||"@@iterator",f=c.asyncIterator||"@@asyncIterator",s=c.toStringTag||"@@toStringTag";function l(t,r,e){return Object.defineProperty(t,r,{value:e,enumerable:!0,configurable:!0,writable:!0}),t[r]}try{l({},"")}catch(t){l=function(t,r,e){return t[r]=e}}function h(t,r,e,n){var o=r&&r.prototype instanceof b?r:b,i=Object.create(o.prototype),c=new A(n||[]);return a(i,"_invoke",{value:_(t,e,c)}),i}function p(t,r,e){try{return{type:"normal",arg:t.call(r,e)}}catch(t){return{type:"throw",arg:t}}}n.wrap=h;var y="suspendedStart",v="suspendedYield",d="executing",g="completed",m={};function b(){}function w(){}function L(){}var x={};l(x,u,(function(){return this}));var E=Object.getPrototypeOf,O=E&&E(E(G([])));O&&O!==o&&i.call(O,u)&&(x=O);var S=L.prototype=b.prototype=Object.create(x);function j(t){["next","throw","return"].forEach((function(r){l(t,r,(function(t){return this._invoke(r,t)}))}))}function P(t,e){function n(o,a,c,u){var f=p(t[o],t,a);if("throw"!==f.type){var s=f.arg,l=s.value;return l&&"object"==r(l)&&i.call(l,"__await")?e.resolve(l.__await).then((function(t){n("next",t,c,u)}),(function(t){n("throw",t,c,u)})):e.resolve(l).then((function(t){s.value=t,c(s)}),(function(t){return n("throw",t,c,u)}))}u(f.arg)}var o;a(this,"_invoke",{value:function(t,r){function i(){return new e((function(e,o){n(t,r,e,o)}))}return o=o?o.then(i,i):i()}})}function _(r,e,n){var o=y;return function(i,a){if(o===d)throw Error("Generator is already running");if(o===g){if("throw"===i)throw a;return{value:t,done:!0}}for(n.method=i,n.arg=a;;){var c=n.delegate;if(c){var u=k(c,n);if(u){if(u===m)continue;return u}}if("next"===n.method)n.sent=n._sent=n.arg;else if("throw"===n.method){if(o===y)throw o=g,n.arg;n.dispatchException(n.arg)}else"return"===n.method&&n.abrupt("return",n.arg);o=d;var f=p(r,e,n);if("normal"===f.type){if(o=n.done?g:v,f.arg===m)continue;return{value:f.arg,done:n.done}}"throw"===f.type&&(o=g,n.method="throw",n.arg=f.arg)}}}function k(r,e){var n=e.method,o=r.iterator[n];if(o===t)return e.delegate=null,"throw"===n&&r.iterator.return&&(e.method="return",e.arg=t,k(r,e),"throw"===e.method)||"return"!==n&&(e.method="throw",e.arg=new TypeError("The iterator does not provide a '"+n+"' method")),m;var i=p(o,r.iterator,e.arg);if("throw"===i.type)return e.method="throw",e.arg=i.arg,e.delegate=null,m;var a=i.arg;return a?a.done?(e[r.resultName]=a.value,e.next=r.nextLoc,"return"!==e.method&&(e.method="next",e.arg=t),e.delegate=null,m):a:(e.method="throw",e.arg=new TypeError("iterator result is not an object"),e.delegate=null,m)}function T(t){var r={tryLoc:t[0]};1 in t&&(r.catchLoc=t[1]),2 in t&&(r.finallyLoc=t[2],r.afterLoc=t[3]),this.tryEntries.push(r)}function N(t){var r=t.completion||{};r.type="normal",delete r.arg,t.completion=r}function A(t){this.tryEntries=[{tryLoc:"root"}],t.forEach(T,this),this.reset(!0)}function G(e){if(e||""===e){var n=e[u];if(n)return n.call(e);if("function"==typeof e.next)return e;if(!isNaN(e.length)){var o=-1,a=function r(){for(;++o<e.length;)if(i.call(e,o))return r.value=e[o],r.done=!1,r;return r.value=t,r.done=!0,r};return a.next=a}}throw new TypeError(r(e)+" is not iterable")}return w.prototype=L,a(S,"constructor",{value:L,configurable:!0}),a(L,"constructor",{value:w,configurable:!0}),w.displayName=l(L,s,"GeneratorFunction"),n.isGeneratorFunction=function(t){var r="function"==typeof t&&t.constructor;return!!r&&(r===w||"GeneratorFunction"===(r.displayName||r.name))},n.mark=function(t){return Object.setPrototypeOf?Object.setPrototypeOf(t,L):(t.__proto__=L,l(t,s,"GeneratorFunction")),t.prototype=Object.create(S),t},n.awrap=function(t){return{__await:t}},j(P.prototype),l(P.prototype,f,(function(){return this})),n.AsyncIterator=P,n.async=function(t,r,e,o,i){void 0===i&&(i=Promise);var a=new P(h(t,r,e,o),i);return n.isGeneratorFunction(r)?a:a.next().then((function(t){return t.done?t.value:a.next()}))},j(S),l(S,s,"Generator"),l(S,u,(function(){return this})),l(S,"toString",(function(){return"[object Generator]"})),n.keys=function(t){var r=Object(t),e=[];for(var n in r)e.push(n);return e.reverse(),function t(){for(;e.length;){var n=e.pop();if(n in r)return t.value=n,t.done=!1,t}return t.done=!0,t}},n.values=G,A.prototype={constructor:A,reset:function(r){if(this.prev=0,this.next=0,this.sent=this._sent=t,this.done=!1,this.delegate=null,this.method="next",this.arg=t,this.tryEntries.forEach(N),!r)for(var e in this)"t"===e.charAt(0)&&i.call(this,e)&&!isNaN(+e.slice(1))&&(this[e]=t)},stop:function(){this.done=!0;var t=this.tryEntries[0].completion;if("throw"===t.type)throw t.arg;return this.rval},dispatchException:function(r){if(this.done)throw r;var e=this;function n(n,o){return c.type="throw",c.arg=r,e.next=n,o&&(e.method="next",e.arg=t),!!o}for(var o=this.tryEntries.length-1;o>=0;--o){var a=this.tryEntries[o],c=a.completion;if("root"===a.tryLoc)return n("end");if(a.tryLoc<=this.prev){var u=i.call(a,"catchLoc"),f=i.call(a,"finallyLoc");if(u&&f){if(this.prev<a.catchLoc)return n(a.catchLoc,!0);if(this.prev<a.finallyLoc)return n(a.finallyLoc)}else if(u){if(this.prev<a.catchLoc)return n(a.catchLoc,!0)}else{if(!f)throw Error("try statement without catch or finally");if(this.prev<a.finallyLoc)return n(a.finallyLoc)}}}},abrupt:function(t,r){for(var e=this.tryEntries.length-1;e>=0;--e){var n=this.tryEntries[e];if(n.tryLoc<=this.prev&&i.call(n,"finallyLoc")&&this.prev<n.finallyLoc){var o=n;break}}o&&("break"===t||"continue"===t)&&o.tryLoc<=r&&r<=o.finallyLoc&&(o=null);var a=o?o.completion:{};return a.type=t,a.arg=r,o?(this.method="next",this.next=o.finallyLoc,m):this.complete(a)},complete:function(t,r){if("throw"===t.type)throw t.arg;return"break"===t.type||"continue"===t.type?this.next=t.arg:"return"===t.type?(this.rval=this.arg=t.arg,this.method="return",this.next="end"):"normal"===t.type&&r&&(this.next=r),m},finish:function(t){for(var r=this.tryEntries.length-1;r>=0;--r){var e=this.tryEntries[r];if(e.finallyLoc===t)return this.complete(e.completion,e.afterLoc),N(e),m}},catch:function(t){for(var r=this.tryEntries.length-1;r>=0;--r){var e=this.tryEntries[r];if(e.tryLoc===t){var n=e.completion;if("throw"===n.type){var o=n.arg;N(e)}return o}}throw Error("illegal catch attempt")},delegateYield:function(r,e,n){return this.delegate={iterator:G(r),resultName:e,nextLoc:n},"next"===this.method&&(this.arg=t),m}},n}function n(t,r,e,n,o,i,a){try{var c=t[i](a),u=c.value}catch(t){return void e(t)}c.done?r(u):Promise.resolve(u).then(n,o)}function o(t){return function(){var r=this,e=arguments;return new Promise((function(o,i){var a=t.apply(r,e);function c(t){n(a,o,i,c,u,"next",t)}function u(t){n(a,o,i,c,u,"throw",t)}c(void 0)}))}}var i=function(t){return new Promise((function(r,e){var n=new FileReader;n.onload=function(){r(n.result)},n.onerror=function(t){var r=t.target.error.code;e(Error("File could not be read! Code=".concat(r)))},n.readAsArrayBuffer(t)}))},a=function(){var t=o(e().mark((function t(r){var n,c,u;return e().wrap((function(t){for(;;)switch(t.prev=t.next){case 0:if(n=r,void 0!==r){t.next=3;break}return t.abrupt("return","undefined");case 3:if("string"!=typeof r){t.next=16;break}if(!/data:image\/([a-zA-Z]*);base64,([^"]*)/.test(r)){t.next=8;break}n=atob(r.split(",")[1]).split("").map((function(t){return t.charCodeAt(0)})),t.next=14;break;case 8:return t.next=10,fetch(r);case 10:return c=t.sent,t.next=13,c.arrayBuffer();case 13:n=t.sent;case 14:t.next=43;break;case 16:if(!("undefined"!=typeof HTMLElement&&r instanceof HTMLElement)){t.next=30;break}if("IMG"!==r.tagName){t.next=21;break}return t.next=20,a(r.src);case 20:n=t.sent;case 21:if("VIDEO"!==r.tagName){t.next=25;break}return t.next=24,a(r.poster);case 24:n=t.sent;case 25:if("CANVAS"!==r.tagName){t.next=28;break}return t.next=28,new Promise((function(t){r.toBlob(function(){var r=o(e().mark((function r(o){return e().wrap((function(r){for(;;)switch(r.prev=r.next){case 0:return r.next=2,i(o);case 2:n=r.sent,t();case 4:case"end":return r.stop()}}),r)})));return function(t){return r.apply(this,arguments)}}())}));case 28:t.next=43;break;case 30:if(!("undefined"!=typeof OffscreenCanvas&&r instanceof OffscreenCanvas)){t.next=39;break}return t.next=33,r.convertToBlob();case 33:return u=t.sent,t.next=36,i(u);case 36:n=t.sent,t.next=43;break;case 39:if(!(r instanceof File||r instanceof Blob)){t.next=43;break}return t.next=42,i(r);case 42:n=t.sent;case 43:return t.abrupt("return",new Uint8Array(n));case 44:case"end":return t.stop()}}),t)})));return function(r){return t.apply(this,arguments)}}();t.exports=a},192:t=>{"use strict";t.exports={AFR:"afr",AMH:"amh",ARA:"ara",ASM:"asm",AZE:"aze",AZE_CYRL:"aze_cyrl",BEL:"bel",BEN:"ben",BOD:"bod",BOS:"bos",BUL:"bul",CAT:"cat",CEB:"ceb",CES:"ces",CHI_SIM:"chi_sim",CHI_TRA:"chi_tra",CHR:"chr",CYM:"cym",DAN:"dan",DEU:"deu",DZO:"dzo",ELL:"ell",ENG:"eng",ENM:"enm",EPO:"epo",EST:"est",EUS:"eus",FAS:"fas",FIN:"fin",FRA:"fra",FRK:"frk",FRM:"frm",GLE:"gle",GLG:"glg",GRC:"grc",GUJ:"guj",HAT:"hat",HEB:"heb",HIN:"hin",HRV:"hrv",HUN:"hun",IKU:"iku",IND:"ind",ISL:"isl",ITA:"ita",ITA_OLD:"ita_old",JAV:"jav",JPN:"jpn",KAN:"kan",KAT:"kat",KAT_OLD:"kat_old",KAZ:"kaz",KHM:"khm",KIR:"kir",KOR:"kor",KUR:"kur",LAO:"lao",LAT:"lat",LAV:"lav",LIT:"lit",MAL:"mal",MAR:"mar",MKD:"mkd",MLT:"mlt",MSA:"msa",MYA:"mya",NEP:"nep",NLD:"nld",NOR:"nor",ORI:"ori",PAN:"pan",POL:"pol",POR:"por",PUS:"pus",RON:"ron",RUS:"rus",SAN:"san",SIN:"sin",SLK:"slk",SLV:"slv",SPA:"spa",SPA_OLD:"spa_old",SQI:"sqi",SRP:"srp",SRP_LATN:"srp_latn",SWA:"swa",SWE:"swe",SYR:"syr",TAM:"tam",TEL:"tel",TGK:"tgk",TGL:"tgl",THA:"tha",TIR:"tir",TUR:"tur",UIG:"uig",UKR:"ukr",URD:"urd",UZB:"uzb",UZB_CYRL:"uzb_cyrl",VIE:"vie",YID:"yid"}},286:t=>{"use strict";t.exports={workerBlobURL:!0,logger:function(){}}},318:t=>{"use strict";t.exports=function(t){var r,e=t.workerPath,n=t.workerBlobURL;if(Blob&&URL&&n){var o=new Blob(['importScripts("'.concat(e,'");')],{type:"application/javascript"});r=new Worker(URL.createObjectURL(o))}else r=new Worker(e);return r}},330:t=>{"use strict";t.exports={rE:"7.0.0"}},364:function(t,r,e){"use strict";function n(t){return n="function"==typeof Symbol&&"symbol"==typeof Symbol.iterator?function(t){return typeof t}:function(t){return t&&"function"==typeof Symbol&&t.constructor===Symbol&&t!==Symbol.prototype?"symbol":typeof t},n(t)}var o=this;function i(){i=function(){return r};var t,r={},e=Object.prototype,o=e.hasOwnProperty,a=Object.defineProperty||function(t,r,e){t[r]=e.value},c="function"==typeof Symbol?Symbol:{},u=c.iterator||"@@iterator",f=c.asyncIterator||"@@asyncIterator",s=c.toStringTag||"@@toStringTag";function l(t,r,e){return Object.defineProperty(t,r,{value:e,enumerable:!0,configurable:!0,writable:!0}),t[r]}try{l({},"")}catch(t){l=function(t,r,e){return t[r]=e}}function h(t,r,e,n){var o=r&&r.prototype instanceof b?r:b,i=Object.create(o.prototype),c=new A(n||[]);return a(i,"_invoke",{value:_(t,e,c)}),i}function p(t,r,e){try{return{type:"normal",arg:t.call(r,e)}}catch(t){return{type:"throw",arg:t}}}r.wrap=h;var y="suspendedStart",v="suspendedYield",d="executing",g="completed",m={};function b(){}function w(){}function L(){}var x={};l(x,u,(function(){return this}));var E=Object.getPrototypeOf,O=E&&E(E(G([])));O&&O!==e&&o.call(O,u)&&(x=O);var S=L.prototype=b.prototype=Object.create(x);function j(t){["next","throw","return"].forEach((function(r){l(t,r,(function(t){return this._invoke(r,t)}))}))}function P(t,r){function e(i,a,c,u){var f=p(t[i],t,a);if("throw"!==f.type){var s=f.arg,l=s.value;return l&&"object"==n(l)&&o.call(l,"__await")?r.resolve(l.__await).then((function(t){e("next",t,c,u)}),(function(t){e("throw",t,c,u)})):r.resolve(l).then((function(t){s.value=t,c(s)}),(function(t){return e("throw",t,c,u)}))}u(f.arg)}var i;a(this,"_invoke",{value:function(t,n){function o(){return new r((function(r,o){e(t,n,r,o)}))}return i=i?i.then(o,o):o()}})}function _(r,e,n){var o=y;return function(i,a){if(o===d)throw Error("Generator is already running");if(o===g){if("throw"===i)throw a;return{value:t,done:!0}}for(n.method=i,n.arg=a;;){var c=n.delegate;if(c){var u=k(c,n);if(u){if(u===m)continue;return u}}if("next"===n.method)n.sent=n._sent=n.arg;else if("throw"===n.method){if(o===y)throw o=g,n.arg;n.dispatchException(n.arg)}else"return"===n.method&&n.abrupt("return",n.arg);o=d;var f=p(r,e,n);if("normal"===f.type){if(o=n.done?g:v,f.arg===m)continue;return{value:f.arg,done:n.done}}"throw"===f.type&&(o=g,n.method="throw",n.arg=f.arg)}}}function k(r,e){var n=e.method,o=r.iterator[n];if(o===t)return e.delegate=null,"throw"===n&&r.iterator.return&&(e.method="return",e.arg=t,k(r,e),"throw"===e.method)||"return"!==n&&(e.method="throw",e.arg=new TypeError("The iterator does not provide a '"+n+"' method")),m;var i=p(o,r.iterator,e.arg);if("throw"===i.type)return e.method="throw",e.arg=i.arg,e.delegate=null,m;var a=i.arg;return a?a.done?(e[r.resultName]=a.value,e.next=r.nextLoc,"return"!==e.method&&(e.method="next",e.arg=t),e.delegate=null,m):a:(e.method="throw",e.arg=new TypeError("iterator result is not an object"),e.delegate=null,m)}function T(t){var r={tryLoc:t[0]};1 in t&&(r.catchLoc=t[1]),2 in t&&(r.finallyLoc=t[2],r.afterLoc=t[3]),this.tryEntries.push(r)}function N(t){var r=t.completion||{};r.type="normal",delete r.arg,t.completion=r}function A(t){this.tryEntries=[{tryLoc:"root"}],t.forEach(T,this),this.reset(!0)}function G(r){if(r||""===r){var e=r[u];if(e)return e.call(r);if("function"==typeof r.next)return r;if(!isNaN(r.length)){var i=-1,a=function e(){for(;++i<r.length;)if(o.call(r,i))return e.value=r[i],e.done=!1,e;return e.value=t,e.done=!0,e};return a.next=a}}throw new TypeError(n(r)+" is not iterable")}return w.prototype=L,a(S,"constructor",{value:L,configurable:!0}),a(L,"constructor",{value:w,configurable:!0}),w.displayName=l(L,s,"GeneratorFunction"),r.isGeneratorFunction=function(t){var r="function"==typeof t&&t.constructor;return!!r&&(r===w||"GeneratorFunction"===(r.displayName||r.name))},r.mark=function(t){return Object.setPrototypeOf?Object.setPrototypeOf(t,L):(t.__proto__=L,l(t,s,"GeneratorFunction")),t.prototype=Object.create(S),t},r.awrap=function(t){return{__await:t}},j(P.prototype),l(P.prototype,f,(function(){return this})),r.AsyncIterator=P,r.async=function(t,e,n,o,i){void 0===i&&(i=Promise);var a=new P(h(t,e,n,o),i);return r.isGeneratorFunction(e)?a:a.next().then((function(t){return t.done?t.value:a.next()}))},j(S),l(S,s,"Generator"),l(S,u,(function(){return this})),l(S,"toString",(function(){return"[object Generator]"})),r.keys=function(t){var r=Object(t),e=[];for(var n in r)e.push(n);return e.reverse(),function t(){for(;e.length;){var n=e.pop();if(n in r)return t.value=n,t.done=!1,t}return t.done=!0,t}},r.values=G,A.prototype={constructor:A,reset:function(r){if(this.prev=0,this.next=0,this.sent=this._sent=t,this.done=!1,this.delegate=null,this.method="next",this.arg=t,this.tryEntries.forEach(N),!r)for(var e in this)"t"===e.charAt(0)&&o.call(this,e)&&!isNaN(+e.slice(1))&&(this[e]=t)},stop:function(){this.done=!0;var t=this.tryEntries[0].completion;if("throw"===t.type)throw t.arg;return this.rval},dispatchException:function(r){if(this.done)throw r;var e=this;function n(n,o){return c.type="throw",c.arg=r,e.next=n,o&&(e.method="next",e.arg=t),!!o}for(var i=this.tryEntries.length-1;i>=0;--i){var a=this.tryEntries[i],c=a.completion;if("root"===a.tryLoc)return n("end");if(a.tryLoc<=this.prev){var u=o.call(a,"catchLoc"),f=o.call(a,"finallyLoc");if(u&&f){if(this.prev<a.catchLoc)return n(a.catchLoc,!0);if(this.prev<a.finallyLoc)return n(a.finallyLoc)}else if(u){if(this.prev<a.catchLoc)return n(a.catchLoc,!0)}else{if(!f)throw Error("try statement without catch or finally");if(this.prev<a.finallyLoc)return n(a.finallyLoc)}}}},abrupt:function(t,r){for(var e=this.tryEntries.length-1;e>=0;--e){var n=this.tryEntries[e];if(n.tryLoc<=this.prev&&o.call(n,"finallyLoc")&&this.prev<n.finallyLoc){var i=n;break}}i&&("break"===t||"continue"===t)&&i.tryLoc<=r&&r<=i.finallyLoc&&(i=null);var a=i?i.completion:{};return a.type=t,a.arg=r,i?(this.method="next",this.next=i.finallyLoc,m):this.complete(a)},complete:function(t,r){if("throw"===t.type)throw t.arg;return"break"===t.type||"continue"===t.type?this.next=t.arg:"return"===t.type?(this.rval=this.arg=t.arg,this.method="return",this.next="end"):"normal"===t.type&&r&&(this.next=r),m},finish:function(t){for(var r=this.tryEntries.length-1;r>=0;--r){var e=this.tryEntries[r];if(e.finallyLoc===t)return this.complete(e.completion,e.afterLoc),N(e),m}},catch:function(t){for(var r=this.tryEntries.length-1;r>=0;--r){var e=this.tryEntries[r];if(e.tryLoc===t){var n=e.completion;if("throw"===n.type){var o=n.arg;N(e)}return o}}throw Error("illegal catch attempt")},delegateYield:function(r,e,n){return this.delegate={iterator:G(r),resultName:e,nextLoc:n},"next"===this.method&&(this.arg=t),m}},r}function a(t,r){(null==r||r>t.length)&&(r=t.length);for(var e=0,n=Array(r);e<r;e++)n[e]=t[e];return n}function c(t,r,e,n,o,i,a){try{var c=t[i](a),u=c.value}catch(t){return void e(t)}c.done?r(u):Promise.resolve(u).then(n,o)}function u(t){return function(){var r=this,e=arguments;return new Promise((function(n,o){var i=t.apply(r,e);function a(t){c(i,n,o,a,u,"next",t)}function u(t){c(i,n,o,a,u,"throw",t)}a(void 0)}))}}var f=e(910),s=e(65).log,l=e(70),h=0;t.exports=function(){var t=l("Scheduler",h),r={},e={},n=[];h+=1;var c=function(){return Object.keys(r).length},p=function(){if(0!==n.length)for(var t=Object.keys(r),o=0;o<t.length;o+=1)if(void 0===e[t[o]]){n[0](r[t[o]]);break}},y=function(r,c){return new Promise((function(l,h){var y=f({action:r,payload:c});n.push(function(){var t=u(i().mark((function t(u){return i().wrap((function(t){for(;;)switch(t.prev=t.next){case 0:return n.shift(),e[u.id]=y,t.prev=2,t.t0=l,t.next=6,u[r].apply(o,[].concat(function(t){if(Array.isArray(t))return a(t)}(i=c)||function(t){if("undefined"!=typeof Symbol&&null!=t[Symbol.iterator]||null!=t["@@iterator"])return Array.from(t)}(i)||function(t,r){if(t){if("string"==typeof t)return a(t,r);var e={}.toString.call(t).slice(8,-1);return"Object"===e&&t.constructor&&(e=t.constructor.name),"Map"===e||"Set"===e?Array.from(t):"Arguments"===e||/^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(e)?a(t,r):void 0}}(i)||function(){throw new TypeError("Invalid attempt to spread non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method.")}(),[y.id]));case 6:t.t1=t.sent,(0,t.t0)(t.t1),t.next=13;break;case 10:t.prev=10,t.t2=t.catch(2),h(t.t2);case 13:return t.prev=13,delete e[u.id],p(),t.finish(13);case 17:case"end":return t.stop()}var i}),t,null,[[2,10,13,17]])})));return function(r){return t.apply(this,arguments)}}()),s("[".concat(t,"]: Add ").concat(y.id," to JobQueue")),s("[".concat(t,"]: JobQueue length=").concat(n.length)),p()}))},v=function(){var r=u(i().mark((function r(e){var n,o,a,u=arguments;return i().wrap((function(r){for(;;)switch(r.prev=r.next){case 0:if(0!==c()){r.next=2;break}throw Error("[".concat(t,"]: You need to have at least one worker before adding jobs"));case 2:for(n=u.length,o=new Array(n>1?n-1:0),a=1;a<n;a++)o[a-1]=u[a];return r.abrupt("return",y(e,o));case 4:case"end":return r.stop()}}),r)})));return function(t){return r.apply(this,arguments)}}(),d=function(){var t=u(i().mark((function t(){return i().wrap((function(t){for(;;)switch(t.prev=t.next){case 0:Object.keys(r).forEach(function(){var t=u(i().mark((function t(e){return i().wrap((function(t){for(;;)switch(t.prev=t.next){case 0:return t.next=2,r[e].terminate();case 2:case"end":return t.stop()}}),t)})));return function(r){return t.apply(this,arguments)}}()),n=[];case 2:case"end":return t.stop()}}),t)})));return function(){return t.apply(this,arguments)}}();return{addWorker:function(e){return r[e.id]=e,s("[".concat(t,"]: Add ").concat(e.id)),s("[".concat(t,"]: Number of workers=").concat(c())),p(),e.id},addJob:v,terminate:d,getQueueLen:function(){return n.length},getNumWorkers:c}}},523:(t,r,e)=>{"use strict";var n=e(830),o=e(318),i=e(862),a=e(727),c=e(753),u=e(130);t.exports={defaultOptions:n,spawnWorker:o,terminateWorker:i,onMessage:a,send:c,loadImage:u}},535:(t,r,e)=>{"use strict";function n(t){return n="function"==typeof Symbol&&"symbol"==typeof Symbol.iterator?function(t){return typeof t}:function(t){return t&&"function"==typeof Symbol&&t.constructor===Symbol&&t!==Symbol.prototype?"symbol":typeof t},n(t)}function o(){o=function(){return r};var t,r={},e=Object.prototype,i=e.hasOwnProperty,a=Object.defineProperty||function(t,r,e){t[r]=e.value},c="function"==typeof Symbol?Symbol:{},u=c.iterator||"@@iterator",f=c.asyncIterator||"@@asyncIterator",s=c.toStringTag||"@@toStringTag";function l(t,r,e){return Object.defineProperty(t,r,{value:e,enumerable:!0,configurable:!0,writable:!0}),t[r]}try{l({},"")}catch(t){l=function(t,r,e){return t[r]=e}}function h(t,r,e,n){var o=r&&r.prototype instanceof b?r:b,i=Object.create(o.prototype),c=new A(n||[]);return a(i,"_invoke",{value:_(t,e,c)}),i}function p(t,r,e){try{return{type:"normal",arg:t.call(r,e)}}catch(t){return{type:"throw",arg:t}}}r.wrap=h;var y="suspendedStart",v="suspendedYield",d="executing",g="completed",m={};function b(){}function w(){}function L(){}var x={};l(x,u,(function(){return this}));var E=Object.getPrototypeOf,O=E&&E(E(G([])));O&&O!==e&&i.call(O,u)&&(x=O);var S=L.prototype=b.prototype=Object.create(x);function j(t){["next","throw","return"].forEach((function(r){l(t,r,(function(t){return this._invoke(r,t)}))}))}function P(t,r){function e(o,a,c,u){var f=p(t[o],t,a);if("throw"!==f.type){var s=f.arg,l=s.value;return l&&"object"==n(l)&&i.call(l,"__await")?r.resolve(l.__await).then((function(t){e("next",t,c,u)}),(function(t){e("throw",t,c,u)})):r.resolve(l).then((function(t){s.value=t,c(s)}),(function(t){return e("throw",t,c,u)}))}u(f.arg)}var o;a(this,"_invoke",{value:function(t,n){function i(){return new r((function(r,o){e(t,n,r,o)}))}return o=o?o.then(i,i):i()}})}function _(r,e,n){var o=y;return function(i,a){if(o===d)throw Error("Generator is already running");if(o===g){if("throw"===i)throw a;return{value:t,done:!0}}for(n.method=i,n.arg=a;;){var c=n.delegate;if(c){var u=k(c,n);if(u){if(u===m)continue;return u}}if("next"===n.method)n.sent=n._sent=n.arg;else if("throw"===n.method){if(o===y)throw o=g,n.arg;n.dispatchException(n.arg)}else"return"===n.method&&n.abrupt("return",n.arg);o=d;var f=p(r,e,n);if("normal"===f.type){if(o=n.done?g:v,f.arg===m)continue;return{value:f.arg,done:n.done}}"throw"===f.type&&(o=g,n.method="throw",n.arg=f.arg)}}}function k(r,e){var n=e.method,o=r.iterator[n];if(o===t)return e.delegate=null,"throw"===n&&r.iterator.return&&(e.method="return",e.arg=t,k(r,e),"throw"===e.method)||"return"!==n&&(e.method="throw",e.arg=new TypeError("The iterator does not provide a '"+n+"' method")),m;var i=p(o,r.iterator,e.arg);if("throw"===i.type)return e.method="throw",e.arg=i.arg,e.delegate=null,m;var a=i.arg;return a?a.done?(e[r.resultName]=a.value,e.next=r.nextLoc,"return"!==e.method&&(e.method="next",e.arg=t),e.delegate=null,m):a:(e.method="throw",e.arg=new TypeError("iterator result is not an object"),e.delegate=null,m)}function T(t){var r={tryLoc:t[0]};1 in t&&(r.catchLoc=t[1]),2 in t&&(r.finallyLoc=t[2],r.afterLoc=t[3]),this.tryEntries.push(r)}function N(t){var r=t.completion||{};r.type="normal",delete r.arg,t.completion=r}function A(t){this.tryEntries=[{tryLoc:"root"}],t.forEach(T,this),this.reset(!0)}function G(r){if(r||""===r){var e=r[u];if(e)return e.call(r);if("function"==typeof r.next)return r;if(!isNaN(r.length)){var o=-1,a=function e(){for(;++o<r.length;)if(i.call(r,o))return e.value=r[o],e.done=!1,e;return e.value=t,e.done=!0,e};return a.next=a}}throw new TypeError(n(r)+" is not iterable")}return w.prototype=L,a(S,"constructor",{value:L,configurable:!0}),a(L,"constructor",{value:w,configurable:!0}),w.displayName=l(L,s,"GeneratorFunction"),r.isGeneratorFunction=function(t){var r="function"==typeof t&&t.constructor;return!!r&&(r===w||"GeneratorFunction"===(r.displayName||r.name))},r.mark=function(t){return Object.setPrototypeOf?Object.setPrototypeOf(t,L):(t.__proto__=L,l(t,s,"GeneratorFunction")),t.prototype=Object.create(S),t},r.awrap=function(t){return{__await:t}},j(P.prototype),l(P.prototype,f,(function(){return this})),r.AsyncIterator=P,r.async=function(t,e,n,o,i){void 0===i&&(i=Promise);var a=new P(h(t,e,n,o),i);return r.isGeneratorFunction(e)?a:a.next().then((function(t){return t.done?t.value:a.next()}))},j(S),l(S,s,"Generator"),l(S,u,(function(){return this})),l(S,"toString",(function(){return"[object Generator]"})),r.keys=function(t){var r=Object(t),e=[];for(var n in r)e.push(n);return e.reverse(),function t(){for(;e.length;){var n=e.pop();if(n in r)return t.value=n,t.done=!1,t}return t.done=!0,t}},r.values=G,A.prototype={constructor:A,reset:function(r){if(this.prev=0,this.next=0,this.sent=this._sent=t,this.done=!1,this.delegate=null,this.method="next",this.arg=t,this.tryEntries.forEach(N),!r)for(var e in this)"t"===e.charAt(0)&&i.call(this,e)&&!isNaN(+e.slice(1))&&(this[e]=t)},stop:function(){this.done=!0;var t=this.tryEntries[0].completion;if("throw"===t.type)throw t.arg;return this.rval},dispatchException:function(r){if(this.done)throw r;var e=this;function n(n,o){return c.type="throw",c.arg=r,e.next=n,o&&(e.method="next",e.arg=t),!!o}for(var o=this.tryEntries.length-1;o>=0;--o){var a=this.tryEntries[o],c=a.completion;if("root"===a.tryLoc)return n("end");if(a.tryLoc<=this.prev){var u=i.call(a,"catchLoc"),f=i.call(a,"finallyLoc");if(u&&f){if(this.prev<a.catchLoc)return n(a.catchLoc,!0);if(this.prev<a.finallyLoc)return n(a.finallyLoc)}else if(u){if(this.prev<a.catchLoc)return n(a.catchLoc,!0)}else{if(!f)throw Error("try statement without catch or finally");if(this.prev<a.finallyLoc)return n(a.finallyLoc)}}}},abrupt:function(t,r){for(var e=this.tryEntries.length-1;e>=0;--e){var n=this.tryEntries[e];if(n.tryLoc<=this.prev&&i.call(n,"finallyLoc")&&this.prev<n.finallyLoc){var o=n;break}}o&&("break"===t||"continue"===t)&&o.tryLoc<=r&&r<=o.finallyLoc&&(o=null);var a=o?o.completion:{};return a.type=t,a.arg=r,o?(this.method="next",this.next=o.finallyLoc,m):this.complete(a)},complete:function(t,r){if("throw"===t.type)throw t.arg;return"break"===t.type||"continue"===t.type?this.next=t.arg:"return"===t.type?(this.rval=this.arg=t.arg,this.method="return",this.next="end"):"normal"===t.type&&r&&(this.next=r),m},finish:function(t){for(var r=this.tryEntries.length-1;r>=0;--r){var e=this.tryEntries[r];if(e.finallyLoc===t)return this.complete(e.completion,e.afterLoc),N(e),m}},catch:function(t){for(var r=this.tryEntries.length-1;r>=0;--r){var e=this.tryEntries[r];if(e.tryLoc===t){var n=e.completion;if("throw"===n.type){var o=n.arg;N(e)}return o}}throw Error("illegal catch attempt")},delegateYield:function(r,e,n){return this.delegate={iterator:G(r),resultName:e,nextLoc:n},"next"===this.method&&(this.arg=t),m}},r}function i(t,r,e,n,o,i,a){try{var c=t[i](a),u=c.value}catch(t){return void e(t)}c.done?r(u):Promise.resolve(u).then(n,o)}function a(t){return function(){var r=this,e=arguments;return new Promise((function(n,o){var a=t.apply(r,e);function c(t){i(a,n,o,c,u,"next",t)}function u(t){i(a,n,o,c,u,"throw",t)}c(void 0)}))}}var c=e(603),u=function(){var t=a(o().mark((function t(r,e,n){var i;return o().wrap((function(t){for(;;)switch(t.prev=t.next){case 0:return t.next=2,c(e,1,n);case 2:return i=t.sent,t.abrupt("return",i.recognize(r).finally(a(o().mark((function t(){return o().wrap((function(t){for(;;)switch(t.prev=t.next){case 0:return t.next=2,i.terminate();case 2:case"end":return t.stop()}}),t)})))));case 4:case"end":return t.stop()}}),t)})));return function(r,e,n){return t.apply(this,arguments)}}(),f=function(){var t=a(o().mark((function t(r,e){var n;return o().wrap((function(t){for(;;)switch(t.prev=t.next){case 0:return t.next=2,c("osd",0,e);case 2:return n=t.sent,t.abrupt("return",n.detect(r).finally(a(o().mark((function t(){return o().wrap((function(t){for(;;)switch(t.prev=t.next){case 0:return t.next=2,n.terminate();case 2:case"end":return t.stop()}}),t)})))));case 4:case"end":return t.stop()}}),t)})));return function(r,e){return t.apply(this,arguments)}}();t.exports={recognize:u,detect:f}},603:(t,r,e)=>{"use strict";function n(t){return n="function"==typeof Symbol&&"symbol"==typeof Symbol.iterator?function(t){return typeof t}:function(t){return t&&"function"==typeof Symbol&&t.constructor===Symbol&&t!==Symbol.prototype?"symbol":typeof t},n(t)}var o=["logger","errorHandler"];function i(){i=function(){return r};var t,r={},e=Object.prototype,o=e.hasOwnProperty,a=Object.defineProperty||function(t,r,e){t[r]=e.value},c="function"==typeof Symbol?Symbol:{},u=c.iterator||"@@iterator",f=c.asyncIterator||"@@asyncIterator",s=c.toStringTag||"@@toStringTag";function l(t,r,e){return Object.defineProperty(t,r,{value:e,enumerable:!0,configurable:!0,writable:!0}),t[r]}try{l({},"")}catch(t){l=function(t,r,e){return t[r]=e}}function h(t,r,e,n){var o=r&&r.prototype instanceof b?r:b,i=Object.create(o.prototype),c=new A(n||[]);return a(i,"_invoke",{value:_(t,e,c)}),i}function p(t,r,e){try{return{type:"normal",arg:t.call(r,e)}}catch(t){return{type:"throw",arg:t}}}r.wrap=h;var y="suspendedStart",v="suspendedYield",d="executing",g="completed",m={};function b(){}function w(){}function L(){}var x={};l(x,u,(function(){return this}));var E=Object.getPrototypeOf,O=E&&E(E(G([])));O&&O!==e&&o.call(O,u)&&(x=O);var S=L.prototype=b.prototype=Object.create(x);function j(t){["next","throw","return"].forEach((function(r){l(t,r,(function(t){return this._invoke(r,t)}))}))}function P(t,r){function e(i,a,c,u){var f=p(t[i],t,a);if("throw"!==f.type){var s=f.arg,l=s.value;return l&&"object"==n(l)&&o.call(l,"__await")?r.resolve(l.__await).then((function(t){e("next",t,c,u)}),(function(t){e("throw",t,c,u)})):r.resolve(l).then((function(t){s.value=t,c(s)}),(function(t){return e("throw",t,c,u)}))}u(f.arg)}var i;a(this,"_invoke",{value:function(t,n){function o(){return new r((function(r,o){e(t,n,r,o)}))}return i=i?i.then(o,o):o()}})}function _(r,e,n){var o=y;return function(i,a){if(o===d)throw Error("Generator is already running");if(o===g){if("throw"===i)throw a;return{value:t,done:!0}}for(n.method=i,n.arg=a;;){var c=n.delegate;if(c){var u=k(c,n);if(u){if(u===m)continue;return u}}if("next"===n.method)n.sent=n._sent=n.arg;else if("throw"===n.method){if(o===y)throw o=g,n.arg;n.dispatchException(n.arg)}else"return"===n.method&&n.abrupt("return",n.arg);o=d;var f=p(r,e,n);if("normal"===f.type){if(o=n.done?g:v,f.arg===m)continue;return{value:f.arg,done:n.done}}"throw"===f.type&&(o=g,n.method="throw",n.arg=f.arg)}}}function k(r,e){var n=e.method,o=r.iterator[n];if(o===t)return e.delegate=null,"throw"===n&&r.iterator.return&&(e.method="return",e.arg=t,k(r,e),"throw"===e.method)||"return"!==n&&(e.method="throw",e.arg=new TypeError("The iterator does not provide a '"+n+"' method")),m;var i=p(o,r.iterator,e.arg);if("throw"===i.type)return e.method="throw",e.arg=i.arg,e.delegate=null,m;var a=i.arg;return a?a.done?(e[r.resultName]=a.value,e.next=r.nextLoc,"return"!==e.method&&(e.method="next",e.arg=t),e.delegate=null,m):a:(e.method="throw",e.arg=new TypeError("iterator result is not an object"),e.delegate=null,m)}function T(t){var r={tryLoc:t[0]};1 in t&&(r.catchLoc=t[1]),2 in t&&(r.finallyLoc=t[2],r.afterLoc=t[3]),this.tryEntries.push(r)}function N(t){var r=t.completion||{};r.type="normal",delete r.arg,t.completion=r}function A(t){this.tryEntries=[{tryLoc:"root"}],t.forEach(T,this),this.reset(!0)}function G(r){if(r||""===r){var e=r[u];if(e)return e.call(r);if("function"==typeof r.next)return r;if(!isNaN(r.length)){var i=-1,a=function e(){for(;++i<r.length;)if(o.call(r,i))return e.value=r[i],e.done=!1,e;return e.value=t,e.done=!0,e};return a.next=a}}throw new TypeError(n(r)+" is not iterable")}return w.prototype=L,a(S,"constructor",{value:L,configurable:!0}),a(L,"constructor",{value:w,configurable:!0}),w.displayName=l(L,s,"GeneratorFunction"),r.isGeneratorFunction=function(t){var r="function"==typeof t&&t.constructor;return!!r&&(r===w||"GeneratorFunction"===(r.displayName||r.name))},r.mark=function(t){return Object.setPrototypeOf?Object.setPrototypeOf(t,L):(t.__proto__=L,l(t,s,"GeneratorFunction")),t.prototype=Object.create(S),t},r.awrap=function(t){return{__await:t}},j(P.prototype),l(P.prototype,f,(function(){return this})),r.AsyncIterator=P,r.async=function(t,e,n,o,i){void 0===i&&(i=Promise);var a=new P(h(t,e,n,o),i);return r.isGeneratorFunction(e)?a:a.next().then((function(t){return t.done?t.value:a.next()}))},j(S),l(S,s,"Generator"),l(S,u,(function(){return this})),l(S,"toString",(function(){return"[object Generator]"})),r.keys=function(t){var r=Object(t),e=[];for(var n in r)e.push(n);return e.reverse(),function t(){for(;e.length;){var n=e.pop();if(n in r)return t.value=n,t.done=!1,t}return t.done=!0,t}},r.values=G,A.prototype={constructor:A,reset:function(r){if(this.prev=0,this.next=0,this.sent=this._sent=t,this.done=!1,this.delegate=null,this.method="next",this.arg=t,this.tryEntries.forEach(N),!r)for(var e in this)"t"===e.charAt(0)&&o.call(this,e)&&!isNaN(+e.slice(1))&&(this[e]=t)},stop:function(){this.done=!0;var t=this.tryEntries[0].completion;if("throw"===t.type)throw t.arg;return this.rval},dispatchException:function(r){if(this.done)throw r;var e=this;function n(n,o){return c.type="throw",c.arg=r,e.next=n,o&&(e.method="next",e.arg=t),!!o}for(var i=this.tryEntries.length-1;i>=0;--i){var a=this.tryEntries[i],c=a.completion;if("root"===a.tryLoc)return n("end");if(a.tryLoc<=this.prev){var u=o.call(a,"catchLoc"),f=o.call(a,"finallyLoc");if(u&&f){if(this.prev<a.catchLoc)return n(a.catchLoc,!0);if(this.prev<a.finallyLoc)return n(a.finallyLoc)}else if(u){if(this.prev<a.catchLoc)return n(a.catchLoc,!0)}else{if(!f)throw Error("try statement without catch or finally");if(this.prev<a.finallyLoc)return n(a.finallyLoc)}}}},abrupt:function(t,r){for(var e=this.tryEntries.length-1;e>=0;--e){var n=this.tryEntries[e];if(n.tryLoc<=this.prev&&o.call(n,"finallyLoc")&&this.prev<n.finallyLoc){var i=n;break}}i&&("break"===t||"continue"===t)&&i.tryLoc<=r&&r<=i.finallyLoc&&(i=null);var a=i?i.completion:{};return a.type=t,a.arg=r,i?(this.method="next",this.next=i.finallyLoc,m):this.complete(a)},complete:function(t,r){if("throw"===t.type)throw t.arg;return"break"===t.type||"continue"===t.type?this.next=t.arg:"return"===t.type?(this.rval=this.arg=t.arg,this.method="return",this.next="end"):"normal"===t.type&&r&&(this.next=r),m},finish:function(t){for(var r=this.tryEntries.length-1;r>=0;--r){var e=this.tryEntries[r];if(e.finallyLoc===t)return this.complete(e.completion,e.afterLoc),N(e),m}},catch:function(t){for(var r=this.tryEntries.length-1;r>=0;--r){var e=this.tryEntries[r];if(e.tryLoc===t){var n=e.completion;if("throw"===n.type){var o=n.arg;N(e)}return o}}throw Error("illegal catch attempt")},delegateYield:function(r,e,n){return this.delegate={iterator:G(r),resultName:e,nextLoc:n},"next"===this.method&&(this.arg=t),m}},r}function a(t,r){(null==r||r>t.length)&&(r=t.length);for(var e=0,n=Array(r);e<r;e++)n[e]=t[e];return n}function c(t,r){var e=Object.keys(t);if(Object.getOwnPropertySymbols){var n=Object.getOwnPropertySymbols(t);r&&(n=n.filter((function(r){return Object.getOwnPropertyDescriptor(t,r).enumerable}))),e.push.apply(e,n)}return e}function u(t){for(var r=1;r<arguments.length;r++){var e=null!=arguments[r]?arguments[r]:{};r%2?c(Object(e),!0).forEach((function(r){f(t,r,e[r])})):Object.getOwnPropertyDescriptors?Object.defineProperties(t,Object.getOwnPropertyDescriptors(e)):c(Object(e)).forEach((function(r){Object.defineProperty(t,r,Object.getOwnPropertyDescriptor(e,r))}))}return t}function f(t,r,e){return(r=function(t){var r=function(t){if("object"!=n(t)||!t)return t;var r=t[Symbol.toPrimitive];if(void 0!==r){var e=r.call(t,"string");if("object"!=n(e))return e;throw new TypeError("@@toPrimitive must return a primitive value.")}return String(t)}(t);return"symbol"==n(r)?r:r+""}(r))in t?Object.defineProperty(t,r,{value:e,enumerable:!0,configurable:!0,writable:!0}):t[r]=e,t}function s(t,r){if(null==t)return{};var e,n,o=function(t,r){if(null==t)return{};var e={};for(var n in t)if({}.hasOwnProperty.call(t,n)){if(-1!==r.indexOf(n))continue;e[n]=t[n]}return e}(t,r);if(Object.getOwnPropertySymbols){var i=Object.getOwnPropertySymbols(t);for(n=0;n<i.length;n++)e=i[n],-1===r.indexOf(e)&&{}.propertyIsEnumerable.call(t,e)&&(o[e]=t[e])}return o}function l(t,r,e,n,o,i,a){try{var c=t[i](a),u=c.value}catch(t){return void e(t)}c.done?r(u):Promise.resolve(u).then(n,o)}function h(t){return function(){var r=this,e=arguments;return new Promise((function(n,o){var i=t.apply(r,e);function a(t){l(i,n,o,a,c,"next",t)}function c(t){l(i,n,o,a,c,"throw",t)}a(void 0)}))}}var p=e(35),y=e(910),v=e(65).log,d=e(70),g=e(972),m=e(523),b=m.defaultOptions,w=m.spawnWorker,L=m.terminateWorker,x=m.onMessage,E=m.loadImage,O=m.send,S=0;t.exports=h(i().mark((function t(){var r,e,n,c,f,l,m,j,P,_,k,T,N,A,G,I,F,R,D,M,C,U,Y,B,H,K,W,z,J,V,Z,Q,q,X,$=arguments;return i().wrap((function(t){for(;;)switch(t.prev=t.next){case 0:return r=$.length>0&&void 0!==$[0]?$[0]:"eng",e=$.length>1&&void 0!==$[1]?$[1]:g.LSTM_ONLY,n=$.length>2&&void 0!==$[2]?$[2]:{},c=$.length>3&&void 0!==$[3]?$[3]:{},f=d("Worker",S),l=p(u(u({},b),n)),m=l.logger,j=l.errorHandler,P=s(l,o),_={},k="string"==typeof r?r.split("+"):r,T=e,N=c,A=[g.DEFAULT,g.LSTM_ONLY].includes(e)&&!P.legacyCore,F=new Promise((function(t,r){I=t,G=r})),R=function(t){G(t.message)},(D=w(P)).onerror=R,S+=1,M=function(t){var r=t.id,e=t.action,n=t.payload;return new Promise((function(t,o){v("[".concat(f,"]: Start ").concat(r,", action=").concat(e));var i="".concat(e,"-").concat(r);_[i]={resolve:t,reject:o},O(D,{workerId:f,jobId:r,action:e,payload:n})}))},C=function(){return console.warn("`load` is depreciated and should be removed from code (workers now come pre-loaded)")},U=function(t){return M(y({id:t,action:"load",payload:{options:{lstmOnly:A,corePath:P.corePath,logging:P.logging}}}))},Y=function(t,r,e){return M(y({id:e,action:"FS",payload:{method:"writeFile",args:[t,r]}}))},B=function(t,r){return M(y({id:r,action:"FS",payload:{method:"readFile",args:[t,{encoding:"utf8"}]}}))},H=function(t,r){return M(y({id:r,action:"FS",payload:{method:"unlink",args:[t]}}))},K=function(t,r,e){return M(y({id:e,action:"FS",payload:{method:t,args:r}}))},W=function(t,r){return M(y({id:r,action:"loadLanguage",payload:{langs:t,options:{langPath:P.langPath,dataPath:P.dataPath,cachePath:P.cachePath,cacheMethod:P.cacheMethod,gzip:P.gzip,lstmOnly:[g.DEFAULT,g.LSTM_ONLY].includes(T)&&!P.legacyLang}}}))},z=function(t,r,e,n){return M(y({id:n,action:"initialize",payload:{langs:t,oem:r,config:e}}))},J=function(){var t=arguments.length>0&&void 0!==arguments[0]?arguments[0]:"eng",r=arguments.length>1?arguments[1]:void 0,e=arguments.length>2?arguments[2]:void 0,n=arguments.length>3?arguments[3]:void 0;if(A&&[g.TESSERACT_ONLY,g.TESSERACT_LSTM_COMBINED].includes(r))throw Error("Legacy model requested but code missing.");var o=r||T;T=o;var i=e||N;N=i;var c,u=("string"==typeof t?t.split("+"):t).filter((function(t){return!k.includes(t)}));return k.push.apply(k,function(t){if(Array.isArray(t))return a(t)}(c=u)||function(t){if("undefined"!=typeof Symbol&&null!=t[Symbol.iterator]||null!=t["@@iterator"])return Array.from(t)}(c)||function(t,r){if(t){if("string"==typeof t)return a(t,r);var e={}.toString.call(t).slice(8,-1);return"Object"===e&&t.constructor&&(e=t.constructor.name),"Map"===e||"Set"===e?Array.from(t):"Arguments"===e||/^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(e)?a(t,r):void 0}}(c)||function(){throw new TypeError("Invalid attempt to spread non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method.")}()),u.length>0?W(u,n).then((function(){return z(t,o,i,n)})):z(t,o,i,n)},V=function(){return M(y({id:arguments.length>1?arguments[1]:void 0,action:"setParameters",payload:{params:arguments.length>0&&void 0!==arguments[0]?arguments[0]:{}}}))},Z=function(){var t=h(i().mark((function t(r){var e,n,o,a=arguments;return i().wrap((function(t){for(;;)switch(t.prev=t.next){case 0:return e=a.length>1&&void 0!==a[1]?a[1]:{},n=a.length>2&&void 0!==a[2]?a[2]:{text:!0},o=a.length>3?a[3]:void 0,t.t0=M,t.t1=y,t.t2=o,t.next=8,E(r);case 8:return t.t3=t.sent,t.t4=e,t.t5=n,t.t6={image:t.t3,options:t.t4,output:t.t5},t.t7={id:t.t2,action:"recognize",payload:t.t6},t.t8=(0,t.t1)(t.t7),t.abrupt("return",(0,t.t0)(t.t8));case 15:case"end":return t.stop()}}),t)})));return function(r){return t.apply(this,arguments)}}(),Q=function(){var t=h(i().mark((function t(r,e){return i().wrap((function(t){for(;;)switch(t.prev=t.next){case 0:if(!A){t.next=2;break}throw Error("`worker.detect` requires Legacy model, which was not loaded.");case 2:return t.t0=M,t.t1=y,t.t2=e,t.next=7,E(r);case 7:return t.t3=t.sent,t.t4={image:t.t3},t.t5={id:t.t2,action:"detect",payload:t.t4},t.t6=(0,t.t1)(t.t5),t.abrupt("return",(0,t.t0)(t.t6));case 12:case"end":return t.stop()}}),t)})));return function(r,e){return t.apply(this,arguments)}}(),q=function(){var t=h(i().mark((function t(){return i().wrap((function(t){for(;;)switch(t.prev=t.next){case 0:return null!==D&&(L(D),D=null),t.abrupt("return",Promise.resolve());case 2:case"end":return t.stop()}}),t)})));return function(){return t.apply(this,arguments)}}(),x(D,(function(t){var r=t.workerId,e=t.jobId,n=t.status,o=t.action,i=t.data,a="".concat(o,"-").concat(e);if("resolve"===n)v("[".concat(r,"]: Complete ").concat(e)),_[a].resolve({jobId:e,data:i}),delete _[a];else if("reject"===n){if(_[a].reject(i),delete _[a],"load"===o&&G(i),!j)throw Error(i);j(i)}else"progress"===n&&m(u(u({},i),{},{userJobId:e}))})),X={id:f,worker:D,load:C,writeText:Y,readText:B,removeFile:H,FS:K,reinitialize:J,setParameters:V,recognize:Z,detect:Q,terminate:q},U().then((function(){return W(r)})).then((function(){return z(r,e,c)})).then((function(){return I(X)})).catch((function(){})),t.abrupt("return",F);case 34:case"end":return t.stop()}}),t)})))},727:t=>{"use strict";t.exports=function(t,r){t.onmessage=function(t){var e=t.data;r(e)}}},753:t=>{"use strict";function r(t){return r="function"==typeof Symbol&&"symbol"==typeof Symbol.iterator?function(t){return typeof t}:function(t){return t&&"function"==typeof Symbol&&t.constructor===Symbol&&t!==Symbol.prototype?"symbol":typeof t},r(t)}function e(){e=function(){return n};var t,n={},o=Object.prototype,i=o.hasOwnProperty,a=Object.defineProperty||function(t,r,e){t[r]=e.value},c="function"==typeof Symbol?Symbol:{},u=c.iterator||"@@iterator",f=c.asyncIterator||"@@asyncIterator",s=c.toStringTag||"@@toStringTag";function l(t,r,e){return Object.defineProperty(t,r,{value:e,enumerable:!0,configurable:!0,writable:!0}),t[r]}try{l({},"")}catch(t){l=function(t,r,e){return t[r]=e}}function h(t,r,e,n){var o=r&&r.prototype instanceof b?r:b,i=Object.create(o.prototype),c=new A(n||[]);return a(i,"_invoke",{value:_(t,e,c)}),i}function p(t,r,e){try{return{type:"normal",arg:t.call(r,e)}}catch(t){return{type:"throw",arg:t}}}n.wrap=h;var y="suspendedStart",v="suspendedYield",d="executing",g="completed",m={};function b(){}function w(){}function L(){}var x={};l(x,u,(function(){return this}));var E=Object.getPrototypeOf,O=E&&E(E(G([])));O&&O!==o&&i.call(O,u)&&(x=O);var S=L.prototype=b.prototype=Object.create(x);function j(t){["next","throw","return"].forEach((function(r){l(t,r,(function(t){return this._invoke(r,t)}))}))}function P(t,e){function n(o,a,c,u){var f=p(t[o],t,a);if("throw"!==f.type){var s=f.arg,l=s.value;return l&&"object"==r(l)&&i.call(l,"__await")?e.resolve(l.__await).then((function(t){n("next",t,c,u)}),(function(t){n("throw",t,c,u)})):e.resolve(l).then((function(t){s.value=t,c(s)}),(function(t){return n("throw",t,c,u)}))}u(f.arg)}var o;a(this,"_invoke",{value:function(t,r){function i(){return new e((function(e,o){n(t,r,e,o)}))}return o=o?o.then(i,i):i()}})}function _(r,e,n){var o=y;return function(i,a){if(o===d)throw Error("Generator is already running");if(o===g){if("throw"===i)throw a;return{value:t,done:!0}}for(n.method=i,n.arg=a;;){var c=n.delegate;if(c){var u=k(c,n);if(u){if(u===m)continue;return u}}if("next"===n.method)n.sent=n._sent=n.arg;else if("throw"===n.method){if(o===y)throw o=g,n.arg;n.dispatchException(n.arg)}else"return"===n.method&&n.abrupt("return",n.arg);o=d;var f=p(r,e,n);if("normal"===f.type){if(o=n.done?g:v,f.arg===m)continue;return{value:f.arg,done:n.done}}"throw"===f.type&&(o=g,n.method="throw",n.arg=f.arg)}}}function k(r,e){var n=e.method,o=r.iterator[n];if(o===t)return e.delegate=null,"throw"===n&&r.iterator.return&&(e.method="return",e.arg=t,k(r,e),"throw"===e.method)||"return"!==n&&(e.method="throw",e.arg=new TypeError("The iterator does not provide a '"+n+"' method")),m;var i=p(o,r.iterator,e.arg);if("throw"===i.type)return e.method="throw",e.arg=i.arg,e.delegate=null,m;var a=i.arg;return a?a.done?(e[r.resultName]=a.value,e.next=r.nextLoc,"return"!==e.method&&(e.method="next",e.arg=t),e.delegate=null,m):a:(e.method="throw",e.arg=new TypeError("iterator result is not an object"),e.delegate=null,m)}function T(t){var r={tryLoc:t[0]};1 in t&&(r.catchLoc=t[1]),2 in t&&(r.finallyLoc=t[2],r.afterLoc=t[3]),this.tryEntries.push(r)}function N(t){var r=t.completion||{};r.type="normal",delete r.arg,t.completion=r}function A(t){this.tryEntries=[{tryLoc:"root"}],t.forEach(T,this),this.reset(!0)}function G(e){if(e||""===e){var n=e[u];if(n)return n.call(e);if("function"==typeof e.next)return e;if(!isNaN(e.length)){var o=-1,a=function r(){for(;++o<e.length;)if(i.call(e,o))return r.value=e[o],r.done=!1,r;return r.value=t,r.done=!0,r};return a.next=a}}throw new TypeError(r(e)+" is not iterable")}return w.prototype=L,a(S,"constructor",{value:L,configurable:!0}),a(L,"constructor",{value:w,configurable:!0}),w.displayName=l(L,s,"GeneratorFunction"),n.isGeneratorFunction=function(t){var r="function"==typeof t&&t.constructor;return!!r&&(r===w||"GeneratorFunction"===(r.displayName||r.name))},n.mark=function(t){return Object.setPrototypeOf?Object.setPrototypeOf(t,L):(t.__proto__=L,l(t,s,"GeneratorFunction")),t.prototype=Object.create(S),t},n.awrap=function(t){return{__await:t}},j(P.prototype),l(P.prototype,f,(function(){return this})),n.AsyncIterator=P,n.async=function(t,r,e,o,i){void 0===i&&(i=Promise);var a=new P(h(t,r,e,o),i);return n.isGeneratorFunction(r)?a:a.next().then((function(t){return t.done?t.value:a.next()}))},j(S),l(S,s,"Generator"),l(S,u,(function(){return this})),l(S,"toString",(function(){return"[object Generator]"})),n.keys=function(t){var r=Object(t),e=[];for(var n in r)e.push(n);return e.reverse(),function t(){for(;e.length;){var n=e.pop();if(n in r)return t.value=n,t.done=!1,t}return t.done=!0,t}},n.values=G,A.prototype={constructor:A,reset:function(r){if(this.prev=0,this.next=0,this.sent=this._sent=t,this.done=!1,this.delegate=null,this.method="next",this.arg=t,this.tryEntries.forEach(N),!r)for(var e in this)"t"===e.charAt(0)&&i.call(this,e)&&!isNaN(+e.slice(1))&&(this[e]=t)},stop:function(){this.done=!0;var t=this.tryEntries[0].completion;if("throw"===t.type)throw t.arg;return this.rval},dispatchException:function(r){if(this.done)throw r;var e=this;function n(n,o){return c.type="throw",c.arg=r,e.next=n,o&&(e.method="next",e.arg=t),!!o}for(var o=this.tryEntries.length-1;o>=0;--o){var a=this.tryEntries[o],c=a.completion;if("root"===a.tryLoc)return n("end");if(a.tryLoc<=this.prev){var u=i.call(a,"catchLoc"),f=i.call(a,"finallyLoc");if(u&&f){if(this.prev<a.catchLoc)return n(a.catchLoc,!0);if(this.prev<a.finallyLoc)return n(a.finallyLoc)}else if(u){if(this.prev<a.catchLoc)return n(a.catchLoc,!0)}else{if(!f)throw Error("try statement without catch or finally");if(this.prev<a.finallyLoc)return n(a.finallyLoc)}}}},abrupt:function(t,r){for(var e=this.tryEntries.length-1;e>=0;--e){var n=this.tryEntries[e];if(n.tryLoc<=this.prev&&i.call(n,"finallyLoc")&&this.prev<n.finallyLoc){var o=n;break}}o&&("break"===t||"continue"===t)&&o.tryLoc<=r&&r<=o.finallyLoc&&(o=null);var a=o?o.completion:{};return a.type=t,a.arg=r,o?(this.method="next",this.next=o.finallyLoc,m):this.complete(a)},complete:function(t,r){if("throw"===t.type)throw t.arg;return"break"===t.type||"continue"===t.type?this.next=t.arg:"return"===t.type?(this.rval=this.arg=t.arg,this.method="return",this.next="end"):"normal"===t.type&&r&&(this.next=r),m},finish:function(t){for(var r=this.tryEntries.length-1;r>=0;--r){var e=this.tryEntries[r];if(e.finallyLoc===t)return this.complete(e.completion,e.afterLoc),N(e),m}},catch:function(t){for(var r=this.tryEntries.length-1;r>=0;--r){var e=this.tryEntries[r];if(e.tryLoc===t){var n=e.completion;if("throw"===n.type){var o=n.arg;N(e)}return o}}throw Error("illegal catch attempt")},delegateYield:function(r,e,n){return this.delegate={iterator:G(r),resultName:e,nextLoc:n},"next"===this.method&&(this.arg=t),m}},n}function n(t,r,e,n,o,i,a){try{var c=t[i](a),u=c.value}catch(t){return void e(t)}c.done?r(u):Promise.resolve(u).then(n,o)}t.exports=function(){var t,r=(t=e().mark((function t(r,n){return e().wrap((function(t){for(;;)switch(t.prev=t.next){case 0:r.postMessage(n);case 1:case"end":return t.stop()}}),t)})),function(){var r=this,e=arguments;return new Promise((function(o,i){var a=t.apply(r,e);function c(t){n(a,o,i,c,u,"next",t)}function u(t){n(a,o,i,c,u,"throw",t)}c(void 0)}))});return function(t,e){return r.apply(this,arguments)}}()},830:(t,r,e)=>{"use strict";function n(t){return n="function"==typeof Symbol&&"symbol"==typeof Symbol.iterator?function(t){return typeof t}:function(t){return t&&"function"==typeof Symbol&&t.constructor===Symbol&&t!==Symbol.prototype?"symbol":typeof t},n(t)}function o(t,r){var e=Object.keys(t);if(Object.getOwnPropertySymbols){var n=Object.getOwnPropertySymbols(t);r&&(n=n.filter((function(r){return Object.getOwnPropertyDescriptor(t,r).enumerable}))),e.push.apply(e,n)}return e}function i(t){for(var r=1;r<arguments.length;r++){var e=null!=arguments[r]?arguments[r]:{};r%2?o(Object(e),!0).forEach((function(r){a(t,r,e[r])})):Object.getOwnPropertyDescriptors?Object.defineProperties(t,Object.getOwnPropertyDescriptors(e)):o(Object(e)).forEach((function(r){Object.defineProperty(t,r,Object.getOwnPropertyDescriptor(e,r))}))}return t}function a(t,r,e){return(r=function(t){var r=function(t){if("object"!=n(t)||!t)return t;var r=t[Symbol.toPrimitive];if(void 0!==r){var e=r.call(t,"string");if("object"!=n(e))return e;throw new TypeError("@@toPrimitive must return a primitive value.")}return String(t)}(t);return"symbol"==n(r)?r:r+""}(r))in t?Object.defineProperty(t,r,{value:e,enumerable:!0,configurable:!0,writable:!0}):t[r]=e,t}var c=e(330).rE,u=e(286);t.exports=i(i({},u),{},{workerPath:"https://cdn.jsdelivr.net/npm/tesseract.js@v".concat(c,"/dist/worker.min.js")})},862:t=>{"use strict";t.exports=function(t){t.terminate()}},877:(t,r,e)=>{"use strict";function n(t){return n="function"==typeof Symbol&&"symbol"==typeof Symbol.iterator?function(t){return typeof t}:function(t){return t&&"function"==typeof Symbol&&t.constructor===Symbol&&t!==Symbol.prototype?"symbol":typeof t},n(t)}function o(t,r){var e=Object.keys(t);if(Object.getOwnPropertySymbols){var n=Object.getOwnPropertySymbols(t);r&&(n=n.filter((function(r){return Object.getOwnPropertyDescriptor(t,r).enumerable}))),e.push.apply(e,n)}return e}function i(t,r,e){return(r=function(t){var r=function(t){if("object"!=n(t)||!t)return t;var r=t[Symbol.toPrimitive];if(void 0!==r){var e=r.call(t,"string");if("object"!=n(e))return e;throw new TypeError("@@toPrimitive must return a primitive value.")}return String(t)}(t);return"symbol"==n(r)?r:r+""}(r))in t?Object.defineProperty(t,r,{value:e,enumerable:!0,configurable:!0,writable:!0}):t[r]=e,t}e(30);var a=e(364),c=e(603),u=e(535),f=e(192),s=e(972),l=e(971),h=e(65).setLogging;t.exports=function(t){for(var r=1;r<arguments.length;r++){var e=null!=arguments[r]?arguments[r]:{};r%2?o(Object(e),!0).forEach((function(r){i(t,r,e[r])})):Object.getOwnPropertyDescriptors?Object.defineProperties(t,Object.getOwnPropertyDescriptors(e)):o(Object(e)).forEach((function(r){Object.defineProperty(t,r,Object.getOwnPropertyDescriptor(e,r))}))}return t}({languages:f,OEM:s,PSM:l,createScheduler:a,createWorker:c,setLogging:h},u)},910:(t,r,e)=>{"use strict";var n=e(70),o=0;t.exports=function(t){var r=t.id,e=t.action,i=t.payload,a=void 0===i?{}:i,c=r;return void 0===c&&(c=n("Job",o),o+=1),{id:c,action:e,payload:a}}},938:t=>{"use strict";function r(t){return r="function"==typeof Symbol&&"symbol"==typeof Symbol.iterator?function(t){return typeof t}:function(t){return t&&"function"==typeof Symbol&&t.constructor===Symbol&&t!==Symbol.prototype?"symbol":typeof t},r(t)}t.exports=function(t){var e={};return"undefined"!=typeof WorkerGlobalScope?e.type="webworker":"object"===("undefined"==typeof document?"undefined":r(document))?e.type="browser":"object"===("undefined"==typeof process?"undefined":r(process))&&(e.type="node"),void 0===t?e:e[t]}},971:t=>{"use strict";t.exports={OSD_ONLY:"0",AUTO_OSD:"1",AUTO_ONLY:"2",AUTO:"3",SINGLE_COLUMN:"4",SINGLE_BLOCK_VERT_TEXT:"5",SINGLE_BLOCK:"6",SINGLE_LINE:"7",SINGLE_WORD:"8",CIRCLE_WORD:"9",SINGLE_CHAR:"10",SPARSE_TEXT:"11",SPARSE_TEXT_OSD:"12",RAW_LINE:"13"}},972:t=>{"use strict";t.exports={TESSERACT_ONLY:0,LSTM_ONLY:1,TESSERACT_LSTM_COMBINED:2,DEFAULT:3}}},r={};function e(n){var o=r[n];if(void 0!==o)return o.exports;var i=r[n]={id:n,loaded:!1,exports:{}};return t[n].call(i.exports,i,i.exports,e),i.loaded=!0,i.exports}return e.nmd=t=>(t.paths=[],t.children||(t.children=[]),t),e(877)})()));
+//# sourceMappingURL=tesseract.min.js.map</script>
+  <script>/*
+ * Dependency-free receipt row detector for the fixed Yotvata supplier layout.
+ *
+ * Input:  an ImageData-like object: { width, height, data: RGBA bytes }
+ * Output: { status, rows, confidence, ...diagnostics }
+ *
+ * The detector does not OCR text. It finds the long, regular sequence of product
+ * lines by measuring black/white transitions in the right-hand barcode column.
+ * Every returned row must still be validated later with OCR/EAN/arithmetic.
+ */
+(function (root, factory) {
+  const api = factory();
+  if (typeof module === "object" && module.exports) module.exports = api;
+  else root.ReceiptRowDetector = api;
+})(typeof globalThis !== "undefined" ? globalThis : this, function () {
+  "use strict";
+
+  const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+  function median(values) {
+    if (!values.length) return NaN;
+    const a = values.slice().sort((x, y) => x - y);
+    const m = a.length >> 1;
+    return a.length & 1 ? a[m] : (a[m - 1] + a[m]) / 2;
+  }
+
+  function grayAt(rgba, pixelIndex) {
+    const i = pixelIndex * 4;
+    // Integer approximation of Rec. 601 luminance.
+    return (77 * rgba[i] + 150 * rgba[i + 1] + 29 * rgba[i + 2]) >> 8;
+  }
+
+  function normalizeGrayscale(imageData, targetWidth) {
+    const srcW = imageData.width | 0;
+    const srcH = imageData.height | 0;
+    const rgba = imageData.data;
+    const dstW = targetWidth | 0;
+    const dstH = Math.max(1, Math.round(srcH * dstW / srcW));
+    const out = new Uint8Array(dstW * dstH);
+
+    if (srcW === dstW && srcH === dstH) {
+      for (let p = 0; p < out.length; p++) out[p] = grayAt(rgba, p);
+      return { gray: out, width: dstW, height: dstH };
+    }
+
+    // Pure-JS bilinear resize, so this also works in a Worker without Canvas.
+    const xScale = srcW / dstW;
+    const yScale = srcH / dstH;
+    for (let y = 0; y < dstH; y++) {
+      const sy = clamp((y + 0.5) * yScale - 0.5, 0, srcH - 1);
+      const y0 = Math.floor(sy);
+      const y1 = Math.min(srcH - 1, y0 + 1);
+      const fy = sy - y0;
+      for (let x = 0; x < dstW; x++) {
+        const sx = clamp((x + 0.5) * xScale - 0.5, 0, srcW - 1);
+        const x0 = Math.floor(sx);
+        const x1 = Math.min(srcW - 1, x0 + 1);
+        const fx = sx - x0;
+        const g00 = grayAt(rgba, y0 * srcW + x0);
+        const g10 = grayAt(rgba, y0 * srcW + x1);
+        const g01 = grayAt(rgba, y1 * srcW + x0);
+        const g11 = grayAt(rgba, y1 * srcW + x1);
+        const g0 = g00 + (g10 - g00) * fx;
+        const g1 = g01 + (g11 - g01) * fx;
+        out[y * dstW + x] = Math.round(g0 + (g1 - g0) * fy);
+      }
+    }
+    return { gray: out, width: dstW, height: dstH };
+  }
+
+  function makeIntegral(gray, width, height) {
+    const stride = width + 1;
+    // The normalized image is small enough that its full 8-bit sum fits uint32.
+    const integral = new Uint32Array(stride * (height + 1));
+    for (let y = 0; y < height; y++) {
+      let rowSum = 0;
+      const srcRow = y * width;
+      const outRow = (y + 1) * stride;
+      const prevRow = y * stride;
+      for (let x = 0; x < width; x++) {
+        rowSum += gray[srcRow + x];
+        integral[outRow + x + 1] = integral[prevRow + x + 1] + rowSum;
+      }
+    }
+    return { integral, stride };
+  }
+
+  function boxMean(integral, stride, width, height, x, y, radius) {
+    const xa = Math.max(0, x - radius);
+    const xb = Math.min(width - 1, x + radius);
+    const ya = Math.max(0, y - radius);
+    const yb = Math.min(height - 1, y + radius);
+    const sum = integral[(yb + 1) * stride + xb + 1]
+      - integral[ya * stride + xb + 1]
+      - integral[(yb + 1) * stride + xa]
+      + integral[ya * stride + xa];
+    return sum / ((xb - xa + 1) * (yb - ya + 1));
+  }
+
+  function reflectIndex(i, n) {
+    while (i < 0 || i >= n) {
+      if (i < 0) i = -i - 1;
+      else i = 2 * n - i - 1;
+    }
+    return i;
+  }
+
+  function gaussianSmooth1D(input, sigma) {
+    const radius = Math.ceil(4 * sigma);
+    const kernel = new Float64Array(radius * 2 + 1);
+    let sum = 0;
+    for (let k = -radius; k <= radius; k++) {
+      const v = Math.exp(-(k * k) / (2 * sigma * sigma));
+      kernel[k + radius] = v;
+      sum += v;
+    }
+    for (let i = 0; i < kernel.length; i++) kernel[i] /= sum;
+
+    const out = new Float64Array(input.length);
+    for (let i = 0; i < input.length; i++) {
+      let v = 0;
+      for (let k = -radius; k <= radius; k++) {
+        v += input[reflectIndex(i + k, input.length)] * kernel[k + radius];
+      }
+      out[i] = v;
+    }
+    return out;
+  }
+
+  function buildTransitionScore(gray, width, height, options) {
+    const { integral, stride } = makeIntegral(gray, width, height);
+    const x0 = Math.round(options.bandStart * width);
+    const x1 = Math.round(options.bandEnd * width);
+    const radius = Math.max(3, Math.round(options.adaptiveWindow / 2));
+    const raw = new Float64Array(height);
+
+    for (let y = 0; y < height; y++) {
+      let transitions = 0;
+      let previousInk = null;
+      for (let x = x0; x < x1; x++) {
+        const mean = boxMean(integral, stride, width, height, x, y, radius);
+        const ink = gray[y * width + x] < mean - options.adaptiveOffset;
+        if (previousInk !== null && ink !== previousInk) transitions++;
+        previousInk = ink;
+      }
+      raw[y] = transitions / Math.max(1, x1 - x0 - 1);
+    }
+    return {
+      score: gaussianSmooth1D(raw, options.verticalSigma),
+      band: { left: x0, right: x1 }
+    };
+  }
+
+  function findCandidates(score, width, options) {
+    const candidates = [];
+    const minHeight = Math.round(options.minBandHeightRatio * width);
+    const maxHeight = Math.round(options.maxBandHeightRatio * width);
+    let start = -1;
+
+    for (let y = 0; y <= score.length; y++) {
+      const active = y < score.length && score[y] > options.transitionThreshold;
+      if (active && start < 0) start = y;
+      if (!active && start >= 0) {
+        const end = y;
+        const bandHeight = end - start;
+        let peak = -Infinity;
+        let weightedY = 0;
+        let weightSum = 0;
+        for (let yy = start; yy < end; yy++) {
+          peak = Math.max(peak, score[yy]);
+          const weight = Math.max(0, score[yy] - options.transitionThreshold);
+          weightedY += yy * weight;
+          weightSum += weight;
+        }
+        if (bandHeight >= minHeight && bandHeight <= maxHeight && peak >= options.minPeak) {
+          candidates.push({
+            top: start,
+            bottom: end,
+            center: weightSum ? weightedY / weightSum : (start + end) / 2,
+            peak,
+            observed: true
+          });
+        }
+        start = -1;
+      }
+    }
+    return candidates;
+  }
+
+  function estimatePitch(candidates, width, options) {
+    const diffs = [];
+    const min = options.minPitchRatio * width;
+    const max = options.maxPitchRatio * width;
+    for (let i = 0; i < candidates.length; i++) {
+      for (let j = i + 1; j < Math.min(candidates.length, i + 4); j++) {
+        const d = candidates[j].center - candidates[i].center;
+        if (d >= min && d <= max) diffs.push(d);
+      }
+    }
+    return median(diffs);
+  }
+
+  function chainRegularity(entries, pitch) {
+    if (entries.length < 2) return 0;
+    let sumSq = 0;
+    for (let i = 1; i < entries.length; i++) {
+      const relativeError = (entries[i].center - entries[i - 1].center - pitch) / pitch;
+      sumSq += relativeError * relativeError;
+    }
+    const rms = Math.sqrt(sumSq / (entries.length - 1));
+    return clamp(1 - rms / 0.25, 0, 1);
+  }
+
+  function selectPeriodicChain(candidates, pitch, options) {
+    let best = null;
+    for (let start = 0; start < candidates.length; start++) {
+      const entries = [{ ...candidates[start] }];
+      let inferredCount = 0;
+
+      for (let j = start + 1; j < candidates.length; j++) {
+        const candidate = candidates[j];
+        const last = entries[entries.length - 1];
+        const gap = candidate.center - last.center;
+
+        if (gap < options.minStep * pitch) {
+          // A duplicate/noise band inside the same expected row; ignore it.
+          continue;
+        }
+        if (gap <= options.maxStep * pitch) {
+          entries.push({ ...candidate });
+          continue;
+        }
+        if (gap >= options.missingMinStep * pitch
+            && gap <= options.missingMaxStep * pitch
+            && inferredCount < options.maxInferredRows) {
+          // Exactly one invisible line. Keep it low-confidence and require OCR validation.
+          entries.push({
+            top: null,
+            bottom: null,
+            center: (last.center + candidate.center) / 2,
+            peak: 0,
+            observed: false
+          });
+          inferredCount++;
+          entries.push({ ...candidate });
+          continue;
+        }
+        break;
+      }
+
+      const observedCount = entries.reduce((n, e) => n + (e.observed ? 1 : 0), 0);
+      const regularity = chainRegularity(entries, pitch);
+      // Observed rows dominate; inferred rows help bridge only isolated weak lines.
+      const score = observedCount * 12 + entries.length * 2 + regularity * 3 - inferredCount * 3;
+      if (!best || score > best.score) {
+        best = { entries, inferredCount, observedCount, regularity, score };
+      }
+    }
+    return best;
+  }
+
+  function detectReceiptRows(imageData, userOptions) {
+    if (!imageData || !imageData.data || !imageData.width || !imageData.height) {
+      throw new TypeError("detectReceiptRows expects {width, height, data: RGBA bytes}");
+    }
+
+    const options = Object.assign({
+      targetWidth: 1290,
+      bandStart: 0.70,
+      bandEnd: 0.97,
+      adaptiveWindow: 31,
+      adaptiveOffset: 10,
+      verticalSigma: 2,
+      transitionThreshold: 0.08,
+      // A peak just over the run threshold is still useful for a short barcode
+      // (the sample's 8-digit 72940976 line is the weakest legitimate anchor).
+      minPeak: 0.081,
+      minBandHeightRatio: 0.006,
+      maxBandHeightRatio: 0.040,
+      minPitchRatio: 0.032,
+      maxPitchRatio: 0.047,
+      minStep: 0.72,
+      maxStep: 1.28,
+      missingMinStep: 1.60,
+      missingMaxStep: 2.40,
+      maxInferredRows: 2,
+      minObservedRows: 4
+    }, userOptions || {});
+
+    const normalized = normalizeGrayscale(imageData, options.targetWidth);
+    const width = normalized.width;
+    const height = normalized.height;
+    const transition = buildTransitionScore(normalized.gray, width, height, options);
+    const candidates = findCandidates(transition.score, width, options);
+    const pitch = estimatePitch(candidates, width, options);
+
+    if (!Number.isFinite(pitch)) {
+      return {
+        status: "insufficient_sequence",
+        rows: [],
+        confidence: 0,
+        message: "No stable row pitch was found; request a new photo.",
+        candidateCount: candidates.length
+      };
+    }
+
+    const chain = selectPeriodicChain(candidates, pitch, options);
+    if (!chain || chain.observedCount < options.minObservedRows) {
+      return {
+        status: "insufficient_sequence",
+        rows: [],
+        confidence: 0,
+        message: "Too few regular product rows were found; request a new photo.",
+        candidateCount: candidates.length,
+        normalizedPitch: pitch
+      };
+    }
+
+    const entries = chain.entries;
+    const yScale = height / imageData.height;
+    const normalizedBounds = entries.map((entry, i) => {
+      const previous = i ? entries[i - 1].center : null;
+      const next = i + 1 < entries.length ? entries[i + 1].center : null;
+      const top = previous === null
+        ? entry.center - (next - entry.center) / 2
+        : (previous + entry.center) / 2;
+      const bottom = next === null
+        ? entry.center + (entry.center - previous) / 2
+        : (entry.center + next) / 2;
+      return { top, bottom };
+    });
+
+    const rows = entries.map((entry, i) => {
+      let spacingError = 0;
+      let spacingSamples = 0;
+      if (i > 0) {
+        spacingError += Math.abs(entry.center - entries[i - 1].center - pitch) / pitch;
+        spacingSamples++;
+      }
+      if (i + 1 < entries.length) {
+        spacingError += Math.abs(entries[i + 1].center - entry.center - pitch) / pitch;
+        spacingSamples++;
+      }
+      spacingError /= Math.max(1, spacingSamples);
+      const signal = clamp((entry.peak - options.transitionThreshold) / 0.08, 0, 1);
+      const confidence = entry.observed
+        ? clamp(0.55 + 0.35 * signal - 0.20 * spacingError, 0, 1)
+        : 0.30;
+      return {
+        index: i + 1,
+        top: clamp(Math.round(normalizedBounds[i].top / yScale), 0, imageData.height),
+        bottom: clamp(Math.round(normalizedBounds[i].bottom / yScale), 0, imageData.height),
+        center: clamp(Math.round(entry.center / yScale), 0, imageData.height - 1),
+        confidence: Math.round(confidence * 1000) / 1000,
+        observed: entry.observed,
+        source: entry.observed ? "transition_band" : "periodic_interpolation",
+        requiresValidation: !entry.observed || confidence < 0.70
+      };
+    });
+
+    const observedFraction = chain.observedCount / rows.length;
+    const meanRowConfidence = rows.reduce((s, r) => s + r.confidence, 0) / rows.length;
+    const overall = clamp(
+      0.40 * observedFraction + 0.30 * chain.regularity + 0.30 * meanRowConfidence,
+      0,
+      1
+    );
+    const status = overall >= 0.65 ? "ok" : "review";
+
+    return {
+      status,
+      rows,
+      confidence: Math.round(overall * 1000) / 1000,
+      observedCount: chain.observedCount,
+      inferredCount: chain.inferredCount,
+      candidateCount: candidates.length,
+      requiresOcrValidation: true,
+      normalizedPitch: Math.round(pitch * 100) / 100,
+      normalizedSize: { width, height },
+      barcodeBand: transition.band,
+      message: chain.inferredCount
+        ? "Rows found, including low-confidence inferred rows; validate every inferred row."
+        : "Rows found; validate them with barcode OCR and arithmetic before import."
+    };
+  }
+
+  return { detectReceiptRows };
+});
+</script>
+  <script>
+  'use strict';
+  const DEFAULT_PRODUCTS = [{"barcode":"5711953106583","name":"ארלה גבינת שמנת טבעי 200 גרם","price":12.77,"boxSize":10},{"barcode":"5711953106590","name":"ארלה גבינת שמנת שום","price":12.77,"boxSize":10},{"barcode":"5711953106606","name":"ארלה גבינת שמנת עשבי תיבול","price":12.77,"boxSize":10},{"barcode":"5740900403215","name":"לורפק קופסא כחול 250 גרם (עם מלח)","price":13.81,"boxSize":12},{"barcode":"5740900403239","name":"לורפק קופסא אדום 250 גרם(ללא מלח)","price":13.81,"boxSize":12},{"barcode":"5740900403260","name":"ממרח לורפק ללא מלח מופחת שומן","price":13.81,"boxSize":12},{"barcode":"7290000041858","name":"שמנת","price":2.2,"boxSize":20},{"barcode":"7290000042855","name":"שוקו שקית(בודד)","price":1.99,"boxSize":8},{"barcode":"7290000408316","name":"דנונה ביו 3% (200 גרם)","price":2.81,"boxSize":4},{"barcode":"7290000408354","name":"דנונה קראנצ פצפוצי שוקולד","price":3.48,"boxSize":2},{"barcode":"7290000453019","name":"שמרים טריים בשקית","price":3.27,"boxSize":12},{"barcode":"7290000453859","name":"נטורינה בטעם חמאה","price":5.69,"boxSize":40},{"barcode":"7290000453866","name":"נטורינה קוקוס","price":5.69,"boxSize":40},{"barcode":"7290000453880","name":"מרגרינה ללא מלח","price":4.15,"boxSize":40},{"barcode":"7290000453897","name":"מרגרינה בטעם חמאה","price":4.15,"boxSize":40},{"barcode":"7290002824183","name":"גבינת סקי 500","price":8.37,"boxSize":6},{"barcode":"7290002824466","name":"דנונה ביו 0%","price":2.81,"boxSize":4},{"barcode":"7290002824640","name":"גבינה סקי","price":4.18,"boxSize":12},{"barcode":"7290003023196","name":"מוקה שקית(בודד)","price":2.09,"boxSize":6},{"barcode":"7290003029181","name":"שוקו 1 ליטר","price":8.86,"boxSize":12},{"barcode":"7290003029372","name":"שוקו ליטר בננה","price":8.86,"boxSize":3},{"barcode":"7290003029389","name":"שוקו בננה פקק","price":3.72,"boxSize":12},{"barcode":"7290003029433","name":"שוקו פקק","price":3.72,"boxSize":12},{"barcode":"7290003029532","name":"משקה מוקה 1 ליטר","price":8.86,"boxSize":3},{"barcode":"7290003029792","name":"שוקו שקית (מארז)","price":15.91,"boxSize":null},{"barcode":"7290003029815","name":"חלב מועשר 3% 2 ליטר","price":13.06,"boxSize":6},{"barcode":"7290003029884","name":"מוקה שקית (מארז)","price":12.53,"boxSize":null},{"barcode":"7290003029907","name":"משקה אייס קפה 1 ליטר","price":8.86,"boxSize":3},{"barcode":"7290003989539","name":"רביולי גבינה 400 גרם","price":13.77,"boxSize":null},{"barcode":"7290004584306","name":"גמדים צהוב רבעייה","price":8.27,"boxSize":null},{"barcode":"7290004584351","name":"סימפוניה שמנת","price":7.91,"boxSize":null},{"barcode":"7290004584528","name":"דנונה ביו 1.7%","price":2.81,"boxSize":4},{"barcode":"7290005174551","name":"חומוס 125 גרם","price":3.38,"boxSize":4},{"barcode":"7290005174575","name":"טחינה 125 גרם","price":3.38,"boxSize":4},{"barcode":"7290005838002","name":"דניאלה וניל","price":2.89,"boxSize":24},{"barcode":"7290005838613","name":"סקי וניל 125 גרם בודד","price":2.99,"boxSize":null},{"barcode":"7290005839078","name":"מארז 8 חסכון - ביו 3% 150 גרם","price":14.19,"boxSize":3},{"barcode":"7290005839108","name":"סימפוניה זתים","price":7.91,"boxSize":null},{"barcode":"7290005839313","name":"מילקי טופ מגולגלת","price":3.37,"boxSize":2},{"barcode":"7290006664532","name":"מעדן יוגורט דנונה תות 3%","price":2.72,"boxSize":4},{"barcode":"7290006664655","name":"אקטימל רגיל שמינייה (864 גרם)","price":15.04,"boxSize":null},{"barcode":"7290006664693","name":"מעדן יוגורט דנונה אפרסק 3%","price":2.72,"boxSize":4},{"barcode":"7290006664990","name":"מארז 8 חסכון - ביו 1.7% 150 גרם","price":14.19,"boxSize":3},{"barcode":"7290008644112","name":"מטבוחה 125 גרם","price":3.38,"boxSize":4},{"barcode":"7290008645935","name":"חומוס 750 חלק","price":8.87,"boxSize":6},{"barcode":"7290008693134","name":"דניאל תות","price":2.89,"boxSize":24},{"barcode":"7290010471669","name":"דנונה קראנצ תות","price":3.48,"boxSize":2},{"barcode":"7290010472307","name":"אקטימל גמדים שמינייה (864 גרם)","price":15.5,"boxSize":null},{"barcode":"7290010472390","name":"דני שוקולד מארז שמינייה","price":12.49,"boxSize":null},{"barcode":"7290011194246","name":"קוטג״ 5% 250 גרם","price":5.1,"boxSize":12},{"barcode":"7290011438142","name":"אייס קפה 350 מ״ל","price":4.45,"boxSize":6},{"barcode":"7290012645112","name":"יוגורט עיזים 750 מ״ל בדלי","price":15.14,"boxSize":null},{"barcode":"7290012645129","name":"יוגורט כבשים 750 מ״ל בדלי","price":15.14,"boxSize":null},{"barcode":"7290012645297","name":"יוגורט עיזים ביו","price":3.96,"boxSize":null},{"barcode":"7290015858106","name":"עללחם פסטו ביתי 180 גרם","price":12.76,"boxSize":12},{"barcode":"7290020215048","name":"טופו משק וינר 345 גרם","price":9,"boxSize":null},{"barcode":"7290102031276","name":"אקטימל תות בננה שמינייה (864 גרם)","price":15.04,"boxSize":null},{"barcode":"7290103404758","name":"כרוב סגול 125","price":3.58,"boxSize":4},{"barcode":"7290104061417","name":"חומוס עם טחינה 400 גרם","price":8.06,"boxSize":6},{"barcode":"7290104061424","name":"חומוס זעתר 400 גרם","price":8.06,"boxSize":3},{"barcode":"7290104061431","name":"חומוס צנובר 400 גרם","price":8.06,"boxSize":3},{"barcode":"7290104061448","name":"חומוס עם חריף 400 גרם","price":8.06,"boxSize":6},{"barcode":"7290104067679","name":"טחינה 400 גרם","price":8.17,"boxSize":3},{"barcode":"7290104721533","name":"סלט פלפלים קלויים 400 גרם","price":11.74,"boxSize":0},{"barcode":"7290104726262","name":"דני שלוק","price":8.22,"boxSize":null},{"barcode":"7290104726712","name":"מילקי שוקולד(מארזים)","price":16.03,"boxSize":3},{"barcode":"7290104728310","name":"שמנת להקצפה 38% מהדרין","price":5.28,"boxSize":24},{"barcode":"7290105362339","name":"שמנת לבישול 15%","price":5.99,"boxSize":24},{"barcode":"7290105364678","name":"משקה דנונה אקטיביה עם אפרסק","price":3.96,"boxSize":12},{"barcode":"7290105366993","name":"סימפוניה שיבקע","price":7.91,"boxSize":null},{"barcode":"7290105368331","name":"מילקי תות","price":2.14,"boxSize":4},{"barcode":"7290105368904","name":"שמנת מתוקה להקצפה 32%","price":6.12,"boxSize":24},{"barcode":"7290105368959","name":"פונצ בננה פקק","price":3.72,"boxSize":12},{"barcode":"7290105961181","name":"משקה  פונצ בננה 1 ליטר","price":8.86,"boxSize":3},{"barcode":"7290105962980","name":"כרוב סגול במיונז  400 גרם","price":7.78,"boxSize":3},{"barcode":"7290105962997","name":"חציל במיונז 400 גרם","price":7.78,"boxSize":3},{"barcode":"7290105963000","name":"מטבוחה 400 גרם","price":7.78,"boxSize":3},{"barcode":"7290105964564","name":"חומוס חלק 400","price":6.57,"boxSize":6},{"barcode":"7290105965738","name":"דנונה לשתיה תות בננה 267 גרם","price":3.86,"boxSize":12},{"barcode":"7290105968098","name":"סלט 500 גרם","price":11.74,"boxSize":3},{"barcode":"7290105968654","name":"רביולי בטטה 400 גרם","price":13.77,"boxSize":null},{"barcode":"7290106520912","name":"שמנת לבישול 9%","price":5.99,"boxSize":24},{"barcode":"7290106521049","name":"קוביות סלק 400 גרם","price":11.74,"boxSize":3},{"barcode":"7290106654099","name":"מילקי קייק מארז(שמינייה)","price":14.6,"boxSize":8},{"barcode":"7290106663121","name":"מילקי קייק (בודד)","price":2.11,"boxSize":24},{"barcode":"7290106664067","name":"לאבנה שמן זית וזעתר 12% 400 גר","price":11.2,"boxSize":0},{"barcode":"7290106668713","name":"מעדן דנונה פירות יער 3%","price":2.72,"boxSize":4},{"barcode":"7290106721807","name":"חציל פיקנטי 400 גרם","price":7.78,"boxSize":3},{"barcode":"7290106724488","name":"דנונה ביו 1.7% 150 גרם (בודד)","price":1.77,"boxSize":null},{"barcode":"7290107932080","name":"חלב מעושר 3% 1 ליטר","price":6.53,"boxSize":12},{"barcode":"7290107932134","name":"חלב אדום 1 ליטר","price":6.53,"boxSize":12},{"barcode":"7290107936309","name":"דנונה יוגורט יווני 130 גרם","price":2.43,"boxSize":4},{"barcode":"7290107938396","name":"אקטימל תות שמינייה (864 גרם)","price":15.04,"boxSize":null},{"barcode":"7290107944472","name":"סימפוניה שום שמיר","price":7.91,"boxSize":null},{"barcode":"7290107954976","name":"משקה פרו קפה 350 מ\"ל","price":4.86,"boxSize":6},{"barcode":"7290107957991","name":"מילקי קייק מיניס","price":10.35,"boxSize":6},{"barcode":"7290107958035","name":"דנונה מתיקות מעודנת(שמינייה)","price":15.61,"boxSize":4},{"barcode":"7290107958639","name":"מטבוחה חריפה 400 גרם","price":11.74,"boxSize":3},{"barcode":"7290110555337","name":"פחית נמס אייס קלאסי","price":5.34,"boxSize":12},{"barcode":"7290110555344","name":"פחית נמס אייס בטעם וניל","price":5.34,"boxSize":12},{"barcode":"7290110557027","name":"חומוס 50% טחינה הסדרה","price":9.98,"boxSize":null},{"barcode":"7290110557133","name":"מעדן הגולן וניל","price":2.06,"boxSize":4},{"barcode":"7290110557423","name":"מילקי טריו שוקולד","price":2.45,"boxSize":4},{"barcode":"7290110558284","name":"דנונה ביו מולטי (200 גרם)","price":3.21,"boxSize":4},{"barcode":"7290110558420","name":"אלפרו משקה ש.שועל בריסטה 1 ליטר","price":9.81,"boxSize":null},{"barcode":"7290110558703","name":"מעדן חלב מועשר בחלבון לל\"ס בטעם שוקולד","price":3.61,"boxSize":6},{"barcode":"7290110559038","name":"מילקשייק שוקו עם סירופ שוקולד 300 מיל'","price":5.09,"boxSize":6},{"barcode":"7290110560836","name":"מילקי פסק זמן","price":2.14,"boxSize":4},{"barcode":"7290110563431","name":"כוסות משקה קפה קר קלאסי 1.6%","price":5.47,"boxSize":10},{"barcode":"7290110563448","name":"כוסות משקה קפה קר מעודן 1.6%","price":5.47,"boxSize":10},{"barcode":"7290110563462","name":"חלב כתום 1 ליטר","price":7.02,"boxSize":12},{"barcode":"7290110564339","name":"חומוס 30% טחינה הסדרה המובחרת","price":9.98,"boxSize":null},{"barcode":"7290110564360","name":"חומוס 40% טחינה הסדרה המובחרת","price":9.98,"boxSize":null},{"barcode":"7290110564742","name":"כוסות משקה קפה קר חזק","price":5.47,"boxSize":10},{"barcode":"7290110565527","name":"מעדן דנונה פרו 20 גרם חלבון 1.5% שומן","price":4.4,"boxSize":6},{"barcode":"7290110566975","name":"מעדן דנונה פרו תות 20 גרם חלבון 0% שומן","price":4.4,"boxSize":6},{"barcode":"7290110568238","name":"שמנת צמחית 21%","price":5.76,"boxSize":null},{"barcode":"7290110568276","name":"משקה פרו וניל 350 מ\"ל","price":4.86,"boxSize":6},{"barcode":"7290110570040","name":"אלפרו משקה שקדים ללא סוכר בריסטה 1 ליטר","price":9.81,"boxSize":null},{"barcode":"7290110571382","name":"מעדן פרו וניל 11 גרם חלבון","price":3.61,"boxSize":6},{"barcode":"7290110573751","name":"מילקי טופ עדשים","price":3.37,"boxSize":2},{"barcode":"7290110577254","name":"משקה פרו קפה ללא סוכר 350 מ\"ל","price":4.86,"boxSize":6},{"barcode":"7290110577261","name":"משקה פרו שוקולד אגוזים ללא סוכר 350 גרם","price":4.86,"boxSize":6},{"barcode":"7290110578053","name":"דנונה קראנצ שוקולד פאפס","price":3.48,"boxSize":2},{"barcode":"7290110578572","name":"אקטימל בטעם פטל שמינייה(864 גרם)","price":15.04,"boxSize":null},{"barcode":"7290110578701","name":"שוקו ליטר מקופלת","price":8.86,"boxSize":3},{"barcode":"7290110579319","name":"חומוס גלילי 400 גרם","price":8.21,"boxSize":3},{"barcode":"7290112330352","name":"מעדן דנונה פרו וניל 20 גרם חלבון 0%שומן","price":4.4,"boxSize":6},{"barcode":"7290112330390","name":"מעדן דנונה פרו פירות יער 20 גרם חלבון 0% שומן","price":4.4,"boxSize":6},{"barcode":"7290112336712","name":"מעדן דנונה פרו 21 גרם חלבון 0%שומן","price":4.4,"boxSize":6},{"barcode":"7290112339867","name":"גמדים סקוואיז אדום","price":3.9,"boxSize":12},{"barcode":"7290112339874","name":"גמדים סקוואיז צהוב","price":3.9,"boxSize":12},{"barcode":"7290112341686","name":"שמינייה מעדן אקטיביה יוגורט3%","price":16.7,"boxSize":3},{"barcode":"7290112343420","name":"משקה פרו צהוב 350 גרם","price":5.24,"boxSize":6},{"barcode":"7290112344724","name":"מילקי בטעם שוקולד בלונדי","price":2.39,"boxSize":4},{"barcode":"7290112347008","name":"גמדים סקוואיז תכלת","price":3.9,"boxSize":12},{"barcode":"7290112349606","name":"דניאלה תות בננה","price":2.89,"boxSize":4},{"barcode":"7290112349637","name":"דניאלה בטעם ענבים","price":2.89,"boxSize":4},{"barcode":"7290112355102","name":"גמדים סקוואיז ורוד","price":3.9,"boxSize":12},{"barcode":"7290112355812","name":"מילקי טופ קרונפלקס","price":3.37,"boxSize":2},{"barcode":"7290115677676","name":"חומוס 40% טחינה עם חריף","price":9.98,"boxSize":null},{"barcode":"7290115677959","name":"אבוקדו גוואקמולי (220 גרם)","price":11.89,"boxSize":8},{"barcode":"7290115677997","name":"חומוס 40% טחינה שום לימון","price":9.98,"boxSize":null},{"barcode":"7290115678376","name":"מעדן הגולן שוקולד","price":2.06,"boxSize":4},{"barcode":"7290115678383","name":"מעדן הגולן בטעם שוקולד מריר","price":2.06,"boxSize":4},{"barcode":"7290119370955","name":"מעדן דנונה פרו וניל עוגיות 20 גרם חלבון 0% שומן","price":4.4,"boxSize":6},{"barcode":"7290119371488","name":"אלפרו ש.שועל ללא סוכר בריסטה","price":9.81,"boxSize":null},{"barcode":"7290119371617","name":"משקה פרו קפה 40 גרם חלבון ללא סוכר","price":7.3,"boxSize":6},{"barcode":"7290119371822","name":"מעדן סויה bio 2.3% שומן","price":3.75,"boxSize":0},{"barcode":"7290119371846","name":"מעדן דנונה bio 2.3% סויה","price":3.75,"boxSize":0},{"barcode":"7290119372997","name":"מעדן דנונה פרו קינמון זירו 20 גרם חלבון 0% שומן","price":4.4,"boxSize":6},{"barcode":"7290119373673","name":"סלט חציל בטעם כבד 250 גרם","price":7.8,"boxSize":null},{"barcode":"7290119373680","name":"קולוסלאו 250 גרם","price":7.8,"boxSize":null},{"barcode":"7290119373703","name":"טחינה חריפה 250 גרם","price":7.8,"boxSize":null},{"barcode":"7290119373710","name":"חומוס 250 גרם 40% טחינה עם חריף","price":7.8,"boxSize":null},{"barcode":"7290119373727","name":"חציל בטחינה 250 גרם","price":7.8,"boxSize":null},{"barcode":"7290119373765","name":"חומוס עם בצל מטוגן 380 גרם","price":9.98,"boxSize":null},{"barcode":"7290119373925","name":"מטבוחה חריפה אש 250 גרם","price":7.8,"boxSize":null},{"barcode":"7290119377404","name":"מעדן דנונה פרו 25 גרם חלבון לל\"ס בטעם וניל","price":4.75,"boxSize":6},{"barcode":"7290119377411","name":"מעדן דנונה פרו 25 גרם חלבון טבעי","price":4.75,"boxSize":6},{"barcode":"7290119377480","name":"פרו קראנצ' פצפוץ שוקולד חלב","price":4.75,"boxSize":2},{"barcode":"7290119378043","name":"חציל בסגנון רומני 250 גרם","price":7.8,"boxSize":null},{"barcode":"7290119379934","name":"ממרח אבוקדו אחלה 200","price":11.89,"boxSize":8},{"barcode":"7290119380794","name":"מעדן דנונה פרו שכבות פירות יער 20 גרם חלבון 0% שומן","price":5.06,"boxSize":6},{"barcode":"7290119380824","name":"כוסות משקה קפה קר שיבולת שועל 230 מ״ל","price":5.47,"boxSize":10},{"barcode":"7290119384242","name":"מעדן דנונה פרו קרם לימון 20 גרם חלבון 0% שומן","price":4.4,"boxSize":6},{"barcode":"7290119384426","name":"מעדן פרו פסק זמן 13 גרם חלבון","price":3.61,"boxSize":6},{"barcode":"7290119385539","name":"פחית נמס אייס פסק זמן","price":5.34,"boxSize":12},{"barcode":"7290119385553","name":"אלפרו משקה סויה ללא סוכר בריסטה 1 ליטר","price":7.9,"boxSize":null},{"barcode":"7290119385577","name":"אלפרו משקה סויה וניל 1 ליטר","price":7.9,"boxSize":null},{"barcode":"7290119385607","name":"אלפרו משקה סויה בריסטה 1 ליטר","price":7.9,"boxSize":null},{"barcode":"7290119386062","name":"אלפרו משקה ש.שועל אגוזי לוז","price":9.81,"boxSize":null},{"barcode":"7290119386079","name":"מילקי טריו טרמיסו","price":2.45,"boxSize":4},{"barcode":"7290119387076","name":"מילקשייק תותים בקצפת 300 מ\"ל","price":5.09,"boxSize":6},{"barcode":"72940754","name":"מילקי וניל","price":2.14,"boxSize":4},{"barcode":"72940761","name":"מילקי שוקולד( בודדים )","price":2.14,"boxSize":24},{"barcode":"72940976","name":"סלט כרוב סגול 250 גרם","price":6.05,"boxSize":4},{"barcode":"72993637","name":"דני שוקולד בודד(מגיע במארז)","price":1.56,"boxSize":0},{"barcode":"72994818","name":"שמרים קוביה (25 גרם)","price":1.4,"boxSize":20}];
+  const $ = id => document.getElementById(id);
+  const state = {
+    source: null, sourceName: '', rotation: 0, rows: [], detection: null,
+    products: DEFAULT_PRODUCTS, results: [], workerPromise: null, runId: 0
+  };
+
+  const imageInput = $('imageInput'), catalogInput = $('catalogInput');
+  const workCanvas = $('workCanvas'), canvasWrap = $('canvasWrap');
+  const detectBtn = $('detectBtn'), ocrBtn = $('ocrBtn');
+  const sensitivity = $('sensitivity');
+
+  function setStatus(text, progress = 0, error = false) {
+    $('statusBox').className = `status show${error ? ' error' : ''}`;
+    $('statusText').textContent = text;
+    $('progressBar').style.width = `${Math.max(0, Math.min(100, progress))}%`;
+  }
+  function hideStatus() { $('statusBox').className = 'status'; }
+  function fmtMoney(value) { return Number.isFinite(value) ? `₪${value.toFixed(2)}` : '—'; }
+  function digitsOnly(value) { return String(value ?? '').replace(/\D/g, ''); }
+  function escapeHtml(value) { return String(value ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+  async function decodeImage(file) {
+    if ('createImageBitmap' in window) {
+      try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch (_) {}
+    }
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image(); img.decoding = 'async'; img.src = url;
+      if (img.decode) await img.decode(); else await new Promise((ok, bad) => { img.onload = ok; img.onerror = bad; });
+      return img;
+    } finally { URL.revokeObjectURL(url); }
+  }
+
+  function drawSource() {
+    const src = state.source; if (!src) return;
+    const sw = src.width || src.naturalWidth, sh = src.height || src.naturalHeight;
+    const rotated = Math.abs(state.rotation) % 180 === 90;
+    const rw = rotated ? sh : sw, rh = rotated ? sw : sh;
+    const maxWidth = 1800, maxPixels = 8000000;
+    const scale = Math.min(1, maxWidth / rw, Math.sqrt(maxPixels / (rw * rh)));
+    const w = Math.max(1, Math.round(rw * scale)), h = Math.max(1, Math.round(rh * scale));
+    workCanvas.width = w; workCanvas.height = h;
+    const ctx = workCanvas.getContext('2d', { alpha: false });
+    ctx.save(); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); ctx.translate(w / 2, h / 2); ctx.rotate(state.rotation * Math.PI / 180);
+    ctx.drawImage(src, -sw * scale / 2, -sh * scale / 2, sw * scale, sh * scale); ctx.restore();
+    state.rows = []; state.detection = null; clearResults(); renderPreview();
+    detectBtn.disabled = false; sensitivity.disabled = false; ocrBtn.disabled = true;
+    $('detectNote').textContent = `רזולוציית עבודה: ${w}×${h} פיקסלים`;
+  }
+
+  function renderPreview() {
+    canvasWrap.innerHTML = '';
+    if (!workCanvas.width) { canvasWrap.innerHTML = '<div class="empty">התמונה והחלוקה לשורות יופיעו כאן</div>'; return; }
+    const preview = document.createElement('canvas'); preview.width = workCanvas.width; preview.height = workCanvas.height;
+    const ctx = preview.getContext('2d'); ctx.drawImage(workCanvas, 0, 0);
+    if (state.rows.length) {
+      const line = Math.max(2, workCanvas.width / 350); ctx.lineWidth = line; ctx.font = `bold ${Math.max(18, workCanvas.width / 40)}px Arial`; ctx.textBaseline = 'top';
+      state.rows.forEach((row, i) => {
+        ctx.strokeStyle = row.interpolated ? '#f59e0b' : '#2563eb'; ctx.fillStyle = row.interpolated ? '#f59e0b' : '#2563eb';
+        ctx.strokeRect(line, row.top, workCanvas.width - line * 2, row.bottom - row.top);
+        const label = `${i + 1}${row.interpolated ? '?' : ''}`; const m = ctx.measureText(label);
+        ctx.fillRect(4, row.top + 2, m.width + 12, Math.max(24, workCanvas.width / 34)); ctx.fillStyle = '#fff'; ctx.fillText(label, 10, row.top + 3);
+      });
+    }
+    canvasWrap.appendChild(preview);
+  }
+
+  function grayscale(imageData) {
+    const { data, width, height } = imageData, gray = new Uint8Array(width * height);
+    for (let i = 0, p = 0; i < data.length; i += 4, p++) gray[p] = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
+    return gray;
+  }
+
+  function adaptiveMask(gray, width, height, radius, c) {
+    const stride = width + 1, integral = new Float64Array((width + 1) * (height + 1));
+    for (let y = 0; y < height; y++) {
+      let rowSum = 0, src = y * width, dst = (y + 1) * stride, prev = y * stride;
+      for (let x = 0; x < width; x++) { rowSum += gray[src + x]; integral[dst + x + 1] = integral[prev + x + 1] + rowSum; }
+    }
+    const mask = new Uint8Array(width * height);
+    for (let y = 0; y < height; y++) {
+      const y0 = Math.max(0, y - radius), y1 = Math.min(height - 1, y + radius), top = y0 * stride, bottom = (y1 + 1) * stride;
+      for (let x = 0; x < width; x++) {
+        const x0 = Math.max(0, x - radius), x1 = Math.min(width - 1, x + radius);
+        const sum = integral[bottom + x1 + 1] - integral[top + x1 + 1] - integral[bottom + x0] + integral[top + x0];
+        const mean = sum / ((x1 - x0 + 1) * (y1 - y0 + 1));
+        mask[y * width + x] = gray[y * width + x] < mean - c ? 1 : 0;
+      }
+    }
+    return mask;
+  }
+
+  function median(values) { const a = [...values].sort((x, y) => x - y); return a.length ? (a[(a.length - 1) >> 1] + a[a.length >> 1]) / 2 : 0; }
+
+  function detectRowsFromImageData(imageData, sensitivityFactor = 1) {
+    const { width: w, height: h } = imageData, gray = grayscale(imageData);
+    const radius = Math.max(8, Math.round(w * 0.012));
+    const mask = adaptiveMask(gray, w, h, radius, 10);
+    const x0 = Math.round(w * .70), x1 = Math.round(w * .97), stripW = Math.max(1, x1 - x0);
+    const raw = new Float32Array(h);
+    for (let y = 0; y < h; y++) {
+      let transitions = 0, prev = mask[y * w + x0];
+      for (let x = x0 + 1; x < x1; x++) { const v = mask[y * w + x]; if (v !== prev) transitions++; prev = v; }
+      raw[y] = transitions / stripW;
+    }
+    const score = new Float32Array(h), kernel = [1, 4, 6, 4, 1], ksum = 16;
+    for (let y = 0; y < h; y++) { let s = 0; for (let k = -2; k <= 2; k++) s += raw[Math.max(0, Math.min(h - 1, y + k))] * kernel[k + 2]; score[y] = s / ksum; }
+    const threshold = .08 * sensitivityFactor, peakMin = .085 * sensitivityFactor;
+    const minH = Math.max(2, Math.round(w * .006)), maxH = Math.max(minH + 1, Math.round(w * .04));
+    const bands = []; let start = -1;
+    for (let y = 0; y <= h; y++) {
+      const active = y < h && score[y] > threshold;
+      if (active && start < 0) start = y;
+      if (!active && start >= 0) {
+        const end = y - 1, bandH = end - start + 1;
+        let peak = -1, peakY = start, weighted = 0, weight = 0;
+        for (let yy = start; yy <= end; yy++) { if (score[yy] > peak) { peak = score[yy]; peakY = yy; } weighted += yy * score[yy]; weight += score[yy]; }
+        if (bandH >= minH && bandH <= maxH && peak >= peakMin) bands.push({ center: weight ? weighted / weight : peakY, peak, start, end });
+        start = -1;
+      }
+    }
+    if (bands.length < 3) return { rows: [], bands, reason: 'לא נמצאה סדרת שורות מספקת' };
+    const diffs = [];
+    for (let i = 1; i < bands.length; i++) { const d = bands[i].center - bands[i - 1].center; if (d >= w * .032 && d <= w * .047) diffs.push(d); }
+    const pitch = median(diffs);
+    if (!pitch) return { rows: [], bands, reason: 'לא נמצא מרווח קבוע בין השורות' };
+    const runs = []; let current = [bands[0]];
+    for (let i = 1; i < bands.length; i++) {
+      const gap = bands[i].center - bands[i - 1].center;
+      if (gap >= pitch * .72 && gap <= pitch * 1.28) current.push(bands[i]);
+      else { if (current.length) runs.push(current); current = [bands[i]]; }
+    }
+    if (current.length) runs.push(current);
+    runs.sort((a, b) => b.length - a.length);
+    let best = runs[0] || [];
+    // Join two substantial runs separated by exactly one missing row. Never extrapolate at either end.
+    for (const a of runs) for (const b of runs) {
+      if (a === b || a.at(-1).center >= b[0].center || a.length < 3 || b.length < 2) continue;
+      const gap = b[0].center - a.at(-1).center;
+      if (gap >= pitch * 1.6 && gap <= pitch * 2.4 && a.length + b.length + 1 > best.length) {
+        best = [...a, { center: a.at(-1).center + pitch, peak: 0, interpolated: true }, ...b];
+      }
+    }
+    if (best.length < 4) return { rows: [], bands, pitch, reason: 'נמצאה רק סדרה קצרה; ייתכן שהצילום חתוך' };
+    const rows = best.map((band, i) => {
+      const prev = i ? best[i - 1].center : band.center - pitch;
+      const next = i < best.length - 1 ? best[i + 1].center : band.center + pitch;
+      return { center: band.center, top: Math.max(0, Math.round((prev + band.center) / 2)), bottom: Math.min(h, Math.round((band.center + next) / 2)), interpolated: !!band.interpolated };
+    });
+    return { rows, bands, pitch, threshold };
+  }
+
+  function clearResults() {
+    state.results = [];
+    $('summaryCard').classList.add('hidden');
+    $('results').innerHTML = '';
+  }
+
+  function hasTerminalInferredBridge(result) {
+    const rows = Array.isArray(result?.rows) ? result.rows : [];
+    const tailStart = Math.max(0, rows.length - 3);
+    return rows.some((row, index) => index >= tailStart && !row.observed);
+  }
+
+  function runDetection() {
+    if (!workCanvas.width) return;
+    clearResults(); ocrBtn.disabled = true;
+    setStatus('מאתר שורות לפי עמודת הברקודים…', 15);
+    requestAnimationFrame(() => {
+      try {
+        const sourceData = workCanvas.getContext('2d', { alpha: false }).getImageData(0, 0, workCanvas.width, workCanvas.height);
+        const base = Number(sensitivity.value);
+        // Two passes are enough for the tested layouts and avoid a slow multi-pass sweep on iPhone.
+        const levels = [...new Set([base, Math.min(135, base + 30)])];
+        const attempts = levels.map(level => {
+          const factor = 100 / level;
+          const result = ReceiptRowDetector.detectReceiptRows(sourceData, {
+            transitionThreshold: .08 * factor,
+            minPeak: .081 * factor
+          });
+          return { level, result, terminalBridge: hasTerminalInferredBridge(result) };
+        });
+        const safeAttempts = attempts.filter(attempt => !attempt.terminalBridge);
+        const pool = safeAttempts.length ? safeAttempts : attempts;
+        pool.sort((a, b) =>
+          (b.result.observedCount || 0) - (a.result.observedCount || 0) ||
+          (a.result.inferredCount || 0) - (b.result.inferredCount || 0) ||
+          (b.result.confidence || 0) - (a.result.confidence || 0) ||
+          Math.abs(a.level - base) - Math.abs(b.level - base)
+        );
+        const chosen = pool[0];
+        const detection = chosen.result;
+        state.rows = detection.rows.map(r => ({ ...r, interpolated: !r.observed }));
+        state.detection = detection; renderPreview(); ocrBtn.disabled = !state.rows.length;
+        if (!state.rows.length) throw new Error(detection.reason || 'לא נמצאו שורות');
+        const guessed = state.rows.filter(r => r.interpolated).length;
+        $('detectNote').textContent = `נמצאו ${state.rows.length} שורות · ביטחון חלוקה ${Math.round((detection.confidence || 0) * 100)}% · רגישות שנבחרה אוטומטית ${chosen.level}%${guessed ? ` · ${guessed} שורה הושלמה לפי המרווח ותיבדק בזהירות` : ''}. בדוק שהמלבנים עוטפים רק את שורות המוצרים.`;
+        setStatus(`נמצאו ${state.rows.length} שורות`, 100); setTimeout(hideStatus, 900);
+      } catch (err) { state.rows = []; renderPreview(); ocrBtn.disabled = true; setStatus(`החלוקה נכשלה: ${err.message}`, 0, true); }
+    });
+  }
+
+  function percentile(hist, total, ratio) { let target = total * ratio, sum = 0; for (let i = 0; i < 256; i++) { sum += hist[i]; if (sum >= target) return i; } return 255; }
+  function normalizeCrop(ctx, width, height, style = 'binary') {
+    const img = ctx.getImageData(0, 0, width, height), d = img.data, hist = new Uint32Array(256); let count = 0;
+    for (let i = 0; i < d.length; i += 4) { const g = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8; hist[g]++; count++; }
+    const low = percentile(hist, count, .01), high = Math.max(low + 1, percentile(hist, count, .99));
+    const gray = new Uint8Array(width * height);
+    for (let i = 0, p = 0; i < d.length; i += 4, p++) gray[p] = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
+    const adaptive = style === 'adaptive' ? adaptiveMask(gray, width, height, Math.max(12, Math.min(34, Math.round(width / 26))), 7) : null;
+    for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+      let g = Math.max(0, Math.min(255, (gray[p] - low) * 255 / (high - low)));
+      if (style === 'contrast') g = Math.max(0, Math.min(255, (g - 128) * 1.65 + 128));
+      else if (style === 'binary') g = g < 138 ? 0 : 255;
+      else if (adaptive) g = adaptive[p] ? 0 : 255;
+      d[i] = d[i + 1] = d[i + 2] = g; d[i + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+
+  function makeRegionCanvas(row, region, style = 'binary') {
+    const rowH = Math.max(1, row.bottom - row.top), w = workCanvas.width;
+    const config = region === 'barcodeWide'
+      ? { x: .62, width: .375, topPad: .18 }
+      : region === 'barcode'
+        ? { x: .70, width: .295, topPad: .15 }
+        : { x: 0, width: .58, topPad: .28 };
+    const x = Math.round(w * config.x);
+    const cropW = Math.round(w * config.width);
+    const top = Math.max(0, Math.round(row.top - rowH * config.topPad));
+    const bottom = Math.min(workCanvas.height, row.bottom);
+    const cropH = Math.max(1, bottom - top);
+    const scale = Math.max(2, Math.min(5, 2100 / cropW)), pad = 34;
+    const out = document.createElement('canvas'); out.width = Math.round(cropW * scale) + pad * 2; out.height = Math.round(cropH * scale) + pad * 2;
+    const ctx = out.getContext('2d', { alpha: false }); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, out.width, out.height); ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(workCanvas, x, top, cropW, cropH, pad, pad, Math.round(cropW * scale), Math.round(cropH * scale));
+    normalizeCrop(ctx, out.width, out.height, style); return out;
+  }
+
+  function levenshtein(a, b) {
+    const prev = new Uint16Array(b.length + 1), curr = new Uint16Array(b.length + 1); for (let j = 0; j <= b.length; j++) prev[j] = j;
+    for (let i = 1; i <= a.length; i++) { curr[0] = i; for (let j = 1; j <= b.length; j++) curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); prev.set(curr); }
+    return prev[b.length];
+  }
+  function validEan(code) {
+    if (!/^(?:\d{8}|\d{13})$/.test(code)) return false;
+    let sum = 0;
+    for (let i = 0; i < code.length - 1; i++) {
+      const distanceFromCheck = code.length - 1 - i;
+      sum += Number(code[i]) * (distanceFromCheck % 2 ? 3 : 1);
+    }
+    return ((10 - (sum % 10)) % 10) === Number(code.at(-1));
+  }
+  function matchBarcode(candidates) {
+    let ranked = [];
+    for (const observed of candidates) for (const product of state.products) {
+      if (![8, 13].includes(product.barcode.length) || Math.abs(observed.length - product.barcode.length) > 1) continue;
+      ranked.push({ observed, product, distance: levenshtein(observed, product.barcode), exact: observed === product.barcode });
+    }
+    ranked.sort((a, b) => a.distance - b.distance || Math.abs(a.observed.length - a.product.barcode.length) - Math.abs(b.observed.length - b.product.barcode.length));
+    const first = ranked[0], secondDifferent = ranked.find(x => x.product.barcode !== first?.product.barcode);
+    if (!first) return null;
+    const uniqueBest = !secondDifferent || first.distance < secondDifferent.distance;
+    return {
+      ...first,
+      observedChecksumValid: validEan(first.observed),
+      margin: secondDifferent ? secondDifferent.distance - first.distance : 99,
+      accepted: first.distance <= 1 && uniqueBest,
+      provisional: false
+    };
+  }
+
+  function barcodeWindows(text) {
+    const found = new Set();
+    const allowedLengths = new Set([7, 8, 9, 12, 13, 14]);
+    for (const line of String(text || '').split(/\r?\n/)) {
+      const joined = digitsOnly(line);
+      if (allowedLengths.has(joined.length)) found.add(joined);
+      if (joined.length > 14 && joined.length <= 24) {
+        for (const length of [13, 8]) {
+          for (let i = 0; i + length <= joined.length; i++) found.add(joined.slice(i, i + length));
+        }
+      }
+      for (const token of line.split(/\s+/)) {
+        const digits = digitsOnly(token);
+        if (allowedLengths.has(digits.length)) found.add(digits);
+      }
+    }
+    return [...found];
+  }
+  function parseOcr(text, barcodeSource = text) {
+    const lines = String(text || '').split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+    const barcodeCandidates = barcodeWindows(barcodeSource);
+    const decimalValues = [];
+    for (const m of String(text || '').matchAll(/\d+[.,]\d{1,2}/g)) { const v = Number(m[0].replace(',', '.')); if (Number.isFinite(v)) decimalValues.push(v); }
+    const integers = [];
+    for (const line of lines.filter(x => /[.,]/.test(x))) for (const m of line.matchAll(/(?:^|\s)(\d{1,3})(?=\s|$)/g)) { const v = Number(m[1]); if (v > 0 && v <= 500) integers.push(v); }
+    return { lines, barcodeCandidates, decimalValues, integers };
+  }
+
+  function arithmeticFor(product, parsed) {
+    const priceCents = product?.price == null ? null : Math.round(Number(product.price) * 100); if (!priceCents) return null;
+    const amountCents = [...new Set(parsed.decimalValues.map(v => Math.round(v * 100)).filter(v => v > 0 && v < 10000000))];
+    const matches = [];
+    for (const amount of amountCents) { const q = Math.round(amount / priceCents); if (q >= 2 && q <= 500 && Math.abs(amount - q * priceCents) <= 2) matches.push({ quantity: q, gross: amount / 100 }); }
+    for (const q of parsed.integers) { const expected = q * priceCents; const amount = amountCents.find(v => Math.abs(v - expected) <= 2); if (amount != null) matches.push({ quantity: q, gross: amount / 100 }); }
+    const unique = [...new Map(matches.map(x => [x.quantity, x])).values()].sort((a, b) => b.quantity - a.quantity);
+    return unique.length === 1 ? unique[0] : null;
+  }
+
+  async function getWorker(runId) {
+    if (!state.workerPromise) {
+      state.workerPromise = Tesseract.createWorker('eng', Tesseract.OEM.LSTM_ONLY, {
+        logger: m => { if (runId !== state.runId) return; if (m.status && m.status !== 'recognizing text') setStatus(`טוען מנוע OCR: ${m.status}`, Math.round((m.progress || 0) * 15)); },
+        errorHandler: err => console.error('OCR worker', err)
+      }).catch(err => { state.workerPromise = null; throw err; });
+    }
+    return state.workerPromise;
+  }
+
+  async function recognizeRow(worker, row, runId) {
+    const recognizeRegion = async (region, style) => {
+      const canvas = makeRegionCanvas(row, region, style);
+      const response = await worker.recognize(canvas, {}, { text: true }); canvas.width = canvas.height = 0;
+      return response.data.text || '';
+    };
+    const parseScan = (barcode, numeric) => ({ text: `ברקוד:\n${barcode}\nמספרים:\n${numeric}`, parsed: parseOcr(`${barcode}\n${numeric}`, barcode) });
+    const matchScore = value => !value ? -Infinity : (value.exact && value.observedChecksumValid ? 1000 : 0) + (value.accepted ? 100 : 0) + Math.max(0, value.margin || 0) - value.distance * 12;
+    let barcodeText = await recognizeRegion('barcode', 'binary');
+    let numericText = await recognizeRegion('numeric', 'binary');
+    let scan = parseScan(barcodeText, numericText);
+    let match = matchBarcode(scan.parsed.barcodeCandidates);
+    let arithmetic = (match?.accepted || match?.provisional) ? arithmeticFor(match.product, scan.parsed) : null;
+    if (!match?.exact && runId === state.runId) {
+      for (const [region, style] of [['barcode', 'contrast'], ['barcode', 'adaptive'], ['barcodeWide', 'binary'], ['barcodeWide', 'contrast'], ['barcodeWide', 'adaptive']]) {
+        const retryText = await recognizeRegion(region, style);
+        const retryScan = parseScan(retryText, numericText), retryMatch = matchBarcode(retryScan.parsed.barcodeCandidates);
+        if (matchScore(retryMatch) > matchScore(match)) {
+          barcodeText = retryText; scan = retryScan; match = retryMatch;
+          arithmetic = (match?.accepted || match?.provisional) ? arithmeticFor(match.product, scan.parsed) : null;
+        }
+        if (match?.exact && match.observedChecksumValid) break;
+      }
+    }
+    if (!arithmetic && (match?.accepted || match?.provisional) && runId === state.runId) {
+      for (const style of ['contrast', 'adaptive']) {
+        const retryNumeric = await recognizeRegion('numeric', style);
+        const retryScan = parseScan(barcodeText, retryNumeric), retryArithmetic = arithmeticFor(match.product, retryScan.parsed);
+        if (retryArithmetic || retryScan.parsed.decimalValues.length > scan.parsed.decimalValues.length) {
+          numericText = retryNumeric; scan = retryScan; arithmetic = retryArithmetic;
+        }
+        if (arithmetic) break;
+      }
+    }
+    let status = 'bad';
+    if (match?.distance === 0 && match.observedChecksumValid && arithmetic && !row.interpolated) status = 'good';
+    else if ((match?.accepted || (match?.provisional && arithmetic)) && match?.margin >= 1) status = 'warn';
+    return { raw: scan.text.trim(), parsed: scan.parsed, match, arithmetic, status, interpolated: row.interpolated };
+  }
+
+  function renderResults() {
+    const counts = { good: 0, warn: 0, bad: 0 }; let units = 0;
+    for (const r of state.results) { counts[r.status]++; if (r.status !== 'bad' && r.arithmetic?.quantity) units += r.arithmetic.quantity; }
+    $('summaryCard').classList.remove('hidden'); $('sumRows').textContent = state.results.length; $('sumGreen').textContent = counts.good; $('sumYellow').textContent = counts.warn; $('sumRed').textContent = counts.bad;
+    $('sumUnits').textContent = units ? `סך הכמויות ששוחזרו בביטחון חשבוני: ${units}` : 'לא שוחזר עדיין סך כמויות.';
+    $('results').innerHTML = state.results.map((r, i) => {
+      const trustedMatch = r.match && (r.match.accepted || r.match.provisional);
+      const product = trustedMatch ? r.match.product : null, label = r.status === 'good' ? 'אומת' : r.status === 'warn' ? 'דורש מבט קצר' : 'לא נפתר';
+      const barcodeText = trustedMatch ? `${r.match.observed} → ${r.match.product.barcode}${r.match.distance ? ` (תיקון ${r.match.distance})` : ''}` : (r.parsed.barcodeCandidates.join(' / ') || 'לא נקלט');
+      const arithmetic = trustedMatch ? r.arithmetic : null;
+      const numbers = arithmetic ? `כמות ${arithmetic.quantity} · מחיר ${fmtMoney(product.price)} · סכום מאומת ${fmtMoney(arithmetic.gross)}` : `מספרים שנקלטו: ${r.parsed.decimalValues.map(v => v.toFixed(2)).join(' · ') || '—'}`;
+      return `<article class="result ${r.status}"><div class="resultHead"><h3>${i + 1}. ${escapeHtml(product?.name || 'שורה לא מזוהה')}</h3><span class="badge">${label}</span></div><div class="meta">ברקוד: ${escapeHtml(barcodeText)}${r.interpolated ? ' · השורה נמצאה לפי המרווח' : ''}</div><div class="numbers">${escapeHtml(numbers)}</div><details><summary>פלט OCR גולמי</summary><div class="raw">${escapeHtml(r.raw || '(ריק)')}</div></details></article>`;
+    }).join('');
+  }
+
+  async function runOcr() {
+    if (!state.rows.length) return; const runId = ++state.runId; clearResults(); ocrBtn.disabled = true; detectBtn.disabled = true;
+    sensitivity.disabled = $('rotateLeft').disabled = $('rotateRight').disabled = catalogInput.disabled = true;
+    try {
+      setStatus('טוען מנוע OCR חינמי למכשיר…', 2); const worker = await getWorker(runId); if (runId !== state.runId) return;
+      await worker.setParameters({ tessedit_pageseg_mode: '7', tessedit_char_whitelist: '0123456789.,*- ', preserve_interword_spaces: '1', user_defined_dpi: '300' });
+      for (let i = 0; i < state.rows.length; i++) {
+        if (runId !== state.runId) return; setStatus(`קורא שורה ${i + 1} מתוך ${state.rows.length}…`, 15 + Math.round(i / state.rows.length * 82));
+        const rowResult = await recognizeRow(worker, state.rows[i], runId);
+        if (runId !== state.runId) return;
+        state.results.push(rowResult); renderResults(); await new Promise(r => setTimeout(r, 0));
+      }
+      setStatus('הסריקה הסתיימה — בדוק את התוצאות', 100); renderResults();
+    } catch (err) { if (runId !== state.runId) return; console.error(err); setStatus(`שגיאת OCR: ${err.message || err}. ודא שהדף פתוח דרך HTTPS ושיש אינטרנט בהפעלה הראשונה.`, 0, true); }
+    finally { if (runId === state.runId) { ocrBtn.disabled = false; detectBtn.disabled = false; sensitivity.disabled = $('rotateLeft').disabled = $('rotateRight').disabled = catalogInput.disabled = false; } }
+  }
+
+  async function resetAll() {
+    const resetId = ++state.runId;
+    const pendingWorker = state.workerPromise; state.workerPromise = null;
+    const oldSource = state.source;
+    state.source = null; state.sourceName = ''; state.rotation = 0; state.rows = []; state.results = []; state.detection = null;
+    imageInput.value = ''; workCanvas.width = workCanvas.height = 0; $('fileName').textContent = 'לא נבחרה תמונה'; $('detectNote').textContent = ''; $('summaryCard').classList.add('hidden'); $('results').innerHTML = ''; hideStatus();
+    detectBtn.disabled = ocrBtn.disabled = sensitivity.disabled = $('rotateLeft').disabled = $('rotateRight').disabled = true; catalogInput.disabled = false; renderPreview();
+    if (oldSource?.close) { try { oldSource.close(); } catch (_) {} }
+    if (pendingWorker) { try { const worker = await pendingWorker; await worker.terminate(); } catch (_) {} }
+    return resetId;
+  }
+
+  imageInput.addEventListener('change', async e => {
+    const file = e.target.files?.[0]; if (!file) return; const loadId = await resetAll(); imageInput.value = '';
+    if (loadId !== state.runId) return;
+    try {
+      setStatus('פותח את התמונה…', 5);
+      const decoded = await decodeImage(file);
+      if (loadId !== state.runId) { if (decoded?.close) { try { decoded.close(); } catch (_) {} } return; }
+      state.source = decoded; state.sourceName = file.name; $('fileName').textContent = file.name; $('rotateLeft').disabled = $('rotateRight').disabled = false; drawSource(); runDetection();
+    }
+    catch (err) { if (loadId === state.runId) setStatus(`לא ניתן לפתוח את התמונה: ${err.message}`, 0, true); }
+  });
+  detectBtn.addEventListener('click', runDetection); ocrBtn.addEventListener('click', runOcr); $('resetBtn').addEventListener('click', resetAll);
+  $('rotateLeft').addEventListener('click', () => { state.rotation = (state.rotation - 90 + 360) % 360; drawSource(); runDetection(); });
+  $('rotateRight').addEventListener('click', () => { state.rotation = (state.rotation + 90) % 360; drawSource(); runDetection(); });
+  sensitivity.addEventListener('input', () => { $('sensitivityValue').textContent = `${sensitivity.value}%`; });
+  sensitivity.addEventListener('change', runDetection);
+  catalogInput.addEventListener('change', async e => {
+    const file = e.target.files?.[0]; if (!file) return;
+    try {
+      const backup = JSON.parse(await file.text()), raw = backup?.collections?.products; if (!raw || typeof raw !== 'object') throw new Error('לא נמצאה collections.products');
+      const map = new Map(); for (const p of Object.values(raw)) { const barcode = digitsOnly(p?.barcode); if (!barcode || !p?.name) continue; map.set(barcode, { barcode, name: String(p.name), price: Number.isFinite(Number(p.price)) ? Number(p.price) : null, boxSize: Number.isFinite(Number(p.boxSize)) ? Number(p.boxSize) : null }); }
+      if (!map.size) throw new Error('לא נמצאו מוצרים'); state.products = [...map.values()]; $('catalogStatus').textContent = `נטענו ${state.products.length} מוצרים מהגיבוי ${file.name}`; $('catalogStatus').className = 'filename catalogOk';
+    } catch (err) { $('catalogStatus').textContent = `הגיבוי לא נטען: ${err.message}`; $('catalogStatus').className = 'filename'; }
+  });
+
+  window.addEventListener('unhandledrejection', e => { console.error(e.reason); setStatus(`שגיאה: ${e.reason?.message || e.reason}`, 0, true); });
+  if (location.protocol === 'file:') {
+    setStatus('חלוקת השורות תעבוד גם מקומית, אבל להפעלת OCR באייפון מומלץ להעלות את הקובץ כעמוד HTTPS נפרד.', 0, true);
+  }
+  </script>
+</body>
+</html>
