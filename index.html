@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v113 בלש טהור לפני משולב</title>
+    <title>הזמנות יטבתה - v114 סריקת AI מאובטחת</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v113 בלש טהור לפני משולב</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v114 סריקת AI מאובטחת</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -472,6 +472,13 @@ let receiptNotes = [];           // פירוט סכומי תעודות הספק 
 let editingNotes = false;        // עריכת סכומי התעודות במסך פתוח
 let receiptOpened = false;       // האם נפתחה תעודה (שער לפני סריקה)
 let reconcileData = null;        // נתוני מסך השוואת תעודה
+const AI_SCAN_WORKER_URL = 'https://yotvata-ai-scan-701905665767.europe-west1.run.app/scan';
+let aiScanDocuments = [];        // תמונות בזיכרון בלבד — אינן נשמרות בטיוטה או בענן
+let aiScanBusy = false;
+let aiScanResponse = null;
+let aiScanEvaluation = null;
+let aiScanError = '';
+let reconcileAiAudit = null;     // מטא-נתונים בלבד, ללא תמונות
 let receiptFix = null;           // תיקון תעודה פתוחה מההיסטוריה
 let returnVerify = null;          // אימות תעודת זיכוי (חזרות)
 let rvOrigin = 'returnsHistory';  // מאיזה מסך נפתח אימות הזיכוי (לחזרה אליו)
@@ -633,7 +640,24 @@ function saveReturnsDraft() {
   }, 700);
 }
 function restoreReturnsDraft() { try { const s = localStorage.getItem(RETURNS_DRAFT_KEY); if (s) { const a = JSON.parse(s); if (Array.isArray(a)) returnsList = a; } } catch (e) {} }
-function parseNoteVal(v) { const n = parseFloat((v || '').toString().replace(/[^0-9.]/g, '')); return isFinite(n) && n > 0 ? r2(n) : null; }
+function parseNoteVal(v) {
+  let s = (v || '').toString().trim().replace(/\s/g, '').replace(/[^0-9.,]/g, '');
+  if (!s) return null;
+  const comma = s.lastIndexOf(','), dot = s.lastIndexOf('.');
+  if (comma >= 0 && dot >= 0) {
+    // המפריד האחרון הוא עשרוני; הקודם הוא מפריד אלפים.
+    if (comma > dot) s = s.replace(/\./g, '').replace(',', '.');
+    else s = s.replace(/,/g, '');
+  } else if (comma >= 0) {
+    const tail = s.length - comma - 1;
+    s = tail === 3 && comma > 0 ? s.replace(/,/g, '') : s.replace(',', '.');
+  } else if ((s.match(/\./g) || []).length > 1) {
+    const last = s.lastIndexOf('.');
+    s = s.slice(0, last).replace(/\./g, '') + s.slice(last);
+  }
+  const n = Number(s);
+  return isFinite(n) && n > 0 ? r2(n) : null;
+}
 let receiptNoteUnits = null; // עוגן נייר: סה"כ יחידות מודפסות בתחתית תעודות הספק
 function normNote(x) {
   if (x && typeof x === 'object') {
@@ -3778,7 +3802,6 @@ function renderReceiving() {
         '<div class="text-center mb-3"><i class="fa-solid fa-file-invoice text-blue-600 text-4xl mb-2"></i><div class="font-black text-slate-800 text-lg">תעודה חדשה</div><div class="text-sm text-slate-500">הזן את סכום התעודה מהספק. מחולק לכמה תעודות? הוסף כל אחת ונסכם.</div></div>' +
         noteEditorBodyHtml() +
         '<button data-role="rc-open" class="btn-tap w-full bg-blue-600 text-white rounded-2xl py-3.5 font-black text-base flex items-center justify-center gap-2 mt-4"><i class="fa-solid fa-barcode"></i> פתח והתחל סריקה</button>' +
-        '<button data-role="rc-open-skip" class="btn-tap mt-3 w-full text-xs font-bold text-slate-400">דלג — ללא אימות סכום</button>' +
       '</div>';
     return;
   }
@@ -3946,6 +3969,18 @@ async function saveNewProduct() {
 // --- סיכום ואישור תעודה ---
 function finishReceipt() {
   if (!receiptList.length) return;
+  // סכום ללא מע״מ וסך יחידות הם עוגני חובה. גם טיוטה ישנה שנוצרה לפני
+  // השינוי אינה יכולה לעקוף את הבלש או להיסגר כתקינה ללא שניהם.
+  const anchorsReady = receiptNotes.length > 0 && receiptNotes.every(raw => {
+    const note = normNote(raw);
+    return note.amount > 0 && note.units != null && note.units > 0;
+  });
+  if (!anchorsReady || receiptNoteTotal == null || receiptNoteUnits == null) {
+    editingNotes = true;
+    showToast('לפני האישור חובה להזין לכל תעודה סכום ללא מע״מ וסך יחידות', null, null, 3800);
+    refreshReceipt();
+    return;
+  }
   const day = todayStr();
   const lines = receiptList.map(it => {
     const p = products.find(x => x.id === it.productId);
@@ -3960,7 +3995,9 @@ function finishReceipt() {
     const dup = receipts.find(r => r.date === day && (Number(r.count) || 0) === lines.length && Math.abs((Number(r.totalExVat) || 0) - ex) <= 1);
     if (dup) { showConfirm('אולי כפילות', 'כבר קיימת תעודה מ-' + dDisp(day) + ' בסכום דומה (₪' + fmtMoney(ex) + ' · ' + lines.length + ' מוצרים). ייתכן שכבר קלטת אותה — לשמור בכל זאת?', 'כן, שמור בכל זאת', function () { receiptDupConfirmed = true; finishReceipt(); }); return; }
   }
-  const moneyMismatch = receiptNoteTotal != null && Math.abs(ex - receiptNoteTotal) > 1;
+  // התאמה תקינה חייבת להיות זהה באגורות. סטייה קטנה אינה נסגרת כ"תקין";
+  // היא עוברת לבלש/AI כדי שלא נסתיר טעות מחיר או מבצע.
+  const moneyMismatch = receiptNoteTotal != null && Math.round(ex * 100) !== Math.round(receiptNoteTotal * 100);
   const unitsMismatch = receiptNoteUnits != null && scannedUnits !== receiptNoteUnits;
   if (moneyMismatch || unitsMismatch) {
     const big = Math.max(ex, receiptNoteTotal), small = Math.min(ex, receiptNoteTotal);
@@ -4006,6 +4043,7 @@ function openReconcile() {
   // מיון חד-פעמי בפתיחה: שורות חריגות (חסר/עודף) למעלה — לא ממוין מחדש תוך כדי עבודה
   reconcileData.sort((a, b) => ((Number(a.noteQty) || 0) === (Number(a.received) || 0) ? 1 : 0) - ((Number(b.noteQty) || 0) === (Number(b.received) || 0) ? 1 : 0));
   detectiveOpen = false; noteCheckOpen = false; noteCheckAuto = false; noteCheckRows = []; noteCheckRes = null; reconcileCheckMode = false; noteCheckQtyMode = false; rcStep = null; noteCheckForceQty = false; ncPromoResult = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; manualSearchTerm = ''; manualAssigned = []; manualSearchOpen = false; manualPromoMarks = {};
+  resetAiInvoiceScan();
   resetDetectiveQuestions();
   setView('reconcile');
 }
@@ -4014,7 +4052,7 @@ function reconcileNoteInc() { let ex = 0; (reconcileData || []).forEach(l => ex 
 function reconcileScannedUnits() { let u = 0; (reconcileData || []).forEach(l => u += (Number(l.noteQty) || 0)); return u; }
 function reconcileUnitsGap() { if (receiptNoteUnits == null) return null; return receiptNoteUnits - reconcileScannedUnits(); }
 function reconcileGap() { return r2((receiptNoteTotal || 0) + (Number(reconcileSupplierDiscount) || 0) - reconcileNoteInc()); }
-function reconcileMoneyBalanced() { return Math.abs(reconcileGap()) <= 1; }
+function reconcileMoneyBalanced() { return Math.round(reconcileGap() * 100) === 0; }
 function reconcileUnitsBalanced() { const g = reconcileUnitsGap(); return g == null || g === 0; }
 function reconcileIsBalanced() { return reconcileMoneyBalanced() && reconcileUnitsBalanced(); }
 function reconcileAssigned() {
@@ -4680,12 +4718,17 @@ function detectiveQuestionHtml(result, question) {
     '<button data-role="rc-goto-barcodes" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">לא בטוח — עבור לברקודים</button>' +
   '</div>';
 }
+// הבלש המקומי סוגר רק מקרה פשוט ובטוח: מוצר אחד, התאמה מדויקת באגורות,
+// חוסר טהור או עודף טהור. כל חוסר+עודף, מחיר, מבצע או צירוף עובר ל-AI.
+function detectiveIsSimpleSafeResult(result) {
+  if (!result || !result.complete || result.overflow || result.level !== 1 || result.toleranceCents !== 0) return false;
+  if (!Array.isArray(result.solutions) || !result.solutions.length || result.solutions.length > 4) return false;
+  if ([DETECTIVE_SEARCH_PURE_SHORT_COMPLETE, DETECTIVE_SEARCH_PURE_SHORT, DETECTIVE_SEARCH_PURE_SURPLUS].indexOf(result.searchStage) === -1) return false;
+  return result.solutions.every(sol => Array.isArray(sol.components) && sol.components.length === 1 &&
+    sol.components[0].allocations.every(a => Array.isArray(a.moves) && a.moves.length === 1));
+}
 function detectiveStepForResult(result) {
-  if (result && !result.overflow && result.solutions.length) return 'detective';
-  if (result && result.overflow && result.complete && detectiveBestQuestion(result)) return 'detective-question';
-  if (result && result.overflow) return detectivePromoConflict() ? 'choose' : 'barcodes';
-  if (!result && detectiveQuestionState.asked > 0) return 'barcodes';
-  return 'choose';
+  return detectiveIsSimpleSafeResult(result) ? 'detective' : 'ai';
 }
 function postBarcodeSolutions() {
   if (!noteCheckRes || receiptNoteUnits == null || noteCheckForceQty) return null;
@@ -5007,8 +5050,321 @@ function reconcileRowHtml(l) {
     '</div>' +
   '</div>';
 }
+
+// ===== סריקת AI — מופעלת רק לאחר שההתאמה והבלש הפשוט לא פתרו =====
+function resetAiInvoiceScan() {
+  const source = receiptNotes.length ? receiptNotes.map(normNote) : [{ amount: receiptNoteTotal, units: receiptNoteUnits }];
+  aiScanDocuments = source.map((note, i) => ({ noteIndex: i, amount: note.amount, units: note.units, pages: [] }));
+  aiScanBusy = false; aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; reconcileAiAudit = null;
+}
+function aiTotalPages() { return aiScanDocuments.reduce((sum, d) => sum + d.pages.length, 0); }
+function aiDataUrlBytes(dataUrl) {
+  const b64 = String(dataUrl || '').split(',')[1] || '';
+  return Math.max(0, Math.floor(b64.length * 3 / 4) - (b64.endsWith('==') ? 2 : (b64.endsWith('=') ? 1 : 0)));
+}
+function aiReadFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('read_failed'));
+    reader.readAsDataURL(file);
+  });
+}
+async function aiCompressInvoiceImage(file) {
+  const raw = await aiReadFile(file);
+  const img = new Image();
+  await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; img.src = raw; });
+  let width = img.naturalWidth || img.width, height = img.naturalHeight || img.height;
+  const maxSide = 1900;
+  const scale = Math.min(1, maxSide / Math.max(width, height));
+  width = Math.max(1, Math.round(width * scale)); height = Math.max(1, Math.round(height * scale));
+  const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
+  const ctx = canvas.getContext('2d', { alpha: false });
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, width, height); ctx.drawImage(img, 0, 0, width, height);
+  let quality = 0.82, dataUrl = canvas.toDataURL('image/jpeg', quality);
+  while (aiDataUrlBytes(dataUrl) > 1450000 && quality > 0.50) { quality -= 0.07; dataUrl = canvas.toDataURL('image/jpeg', quality); }
+  if (aiDataUrlBytes(dataUrl) > 1550000) throw new Error('image_too_large');
+  return { dataUrl, name: file.name || ('עמוד-' + Date.now() + '.jpg'), bytes: aiDataUrlBytes(dataUrl) };
+}
+async function aiAddInvoiceFiles(docIndex, files) {
+  const doc = aiScanDocuments[docIndex]; if (!doc || !files || !files.length || aiScanBusy) return;
+  const slots = Math.max(0, 8 - aiTotalPages());
+  if (!slots) { showToast('ניתן לצרף עד 8 עמודים בסריקה אחת', null, null, 3000); return; }
+  aiScanBusy = true; aiScanError = ''; renderReconcile();
+  try {
+    const picked = Array.from(files).slice(0, slots);
+    for (const file of picked) doc.pages.push(await aiCompressInvoiceImage(file));
+    aiScanResponse = null; aiScanEvaluation = null;
+  } catch (error) {
+    aiScanError = error && error.message === 'image_too_large' ? 'התמונה גדולה מדי. צלם שוב מקרוב ובחדות.' : 'לא הצלחתי להכין את התמונה. נסה לצלם שוב.';
+  } finally { aiScanBusy = false; if (currentView === 'reconcile') renderReconcile(); }
+}
+function aiRemoveInvoicePage(docIndex, pageIndex) {
+  const doc = aiScanDocuments[docIndex]; if (!doc || aiScanBusy) return;
+  doc.pages.splice(pageIndex, 1); aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; renderReconcile();
+}
+function aiMoneyCents(value) {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  return isFinite(n) ? Math.round(n * 100) : null;
+}
+function aiLineTotal(row, qty) {
+  if (aiMoneyCents(row.lineTotalExVat) != null) return r2(Number(row.lineTotalExVat));
+  if (aiMoneyCents(row.grossLineTotalExVat) != null) return r2(Number(row.grossLineTotalExVat) - (Number(row.lineDiscountExVat) || 0));
+  if (aiMoneyCents(row.unitPriceExVat) != null && qty != null) return r2(Number(row.unitPriceExVat) * qty - (Number(row.lineDiscountExVat) || 0));
+  return null;
+}
+function aiRowArithmeticError(row, qty) {
+  const unit = aiMoneyCents(row.unitPriceExVat);
+  const gross = aiMoneyCents(row.grossLineTotalExVat);
+  const discount = aiMoneyCents(row.lineDiscountExVat);
+  const total = aiMoneyCents(row.lineTotalExVat);
+  // בודקים רק מספרים שה-AI טוען שקרא בפועל. ערך null אינו מושלם מהקטלוג.
+  if (unit != null && gross != null && Math.abs(gross - unit * qty) > 1) return 'מחיר × כמות אינו תואם לסכום הברוטו בשורה';
+  if (gross != null && discount != null && total != null && Math.abs((gross - discount) - total) > 1) return 'סכום הברוטו פחות הנחת השורה אינו תואם לסכום השורה';
+  if (gross == null && unit != null && discount != null && total != null && Math.abs((unit * qty - discount) - total) > 1) return 'מחיר × כמות פחות ההנחה אינו תואם לסכום השורה';
+  return '';
+}
+function aiEvaluateInvoiceScan(payload) {
+  const scan = payload && payload.scan;
+  const errors = [], warnings = [], findings = [], promoCandidates = [], aggregates = new Map(), docSummaries = [];
+  if (!scan || !Array.isArray(scan.documents)) return { valid: false, totalVerified: false, unitsVerified: false, extractedTotal: 0, extractedUnits: 0, errors: ['השרת לא החזיר מסמכים תקינים'], warnings, findings, aggregates, docSummaries };
+  const returned = new Map();
+  scan.documents.forEach(doc => {
+    const idx = Number(doc.noteIndex);
+    if (!Number.isInteger(idx) || returned.has(idx)) errors.push('מספור המסמכים שחזר מה-AI אינו תקין');
+    else returned.set(idx, doc);
+  });
+  let extractedTotalCents = 0, extractedUnits = 0, rowTotalCents = 0, verifiedDocumentDiscountCents = 0;
+  aiScanDocuments.forEach((inputDoc, index) => {
+    const doc = returned.get(index);
+    if (!doc) { errors.push('לא התקבל פענוח עבור תעודה ' + (index + 1)); return; }
+    if (Number(doc.pageCount) !== inputDoc.pages.length) errors.push('תעודה ' + (index + 1) + ': מספר העמודים שפוענחו אינו זהה למספר התמונות שצולמו');
+    const subtotalCents = aiMoneyCents(doc.subtotalExVat);
+    const expectedCents = aiMoneyCents(inputDoc.amount);
+    if (subtotalCents == null) errors.push('הסכום ללא מע״מ לא נקרא בתעודה ' + (index + 1));
+    else {
+      extractedTotalCents += subtotalCents;
+      if (expectedCents != null && subtotalCents !== expectedCents) errors.push('תעודה ' + (index + 1) + ': נקרא ₪' + fmtMoney(subtotalCents / 100) + ' במקום ₪' + fmtMoney(expectedCents / 100));
+    }
+    const vatCents = aiMoneyCents(doc.vatAmount), totalInclCents = aiMoneyCents(doc.totalInclVat);
+    if (subtotalCents != null && vatCents != null && totalInclCents != null && Math.abs((subtotalCents + vatCents) - totalInclCents) > 1) {
+      errors.push('תעודה ' + (index + 1) + ': הסכום ללא מע״מ בתוספת המע״מ אינו תואם לסכום הכולל שנקרא');
+    }
+    const docConfidence = Number(doc.confidence);
+    if (!isFinite(docConfidence) || docConfidence < 0.55) errors.push('תעודה ' + (index + 1) + ': ביטחון הקריאה נמוך מדי — יש לצלם מחדש');
+    else if (docConfidence < 0.78) warnings.push('תעודה ' + (index + 1) + ': ביטחון הקריאה בינוני — בדוק היטב לפני אישור');
+    let docUnits = 0, docRowsCents = 0;
+    (Array.isArray(doc.warnings) ? doc.warnings : []).forEach(w => warnings.push('תעודה ' + (index + 1) + ': ' + w));
+    (Array.isArray(doc.rows) ? doc.rows : []).forEach((row, rowIndex) => {
+      const barcode = normalizeBarcode(row.barcode || '');
+      const product = findProductByBarcode(barcode);
+      const qtyRaw = row.quantity == null || row.quantity === '' ? NaN : Number(row.quantity);
+      const qty = isFinite(qtyRaw) && qtyRaw >= 0 && Math.abs(qtyRaw - Math.round(qtyRaw)) < 0.001 ? Math.round(qtyRaw) : null;
+      if (!barcode || !product) { errors.push('תעודה ' + (index + 1) + ', שורה ' + (row.lineNumber || (rowIndex + 1)) + ': הברקוד לא זוהה במאגר'); return; }
+      if (qty == null) { errors.push(product.name + ': הכמות בשורה לא נקראה בוודאות'); return; }
+      const arithmeticError = aiRowArithmeticError(row, qty);
+      if (arithmeticError) { errors.push(product.name + ': ' + arithmeticError); return; }
+      const total = aiLineTotal(row, qty);
+      if (total == null || total < 0) { errors.push(product.name + ': סכום השורה לא נקרא'); return; }
+      const cents = aiMoneyCents(total);
+      docUnits += qty; extractedUnits += qty; docRowsCents += cents; rowTotalCents += cents;
+      const rowConfidence = Number(row.confidence);
+      const old = aggregates.get(product.id) || { product, qty: 0, totalCents: 0, rows: [], promotionTexts: [], priceVariants: new Set() };
+      old.qty += qty; old.totalCents += cents; old.rows.push({ document: index + 1, page: row.sourcePage, line: row.lineNumber, confidence: isFinite(rowConfidence) ? rowConfidence : 0 });
+      if (qty > 0) old.priceVariants.add(r2(cents / 100 / qty));
+      if (row.promotionText) old.promotionTexts.push(String(row.promotionText));
+      aggregates.set(product.id, old);
+      if (!isFinite(rowConfidence) || rowConfidence < 0.55) errors.push(product.name + ': ביטחון הקריאה בשורה נמוך מדי — יש לצלם מחדש');
+      else if (rowConfidence < 0.78) warnings.push(product.name + ': ביטחון קריאה בינוני — מומלץ לבדוק מול התמונה');
+    });
+    const printedUnits = doc.printedUnits == null || doc.printedUnits === '' ? null : Number(doc.printedUnits);
+    if (printedUnits != null && isFinite(printedUnits) && Math.round(printedUnits) !== docUnits) errors.push('תעודה ' + (index + 1) + ': סך היחידות המודפס אינו תואם לסכום השורות שנקראו');
+    const printedLines = doc.printedLines == null || doc.printedLines === '' ? null : Number(doc.printedLines);
+    if (printedLines != null && isFinite(printedLines) && Math.round(printedLines) !== (Array.isArray(doc.rows) ? doc.rows.length : 0)) errors.push('תעודה ' + (index + 1) + ': מספר שורות המוצרים המודפס אינו תואם למספר השורות שנקראו');
+    if (inputDoc.units != null && docUnits !== Number(inputDoc.units)) errors.push('תעודה ' + (index + 1) + ': נקראו ' + docUnits + ' יחידות במקום ' + inputDoc.units);
+    const printedDiscountCents = aiMoneyCents(doc.documentDiscountExVat);
+    const impliedDiscountCents = subtotalCents == null ? null : docRowsCents - subtotalCents;
+    if (impliedDiscountCents != null) {
+      if (impliedDiscountCents < 0) errors.push('תעודה ' + (index + 1) + ': סכום השורות נמוך מסכום התעודה — כנראה חסרה שורה או תוספת שלא נקראה');
+      else if (impliedDiscountCents === 0) {
+        if (printedDiscountCents != null && printedDiscountCents !== 0) errors.push('תעודה ' + (index + 1) + ': הנחת המסמך המודפסת אינה תואמת לסכום השורות');
+      } else if (printedDiscountCents == null) {
+        errors.push('תעודה ' + (index + 1) + ': קיים פער של ₪' + fmtMoney(impliedDiscountCents / 100) + ' בין השורות לסכום, אך הנחת המסמך לא נקראה');
+      } else if (printedDiscountCents !== impliedDiscountCents) {
+        errors.push('תעודה ' + (index + 1) + ': הנחת המסמך שנקראה אינה סוגרת בדיוק את סכום השורות');
+      } else verifiedDocumentDiscountCents += printedDiscountCents;
+    }
+    docSummaries.push({ noteIndex: index, invoiceNumber: doc.invoiceNumber || '', subtotal: subtotalCents == null ? null : subtotalCents / 100, units: docUnits, rows: Array.isArray(doc.rows) ? doc.rows.length : 0, documentDiscount: printedDiscountCents == null ? null : printedDiscountCents / 100, confidence: isFinite(docConfidence) ? docConfidence : 0 });
+  });
+  if (returned.size !== aiScanDocuments.length) errors.push('מספר המסמכים שחזר אינו זהה למספר התעודות שצולמו');
+  const expectedTotalCents = aiMoneyCents(receiptNoteTotal);
+  if (expectedTotalCents != null && extractedTotalCents !== expectedTotalCents) errors.push('סך כל המסמכים אינו זהה באגורות לסכום שהוקלד בתחילת הקליטה');
+  if (receiptNoteUnits != null && extractedUnits !== Number(receiptNoteUnits)) errors.push('סך היחידות שנקרא (' + extractedUnits + ') אינו זהה ל-' + receiptNoteUnits + ' שהוקלדו בתחילת הקליטה');
+  const documentDiscountCents = rowTotalCents - extractedTotalCents;
+  if (documentDiscountCents !== verifiedDocumentDiscountCents) errors.push('סך הנחות המסמך שנקראו אינו סוגר בדיוק את סכום כל השורות');
+  const day = todayStr();
+  const paperBasketQty = pr => {
+    if (!pr || !Array.isArray(pr.productIds)) return 0;
+    let total = 0;
+    aggregates.forEach(item => { if (pr.productIds.indexOf(item.product.id) !== -1) total += Number(item.qty) || 0; });
+    return total;
+  };
+  const paperPromoTriggered = pr => promoActive(pr, day) && paperBasketQty(pr) >= promoMinUnitsP(pr);
+  aggregates.forEach(a => {
+    a.paperUnitPrice = a.qty > 0 ? r2(a.totalCents / 100 / a.qty) : 0;
+    const line = (reconcileData || []).find(l => l.productId === a.product.id);
+    const received = Number(line && line.received) || 0;
+    const quantityDiff = a.qty - received;
+    if (quantityDiff > 0) findings.push({ type: 'shortage', productId: a.product.id, name: a.product.name, qty: quantityDiff, text: 'חסר ' + quantityDiff + ' × ' + a.product.name });
+    else if (quantityDiff < 0) findings.push({ type: 'surplus', productId: a.product.id, name: a.product.name, qty: -quantityDiff, text: 'עודף ' + (-quantityDiff) + ' × ' + a.product.name });
+    const productPromo = promoForProduct(a.product.id);
+    const expected = paperPromoTriggered(productPromo)
+      ? r2((Number(a.product.price) || 0) * (1 - (Number(productPromo.pct) || 0) / 100))
+      : r2(Number(a.product.price) || 0);
+    const priceVariants = Array.from(a.priceVariants || []).sort((x, y) => x - y);
+    if (priceVariants.length > 1) {
+      const priceAmount = r2(a.totalCents / 100 - expected * a.qty);
+      findings.push({ type: 'price', productId: a.product.id, name: a.product.name, qty: a.qty, expectedPrice: expected, paperPrice: a.paperUnitPrice, amount: priceAmount, text: 'אותו מוצר חויב ביותר ממחיר אחד: ' + a.product.name + ' — ' + priceVariants.map(x => '₪' + fmtMoney(x)).join(' · ') });
+    } else if (a.qty > 0 && expected > 0 && Math.abs(a.paperUnitPrice - expected) > 0.02) {
+      const pr = productPromo, promoExpected = !!(pr && paperPromoTriggered(pr) && a.paperUnitPrice > expected + 0.02);
+      const priceFinding = { type: promoExpected ? 'promo_missing' : 'price', productId: a.product.id, name: a.product.name, qty: a.qty, expectedPrice: expected, paperPrice: a.paperUnitPrice, amount: r2((a.paperUnitPrice - expected) * a.qty), text: (promoExpected ? 'המבצע לא מופיע אצל הספק: ' : 'מחיר שונה: ') + a.product.name + ' — במערכת ₪' + fmtMoney(expected) + ', בנייר ₪' + fmtMoney(a.paperUnitPrice) };
+      // לעיתים יטבתה מדפיסה את המבצעים כהנחה אחת בתחתית המסמך ולא כהנחת שורה.
+      // מחכים לסיום כל השורות ורק אז בודקים אם ההנחה הכללית סוגרת בדיוק את כל המבצעים.
+      if (promoExpected) promoCandidates.push(priceFinding);
+      else findings.push(priceFinding);
+    }
+    if (a.promotionTexts.length) findings.push({ type: 'printed_promo', productId: a.product.id, name: a.product.name, text: 'מבצע מודפס ליד ' + a.product.name + ': ' + Array.from(new Set(a.promotionTexts)).join(' · ') });
+  });
+  const expectedPromoDiscountCents = promoCandidates.reduce((sum, finding) => sum + Math.max(0, aiMoneyCents(finding.amount) || 0), 0);
+  if (promoCandidates.length && verifiedDocumentDiscountCents > 0 && expectedPromoDiscountCents === verifiedDocumentDiscountCents) {
+    findings.push({ type: 'printed_promo', amount: verifiedDocumentDiscountCents / 100, text: 'מבצעי המערכת מופיעים כהנחה כללית מאומתת בתעודה: ₪' + fmtMoney(verifiedDocumentDiscountCents / 100) });
+  } else {
+    findings.push(...promoCandidates);
+  }
+  (reconcileData || []).forEach(line => {
+    if ((Number(line.received) || 0) > 0 && !aggregates.has(line.productId)) findings.push({ type: 'surplus', productId: line.productId, name: line.name, qty: Number(line.received) || 0, text: 'עודף ' + (Number(line.received) || 0) + ' × ' + line.name + ' — לא מופיע בתעודה' });
+  });
+  if (documentDiscountCents > 2) findings.push({ type: 'document_discount', amount: documentDiscountCents / 100, text: 'הנחת מסמך כללית: ₪' + fmtMoney(documentDiscountCents / 100) });
+  const uniqueErrors = Array.from(new Set(errors)), uniqueWarnings = Array.from(new Set(warnings.concat(Array.isArray(scan.warnings) ? scan.warnings : [])));
+  const totalVerified = expectedTotalCents != null && extractedTotalCents === expectedTotalCents && aiScanDocuments.every((inputDoc, index) => {
+    const doc = returned.get(index); return doc && aiMoneyCents(doc.subtotalExVat) === aiMoneyCents(inputDoc.amount);
+  });
+  const unitsVerified = receiptNoteUnits != null && extractedUnits === Number(receiptNoteUnits) && aiScanDocuments.every((inputDoc, index) => {
+    const doc = returned.get(index); return doc && inputDoc.units != null && (Array.isArray(doc.rows) ? doc.rows.reduce((sum, row) => sum + (row.quantity == null ? 0 : Number(row.quantity) || 0), 0) : 0) === Number(inputDoc.units);
+  });
+  return { valid: uniqueErrors.length === 0 && aggregates.size > 0 && totalVerified && unitsVerified, totalVerified, unitsVerified, errors: uniqueErrors, warnings: uniqueWarnings, findings, aggregates, docSummaries, extractedTotal: extractedTotalCents / 100, extractedUnits, rowTotal: rowTotalCents / 100, supplierDiscount: Math.max(0, verifiedDocumentDiscountCents / 100) };
+}
+async function aiRunInvoiceScan() {
+  if (aiScanBusy) return;
+  if (aiScanDocuments.length > 4) { showToast('ניתן לפענח עד 4 תעודות בפעולה אחת', null, null, 3200); return; }
+  if (aiTotalPages() > 8) { showToast('ניתן לפענח עד 8 עמודים בפעולה אחת', null, null, 3200); return; }
+  if (!aiScanDocuments.length || aiScanDocuments.some(d => !d.pages.length)) { showToast('צלם לפחות עמוד אחד מכל תעודה', null, null, 3000); return; }
+  if (!auth || !auth.currentUser) { showToast('עדיין אין חיבור מאובטח — המתן רגע ונסה שוב', null, null, 3000); return; }
+  aiScanBusy = true; aiScanError = ''; aiScanResponse = null; aiScanEvaluation = null; renderReconcile();
+  try {
+    const token = await auth.currentUser.getIdToken();
+    const response = await fetch(AI_SCAN_WORKER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({
+        documents: aiScanDocuments.map(d => ({ noteIndex: d.noteIndex, pages: d.pages.map(p => p.dataUrl) })),
+        catalog: products.map(p => ({ id: p.id, name: p.name || '', barcode: normalizeBarcode(p.barcode || '') })).filter(p => p.barcode)
+      })
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) {
+      const code = payload.error || '';
+      if (code === 'rate_limited') throw new Error('בוצעו יותר מדי ניסיונות. המתן 10 דקות ונסה שוב.');
+      if (code === 'invalid_auth' || code === 'auth_required') throw new Error('האימות המאובטח נכשל. רענן את האפליקציה ונסה שוב.');
+      if (code === 'incomplete_model_output' || code === 'model_refusal' || code === 'invalid_model_output') throw new Error('ה-AI לא החזיר פענוח מלא ובטוח. שום נתון לא שונה — צלם שוב את כל הדפים.');
+      if (code === 'openai_error' && payload.message) throw new Error('שירות ה-AI החזיר שגיאה: ' + payload.message);
+      throw new Error('הסריקה החכמה לא הצליחה. נסה שוב או עבור לבדיקה ידנית.');
+    }
+    aiScanResponse = payload; aiScanEvaluation = aiEvaluateInvoiceScan(payload);
+    if (!aiScanEvaluation.valid) aiScanError = 'הפענוח לא עבר את בדיקות הבטיחות — התעודה לא שונתה.';
+  } catch (error) { aiScanError = error && error.message ? error.message : 'הסריקה החכמה נכשלה'; }
+  finally { aiScanBusy = false; if (currentView === 'reconcile') renderReconcile(); }
+}
+function aiFindingHtml(f) {
+  const cls = f.type === 'shortage' ? 'bg-rose-50 border-rose-200 text-rose-800' : (f.type === 'surplus' ? 'bg-amber-50 border-amber-200 text-amber-800' : (f.type === 'promo_missing' ? 'bg-orange-50 border-orange-300 text-orange-900' : 'bg-blue-50 border-blue-200 text-blue-900'));
+  const icon = f.type === 'shortage' ? '🔴' : (f.type === 'surplus' ? '🟠' : (f.type === 'promo_missing' ? '🏷️' : 'ℹ️'));
+  return '<div class="rounded-xl border p-2.5 text-sm font-black ' + cls + '">' + icon + ' ' + htmlEscape(f.text || '') + '</div>';
+}
+function aiInvoiceCaptureHtml() {
+  if (aiScanBusy) return '<div class="bg-white rounded-2xl border-2 border-violet-200 p-6 text-center mb-24"><i class="fa-solid fa-spinner fa-spin text-4xl text-violet-600"></i><div class="font-black text-lg mt-3">' + (aiScanResponse ? 'מכין את התוצאות…' : 'ה-AI קורא את כל דפי התעודות…') + '</div><div class="text-xs text-slate-500 mt-1">אל תסגור את המסך. הפעולה עשויה לקחת עד שתי דקות.</div></div>';
+  if (aiScanEvaluation) {
+    const ev = aiScanEvaluation;
+    const amountCls = ev.totalVerified ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-300 text-rose-800';
+    const unitsCls = ev.unitsVerified ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-300 text-rose-800';
+    const checks = '<div class="grid grid-cols-2 gap-2 mb-3"><div class="rounded-xl border p-2 text-center ' + amountCls + '"><div class="text-[10px] font-bold">סכום שנקרא</div><div class="font-black">₪' + fmtMoney(ev.extractedTotal) + (ev.totalVerified ? ' ✓' : ' ✗') + '</div></div><div class="rounded-xl border p-2 text-center ' + unitsCls + '"><div class="text-[10px] font-bold">יחידות שנקראו</div><div class="font-black">' + ev.extractedUnits + (ev.unitsVerified ? ' ✓' : ' ✗') + '</div></div></div>';
+    return '<div class="bg-white rounded-2xl border-2 ' + (ev.valid ? 'border-violet-300' : 'border-rose-300') + ' p-4 shadow-sm mb-24">' +
+      '<div class="font-black text-xl text-slate-800 mb-1"><i class="fa-solid fa-wand-magic-sparkles text-violet-600"></i> תוצאות הסריקה החכמה</div>' +
+      '<div class="text-xs text-slate-500 font-bold mb-3">ה-AI לא משנה ולא סוגר דבר לבד. בדוק ואשר רק אם זה תואם לנייר ולסחורה.</div>' + checks +
+      (ev.findings.length ? '<div class="font-black text-sm text-slate-700 mb-2">מה נמצא:</div><div class="space-y-2">' + ev.findings.map(aiFindingHtml).join('') + '</div>' : '<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-3 font-black text-emerald-800">לא נמצא פער בין הנייר למה שנסרק בפועל.</div>') +
+      (ev.errors.length ? '<div class="mt-3 rounded-xl bg-rose-50 border border-rose-300 p-3"><div class="font-black text-rose-800 mb-1">אי אפשר לאשר עדיין:</div>' + ev.errors.map(x => '<div class="text-xs font-bold text-rose-700 mt-1">• ' + htmlEscape(x) + '</div>').join('') + '</div>' : '') +
+      (ev.warnings.length ? '<details class="mt-3 rounded-xl bg-amber-50 border border-amber-200 p-2"><summary class="font-black text-xs text-amber-800">אזהרות קריאה (' + ev.warnings.length + ')</summary>' + ev.warnings.map(x => '<div class="text-[11px] font-bold text-amber-800 mt-1">• ' + htmlEscape(x) + '</div>').join('') + '</details>' : '') +
+      (ev.valid ? '<button data-role="ai-apply" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-3.5 font-black mt-4"><i class="fa-solid fa-check"></i> כן, זה מה שקרה — החל על התעודה</button>' : '') +
+      '<button data-role="ai-rescan" class="btn-tap w-full bg-white border-2 border-slate-200 text-slate-700 rounded-xl py-3 font-black mt-2">צלם מחדש</button>' +
+      '<button data-role="rc-goto-manual" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">עבור לבדיקה ידנית</button></div>';
+  }
+  const docCards = aiScanDocuments.map((doc, i) => {
+    const noteText = 'סכום צפוי: ₪' + fmtMoney(doc.amount || 0) + (doc.units != null ? ' · ' + doc.units + ' יחידות' : '');
+    const pages = doc.pages.map((p, pi) => '<div class="relative w-20 h-24 rounded-lg overflow-hidden border border-slate-200 bg-slate-100"><img src="' + p.dataUrl + '" class="w-full h-full object-cover"><button data-role="ai-remove-page" data-doc="' + i + '" data-page="' + pi + '" class="absolute top-1 left-1 w-6 h-6 rounded-full bg-rose-600 text-white text-xs"><i class="fa-solid fa-xmark"></i></button><div class="absolute bottom-0 inset-x-0 bg-black/60 text-white text-[9px] text-center py-0.5">עמוד ' + (pi + 1) + '</div></div>').join('');
+    return '<div class="rounded-2xl border-2 border-slate-200 p-3 mb-3"><div class="flex items-center justify-between gap-2"><div><div class="font-black text-slate-800">תעודה ' + (i + 1) + '</div><div class="text-[11px] font-bold text-slate-500">' + noteText + '</div></div><span class="text-xs font-black ' + (doc.pages.length ? 'text-emerald-700' : 'text-rose-600') + '">' + doc.pages.length + ' עמודים</span></div>' +
+      (pages ? '<div class="flex gap-2 overflow-x-auto py-3">' + pages + '</div>' : '<div class="rounded-xl bg-amber-50 border border-amber-200 p-2 text-xs font-bold text-amber-800 my-3">צלם את כל דפי התעודה. צילום אחד ברור לכל דף.</div>') +
+      '<input id="aiDocFile_' + i + '" data-role="ai-file" data-doc="' + i + '" type="file" accept="image/*" capture="environment" multiple class="hidden">' +
+      '<button data-role="ai-add-photo" data-doc="' + i + '" class="btn-tap w-full bg-slate-100 text-slate-700 rounded-xl py-2.5 font-black"><i class="fa-solid fa-camera"></i> ' + (doc.pages.length ? 'הוסף עמוד נוסף' : 'צלם תעודה') + '</button></div>';
+  }).join('');
+  const ready = aiScanDocuments.length && aiScanDocuments.every(d => d.pages.length);
+  return '<div class="bg-white rounded-2xl border-2 border-violet-200 p-4 shadow-sm mb-24"><div class="font-black text-xl text-slate-800"><i class="fa-solid fa-camera-retro text-violet-600"></i> סריקה חכמה של התעודות</div><div class="text-xs text-slate-500 font-bold leading-relaxed mt-1 mb-3">הבלש הפשוט לא פתר את הפער. צלם פעם אחת כל עמוד מכל תעודה. התמונות נשלחות לפענוח בלבד ואינן נשמרות באפליקציה.</div>' +
+    (aiScanError ? '<div class="rounded-xl bg-rose-50 border border-rose-300 p-2.5 text-xs font-black text-rose-700 mb-3">' + htmlEscape(aiScanError) + '</div>' : '') + docCards +
+    '<button data-role="ai-run" ' + (ready ? '' : 'disabled') + ' class="btn-tap w-full rounded-xl py-3.5 font-black ' + (ready ? 'bg-violet-600 text-white' : 'bg-slate-200 text-slate-400') + '"><i class="fa-solid fa-wand-magic-sparkles"></i> פענח את כל התעודות ב-AI</button>' +
+    '<div class="text-[10px] text-slate-400 font-bold text-center mt-2">הפענוח בתשלום לפי שימוש. הוא מופעל רק במקרה המורכב הזה.</div><button data-role="rc-goto-manual" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">המשך בלי AI — בדיקה ידנית</button></div>';
+}
+function aiApplyInvoiceResult() {
+  const ev = aiScanEvaluation; if (!ev || !ev.valid || !reconcileData) return;
+  // ההחלה היא עסקה מקומית: אם אפילו אגורה או יחידה אינן נסגרות, מחזירים את
+  // המצב הקודם ולא משאירים חצי פענוח בתוך התעודה.
+  const before = {
+    data: cloneSafe(reconcileData),
+    discount: reconcileSupplierDiscount,
+    supplierPromoItems: cloneSafe(reconcileSupplierPromoItems),
+    promoMismatchItems: cloneSafe(reconcilePromoMismatchItems),
+    creditClaim: reconcileSupplierCreditClaim ? cloneSafe(reconcileSupplierCreditClaim) : null,
+    audit: reconcileAiAudit ? cloneSafe(reconcileAiAudit) : null
+  };
+  (reconcileData || []).forEach(l => { l.noteQty = 0; l.aiPaperPriceOnly = false; });
+  ev.aggregates.forEach(a => {
+    let line = (reconcileData || []).find(l => l.productId === a.product.id);
+    const base = r2(Number(a.product.price) || 0), pr = promoForProduct(a.product.id), on = promoTriggered(pr, todayStr()), pct = on ? (Number(pr.pct) || 0) : 0;
+    if (!line) { line = { productId: a.product.id, name: a.product.name, barcode: a.product.barcode || '', received: 0, noteQty: 0, price: a.paperUnitPrice, basePrice: base, promoPct: pct, promoOn: on, checked: true }; reconcileData.unshift(line); }
+    line.noteQty = a.qty; line.price = a.paperUnitPrice; line.basePrice = base; line.promoPct = pct; line.promoOn = on; line.checked = true; line.aiPaperPriceOnly = true;
+  });
+  reconcileSupplierDiscount = r2(ev.supplierDiscount || 0);
+  reconcileSupplierPromoItems = [];
+  reconcilePromoMismatchItems = ev.findings.filter(f => f.type === 'promo_missing').map(f => ({ productId: f.productId, name: f.name, qty: f.qty, expectedPrice: f.expectedPrice, chargedPrice: f.paperPrice, expectedDiscount: Math.max(0, r2(f.amount || 0)) }));
+  const claims = ev.findings.filter(f => (f.type === 'promo_missing' || f.type === 'price') && Number(f.amount) > 0.02);
+  reconcileSupplierCreditClaim = claims.length ? { status: 'open', source: 'ai_invoice_scan', amount: r2(claims.reduce((sum, f) => sum + Number(f.amount || 0), 0)), items: claims.map(f => ({ productId: f.productId, name: f.name, qty: f.qty, expectedUnitPrice: f.expectedPrice, chargedUnitPrice: f.paperPrice, amount: r2(f.amount || 0), reason: f.type })) } : null;
+  const safeFindings = ev.findings.map(f => ({ type: f.type, productId: f.productId || null, name: f.name || '', qty: f.qty != null ? f.qty : null, amount: f.amount != null ? f.amount : null, expectedPrice: f.expectedPrice != null ? f.expectedPrice : null, paperPrice: f.paperPrice != null ? f.paperPrice : null, text: f.text || '' }));
+  reconcileAiAudit = { version: 1, scannedAt: Date.now(), model: aiScanResponse && aiScanResponse.model || 'gpt-5-mini', requestId: aiScanResponse && aiScanResponse.requestId || null, totalVerified: !!ev.totalVerified, unitsVerified: !!ev.unitsVerified, documents: ev.docSummaries, findings: safeFindings, hasDiscrepancy: safeFindings.some(f => ['shortage', 'surplus', 'price', 'promo_missing'].includes(f.type)) };
+  const exactMoney = Math.round(reconcileGap() * 100) === 0;
+  const exactUnits = reconcileUnitsGap() == null || reconcileUnitsGap() === 0;
+  if (!exactMoney || !exactUnits) {
+    reconcileData = before.data;
+    reconcileSupplierDiscount = before.discount;
+    reconcileSupplierPromoItems = before.supplierPromoItems;
+    reconcilePromoMismatchItems = before.promoMismatchItems;
+    reconcileSupplierCreditClaim = before.creditClaim;
+    reconcileAiAudit = before.audit;
+    aiScanError = 'הפענוח עבר בדיקות ראשוניות, אבל אינו סוגר בדיוק באגורות וביחידות. שום נתון לא שונה — צלם שוב.';
+    aiScanEvaluation.valid = false; renderReconcile(); return;
+  }
+  rcStep = 'balanced'; buzz(24); showToast('הנתונים הוחלו — בדוק את החוסר, העודף, המחיר והמבצע לפני האישור', null, null, 4300); renderReconcile();
+}
 // ===== בדיקת תעודה — זרימה מודרכת (שלב אחד גלוי בכל רגע) =====
-// שלבים: 'detective' (הבלש בטוח) → 'barcodes' (ברקודים) → 'quantities' (כמויות) → 'prices' (מחירים ללא מבצע) → 'promos' (כוכביות/מבצעים) → 'balanced'
+// שלבים: 'detective' (מוצר יחיד ובטוח) → 'ai' (פער מורכב) → 'balanced'
+// המסלולים הידניים הישנים נשארים כגיבוי בלבד אם הסריקה החכמה אינה זמינה.
 let rcStep = null;
 function reconcilePriceEditHtml(l) {
   return '<span class="text-[11px] text-slate-400">₪<input data-role="rc-recon-price" data-id="' + l.productId + '" type="text" inputmode="decimal" value="' + (l.price != null ? l.price : '') + '" class="w-14 text-center border border-slate-200 rounded px-1 py-0.5 outline-none focus:border-blue-500"> ליח׳</span>';
@@ -5020,7 +5376,8 @@ function renderReconcile() {
   const absGap = Math.abs(gap);
   const uG = reconcileUnitsGap();
   const balanced = reconcileIsBalanced();
-  const dir = absGap > 1 ? (gap > 0 ? 'חסר' : 'עודף') : (uG > 0 ? 'חסר ביחידות' : 'עודף ביחידות');
+  const hasMoneyGap = Math.round(absGap * 100) > 0;
+  const dir = hasMoneyGap ? (gap > 0 ? 'חסר' : 'עודף') : (uG > 0 ? 'חסר ביחידות' : 'עודף ביחידות');
 
   // קביעת השלב אוטומטית לפי המצב (פעם ראשונה)
   if (rcStep === null) {
@@ -5038,7 +5395,10 @@ function renderReconcile() {
 
   // סרגל סכומים תמידי
   const asgTop = reconcileAssigned();
-  const explained = balanced && (asgTop.sh > 0.05 || asgTop.ov > 0.05);
+  const aiActionable = reconcileAiAudit && Array.isArray(reconcileAiAudit.findings)
+    ? reconcileAiAudit.findings.filter(f => ['shortage', 'surplus', 'price', 'promo_missing'].includes(f.type))
+    : [];
+  const explained = balanced && (asgTop.sh > 0.05 || asgTop.ov > 0.05 || aiActionable.length > 0);
   const discountLine = (Number(reconcileSupplierDiscount) || 0) > 0
     ? '<div class="flex justify-between text-sm font-black mt-1 text-emerald-700"><span>הנחת ספק / מבצע</span><span>−₪' + fmtMoney(reconcileSupplierDiscount) + '</span></div>'
     : '';
@@ -5053,7 +5413,7 @@ function renderReconcile() {
     '<div class="flex justify-between text-sm font-bold ' + (balanced && !explained ? 'text-emerald-900' : 'text-amber-900') + '"><span>תעודת הספק</span><span>₪' + fmtMoney(note || 0) + '</span></div>' +
     '<div class="flex justify-between text-sm font-bold mt-1 ' + (balanced && !explained ? 'text-emerald-900' : 'text-amber-900') + '"><span>סכום הפריטים מהנייר</span><span>₪' + fmtMoney(reconcileNoteInc()) + '</span></div>' +
     discountLine +
-    '<div class="flex justify-between text-lg font-black mt-1.5 pt-1.5 border-t ' + (balanced ? (explained ? 'border-amber-200 text-amber-700' : 'border-emerald-200 text-emerald-700') : 'border-amber-200 text-rose-700') + '"><span>' + (balanced ? (explained ? 'הוסבר — הפרש פתוח' : 'מאוזן') : dir) + '</span><span>' + (balanced ? (explained ? '₪' + fmtMoney(r2(asgTop.sh - asgTop.ov > 0 ? asgTop.sh - asgTop.ov : asgTop.ov - asgTop.sh)) : '✓') : (absGap > 1 ? '₪' + fmtMoney(absGap) : Math.abs(uG || 0) + ' יח׳')) + '</span></div>' +
+    '<div class="flex justify-between text-lg font-black mt-1.5 pt-1.5 border-t ' + (balanced ? (explained ? 'border-amber-200 text-amber-700' : 'border-emerald-200 text-emerald-700') : 'border-amber-200 text-rose-700') + '"><span>' + (balanced ? (explained ? 'הוסבר — הפרש פתוח' : 'מאוזן') : dir) + '</span><span>' + (balanced ? (explained ? '₪' + fmtMoney(r2(asgTop.sh - asgTop.ov > 0 ? asgTop.sh - asgTop.ov : asgTop.ov - asgTop.sh)) : '✓') : (hasMoneyGap ? '₪' + fmtMoney(absGap) : Math.abs(uG || 0) + ' יח׳')) + '</span></div>' +
     anchorsLine +
   '</div>';
 
@@ -5062,20 +5422,26 @@ function renderReconcile() {
   if (rcStep === 'balanced') {
     // האם ההפרש שויך לחוסרים/עודפים (תעודה פתוחה) או שבאמת הכל תואם?
     const asg = reconcileAssigned();
-    if (asg.sh > 0.05 || asg.ov > 0.05) {
+    if (asg.sh > 0.05 || asg.ov > 0.05 || aiActionable.length > 0) {
       const shortLines = [], overLines = [];
       (reconcileData || []).forEach(l => {
         const d = (Number(l.noteQty) || 0) - (Number(l.received) || 0);
         if (d > 0) shortLines.push('חסר ' + d + ' × ' + l.name);
         else if (d < 0) overLines.push('עודף ' + (-d) + ' × ' + l.name);
       });
+      const aiVerified = reconcileAiAudit
+        ? '<div class="rounded-xl bg-violet-50 border border-violet-200 p-2.5 mt-3 text-xs font-black text-violet-800"><i class="fa-solid fa-shield-halved"></i> ה-AI קרא את כל הדפים; סכום התעודות והיחידות אומתו בדיוק מול מה שהוקלד בתחילת הקליטה.</div>'
+        : '';
+      const aiFindingsHtml = aiActionable.length
+        ? '<div class="space-y-2 mt-3">' + aiActionable.map(aiFindingHtml).join('') + '</div>'
+        : '';
       body = '<div class="bg-white rounded-2xl border-2 border-amber-300 p-5 shadow-sm mb-24">' +
         '<div class="text-4xl mb-2 text-center">📋</div>' +
         '<div class="font-black text-xl text-amber-700 mb-1 text-center">ההפרש הוסבר — התעודה תיקלט כפתוחה</div>' +
-        '<div class="bg-amber-50 rounded-xl p-3 mt-3 space-y-1">' +
+        (reconcileAiAudit ? aiFindingsHtml : '<div class="bg-amber-50 rounded-xl p-3 mt-3 space-y-1">' +
           shortLines.map(s => '<div class="text-sm font-black text-rose-700">🔴 ' + s + '</div>').join('') +
           overLines.map(s => '<div class="text-sm font-black text-amber-700">🟠 ' + s + '</div>').join('') +
-        '</div>' +
+        '</div>') + aiVerified +
         '<div class="text-xs text-slate-500 mt-3 text-center">הספק חייב להשלים או לזכות — התעודה תסומן "הפרש פתוח" עד שיוסדר</div>' +
       '</div>';
     } else {
@@ -5083,6 +5449,7 @@ function renderReconcile() {
         '<div class="text-5xl mb-2">✅</div>' +
         '<div class="font-black text-xl text-emerald-700 mb-1">התעודה מאוזנת</div>' +
         '<div class="text-sm text-slate-500">כל מה שנסרק תואם לתעודת הספק</div>' +
+        (reconcileAiAudit ? '<div class="text-xs font-black text-violet-700 mt-2"><i class="fa-solid fa-shield-halved"></i> הסכום והיחידות אומתו גם בסריקת AI</div>' : '') +
       '</div>';
     }
   }
@@ -5096,6 +5463,9 @@ function renderReconcile() {
     const q = detectiveBestQuestion(ds);
     if (!ds || !ds.overflow || !q) { rcStep = detectiveStepForResult(ds); return renderReconcile(); }
     body = detectiveQuestionHtml(ds, q);
+  }
+  else if (rcStep === 'ai') {
+    body = aiInvoiceCaptureHtml();
   }
   else if (rcStep === 'choose') {
     // הבלש לא הצליח לזהות — העובד בוחר איך לבדוק
@@ -5120,7 +5490,7 @@ function renderReconcile() {
       : '';
     body = '<div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 shadow-sm mb-24">' +
       '<div class="text-xs font-black text-slate-400 mb-1">שלב 1 מתוך 3 · בדיקה ידנית</div>' +
-      '<div class="font-black text-lg text-slate-800 mb-2">' + (!balanced ? (absGap > 1 ? dir + ' של ₪' + fmtMoney(absGap) : dir + ' של ' + Math.abs(uG || 0) + ' יח׳') + ' — בדוק לבד מה המקור' : 'התעודה מאוזנת — אפשר לעבור על הפרטים') + '</div>' +
+      '<div class="font-black text-lg text-slate-800 mb-2">' + (!balanced ? (hasMoneyGap ? dir + ' של ₪' + fmtMoney(absGap) : dir + ' של ' + Math.abs(uG || 0) + ' יח׳') + ' — בדוק לבד מה המקור' : 'התעודה מאוזנת — אפשר לעבור על הפרטים') + '</div>' +
       '<button data-role="manual-toggle-search" class="btn-tap w-full flex items-center justify-between px-3 py-3 rounded-xl border-2 ' + (manualSearchOpen ? 'border-indigo-300 bg-indigo-50' : 'border-slate-200 bg-white') + ' font-black text-sm text-slate-700"><span><i class="fa-solid fa-plus text-indigo-600"></i> חוסר / עודף של מוצר — חפש ושייך</span><i class="fa-solid fa-chevron-' + (manualSearchOpen ? 'up' : 'down') + ' text-slate-400"></i></button>' +
       addSection +
       '<div class="mt-4 mb-1 font-black text-sm text-slate-700"><i class="fa-solid fa-list-check text-indigo-600"></i> מה שנסרק — מחירים ומבצעים</div>' +
@@ -5196,15 +5566,17 @@ function renderReconcile() {
   }
 
   // כפתור צדדי קטן: סגירה עם הפרש
-  const sideClose = (rcStep !== 'balanced') ?
+  const sideClose = (rcStep !== 'balanced' && rcStep !== 'ai') ?
     '<div class="text-center mb-24 -mt-20 relative z-10"><button data-role="rc-recon-save" class="btn-tap text-xs font-bold text-slate-400 underline">סגור עם הפרש ואטפל אחר כך</button></div>' : '';
 
   // סרגל תחתון
   const footer = '<div class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 p-3 flex gap-2 z-40">' +
     '<button data-role="rc-recon-cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">חזור לסריקה</button>' +
-    (rcStep === 'balanced'
+    (rcStep === 'ai'
+      ? ''
+      : (rcStep === 'balanced'
       ? '<button data-role="rc-recon-save" class="btn-tap flex-[2] py-3 rounded-xl font-black bg-emerald-600 text-white"><i class="fa-solid fa-check"></i> קלוט תעודה</button>'
-      : '<button data-role="rc-recon-save" class="btn-tap flex-[2] py-3 rounded-xl font-black bg-blue-600 text-white">קלוט תעודה</button>') +
+      : '<button data-role="rc-recon-save" class="btn-tap flex-[2] py-3 rounded-xl font-black bg-blue-600 text-white">קלוט תעודה</button>')) +
   '</div>';
 
   app.innerHTML = header + summary + body + sideClose + footer;
@@ -5649,6 +6021,20 @@ async function askSupplierCreditNote(title, required) {
   if (required && !v) { showToast('חובה לרשום הערה כדי לסגור ידנית', null, null, 2600); return null; }
   return v;
 }
+function receiptAuditAfterCredit(rc, nextClaim) {
+  let aiAudit = rc && rc.aiAudit ? cloneSafe(rc.aiAudit) : null;
+  // ממצאי הכמות מיוצגים גם בשורות התעודה; ממצאי מחיר/מבצע מיוצגים בדרישת
+  // הזיכוי. לכן אחרי סגירת הזיכוי מחשבים מחדש בלי לתת לדגל הישן לנעול את
+  // התעודה לנצח, אך לא מסתירים חוסר/עודף שעדיין פתוחים.
+  const probe = { ...rc, supplierCreditClaim: nextClaim, aiAudit: null };
+  const baseOpen = receiptDiscrepancyInfo(probe).open;
+  if (aiAudit) {
+    aiAudit.hasDiscrepancy = baseOpen;
+    if (!baseOpen) aiAudit.resolvedAt = Date.now();
+    else delete aiAudit.resolvedAt;
+  }
+  return { aiAudit, status: baseOpen ? 'open' : 'ok' };
+}
 async function setReceiptSupplierCreditStatus(id, status, opts) {
   const rc = receipts.find(x => x.id === id); if (!rc || !rc.supplierCreditClaim) return;
   opts = opts || {};
@@ -5700,7 +6086,8 @@ async function setReceiptSupplierCreditStatus(id, status, opts) {
   else if (status === 'payment_offset') actionName = 'offset supplier promo credit in payment';
   else if (status === 'cancelled') actionName = 'cancel supplier promo credit';
   else if (status === 'deferred') actionName = 'defer supplier promo credit';
-  const ok = await runCloudTask(actionName, { op: 'update', path: dataPath('receipts', id), data: { supplierCreditClaim: claim }, operationId: makeOperationId('supplier_credit') });
+  const auditState = receiptAuditAfterCredit(rc, claim);
+  const ok = await runCloudTask(actionName, { op: 'update', path: dataPath('receipts', id), data: { supplierCreditClaim: claim, aiAudit: auditState.aiAudit, status: auditState.status }, operationId: makeOperationId('supplier_credit') });
   if (ok) {
     if (status === 'verified') {
       if (claim.status === 'partial') showToast('נרשם זיכוי חלקי — נותר לקבל ₪' + fmtMoney(claim.remainingAmount), null, null, 3500);
@@ -5719,7 +6106,8 @@ async function bulkVerifySupplierCredits(ids) {
     if (!rc || !rc.supplierCreditClaim) return;
     const claim = cloneSafe(rc.supplierCreditClaim);
     claim.status = 'verified'; claim.receivedAmount = r2(Number(claim.amount) || 0); claim.receivedAt = Date.now(); claim.verifiedAt = Date.now(); claim.verifiedMonth = monthKeyFromTs(Date.now()); claim.settlementMethod = 'statement'; claim.remainingAmount = 0; claim.updatedAt = Date.now();
-    writes.push({ op: 'update', path: dataPath('receipts', id), data: { supplierCreditClaim: claim } });
+    const auditState = receiptAuditAfterCredit(rc, claim);
+    writes.push({ op: 'update', path: dataPath('receipts', id), data: { supplierCreditClaim: claim, aiAudit: auditState.aiAudit, status: auditState.status } });
   });
   if (!writes.length) { showToast('לא נמצאו דרישות זיכוי לסגירה', null, null, 2500); return; }
   const ok = await runCloudTask('verify supplier promo credit', { op: 'batch', writes, operationId: makeOperationId('supplier_credit_bulk') });
@@ -5892,14 +6280,17 @@ function saveReconciledReceipt(opts) {
   }
   if (!opts.skipGap && (receiptNoteTotal != null || receiptNoteUnits != null)) {
     const g = reconcileGap(), ug = reconcileUnitsGap();
-    if (Math.abs(g) > 1 || (ug != null && ug !== 0)) {
+    if (Math.round(Math.abs(g) * 100) > 0 || (ug != null && ug !== 0)) {
       const parts = [];
-      if (Math.abs(g) > 1) parts.push('הפרש סכום ₪' + fmtMoney(Math.abs(g)) + ' (' + (g > 0 ? 'חסר' : 'עודף') + ')');
+      if (Math.round(Math.abs(g) * 100) > 0) parts.push('הפרש סכום ₪' + fmtMoney(Math.abs(g)) + ' (' + (g > 0 ? 'חסר' : 'עודף') + ')');
       if (ug != null && ug !== 0) parts.push('פער ' + Math.abs(ug) + ' יחידות (' + (ug > 0 ? 'חסרות' : 'עודפות') + ')');
       showConfirm('הפרש לא מוסבר', 'עדיין נשאר ' + parts.join(' וגם ') + ' שלא שובץ לפריטים. התעודה תישמר כפתוחה ולא תיצבע בירוק. לשמור בכל זאת?', 'שמור כפתוחה', function () { saveReconciledReceipt({ skipChecked: true, skipGap: true }); }); return;
     }
   }
   reconcileData.forEach(l => {
+    // מחיר שנקרא מהנייר ב-AI שייך לתעודה הזאת בלבד. הוא אינו משנה בשקט
+    // את מחיר המוצר הקבוע במאגר.
+    if (l.aiPaperPriceOnly) return;
     const p = products.find(x => x.id === l.productId);
     const np = ((Number(l.promoPct) || 0) > 0 && l.promoOn) ? r2(Number(l.basePrice) || 0) : r2(Number(l.price) || 0);
     if (p && np > 0 && r2(Number(p.price) || 0) !== np) { p.price = np; if (db) runCloudTaskSilent('save price from reconcile', { op: 'update', path: dataPath('products', l.productId), data: { price: np }, operationId: makeOperationId('reconcile_price') }); }
@@ -5914,12 +6305,15 @@ function saveReconciledReceipt(opts) {
   const grossEx = r2(lines.reduce((a, l) => a + l.lineTotal, 0));
   const supplierDiscount = r2(Number(reconcileSupplierDiscount) || 0);
   const ex = r2(grossEx - supplierDiscount);
-  const unresolvedAmountGap = Math.abs(reconcileGap()) > 1 ? reconcileGap() : 0;
+  const unresolvedAmountGap = Math.round(Math.abs(reconcileGap()) * 100) > 0 ? reconcileGap() : 0;
   const unresolvedUnitsGap = (reconcileUnitsGap() != null && reconcileUnitsGap() !== 0) ? reconcileUnitsGap() : 0;
-  const open = lines.some(l => l.noteQty != null && l.noteQty !== l.qty) || !!unresolvedAmountGap || !!unresolvedUnitsGap;
+  const aiAudit = reconcileAiAudit ? cloneSafe(reconcileAiAudit) : null;
+  const aiDiscrepancy = !!(aiAudit && aiAudit.hasDiscrepancy);
   const supplierCreditClaim = reconcileSupplierCreditClaim ? cloneSafe(reconcileSupplierCreditClaim) : null;
-  pendingReceipt = { lines, ex, grossEx, supplierDiscount, supplierPromoItems: reconcileSupplierPromoItems.slice(), supplierPromoMismatchItems: reconcilePromoMismatchItems.slice(), supplierCreditClaim, noteTotal: receiptNoteTotal, status: open ? 'open' : 'ok', noteParts: receiptNotes.slice(), unresolvedAmountGap, unresolvedUnitsGap };
-  presentReconcileSummary(lines, ex, open, { grossEx, supplierDiscount, supplierPromoItems: reconcileSupplierPromoItems.slice(), supplierPromoMismatchItems: reconcilePromoMismatchItems.slice(), supplierCreditClaim });
+  const creditOpen = supplierCreditClaimOpen({ supplierCreditClaim }) || supplierCreditClaimDeferred({ supplierCreditClaim });
+  const open = lines.some(l => l.noteQty != null && l.noteQty !== l.qty) || !!unresolvedAmountGap || !!unresolvedUnitsGap || aiDiscrepancy || creditOpen;
+  pendingReceipt = { lines, ex, grossEx, supplierDiscount, supplierPromoItems: reconcileSupplierPromoItems.slice(), supplierPromoMismatchItems: reconcilePromoMismatchItems.slice(), supplierCreditClaim, aiAudit, noteTotal: receiptNoteTotal, status: open ? 'open' : 'ok', noteParts: receiptNotes.slice(), unresolvedAmountGap, unresolvedUnitsGap };
+  presentReconcileSummary(lines, ex, open, { grossEx, supplierDiscount, supplierPromoItems: reconcileSupplierPromoItems.slice(), supplierPromoMismatchItems: reconcilePromoMismatchItems.slice(), supplierCreditClaim, aiAudit });
 }
 function presentReconcileSummary(lines, ex, open, extra) {
   extra = extra || {};
@@ -5941,11 +6335,16 @@ function presentReconcileSummary(lines, ex, open, extra) {
   const supplierCreditSummary = (extra.supplierCreditClaim && Number(extra.supplierCreditClaim.amount) > 0)
     ? '<div class="mt-2 rounded-xl bg-orange-50 border-2 border-orange-300 p-3 text-xs font-bold text-orange-900"><div class="font-black text-sm"><i class="fa-solid fa-triangle-exclamation"></i> נפתחה דרישת זיכוי פתוחה מול הספק</div><div class="mt-1">סכום מוערך לזיכוי: ₪' + fmtMoney(extra.supplierCreditClaim.amount) + '</div><div class="text-[11px] mt-1">ייכנס לחישוב הספק כזיכוי שמגיע, אך יישאר מסומן כלא מאומת עד בדיקה מול מרכזת/תעודת זיכוי.</div></div>'
     : '';
+  const aiSummary = (extra.aiAudit && Array.isArray(extra.aiAudit.findings))
+    ? '<div class="mt-2 rounded-xl bg-violet-50 border-2 border-violet-200 p-3"><div class="font-black text-sm text-violet-900"><i class="fa-solid fa-shield-halved"></i> תוצאות AI שאישרת</div>' +
+      '<div class="text-[11px] font-bold text-violet-700 mt-1">סכום התעודות והיחידות אומתו בדיוק. התמונות לא נשמרות.</div>' +
+      (extra.aiAudit.findings.filter(f => ['shortage', 'surplus', 'price', 'promo_missing'].includes(f.type)).map(f => '<div class="text-xs font-black mt-1.5 ' + (f.type === 'shortage' ? 'text-rose-700' : (f.type === 'surplus' ? 'text-amber-700' : 'text-orange-800')) + '">• ' + htmlEscape(f.text || '') + '</div>').join('') || '<div class="text-xs font-black text-emerald-700 mt-1.5">לא נמצא פער נוסף.</div>') + '</div>'
+    : '';
   $('rsBody').innerHTML =
     (open ? '<div class="bg-rose-50 border border-rose-200 rounded-xl p-2.5 mb-3 text-xs font-bold text-rose-700"><i class="fa-solid fa-triangle-exclamation"></i> נשמר עם הפרשים — התעודה תסומן כפתוחה עד שתתוקן</div>' : '') +
     '<div class="bg-slate-50 rounded-xl p-3 max-h-56 overflow-y-auto border border-slate-100 mb-3">' + listHtml + '</div>' +
     ((Number(extra.supplierDiscount) || 0) > 0 ? '<div class="flex items-center justify-between text-slate-500 font-bold text-sm"><span>סכום שורות לפני מבצע</span><span>₪' + fmtMoney(extra.grossEx || ex) + '</span></div>' : '') +
-    discountSummary + promoMismatchSummary + supplierCreditSummary +
+    discountSummary + promoMismatchSummary + supplierCreditSummary + aiSummary +
     '<div class="flex items-center justify-between text-slate-900 font-black text-xl mt-2 pt-2 border-t border-slate-200"><span>לתשלום — מה שהתקבל (ללא מע״מ)</span><span>₪' + fmtMoney(ex) + '</span></div>' +
     (receiptNoteTotal != null ? '<div class="text-[11px] text-slate-400 mt-1">סכום התעודה מהספק: ₪' + fmtMoney(receiptNoteTotal) + '</div>' : '');
   const m = $('receiptSummaryModal'); m.classList.remove('hidden'); m.classList.add('flex');
@@ -6108,9 +6507,20 @@ async function saveReceiptFix() {
     return line;
   }).filter(l => (Number(l.qty) || 0) > 0 || l.noteQty != null);
   const ex = r2(items.reduce((a, l) => a + l.lineTotal, 0));
-  const di = receiptFixEffectiveInfo(items), open = di.open;
+  const originalReceipt = receipts.find(x => x.id === receiptFix.id);
+  let aiAudit = originalReceipt && originalReceipt.aiAudit ? cloneSafe(originalReceipt.aiAudit) : null;
+  // שמירת תיקון היא אישור מפורש של העובד. אם כל פערי הכמות נסגרו ואין
+  // דרישת זיכוי פתוחה, ממצאי ה-AI נשארים בהיסטוריה אך אינם נועלים את התעודה באדום לנצח.
+  if (aiAudit) {
+    const quantityStillOpen = items.some(l => l.noteQty != null && Number(l.noteQty) !== Number(l.qty));
+    const creditStillOpen = supplierCreditClaimOpen(originalReceipt) || supplierCreditClaimDeferred(originalReceipt);
+    aiAudit.hasDiscrepancy = quantityStillOpen || creditStillOpen;
+    if (!aiAudit.hasDiscrepancy) aiAudit.resolvedAt = Date.now();
+  }
+  const di = receiptFixEffectiveInfo(items);
+  const open = di.open || !!(aiAudit && aiAudit.hasDiscrepancy);
   const id = receiptFix.id;
-  const updateData = { items, count: items.length, totalExVat: ex, totalIncVat: ex, unresolvedAmountGap: r2(Number(di.unresolvedAmountGap) || 0), unresolvedUnitsGap: Number(di.unresolvedUnitsGap) || 0, status: open ? 'open' : 'ok' };
+  const updateData = { items, count: items.length, totalExVat: ex, totalIncVat: ex, aiAudit, unresolvedAmountGap: r2(Number(di.unresolvedAmountGap) || 0), unresolvedUnitsGap: Number(di.unresolvedUnitsGap) || 0, status: open ? 'open' : 'ok' };
   const opId = makeOperationId('receipt_fix');
   const saved = await runCloudTask('save receipt fix', { op: 'update', path: dataPath('receipts', id), data: updateData, operationId: opId });
   if (!saved) return;
@@ -6122,14 +6532,14 @@ async function saveReceiptFix() {
 }
 async function confirmReceipt() {
   if (!pendingReceipt) { hideReceiptSummary(); return; }
-  const { lines, ex, grossEx, supplierDiscount, supplierPromoItems, supplierPromoMismatchItems, supplierCreditClaim, noteTotal, status, noteParts, unresolvedAmountGap, unresolvedUnitsGap } = pendingReceipt;
+  const { lines, ex, grossEx, supplierDiscount, supplierPromoItems, supplierPromoMismatchItems, supplierCreditClaim, aiAudit, noteTotal, status, noteParts, unresolvedAmountGap, unresolvedUnitsGap } = pendingReceipt;
   const opId = pendingReceipt.operationId || (pendingReceipt.operationId = makeOperationId('receipt'));
   const creditClaim = supplierCreditClaim ? { ...cloneSafe(supplierCreditClaim), createdAt: supplierCreditClaim.createdAt || Date.now() } : null;
-  const data = { timestamp: Date.now(), date: todayStr(), items: lines, count: lines.length, totalExVat: ex, totalIncVat: ex, grossExVat: (grossEx != null ? grossEx : ex), supplierDiscount: r2(Number(supplierDiscount) || 0), supplierPromoItems: (Array.isArray(supplierPromoItems) ? supplierPromoItems : []), supplierPromoMismatchItems: (Array.isArray(supplierPromoMismatchItems) ? supplierPromoMismatchItems : []), supplierCreditClaim: creditClaim, noteTotalInc: (noteTotal != null ? noteTotal : null), noteParts: (Array.isArray(noteParts) ? noteParts : []), unresolvedAmountGap: r2(Number(unresolvedAmountGap) || 0), unresolvedUnitsGap: Number(unresolvedUnitsGap) || 0, status: status || 'ok', operationId: opId };
+  const data = { timestamp: Date.now(), date: todayStr(), items: lines, count: lines.length, totalExVat: ex, totalIncVat: ex, grossExVat: (grossEx != null ? grossEx : ex), supplierDiscount: r2(Number(supplierDiscount) || 0), supplierPromoItems: (Array.isArray(supplierPromoItems) ? supplierPromoItems : []), supplierPromoMismatchItems: (Array.isArray(supplierPromoMismatchItems) ? supplierPromoMismatchItems : []), supplierCreditClaim: creditClaim, aiAudit: aiAudit ? cloneSafe(aiAudit) : null, noteTotalInc: (noteTotal != null ? noteTotal : null), noteParts: (Array.isArray(noteParts) ? noteParts : []), unresolvedAmountGap: r2(Number(unresolvedAmountGap) || 0), unresolvedUnitsGap: Number(unresolvedUnitsGap) || 0, status: status || 'ok', operationId: opId };
   const saved = await runCloudTask('save receipt before clearing draft', { op: 'set', path: dataPath('receipts', opId), data, operationId: opId });
   if (!saved) return;
   hideReceiptSummary();
-  receiptList = []; pendingReceipt = null; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; reconcileData = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; receiptDupConfirmed = false; saveReceiptDraft();
+  receiptList = []; pendingReceipt = null; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; reconcileData = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; reconcileAiAudit = null; aiScanDocuments = []; aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; receiptDupConfirmed = false; saveReceiptDraft();
   setView('receiptsHistory');
   const newOpen = receipts.filter(r => receiptDiscrepancyInfo(r).open).find(r => findOffsetMatch(r));
   if (newOpen) showToast('💡 זוהה קיזוז אפשרי מול תעודה קודמת — ראה בכרטיס התעודה', null, null, 3500);
@@ -6257,24 +6667,11 @@ function receiptDiscrepancyInfo(rc, opts) {
     else if (d < 0) rawOver.push({ productId: l.productId || '', name: l.name || '', n: -d, price });
   });
 
-  // קיזוז פנימי באותה תעודה: אם עובד סרק מוצר לא נכון אבל באותו מחיר בדיוק,
-  // המערכת מקזזת את החוסר והעודף לפי מחיר ולא משאירה את התעודה פתוחה סתם.
+  // מחיר זהה אינו הוכחה ששני מוצרים שונים מתקזזים. כל חוסר/עודף נשאר פתוח
+  // עד אישור מפורש של העובד או קיזוז מדויק של אותו מוצר מול תעודה אחרת.
   const shortItems = rawShort.map(cloneReceiptDiffItem);
   const overItems = rawOver.map(cloneReceiptDiffItem);
   const priceOffsets = [];
-  const prices = Array.from(new Set(shortItems.concat(overItems).map(x => x.price).filter(p => p > 0)));
-  prices.forEach(price => {
-    const sList = shortItems.filter(x => x.price === price && x.n > 0);
-    const oList = overItems.filter(x => x.price === price && x.n > 0);
-    const sQty = sList.reduce((a, x) => a + (Number(x.n) || 0), 0);
-    const oQty = oList.reduce((a, x) => a + (Number(x.n) || 0), 0);
-    const qty = Math.min(sQty, oQty);
-    if (qty > 0) {
-      const usedShort = consumeReceiptDiffQty(sList, qty);
-      const usedOver = consumeReceiptDiffQty(oList, qty);
-      priceOffsets.push({ price, qty: r2(qty), shortItems: usedShort, overItems: usedOver });
-    }
-  });
 
   // קיזוז בין תעודות נשמר ברמת מוצר וכמות. הוא צורך רק את ההפרש שאושר,
   // ולעולם אינו מסתיר חוסר/עודף אחר שנשאר באותה תעודה.
@@ -6292,9 +6689,10 @@ function receiptDiscrepancyInfo(rc, opts) {
   const derivedUnitsGap = paperUnits == null ? 0 : paperUnits - assignedPaperUnits;
   const storedUnitsGap = Number(rc && rc.unresolvedUnitsGap) || 0;
   const unresolvedUnitsGap = storedUnitsGap || derivedUnitsGap;
-  if (unresolvedAmountGap > 1) shortVal += unresolvedAmountGap;
-  else if (unresolvedAmountGap < -1) overVal += -unresolvedAmountGap;
-  return { open: !!(finalShort.length || finalOver.length || Math.abs(unresolvedAmountGap) > 1 || unresolvedUnitsGap !== 0), shortItems: finalShort, overItems: finalOver, priceOffsets, externalOffsets, shortVal: r2(shortVal), overVal: r2(overVal), unresolvedAmountGap, unresolvedUnitsGap };
+  if (Math.round(unresolvedAmountGap * 100) > 0) shortVal += unresolvedAmountGap;
+  else if (Math.round(unresolvedAmountGap * 100) < 0) overVal += -unresolvedAmountGap;
+  const creditOpen = supplierCreditClaimOpen(rc) || supplierCreditClaimDeferred(rc);
+  return { open: !!(finalShort.length || finalOver.length || Math.round(Math.abs(unresolvedAmountGap) * 100) > 0 || unresolvedUnitsGap !== 0 || (rc.aiAudit && rc.aiAudit.hasDiscrepancy) || creditOpen), shortItems: finalShort, overItems: finalOver, priceOffsets, externalOffsets, shortVal: r2(shortVal), overVal: r2(overVal), unresolvedAmountGap, unresolvedUnitsGap };
 }
 function receiptsBalance() {
   let bal = 0, n = 0;
@@ -6439,6 +6837,13 @@ function renderReceiptsHistory() {
         '<div class="text-sm font-black text-slate-600 shrink-0">₪' + fmtMoney(l.lineTotal) + '</div>' +
       '</div>'
     ).join('');
+    const aiHistoryFindings = rc.aiAudit && Array.isArray(rc.aiAudit.findings)
+      ? rc.aiAudit.findings.filter(f => ['shortage', 'surplus', 'price', 'promo_missing'].includes(f.type))
+      : [];
+    const aiHistoryHtml = rc.aiAudit
+      ? '<div class="mt-2 bg-violet-50 border border-violet-200 rounded-xl p-2.5 text-xs"><div class="font-black text-violet-900 mb-1"><i class="fa-solid fa-shield-halved"></i> פוענח ואושר בסריקת AI</div><div class="text-[11px] font-bold text-violet-700 mb-1">סכום התעודות והיחידות אומתו בדיוק; התמונות לא נשמרו.</div>' +
+        (aiHistoryFindings.map(f => '<div class="font-black mt-1 ' + (f.type === 'shortage' ? 'text-rose-700' : (f.type === 'surplus' ? 'text-amber-700' : 'text-orange-800')) + '">• ' + htmlEscape(f.text || '') + '</div>').join('') || '<div class="font-black text-emerald-700">לא נמצא פער נוסף.</div>') + '</div>'
+      : '';
     const hasInternalOffset = !effectiveOpen && !!(di.priceOffsets && di.priceOffsets.length);
     let barCls = 'bg-emerald-500 text-white', borderCls = 'border-emerald-300', statusTxt = '<i class="fa-solid fa-circle-check"></i> אומתה';
     let metaStatus = '';
@@ -6484,9 +6889,10 @@ function renderReceiptsHistory() {
           di.shortItems.map(s => '<div class="flex justify-between text-rose-600"><span>חסר: ' + s.name + '</span><span>' + s.n + ' יח׳</span></div>').join('') +
           di.overItems.map(s => '<div class="flex justify-between text-amber-600"><span>עודף: ' + s.name + '</span><span>' + s.n + ' יח׳</span></div>').join('') +
           (di.unresolvedUnitsGap ? '<div class="flex justify-between text-rose-700 font-black"><span>פער יחידות שטרם שויך</span><span>' + Math.abs(di.unresolvedUnitsGap) + ' (' + (di.unresolvedUnitsGap > 0 ? 'חסרות' : 'עודפות') + ')</span></div>' : '') +
-          (Math.abs(di.unresolvedAmountGap || 0) > 1 ? '<div class="flex justify-between text-rose-700 font-black"><span>פער סכום שטרם שויך</span><span>₪' + fmtMoney(Math.abs(di.unresolvedAmountGap)) + '</span></div>' : '') +
+          (Math.round(Math.abs(di.unresolvedAmountGap || 0) * 100) > 0 ? '<div class="flex justify-between text-rose-700 font-black"><span>פער סכום שטרם שויך</span><span>₪' + fmtMoney(Math.abs(di.unresolvedAmountGap)) + '</span></div>' : '') +
           (rc.noteTotalInc != null ? '<div class="mt-1 pt-1 border-t border-rose-200 text-rose-700/80">תעודת ספק ₪' + fmtMoney(rc.noteTotalInc) + (rc.noteParts && rc.noteParts.length > 1 ? ' (' + rc.noteParts.map(x => '₪' + fmtMoney(normNote(x).amount)).join(' + ') + ')' : '') + ' · שולם בפועל ₪' + fmtMoney(rc.totalExVat) + '</div>' : '') +
         '</div>' : '') +
+        aiHistoryHtml +
         ((di.priceOffsets && di.priceOffsets.length) ? '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800"><div class="font-black mb-1"><i class="fa-solid fa-scale-balanced"></i> קיזוז פנימי לפי מחיר זהה</div>' + di.priceOffsets.map(o => '<div class="font-bold">' + receiptSideText(o.shortItems) + ' ⇄ ' + receiptSideText(o.overItems) + ' · ₪' + fmtMoney(o.price) + '</div>').join('') + '</div>' : '') +
         ((Number(rc.supplierDiscount) || 0) > 0 ? '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800"><div class="font-black mb-1"><i class="fa-solid fa-percent"></i> אומתה עם מבצע / הנחת ספק</div><div class="font-bold">הנחה: −₪' + fmtMoney(rc.supplierDiscount) + ((rc.grossExVat != null) ? ' · לפני מבצע: ₪' + fmtMoney(rc.grossExVat) : '') + '</div>' + ((rc.supplierPromoItems || []).length ? '<div class="text-[11px] mt-1">כוכבית: ' + (rc.supplierPromoItems || []).map(x => x.name).join(' · ') + '</div>' : '') + '</div>' : '') +
         supplierCreditClaimCardHtml(rc) +
@@ -7877,6 +8283,13 @@ app.addEventListener('input', (e) => {
 app.addEventListener('change', (e) => {
   const t = e.target;
   if (t && t.id === 'backupImportFile') { handleBackupFile(t.files && t.files[0]); return; }
+  if (t && t.getAttribute && t.getAttribute('data-role') === 'ai-file') {
+    const docIndex = parseInt(t.dataset.doc, 10);
+    const files = Array.from(t.files || []);
+    t.value = '';
+    aiAddInvoiceFiles(docIndex, files);
+    return;
+  }
   if (t && t.getAttribute && t.getAttribute('data-role') === 'nc-promo-mark') {
     const i = parseInt(t.dataset.i, 10) || 0;
     const row = noteCheckRows[i]; if (row) row.promoMark = !!t.checked;
@@ -7926,6 +8339,11 @@ app.addEventListener('click', (e) => {
   if (unitBtn) { toggleUnit(unitBtn.dataset.id, unitBtn); buzz(8); return; }
   const t = e.target.closest('[data-role]'); if (!t) return;
   const role = t.dataset.role, id = t.dataset.id;
+  if (role === 'ai-add-photo') { const input = $('aiDocFile_' + (parseInt(t.dataset.doc, 10) || 0)); if (input) input.click(); return; }
+  if (role === 'ai-remove-page') { aiRemoveInvoicePage(parseInt(t.dataset.doc, 10) || 0, parseInt(t.dataset.page, 10) || 0); return; }
+  if (role === 'ai-run') { aiRunInvoiceScan(); return; }
+  if (role === 'ai-rescan') { resetAiInvoiceScan(); rcStep = 'ai'; renderReconcile(); return; }
+  if (role === 'ai-apply') { aiApplyInvoiceResult(); return; }
   if (role === 'admin-login') { requireAdmin('כניסת מנהל', () => { if (currentView === 'settings') renderSettings(); }); return; }
   if (role === 'admin-logout') { exitAdminMode(); return; }
   if (role === 'admin-change-pin') { openChangeAdminPinModal(); return; }
@@ -7982,12 +8400,18 @@ app.addEventListener('click', (e) => {
   else if (role === 'clear-returns-history') showConfirm('ניקוי היסטוריה', 'למחוק את כל היסטוריית החזרות? יישמר גיבוי בסל מחזור.', 'מחק הכל', () => clearAllDocs('returns'));
   else if (role === 'rc-scan') openReceivingScanner();
   else if (role === 'rc-open') { const en = readNoteEntry(receiptNotes.length === 0); if (en === false) return; if (en) receiptNotes.push(en); recomputeNoteTotal(); receiptOpened = true; receiptDupConfirmed = false; saveReceiptDraft(); refreshReceipt(); openReceivingScanner(); }
-  else if (role === 'rc-open-skip') { receiptNotes = []; recomputeNoteTotal(); receiptOpened = true; receiptDupConfirmed = false; saveReceiptDraft(); refreshReceipt(); openReceivingScanner(); }
   else if (role === 'rc-cancel') { showConfirm('ביטול תעודה', 'לבטל את התעודה הנוכחית? כל הפריטים שנסרקו יימחקו.', 'בטל תעודה', () => { receiptList = []; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; reconcileData = null; receiptDupConfirmed = false; saveReceiptDraft(); setView('receiving'); }); }
   else if (role === 'rc-note-add') { const en = readNoteEntry(true); if (en === false) return; if (en) { receiptNotes.push(en); recomputeNoteTotal(); saveReceiptDraft(); } refreshReceipt(); const inp = $('rcNoteInput'); if (inp) inp.focus(); }
   else if (role === 'rc-note-remove') { const i = parseInt(t.dataset.idx, 10); if (i >= 0) { receiptNotes.splice(i, 1); recomputeNoteTotal(); saveReceiptDraft(); refreshReceipt(); } }
   else if (role === 'rc-notes-edit') { editingNotes = true; refreshReceipt(); }
-  else if (role === 'rc-notes-done') { const en = readNoteEntry(false); if (en === false) return; if (en) receiptNotes.push(en); recomputeNoteTotal(); editingNotes = false; saveReceiptDraft(); refreshReceipt(); }
+  else if (role === 'rc-notes-done') {
+    const en = readNoteEntry(false); if (en === false) return;
+    if (en) receiptNotes.push(en);
+    recomputeNoteTotal();
+    const anchorsReady = receiptNotes.length > 0 && receiptNotes.every(raw => { const note = normNote(raw); return note.amount > 0 && note.units != null && note.units > 0; });
+    if (!anchorsReady) { showToast('חובה להשאיר לפחות תעודה אחת עם סכום וסך יחידות', null, null, 3200); refreshReceipt(); return; }
+    editingNotes = false; saveReceiptDraft(); refreshReceipt();
+  }
   else if (role === 'rc-recon-minus') reconcileStepNote(id, -1);
   else if (role === 'rc-recon-plus') reconcileStepNote(id, 1);
   else if (role === 'rc-recon-recv-minus') reconcileStepRecv(id, -1);
@@ -8201,7 +8625,7 @@ app.addEventListener('click', (e) => {
   }
   else if (role === 'rf-add-item') receiptFixAddItem(id);
   else if (role === 'rc-digits-pick') receivingDigitsPick(id);
-  else if (role === 'rc-recon-cancel') { reconcileData = null; setView('receiving'); }
+  else if (role === 'rc-recon-cancel') { resetAiInvoiceScan(); reconcileData = null; setView('receiving'); }
   else if (role === 'rc-recon-save') saveReconciledReceipt();
   else if (role === 'rc-fix-open') openReceiptFix(id);
   else if (role === 'rc-offset') { const otherId = t.dataset.other, productId = t.dataset.product; const rc = receipts.find(x => x.id === id); const other = receipts.find(x => x.id === otherId); const m = rc ? findOffsetMatch(rc, otherId, productId) : null; if (m && other) showConfirm('אישור קיזוז לפריט', m.qty + ' × ' + m.name + ' מתקזזים מול תעודת ' + new Date(other.timestamp).toLocaleDateString('he-IL') + '. הקיזוז יחול רק על הפריט הזה; כל חוסר או עודף אחר יישאר פתוח לטיפול.', 'אשר קיזוז לפריט', () => applyOffset(id, otherId, productId)); }
