@@ -1,0 +1,6 @@
+{
+  "name": "yotvata-ai-scan-asaf",
+  "main": "yotvata-v115-worker.js",
+  "compatibility_date": "2026-07-18",
+  "keep_vars": true
+}
