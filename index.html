@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v115 סריקת AI יציבה</title>
+    <title>הזמנות יטבתה - v117 סריקת AI בטוחה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v115 סריקת AI יציבה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v117 סריקת AI בטוחה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -179,6 +179,36 @@
         <div class="absolute bottom-0 inset-x-0 p-8 text-center">
           <p id="scanHint" class="text-white font-bold" style="text-shadow:0 1px 3px rgba(0,0,0,.6)">כוון את הברקוד אל תוך המסגרת</p>
         </div>
+      </div>
+    </div>
+
+    <!-- אישור כיוון תמונת תעודה — האייפון עלול לשמור צילום על הצד -->
+    <div id="aiOrientationModal" class="hidden fixed inset-0 bg-slate-950 z-[95] flex-col" role="dialog" aria-modal="true" aria-labelledby="aiOrientationTitle">
+      <div class="shrink-0 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-3 bg-slate-900 text-white border-b border-white/10">
+        <div class="flex items-center justify-between gap-3">
+          <div class="min-w-0">
+            <h3 id="aiOrientationTitle" class="font-black text-xl">בדיקת כיוון התעודה</h3>
+            <p id="aiOrientationLabel" class="text-xs font-bold text-slate-300 mt-0.5 truncate">עמוד שצולם</p>
+          </div>
+          <button id="aiOrientationCancel" type="button" class="btn-tap h-11 shrink-0 rounded-xl bg-rose-500/20 border border-rose-300/30 text-rose-100 px-3 flex items-center justify-center gap-1.5 font-black text-sm" aria-label="מחק את הצילום"><i class="fa-solid fa-trash-can"></i> מחק צילום</button>
+        </div>
+        <div class="mt-2 rounded-xl bg-amber-400/15 border border-amber-300/30 px-3 py-2 text-sm font-black text-amber-100">
+          <i class="fa-solid fa-mobile-screen-button ml-1"></i> ודא שהכותרת למעלה ושאפשר לקרוא את הטקסט ישר.
+        </div>
+      </div>
+      <div class="relative flex-1 min-h-0 p-3 flex items-center justify-center overflow-hidden">
+        <img id="aiOrientationImage" alt="תצוגה מקדימה של התעודה" class="w-full h-full object-contain rounded-xl bg-white shadow-2xl">
+        <div id="aiOrientationBusy" class="hidden absolute inset-0 bg-black/55 items-center justify-center text-white">
+          <div class="text-center"><i class="fa-solid fa-spinner fa-spin text-4xl"></i><div class="font-black mt-2">מסובב…</div></div>
+        </div>
+      </div>
+      <div class="shrink-0 bg-slate-900 px-3 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-white/10">
+        <div class="grid grid-cols-2 gap-2 mb-2" dir="ltr">
+          <button id="aiOrientationLeft" type="button" class="btn-tap py-3 rounded-xl bg-white/10 border border-white/15 text-white font-black"><i class="fa-solid fa-rotate-left ml-1"></i> סובב שמאלה</button>
+          <button id="aiOrientationRight" type="button" class="btn-tap py-3 rounded-xl bg-white/10 border border-white/15 text-white font-black"><i class="fa-solid fa-rotate-right ml-1"></i> סובב ימינה</button>
+        </div>
+        <button id="aiOrientationConfirm" type="button" class="btn-tap w-full py-3.5 rounded-xl bg-emerald-600 text-white font-black text-lg"><i class="fa-solid fa-check ml-1"></i> התמונה ישרה — המשך</button>
+        <p class="text-[11px] text-slate-400 font-bold text-center mt-2">התמונה לא תישלח ל-AI לפני האישור.</p>
       </div>
     </div>
 
@@ -482,6 +512,10 @@ let aiScanError = '';
 let aiScanAutoRotationNote = '';
 let aiScanAttemptCount = 0;
 const AI_SCAN_MAX_AUTO_ROTATION_RETRIES = 2;
+const AI_SCAN_MIN_SERVICE_VERSION = 117;
+const AI_BARCODE_SUFFIX_DIGITS = 6;
+let aiOrientationSession = null;
+let aiOrientationBusy = false;
 let reconcileAiAudit = null;     // מטא-נתונים בלבד, ללא תמונות
 let receiptFix = null;           // תיקון תעודה פתוחה מההיסטוריה
 let returnVerify = null;          // אימות תעודת זיכוי (חזרות)
@@ -5095,6 +5129,7 @@ function reconcileRowHtml(l) {
 
 // ===== סריקת AI — מופעלת רק לאחר שההתאמה והבלש הפשוט לא פתרו =====
 function resetAiInvoiceScan() {
+  aiCloseOrientationReview();
   const source = receiptNotes.length ? receiptNotes.map(normNote) : [{ amount: receiptNoteTotal, units: receiptNoteUnits }];
   aiScanDocuments = source.map((note, i) => ({ noteIndex: i, amount: note.amount, units: note.units, pages: [] }));
   aiScanBusy = false; aiScanProgressText = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; reconcileAiAudit = null;
@@ -5166,7 +5201,103 @@ async function aiCompressInvoiceImage(file) {
   if (!ctx) throw new Error('canvas_failed');
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, width, height); ctx.drawImage(img, 0, 0, width, height);
   const encoded = aiCanvasToInvoiceJpeg(canvas, 0.92);
-  return { dataUrl: encoded.dataUrl, baseDataUrl: encoded.dataUrl, rotation: 0, name: file.name || ('עמוד-' + Date.now() + '.jpg'), bytes: encoded.bytes };
+  return { dataUrl: encoded.dataUrl, baseDataUrl: encoded.dataUrl, rotation: 0, orientationConfirmed: false, name: file.name || ('עמוד-' + Date.now() + '.jpg'), bytes: encoded.bytes };
+}
+function aiOrientationLocation(page) {
+  for (let docIndex = 0; docIndex < aiScanDocuments.length; docIndex++) {
+    const pageIndex = aiScanDocuments[docIndex].pages.indexOf(page);
+    if (pageIndex !== -1) return { docIndex, pageIndex, doc: aiScanDocuments[docIndex], page };
+  }
+  return null;
+}
+function aiSetOrientationBusy(busy) {
+  aiOrientationBusy = !!busy;
+  const overlay = $('aiOrientationBusy');
+  if (overlay) { overlay.classList.toggle('hidden', !busy); overlay.classList.toggle('flex', !!busy); }
+  ['aiOrientationLeft', 'aiOrientationRight', 'aiOrientationConfirm', 'aiOrientationCancel'].forEach(id => {
+    const button = $(id); if (button) button.disabled = !!busy;
+  });
+}
+function aiPaintOrientationReview() {
+  const location = aiOrientationSession && aiOrientationLocation(aiOrientationSession.page);
+  if (!location) { aiCloseOrientationReview(); return false; }
+  const img = $('aiOrientationImage'), label = $('aiOrientationLabel');
+  if (img) img.src = location.page.dataUrl;
+  if (label) label.textContent = 'תעודה ' + (location.docIndex + 1) + ' · עמוד ' + (location.pageIndex + 1) + ((Number(location.page.rotation) || 0) ? ' · סיבוב ' + (Number(location.page.rotation) || 0) + '°' : '');
+  return true;
+}
+function aiOpenOrientationReview(docIndex, pageIndex, requireReconfirm) {
+  if (aiScanBusy || aiOrientationBusy) return false;
+  const doc = aiScanDocuments[docIndex], page = doc && doc.pages[pageIndex];
+  if (!page) return false;
+  if (requireReconfirm) page.orientationConfirmed = false;
+  aiOrientationSession = { page };
+  const modal = $('aiOrientationModal');
+  if (modal) { modal.classList.remove('hidden'); modal.classList.add('flex'); }
+  aiSetOrientationBusy(false);
+  aiPaintOrientationReview();
+  return true;
+}
+function aiOpenNextUnconfirmedOrientation() {
+  if (aiOrientationSession || aiScanBusy || aiOrientationBusy) return false;
+  for (let docIndex = 0; docIndex < aiScanDocuments.length; docIndex++) {
+    const pageIndex = aiScanDocuments[docIndex].pages.findIndex(page => !page.orientationConfirmed);
+    if (pageIndex !== -1) return aiOpenOrientationReview(docIndex, pageIndex, false);
+  }
+  return false;
+}
+function aiCloseOrientationReview() {
+  aiOrientationSession = null;
+  aiOrientationBusy = false;
+  const modal = $('aiOrientationModal');
+  if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+  const overlay = $('aiOrientationBusy');
+  if (overlay) { overlay.classList.add('hidden'); overlay.classList.remove('flex'); }
+}
+async function aiRotateOrientationReview(deltaTurns) {
+  const session = aiOrientationSession, location = session && aiOrientationLocation(session.page);
+  if (!location || aiOrientationBusy) return;
+  aiSetOrientationBusy(true);
+  try {
+    const page = location.page;
+    const baseDataUrl = page.baseDataUrl || page.dataUrl;
+    const currentTurns = aiNormalizeQuarterTurns((Number(page.rotation) || 0) / 90);
+    const targetTurns = aiNormalizeQuarterTurns(currentTurns + deltaTurns);
+    const rendered = await aiRenderInvoiceRotation(baseDataUrl, targetTurns);
+    // מעדכנים רק לאחר שסיבוב מלא הצליח, כדי שכשל לא ישאיר חצי שינוי.
+    if (!aiOrientationSession || aiOrientationSession.page !== page || !aiOrientationLocation(page)) return;
+    page.baseDataUrl = baseDataUrl;
+    page.dataUrl = rendered.dataUrl;
+    page.rotation = targetTurns * 90;
+    page.bytes = rendered.bytes;
+    page.orientationConfirmed = false;
+    aiPaintOrientationReview();
+  } catch (error) {
+    const label = $('aiOrientationLabel');
+    if (label) label.textContent = error && error.message === 'image_too_large' ? 'לא ניתן לסובב בלי לחרוג ממגבלת הגודל' : 'הסיבוב נכשל — התמונה המקורית לא השתנתה';
+  } finally { aiSetOrientationBusy(false); }
+}
+function aiConfirmOrientationReview() {
+  const location = aiOrientationSession && aiOrientationLocation(aiOrientationSession.page);
+  if (!location || aiOrientationBusy) return;
+  location.page.orientationConfirmed = true;
+  aiCloseOrientationReview();
+  aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0;
+  if (currentView === 'reconcile') renderReconcile();
+  setTimeout(aiOpenNextUnconfirmedOrientation, 0);
+}
+function aiCancelOrientationReview() {
+  const location = aiOrientationSession && aiOrientationLocation(aiOrientationSession.page);
+  if (!location || aiOrientationBusy) return;
+  location.doc.pages.splice(location.pageIndex, 1);
+  aiCloseOrientationReview();
+  aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0;
+  if (currentView === 'reconcile') renderReconcile();
+  setTimeout(aiOpenNextUnconfirmedOrientation, 0);
+}
+function aiAllPagesOrientationConfirmed(documents) {
+  const list = documents || aiScanDocuments;
+  return list.length > 0 && list.every(doc => doc.pages.length > 0 && doc.pages.every(page => page.orientationConfirmed === true));
 }
 async function aiAddInvoiceFiles(docIndex, files) {
   const doc = aiScanDocuments[docIndex]; if (!doc || !files || !files.length || aiScanBusy) return;
@@ -5179,7 +5310,11 @@ async function aiAddInvoiceFiles(docIndex, files) {
     aiScanResponse = null; aiScanEvaluation = null; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0;
   } catch (error) {
     aiScanError = error && error.message === 'image_too_large' ? 'התמונה גדולה מדי. צלם שוב מקרוב ובחדות.' : 'לא הצלחתי להכין את התמונה. נסה לצלם שוב.';
-  } finally { aiScanBusy = false; aiScanProgressText = ''; if (currentView === 'reconcile') renderReconcile(); }
+  } finally {
+    aiScanBusy = false; aiScanProgressText = '';
+    if (currentView === 'reconcile') renderReconcile();
+    setTimeout(aiOpenNextUnconfirmedOrientation, 0);
+  }
 }
 function aiRemoveInvoicePage(docIndex, pageIndex) {
   const doc = aiScanDocuments[docIndex]; if (!doc || aiScanBusy) return;
@@ -5198,12 +5333,14 @@ async function aiRotateInvoicePage(docIndex, pageIndex) {
     page.dataUrl = rendered.dataUrl;
     page.rotation = targetTurns * 90;
     page.bytes = rendered.bytes;
+    page.orientationConfirmed = false;
     aiScanResponse = null; aiScanEvaluation = null; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0;
   } catch (error) {
     aiScanError = error && error.message === 'image_too_large' ? 'לא ניתן לסובב בלי לחרוג ממגבלת הגודל.' : 'סיבוב התמונה נכשל. התמונה המקורית נשארה ללא שינוי.';
   } finally {
     aiScanBusy = false; aiScanProgressText = '';
     if (currentView === 'reconcile') renderReconcile();
+    if (!page.orientationConfirmed) setTimeout(() => aiOpenOrientationReview(docIndex, pageIndex, false), 0);
   }
 }
 async function aiBuildRotatedDocuments(sourceDocuments, documentIndexes, deltaTurns) {
@@ -5249,10 +5386,47 @@ function aiRowArithmeticError(row, qty) {
   if (gross == null && unitQtyCents != null && discount != null && total != null && Math.abs((unitQtyCents - discount) - total) > 1) return 'מחיר × כמות פחות ההנחה אינו תואם לסכום השורה';
   return '';
 }
+function aiCatalogBarcodeMatches(observed, suffixMode) {
+  if (!/^\d{6,20}$/.test(observed || '')) return [];
+  const seen = new Set(), matches = [];
+  products.forEach(product => {
+    const barcode = normalizeBarcode(product && product.barcode || '');
+    if (!/^\d{6,20}$/.test(barcode)) return;
+    if ((suffixMode ? barcode.endsWith(observed) : barcode === observed) && !seen.has(product.id)) {
+      seen.add(product.id); matches.push({ product, barcode });
+    }
+  });
+  return matches;
+}
+function aiResolveInvoiceBarcode(row) {
+  const readType = String(row && row.barcodeReadType || '');
+  const method = String(row && row.barcodeMatchMethod || '');
+  const observed = normalizeBarcode(row && row.barcodeObserved != null ? row.barcodeObserved : '');
+  const resolved = normalizeBarcode(row && row.barcode != null ? row.barcode : '');
+  if (!['full', 'suffix', 'unreadable'].includes(readType)) return { error: 'חסרה הוכחת קריאת ברקוד מהצילום' };
+  if (method === 'exact_full') {
+    if (readType !== 'full' || !/^\d{6,20}$/.test(observed) || resolved !== observed) return { error: 'הברקוד המלא שחזר אינו תואם לספרות שנקראו בתמונה' };
+    const matches = aiCatalogBarcodeMatches(observed, false);
+    if (matches.length !== 1) return { error: matches.length > 1 ? 'הברקוד המלא קיים ביותר ממוצר אחד במאגר' : 'הברקוד המלא לא נמצא במאגר' };
+    return { product: matches[0].product, barcode: matches[0].barcode, observed, method };
+  }
+  if (method === 'unique_suffix') {
+    if (readType !== 'suffix' || !/^\d{6,20}$/.test(observed) || !resolved.endsWith(observed)) return { error: 'סיומת הברקוד שחזרה אינה תואמת לספרות שנקראו בתמונה' };
+    const matches = aiCatalogBarcodeMatches(observed, true);
+    if (matches.length !== 1 || matches[0].barcode !== resolved) return { error: matches.length > 1 ? 'סיומת הברקוד מתאימה ליותר ממוצר אחד' : 'סיומת הברקוד לא נמצאה באופן יחיד במאגר' };
+    return { product: matches[0].product, barcode: matches[0].barcode, observed, method };
+  }
+  if (method === 'ambiguous') return { error: 'הספרות שנקראו מתאימות ליותר ממוצר אחד — יש לבדוק ידנית' };
+  if (readType === 'suffix' && observed.length < AI_BARCODE_SUFFIX_DIGITS) return { error: 'נקראו פחות מ־6 ספרות אחרונות של הברקוד' };
+  return { error: 'הברקוד לא נקרא או לא נמצא במאגר באופן חד־משמעי' };
+}
 function aiEvaluateInvoiceScan(payload) {
   const scan = payload && payload.scan;
   const errors = [], warnings = [], findings = [], promoCandidates = [], aggregates = new Map(), docSummaries = [];
   if (!scan || !Array.isArray(scan.documents)) return { valid: false, totalVerified: false, unitsVerified: false, extractedTotal: 0, extractedUnits: 0, errors: ['השרת לא החזיר מסמכים תקינים'], warnings, findings, aggregates, docSummaries };
+  if (!Number.isInteger(Number(payload.serviceVersion)) || Number(payload.serviceVersion) < AI_SCAN_MIN_SERVICE_VERSION) {
+    errors.push('שירות הסריקה עדיין בגרסה ישנה שאינה מוכיחה את מקור הברקוד — יש להעלות קודם את server.js החדש');
+  }
   const returned = new Map();
   scan.documents.forEach(doc => {
     const idx = Number(doc.noteIndex);
@@ -5281,11 +5455,13 @@ function aiEvaluateInvoiceScan(payload) {
     let docUnits = 0, docRowsCents = 0;
     (Array.isArray(doc.warnings) ? doc.warnings : []).forEach(w => warnings.push('תעודה ' + (index + 1) + ': ' + w));
     (Array.isArray(doc.rows) ? doc.rows : []).forEach((row, rowIndex) => {
-      const barcode = normalizeBarcode(row.barcode || '');
-      const product = findProductByBarcode(barcode);
+      const barcodeMatch = aiResolveInvoiceBarcode(row);
+      const barcode = barcodeMatch.barcode || '';
+      const product = barcodeMatch.product || null;
       const qtyRaw = row.quantity == null || row.quantity === '' ? NaN : Number(row.quantity);
       const qty = isFinite(qtyRaw) && qtyRaw >= 0 && Math.abs(qtyRaw - Math.round(qtyRaw)) < 0.001 ? Math.round(qtyRaw) : null;
-      if (!barcode || !product) { errors.push('תעודה ' + (index + 1) + ', שורה ' + (row.lineNumber || (rowIndex + 1)) + ': הברקוד לא זוהה במאגר'); return; }
+      if (!barcode || !product) { errors.push('תעודה ' + (index + 1) + ', שורה ' + (row.lineNumber || (rowIndex + 1)) + ': ' + (barcodeMatch.error || 'הברקוד לא זוהה במאגר')); return; }
+      if (barcodeMatch.method === 'unique_suffix') warnings.push(product.name + ': הותאם בוודאות לפי סיומת ייחודית שנקראה (' + barcodeMatch.observed + ')');
       if (qty == null) { errors.push(product.name + ': הכמות בשורה לא נקראה בוודאות'); return; }
       const arithmeticError = aiRowArithmeticError(row, qty);
       if (arithmeticError) { errors.push(product.name + ': ' + arithmeticError); return; }
@@ -5295,7 +5471,7 @@ function aiEvaluateInvoiceScan(payload) {
       docUnits += qty; extractedUnits += qty; docRowsCents += cents; rowTotalCents += cents;
       const rowConfidence = Number(row.confidence);
       const old = aggregates.get(product.id) || { product, qty: 0, totalCents: 0, rows: [], promotionTexts: [], priceVariants: new Set() };
-      old.qty += qty; old.totalCents += cents; old.rows.push({ document: index + 1, page: row.sourcePage, line: row.lineNumber, confidence: isFinite(rowConfidence) ? rowConfidence : 0 });
+      old.qty += qty; old.totalCents += cents; old.rows.push({ document: index + 1, page: row.sourcePage, line: row.lineNumber, confidence: isFinite(rowConfidence) ? rowConfidence : 0, barcodeObserved: barcodeMatch.observed, barcodeMatchMethod: barcodeMatch.method });
       // קיבוץ אבחוני בלבד לזיהוי מחירים מודפסים שונים; אינו משתתף בחישוב הסכום.
       // כאן השוואה ברמת אגורות מכוונת, כדי שעיגולי שורה תקינים לא ייראו כמחירים שונים.
       if (qty > 0) old.priceVariants.add(r2(cents / 100 / qty));
@@ -5431,12 +5607,14 @@ function aiEvaluationIsBetter(candidate, currentBest) {
   return false;
 }
 async function aiRequestInvoiceScan(token, documents) {
+  if (!aiAllPagesOrientationConfirmed(documents)) throw new Error('לא כל התמונות אושרו כישרות — שום תמונה לא נשלחה ל-AI.');
   const response = await fetch(AI_SCAN_WORKER_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
     body: JSON.stringify({
       documents: documents.map(d => ({ noteIndex: d.noteIndex, pages: d.pages.map(p => p.dataUrl) })),
-      catalog: products.map(p => ({ id: p.id, name: p.name || '', barcode: normalizeBarcode(p.barcode || '') })).filter(p => p.barcode)
+      // השמות אינם נשלחים: השרת פותר רק ספרות ברקוד שנקראו מהצילום.
+      catalog: products.map(p => ({ id: p.id, barcode: normalizeBarcode(p.barcode || '') })).filter(p => /^\d{6,20}$/.test(p.barcode))
     })
   });
   const payload = await response.json().catch(() => ({}));
@@ -5455,6 +5633,7 @@ async function aiRunInvoiceScan() {
   if (aiScanDocuments.length > 4) { showToast('ניתן לפענח עד 4 תעודות בפעולה אחת', null, null, 3200); return; }
   if (aiTotalPages() > 8) { showToast('ניתן לפענח עד 8 עמודים בפעולה אחת', null, null, 3200); return; }
   if (!aiScanDocuments.length || aiScanDocuments.some(d => !d.pages.length)) { showToast('צלם לפחות עמוד אחד מכל תעודה', null, null, 3000); return; }
+  if (!aiAllPagesOrientationConfirmed()) { showToast('אשר שכל התמונות ישרות לפני הפענוח', null, null, 3200); aiOpenNextUnconfirmedOrientation(); return; }
   if (!auth || !auth.currentUser) { showToast('עדיין אין חיבור מאובטח — המתן רגע ונסה שוב', null, null, 3000); return; }
   aiScanBusy = true; aiScanProgressText = 'ה-AI קורא את כל דפי התעודות…'; aiScanError = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; renderReconcile();
   try {
@@ -5529,14 +5708,14 @@ function aiInvoiceCaptureHtml() {
   }
   const docCards = aiScanDocuments.map((doc, i) => {
     const noteText = 'סכום צפוי: ₪' + fmtMoney(doc.amount || 0) + (doc.units != null ? ' · ' + doc.units + ' יחידות' : '');
-    const pages = doc.pages.map((p, pi) => '<div class="relative w-24 h-24 shrink-0 rounded-lg overflow-hidden border border-slate-200 bg-white"><img src="' + p.dataUrl + '" class="w-full h-full object-contain"><button data-role="ai-remove-page" data-doc="' + i + '" data-page="' + pi + '" aria-label="מחק עמוד" class="absolute top-1 left-1 w-7 h-7 rounded-full bg-rose-600 text-white text-xs shadow"><i class="fa-solid fa-xmark"></i></button><button data-role="ai-rotate-page" data-doc="' + i + '" data-page="' + pi + '" aria-label="סובב 90 מעלות ימינה" class="absolute top-1 right-1 w-7 h-7 rounded-full bg-blue-600 text-white text-xs shadow"><i class="fa-solid fa-rotate-right"></i></button><div class="absolute bottom-0 inset-x-0 bg-black/65 text-white text-[9px] text-center py-0.5">עמוד ' + (pi + 1) + ((Number(p.rotation) || 0) ? ' · ' + (Number(p.rotation) || 0) + '°' : '') + '</div></div>').join('');
+    const pages = doc.pages.map((p, pi) => '<div class="relative w-28 h-28 shrink-0 rounded-lg overflow-hidden border-2 ' + (p.orientationConfirmed ? 'border-emerald-400' : 'border-amber-400') + ' bg-white"><button data-role="ai-review-page" data-doc="' + i + '" data-page="' + pi + '" class="absolute inset-0 w-full h-full"><img src="' + p.dataUrl + '" class="w-full h-full object-contain" alt="פתח בדיקת כיוון"></button><button data-role="ai-remove-page" data-doc="' + i + '" data-page="' + pi + '" aria-label="מחק עמוד" class="absolute top-1 left-1 w-7 h-7 rounded-full bg-rose-600 text-white text-xs shadow z-10"><i class="fa-solid fa-xmark"></i></button><button data-role="ai-review-page" data-doc="' + i + '" data-page="' + pi + '" aria-label="פתח תמונה גדולה וסובב" class="absolute top-1 right-1 w-7 h-7 rounded-full bg-blue-600 text-white text-xs shadow z-10"><i class="fa-solid fa-expand"></i></button><div class="absolute bottom-0 inset-x-0 ' + (p.orientationConfirmed ? 'bg-emerald-700/90' : 'bg-amber-600/95') + ' text-white text-[9px] font-black text-center py-1 pointer-events-none">' + (p.orientationConfirmed ? '✓ הכיוון אושר' : 'דרוש אישור') + ' · עמוד ' + (pi + 1) + ((Number(p.rotation) || 0) ? ' · ' + (Number(p.rotation) || 0) + '°' : '') + '</div></div>').join('');
     return '<div class="rounded-2xl border-2 border-slate-200 p-3 mb-3"><div class="flex items-center justify-between gap-2"><div><div class="font-black text-slate-800">תעודה ' + (i + 1) + '</div><div class="text-[11px] font-bold text-slate-500">' + noteText + '</div></div><span class="text-xs font-black ' + (doc.pages.length ? 'text-emerald-700' : 'text-rose-600') + '">' + doc.pages.length + ' עמודים</span></div>' +
       (pages ? '<div class="flex gap-2 overflow-x-auto py-3">' + pages + '</div>' : '<div class="rounded-xl bg-amber-50 border border-amber-200 p-2 text-xs font-bold text-amber-800 my-3">צלם את כל דפי התעודה. צילום אחד ברור לכל דף.</div>') +
       '<input id="aiDocFile_' + i + '" data-role="ai-file" data-doc="' + i + '" type="file" accept="image/*" capture="environment" multiple class="hidden">' +
       '<button data-role="ai-add-photo" data-doc="' + i + '" class="btn-tap w-full bg-slate-100 text-slate-700 rounded-xl py-2.5 font-black"><i class="fa-solid fa-camera"></i> ' + (doc.pages.length ? 'הוסף עמוד נוסף' : 'צלם תעודה') + '</button></div>';
   }).join('');
-  const ready = aiScanDocuments.length && aiScanDocuments.every(d => d.pages.length);
-  return '<div class="bg-white rounded-2xl border-2 border-violet-200 p-4 shadow-sm mb-24"><div class="font-black text-xl text-slate-800"><i class="fa-solid fa-camera-retro text-violet-600"></i> סריקה חכמה של התעודות</div><div class="text-xs text-slate-500 font-bold leading-relaxed mt-1 mb-2">הבלש הפשוט לא פתר את הפער. צלם פעם אחת כל עמוד מכל תעודה. התמונות נשלחות לפענוח בלבד ואינן נשמרות באפליקציה.</div><div class="rounded-xl bg-blue-50 border border-blue-200 p-2 text-[11px] font-black text-blue-800 mb-3"><i class="fa-solid fa-rotate"></i> בדוק שהכתב עומד ישר בתצוגה. אם לא — לחץ על כפתור הסיבוב שבתמונה.</div>' +
+  const ready = aiAllPagesOrientationConfirmed();
+  return '<div class="bg-white rounded-2xl border-2 border-violet-200 p-4 shadow-sm mb-24"><div class="font-black text-xl text-slate-800"><i class="fa-solid fa-camera-retro text-violet-600"></i> סריקה חכמה של התעודות</div><div class="text-xs text-slate-500 font-bold leading-relaxed mt-1 mb-2">הבלש הפשוט לא פתר את הפער. צלם פעם אחת כל עמוד מכל תעודה. התמונות נשלחות לפענוח בלבד ואינן נשמרות באפליקציה.</div><div class="rounded-xl bg-blue-50 border border-blue-200 p-2 text-[11px] font-black text-blue-800 mb-3"><i class="fa-solid fa-expand"></i> כל צילום נפתח בגודל גדול. סובב עד שהכותרת למעלה והכתב ישר, ואז אשר. ללא אישור התמונה לא תישלח.</div>' +
     (aiScanError ? '<div class="rounded-xl bg-rose-50 border border-rose-300 p-2.5 text-xs font-black text-rose-700 mb-3">' + htmlEscape(aiScanError) + '</div>' : '') + docCards +
     '<button data-role="ai-run" ' + (ready ? '' : 'disabled') + ' class="btn-tap w-full rounded-xl py-3.5 font-black ' + (ready ? 'bg-violet-600 text-white' : 'bg-slate-200 text-slate-400') + '"><i class="fa-solid fa-wand-magic-sparkles"></i> פענח את כל התעודות ב-AI</button>' +
     '<div class="text-[10px] text-slate-400 font-bold text-center mt-2">בדרך כלל מתבצעת קריאת AI אחת. רק אם נקראות 0 שורות, המערכת עשויה לנסות עד שתי זוויות נוספות.</div><button data-role="rc-goto-manual" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">המשך בלי AI — בדיקה ידנית</button></div>';
@@ -6797,6 +6976,7 @@ async function confirmReceipt() {
   const saved = await runCloudTask('save receipt before clearing draft', { op: 'set', path: dataPath('receipts', opId), data, operationId: opId });
   if (!saved) return;
   hideReceiptSummary();
+  aiCloseOrientationReview();
   receiptList = []; pendingReceipt = null; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; reconcileData = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; reconcileAiAudit = null; aiScanDocuments = []; aiScanBusy = false; aiScanProgressText = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; receiptDupConfirmed = false; saveReceiptDraft();
   setView('receiptsHistory');
   const newOpen = receipts.filter(r => receiptDiscrepancyInfo(r).open).find(r => findOffsetMatch(r));
@@ -8399,6 +8579,10 @@ $('prod_price').addEventListener('input', updateProdRecHint);
 $('prod_cartonPrice').addEventListener('input', calcCartonPrice);
 $('prod_cartonUnits').addEventListener('input', calcCartonPrice);
 $('scanClose').addEventListener('click', closeScanner);
+$('aiOrientationLeft').addEventListener('click', () => aiRotateOrientationReview(-1));
+$('aiOrientationRight').addEventListener('click', () => aiRotateOrientationReview(1));
+$('aiOrientationConfirm').addEventListener('click', aiConfirmOrientationReview);
+$('aiOrientationCancel').addEventListener('click', aiCancelOrientationReview);
 $('toastBtn').addEventListener('click', doUndo);
 $('closeSend').addEventListener('click', hideSend);
 $('searchInput').addEventListener('input', (e) => { $('clearSearch').classList.toggle('hidden', !e.target.value); applySearch(e.target.value); });
@@ -8599,7 +8783,7 @@ app.addEventListener('click', (e) => {
   const t = e.target.closest('[data-role]'); if (!t) return;
   const role = t.dataset.role, id = t.dataset.id;
   if (role === 'ai-add-photo') { const input = $('aiDocFile_' + (parseInt(t.dataset.doc, 10) || 0)); if (input) input.click(); return; }
-  if (role === 'ai-rotate-page') { aiRotateInvoicePage(parseInt(t.dataset.doc, 10) || 0, parseInt(t.dataset.page, 10) || 0); return; }
+  if (role === 'ai-review-page') { aiOpenOrientationReview(parseInt(t.dataset.doc, 10) || 0, parseInt(t.dataset.page, 10) || 0, true); if (currentView === 'reconcile') renderReconcile(); return; }
   if (role === 'ai-remove-page') { aiRemoveInvoicePage(parseInt(t.dataset.doc, 10) || 0, parseInt(t.dataset.page, 10) || 0); return; }
   if (role === 'ai-run') { aiRunInvoiceScan(); return; }
   if (role === 'ai-edit-images') { aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; renderReconcile(); return; }
