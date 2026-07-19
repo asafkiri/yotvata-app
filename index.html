@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v114.1 עיגול מבצעים מדויק</title>
+    <title>הזמנות יטבתה - v114.2 עיגול מבצעים מלא + AI</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v114.1 עיגול מבצעים מדויק</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v114.2 עיגול מבצעים מלא + AI</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5153,14 +5153,18 @@ function aiLineTotal(row, qty) {
   return null;
 }
 function aiRowArithmeticError(row, qty) {
-  const unit = aiMoneyCents(row.unitPriceExVat);
+  // מחיר יחידה עשוי להכיל יותר משתי ספרות אחרי הנקודה. מכפילים אותו בכמות
+  // בדיוק מלא ורק את תוצאת השורה ממירים לאגורות; אחרת 1.79333 יהפוך ל-1.79
+  // לפני הכפלה וייצור פער שווא של 8 אגורות בכמות 24.
+  const unitRaw = row.unitPriceExVat == null || row.unitPriceExVat === '' ? null : Number(row.unitPriceExVat);
+  const unitQtyCents = unitRaw != null && isFinite(unitRaw) ? aiMoneyCents(unitRaw * qty) : null;
   const gross = aiMoneyCents(row.grossLineTotalExVat);
   const discount = aiMoneyCents(row.lineDiscountExVat);
   const total = aiMoneyCents(row.lineTotalExVat);
   // בודקים רק מספרים שה-AI טוען שקרא בפועל. ערך null אינו מושלם מהקטלוג.
-  if (unit != null && gross != null && Math.abs(gross - unit * qty) > 1) return 'מחיר × כמות אינו תואם לסכום הברוטו בשורה';
+  if (unitQtyCents != null && gross != null && Math.abs(gross - unitQtyCents) > 1) return 'מחיר × כמות אינו תואם לסכום הברוטו בשורה';
   if (gross != null && discount != null && total != null && Math.abs((gross - discount) - total) > 1) return 'סכום הברוטו פחות הנחת השורה אינו תואם לסכום השורה';
-  if (gross == null && unit != null && discount != null && total != null && Math.abs((unit * qty - discount) - total) > 1) return 'מחיר × כמות פחות ההנחה אינו תואם לסכום השורה';
+  if (gross == null && unitQtyCents != null && discount != null && total != null && Math.abs((unitQtyCents - discount) - total) > 1) return 'מחיר × כמות פחות ההנחה אינו תואם לסכום השורה';
   return '';
 }
 function aiEvaluateInvoiceScan(payload) {
@@ -5210,6 +5214,8 @@ function aiEvaluateInvoiceScan(payload) {
       const rowConfidence = Number(row.confidence);
       const old = aggregates.get(product.id) || { product, qty: 0, totalCents: 0, rows: [], promotionTexts: [], priceVariants: new Set() };
       old.qty += qty; old.totalCents += cents; old.rows.push({ document: index + 1, page: row.sourcePage, line: row.lineNumber, confidence: isFinite(rowConfidence) ? rowConfidence : 0 });
+      // קיבוץ אבחוני בלבד לזיהוי מחירים מודפסים שונים; אינו משתתף בחישוב הסכום.
+      // כאן השוואה ברמת אגורות מכוונת, כדי שעיגולי שורה תקינים לא ייראו כמחירים שונים.
       if (qty > 0) old.priceVariants.add(r2(cents / 100 / qty));
       if (row.promotionText) old.promotionTexts.push(String(row.promotionText));
       aggregates.set(product.id, old);
@@ -5250,7 +5256,9 @@ function aiEvaluateInvoiceScan(payload) {
   };
   const paperPromoTriggered = pr => promoActive(pr, day) && paperBasketQty(pr) >= promoMinUnitsP(pr);
   aggregates.forEach(a => {
-    a.paperUnitPrice = a.qty > 0 ? r2(a.totalCents / 100 / a.qty) : 0;
+    // מחיר אפקטיבי שנגזר מסכום שורת הנייר חייב להישאר בדיוק מלא.
+    // עיגול כאן היה מחזיר למשל 43.04 / 24 מ-1.79333 ל-1.79 ומאבד 8 אגורות.
+    a.paperUnitPrice = a.qty > 0 ? (a.totalCents / 100 / a.qty) : 0;
     const line = (reconcileData || []).find(l => l.productId === a.product.id);
     const received = Number(line && line.received) || 0;
     const quantityDiff = a.qty - received;
