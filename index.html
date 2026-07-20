@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v119 סריקת AI דו־שלבית</title>
+    <title>הזמנות יטבתה - v120 קיזוז פנימי וסיבולת עיגול</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v119 סריקת AI דו־שלבית</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v120 קיזוז פנימי וסיבולת עיגול</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -3500,7 +3500,9 @@ function fmtUnitPrice(n, precise) {
   const v = Number(n) || 0;
   return precise ? v.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 5 }) : fmtMoney(v);
 }
-const RECEIPT_ROUNDING_TOLERANCE_CENTS = 2;
+// פערי אגורות מצטברים נוצרים כשהספק מדפיס מחיר יחידה מעוגל אך מחשב את
+// השורות בדיוק פנימי. מתירים עד 20 אגורות רק כשסך היחידות ידוע ותואם בדיוק.
+const RECEIPT_ROUNDING_TOLERANCE_CENTS = 20;
 function moneyDiffCents(a, b) { return Math.abs(Math.round((Number(a) || 0) * 100) - Math.round((Number(b) || 0) * 100)); }
 function receiptMoneyMatches(calculated, paperTotal, unitsMatch) {
   const diff = moneyDiffCents(calculated, paperTotal);
@@ -7058,12 +7060,11 @@ function saveReconciledReceipt(opts) {
   const unresolvedAmountGap = reconcileMoneyBalanced() ? 0 : reconcileGap();
   const unresolvedUnitsGap = (reconcileUnitsGap() != null && reconcileUnitsGap() !== 0) ? reconcileUnitsGap() : 0;
   const aiAudit = reconcileAiAudit ? cloneSafe(reconcileAiAudit) : null;
-  const aiDiscrepancy = !!(aiAudit && aiAudit.hasDiscrepancy);
   const supplierCreditClaim = reconcileSupplierCreditClaim ? cloneSafe(reconcileSupplierCreditClaim) : null;
-  const creditOpen = supplierCreditClaimOpen({ supplierCreditClaim }) || supplierCreditClaimDeferred({ supplierCreditClaim });
-  const open = lines.some(l => l.noteQty != null && l.noteQty !== l.qty) || !!unresolvedAmountGap || !!unresolvedUnitsGap || aiDiscrepancy || creditOpen;
+  const effectiveInfo = receiptDiscrepancyInfo({ items: lines, noteParts: receiptNotes.slice(), unresolvedAmountGap, unresolvedUnitsGap, supplierCreditClaim, aiAudit });
+  const open = effectiveInfo.open;
   pendingReceipt = { lines, ex, calculatedEx, roundingAdjustment, grossEx, supplierDiscount, supplierPromoItems: reconcileSupplierPromoItems.slice(), supplierPromoMismatchItems: reconcilePromoMismatchItems.slice(), supplierCreditClaim, aiAudit, noteTotal: receiptNoteTotal, status: open ? 'open' : 'ok', noteParts: receiptNotes.slice(), unresolvedAmountGap, unresolvedUnitsGap };
-  presentReconcileSummary(lines, ex, open, { calculatedEx, roundingAdjustment, grossEx, supplierDiscount, supplierPromoItems: reconcileSupplierPromoItems.slice(), supplierPromoMismatchItems: reconcilePromoMismatchItems.slice(), supplierCreditClaim, aiAudit });
+  presentReconcileSummary(lines, ex, open, { calculatedEx, roundingAdjustment, grossEx, supplierDiscount, supplierPromoItems: reconcileSupplierPromoItems.slice(), supplierPromoMismatchItems: reconcilePromoMismatchItems.slice(), supplierCreditClaim, aiAudit, internalOffsets: effectiveInfo.priceOffsets || [] });
 }
 function presentReconcileSummary(lines, ex, open, extra) {
   extra = extra || {};
@@ -7085,6 +7086,10 @@ function presentReconcileSummary(lines, ex, open, extra) {
   const supplierCreditSummary = (extra.supplierCreditClaim && Number(extra.supplierCreditClaim.amount) > 0)
     ? '<div class="mt-2 rounded-xl bg-orange-50 border-2 border-orange-300 p-3 text-xs font-bold text-orange-900"><div class="font-black text-sm"><i class="fa-solid fa-triangle-exclamation"></i> נפתחה דרישת זיכוי פתוחה מול הספק</div><div class="mt-1">סכום מוערך לזיכוי: ₪' + fmtMoney(extra.supplierCreditClaim.amount) + '</div><div class="text-[11px] mt-1">ייכנס לחישוב הספק כזיכוי שמגיע, אך יישאר מסומן כלא מאומת עד בדיקה מול מרכזת/תעודת זיכוי.</div></div>'
     : '';
+  const internalOffsetSummary = (Array.isArray(extra.internalOffsets) && extra.internalOffsets.length)
+    ? '<div class="mt-2 rounded-xl bg-emerald-50 border-2 border-emerald-200 p-3 text-xs text-emerald-900"><div class="font-black text-sm"><i class="fa-solid fa-scale-balanced"></i> קיזוז פנימי לפי מחיר יחידה זהה</div>' +
+      extra.internalOffsets.map(o => '<div class="font-bold mt-1">' + receiptSideText(o.shortItems) + ' ⇄ ' + receiptSideText(o.overItems) + ' · ₪' + fmtMoney(o.price) + '</div>').join('') + '</div>'
+    : '';
   const aiSummary = (extra.aiAudit && Array.isArray(extra.aiAudit.findings))
     ? '<div class="mt-2 rounded-xl bg-violet-50 border-2 border-violet-200 p-3"><div class="font-black text-sm text-violet-900"><i class="fa-solid fa-shield-halved"></i> תוצאות AI שאישרת</div>' +
       '<div class="text-[11px] font-bold text-violet-700 mt-1">סכום התעודות והיחידות אומתו בדיוק. התמונות לא נשמרות.</div>' +
@@ -7094,7 +7099,7 @@ function presentReconcileSummary(lines, ex, open, extra) {
     (open ? '<div class="bg-rose-50 border border-rose-200 rounded-xl p-2.5 mb-3 text-xs font-bold text-rose-700"><i class="fa-solid fa-triangle-exclamation"></i> נשמר עם הפרשים — התעודה תסומן כפתוחה עד שתתוקן</div>' : '') +
     '<div class="bg-slate-50 rounded-xl p-3 max-h-56 overflow-y-auto border border-slate-100 mb-3">' + listHtml + '</div>' +
     ((Number(extra.supplierDiscount) || 0) > 0 ? '<div class="flex items-center justify-between text-slate-500 font-bold text-sm"><span>סכום שורות לפני מבצע</span><span>₪' + fmtMoney(extra.grossEx || ex) + '</span></div>' : '') +
-    discountSummary + promoMismatchSummary + supplierCreditSummary + aiSummary +
+    discountSummary + promoMismatchSummary + supplierCreditSummary + internalOffsetSummary + aiSummary +
     (extra.roundingAdjustment ? '<div class="flex items-center justify-between text-[11px] text-blue-700 font-bold mt-2"><span><i class="fa-solid fa-calculator"></i> התאמת עיגול תעודה</span><span>' + (extra.roundingAdjustment > 0 ? '+' : '−') + '₪' + fmtMoney(Math.abs(extra.roundingAdjustment)) + '</span></div>' : '') +
     '<div class="flex items-center justify-between text-slate-900 font-black text-xl mt-2 pt-2 border-t border-slate-200"><span>לתשלום — מה שהתקבל (ללא מע״מ)</span><span>₪' + fmtMoney(ex) + '</span></div>' +
     (receiptNoteTotal != null ? '<div class="text-[11px] text-slate-400 mt-1">סכום התעודה מהספק: ₪' + fmtMoney(receiptNoteTotal) + '</div>' : '');
@@ -7161,7 +7166,13 @@ function receiptFixLineState(productId) {
   const sh = (di.shortItems || []).find(x => x.productId === productId);
   const ov = (di.overItems || []).find(x => x.productId === productId);
   const offsets = (di.externalOffsets || []).filter(x => x.productId === productId);
-  return { d: sh ? Number(sh.n) || 0 : (ov ? -(Number(ov.n) || 0) : 0), offsets, offsetQty: r2(offsets.reduce((a, x) => a + (Number(x.qty) || 0), 0)), locked: offsets.length > 0 };
+  let internalOffsetQty = 0;
+  (di.priceOffsets || []).forEach(o => {
+    (o.shortItems || []).concat(o.overItems || []).forEach(x => {
+      if (x.productId === productId) internalOffsetQty += Number(x.n) || 0;
+    });
+  });
+  return { d: sh ? Number(sh.n) || 0 : (ov ? -(Number(ov.n) || 0) : 0), offsets, offsetQty: r2(offsets.reduce((a, x) => a + (Number(x.qty) || 0), 0)), internalOffsetQty: r2(internalOffsetQty), locked: offsets.length > 0 };
 }
 function receiptFixRowHtml(l) {
   const qty = Number(l.qty) || 0, noteQty = Number(l.noteQty) || 0;
@@ -7170,6 +7181,7 @@ function receiptFixRowHtml(l) {
   if (d > 0) tag = '<span class="text-rose-600 font-black text-[11px]">חסר ' + d + '</span>';
   else if (d < 0) tag = '<span class="text-amber-600 font-black text-[11px]">עודף ' + (-d) + '</span>';
   else if (ls.locked) tag = '<span class="text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-lg font-black text-[11px]"><i class="fa-solid fa-scale-balanced"></i> קוזז ' + ls.offsetQty + ' מול תעודה אחרת</span>';
+  else if (ls.internalOffsetQty > 0) tag = '<span class="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg font-black text-[11px]"><i class="fa-solid fa-scale-balanced"></i> קיזוז פנימי ' + ls.internalOffsetQty + '</span>';
   const pct = Number(l.promoPct) || 0;
   const promoUi = pct > 0 ? ('<div class="flex items-center gap-1.5 mt-1 flex-wrap">' +
     (l.promoOn ? '<span class="text-[10px] font-black text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded">מבצע ' + pct + '%</span>'
@@ -7293,16 +7305,16 @@ async function saveReceiptFix() {
     ? r2(Number(receiptFix.noteTotalInc) - calculatedEx) : 0;
   const ex = roundingAdjustment ? r2(receiptFix.noteTotalInc) : calculatedEx;
   const originalReceipt = receipts.find(x => x.id === receiptFix.id);
+  const di = receiptFixEffectiveInfo(items);
   let aiAudit = originalReceipt && originalReceipt.aiAudit ? cloneSafe(originalReceipt.aiAudit) : null;
   // שמירת תיקון היא אישור מפורש של העובד. אם כל פערי הכמות נסגרו ואין
   // דרישת זיכוי פתוחה, ממצאי ה-AI נשארים בהיסטוריה אך אינם נועלים את התעודה באדום לנצח.
   if (aiAudit) {
-    const quantityStillOpen = items.some(l => l.noteQty != null && Number(l.noteQty) !== Number(l.qty));
+    const quantityStillOpen = !!((di.shortItems && di.shortItems.length) || (di.overItems && di.overItems.length) || di.unresolvedUnitsGap || di.amountGapOpen);
     const creditStillOpen = supplierCreditClaimOpen(originalReceipt) || supplierCreditClaimDeferred(originalReceipt);
     aiAudit.hasDiscrepancy = quantityStillOpen || creditStillOpen;
     if (!aiAudit.hasDiscrepancy) aiAudit.resolvedAt = Date.now();
   }
-  const di = receiptFixEffectiveInfo(items);
   const open = di.open || !!(aiAudit && aiAudit.hasDiscrepancy);
   const id = receiptFix.id;
   const updateData = { items, count: items.length, totalExVat: ex, totalIncVat: ex, grossExVat: grossEx, calculatedExVat: calculatedEx, roundingAdjustment, aiAudit, unresolvedAmountGap: r2(Number(di.unresolvedAmountGap) || 0), unresolvedUnitsGap: Number(di.unresolvedUnitsGap) || 0, status: open ? 'open' : 'ok' };
@@ -7453,11 +7465,27 @@ function receiptDiscrepancyInfo(rc, opts) {
     else if (d < 0) rawOver.push({ productId: l.productId || '', name: l.name || '', n: -d, price });
   });
 
-  // מחיר זהה אינו הוכחה ששני מוצרים שונים מתקזזים. כל חוסר/עודף נשאר פתוח
-  // עד אישור מפורש של העובד או קיזוז מדויק של אותו מוצר מול תעודה אחרת.
+  // קיזוז פנימי באותה תעודה: חוסר ועודף של מוצרים במחיר יחידה זהה מצביעים
+  // על סריקת וריאנט לא נכון. הקיזוז חלקי: נצרכת רק הכמות המשותפת, וכל יתרה
+  // נשארת פתוחה. ההתאמה נעשית לפי מחיר האגורות המוצג, בלי לעגל את חישוב השורה.
   const shortItems = rawShort.map(cloneReceiptDiffItem);
   const overItems = rawOver.map(cloneReceiptDiffItem);
   const priceOffsets = [];
+  const priceKeys = Array.from(new Set(shortItems.concat(overItems)
+    .map(x => Math.round((Number(x.price) || 0) * 100))
+    .filter(cents => cents > 0)));
+  priceKeys.forEach(priceCents => {
+    const sList = shortItems.filter(x => Math.round((Number(x.price) || 0) * 100) === priceCents && (Number(x.n) || 0) > 0);
+    const oList = overItems.filter(x => Math.round((Number(x.price) || 0) * 100) === priceCents && (Number(x.n) || 0) > 0);
+    const sQty = sList.reduce((a, x) => a + (Number(x.n) || 0), 0);
+    const oQty = oList.reduce((a, x) => a + (Number(x.n) || 0), 0);
+    const qty = Math.min(sQty, oQty);
+    if (qty > 0) {
+      const usedShort = consumeReceiptDiffQty(sList, qty);
+      const usedOver = consumeReceiptDiffQty(oList, qty);
+      priceOffsets.push({ price: priceCents / 100, qty: r2(qty), shortItems: usedShort, overItems: usedOver });
+    }
+  });
 
   // קיזוז בין תעודות נשמר ברמת מוצר וכמות. הוא צורך רק את ההפרש שאושר,
   // ולעולם אינו מסתיר חוסר/עודף אחר שנשאר באותה תעודה.
@@ -7469,16 +7497,27 @@ function receiptDiscrepancyInfo(rc, opts) {
   const unresolvedAmountGap = r2(Number(rc && rc.unresolvedAmountGap) || 0);
   // גם תעודה ישנה שנשמרה לפני v111 נבדקת מחדש מול סך היחידות שבתעודות הספק.
   // כך פער יחידות שלא שויך בזמנו לא נשאר ירוק רק מפני שלא נשמר עבורו שדה מפורש.
-  const unitParts = (Array.isArray(rc && rc.noteParts) ? rc.noteParts : []).filter(x => x && x.units != null && x.units !== '');
-  const paperUnits = unitParts.length ? unitParts.reduce((a, x) => a + (Number(x.units) || 0), 0) : null;
+  const notePartsForUnits = (Array.isArray(rc && rc.noteParts) ? rc.noteParts : []).filter(Boolean);
+  const unitParts = notePartsForUnits.filter(x => x.units != null && x.units !== '');
+  const paperUnits = notePartsForUnits.length > 0 && unitParts.length === notePartsForUnits.length
+    ? unitParts.reduce((a, x) => a + (Number(x.units) || 0), 0)
+    : null;
   const assignedPaperUnits = paperUnits == null ? null : (rc.items || []).reduce((a, l) => a + (l.noteQty != null ? (Number(l.noteQty) || 0) : (Number(l.qty) || 0)), 0);
   const derivedUnitsGap = paperUnits == null ? 0 : paperUnits - assignedPaperUnits;
   const storedUnitsGap = Number(rc && rc.unresolvedUnitsGap) || 0;
   const unresolvedUnitsGap = storedUnitsGap || derivedUnitsGap;
-  if (Math.round(unresolvedAmountGap * 100) > 0) shortVal += unresolvedAmountGap;
-  else if (Math.round(unresolvedAmountGap * 100) < 0) overVal += -unresolvedAmountGap;
+  const amountGapCents = Math.abs(Math.round(unresolvedAmountGap * 100));
+  const amountToleranceCents = paperUnits != null && unresolvedUnitsGap === 0 ? RECEIPT_ROUNDING_TOLERANCE_CENTS : 0;
+  const amountGapOpen = amountGapCents > amountToleranceCents;
+  if (amountGapOpen && Math.round(unresolvedAmountGap * 100) > 0) shortVal += unresolvedAmountGap;
+  else if (amountGapOpen && Math.round(unresolvedAmountGap * 100) < 0) overVal += -unresolvedAmountGap;
   const creditOpen = supplierCreditClaimOpen(rc) || supplierCreditClaimDeferred(rc);
-  return { open: !!(finalShort.length || finalOver.length || Math.round(Math.abs(unresolvedAmountGap) * 100) > 0 || unresolvedUnitsGap !== 0 || (rc.aiAudit && rc.aiAudit.hasDiscrepancy) || creditOpen), shortItems: finalShort, overItems: finalOver, priceOffsets, externalOffsets, shortVal: r2(shortVal), overVal: r2(overVal), unresolvedAmountGap, unresolvedUnitsGap };
+  // ממצאי כמות של ה-AI נשמרים בהיסטוריה, אבל אינם משאירים תעודה אדומה אחרי
+  // שהחוסר והעודף עצמם נסגרו בקיזוז. ממצא מחיר/מבצע עדיין מחייב טיפול.
+  const aiFindings = rc && rc.aiAudit && Array.isArray(rc.aiAudit.findings) ? rc.aiAudit.findings : [];
+  const aiHasNonQuantityFinding = aiFindings.some(f => f && (f.type === 'price' || f.type === 'promo_missing'));
+  const aiAuditOpen = !!(rc && rc.aiAudit && rc.aiAudit.hasDiscrepancy && (aiHasNonQuantityFinding || (!aiFindings.length && !(priceOffsets.length && !finalShort.length && !finalOver.length))));
+  return { open: !!(finalShort.length || finalOver.length || amountGapOpen || unresolvedUnitsGap !== 0 || aiAuditOpen || creditOpen), shortItems: finalShort, overItems: finalOver, priceOffsets, externalOffsets, shortVal: r2(shortVal), overVal: r2(overVal), unresolvedAmountGap, unresolvedUnitsGap, amountGapOpen, amountToleranceCents, aiAuditOpen };
 }
 function receiptsBalance() {
   let bal = 0, n = 0;
@@ -7675,9 +7714,10 @@ function renderReceiptsHistory() {
           di.shortItems.map(s => '<div class="flex justify-between text-rose-600"><span>חסר: ' + s.name + '</span><span>' + s.n + ' יח׳</span></div>').join('') +
           di.overItems.map(s => '<div class="flex justify-between text-amber-600"><span>עודף: ' + s.name + '</span><span>' + s.n + ' יח׳</span></div>').join('') +
           (di.unresolvedUnitsGap ? '<div class="flex justify-between text-rose-700 font-black"><span>פער יחידות שטרם שויך</span><span>' + Math.abs(di.unresolvedUnitsGap) + ' (' + (di.unresolvedUnitsGap > 0 ? 'חסרות' : 'עודפות') + ')</span></div>' : '') +
-          (Math.round(Math.abs(di.unresolvedAmountGap || 0) * 100) > 0 ? '<div class="flex justify-between text-rose-700 font-black"><span>פער סכום שטרם שויך</span><span>₪' + fmtMoney(Math.abs(di.unresolvedAmountGap)) + '</span></div>' : '') +
+          (di.amountGapOpen ? '<div class="flex justify-between text-rose-700 font-black"><span>פער סכום שטרם שויך</span><span>₪' + fmtMoney(Math.abs(di.unresolvedAmountGap)) + '</span></div>' : '') +
           (rc.noteTotalInc != null ? '<div class="mt-1 pt-1 border-t border-rose-200 text-rose-700/80">תעודת ספק ₪' + fmtMoney(rc.noteTotalInc) + (rc.noteParts && rc.noteParts.length > 1 ? ' (' + rc.noteParts.map(x => '₪' + fmtMoney(normNote(x).amount)).join(' + ') + ')' : '') + ' · שולם בפועל ₪' + fmtMoney(rc.totalExVat) + '</div>' : '') +
         '</div>' : '') +
+        ((!di.amountGapOpen && Math.round(Math.abs(di.unresolvedAmountGap || 0) * 100) > 0) ? '<div class="mt-2 bg-blue-50 border border-blue-200 rounded-xl p-2.5 text-xs text-blue-800"><div class="font-black"><i class="fa-solid fa-calculator"></i> פער עיגול נסבל: ₪' + fmtMoney(Math.abs(di.unresolvedAmountGap)) + ' · סך היחידות תואם</div></div>' : '') +
         aiHistoryHtml +
         ((di.priceOffsets && di.priceOffsets.length) ? '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800"><div class="font-black mb-1"><i class="fa-solid fa-scale-balanced"></i> קיזוז פנימי לפי מחיר זהה</div>' + di.priceOffsets.map(o => '<div class="font-bold">' + receiptSideText(o.shortItems) + ' ⇄ ' + receiptSideText(o.overItems) + ' · ₪' + fmtMoney(o.price) + '</div>').join('') + '</div>' : '') +
         ((Number(rc.supplierDiscount) || 0) > 0 ? '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800"><div class="font-black mb-1"><i class="fa-solid fa-percent"></i> אומתה עם מבצע / הנחת ספק</div><div class="font-bold">הנחה: −₪' + fmtMoney(rc.supplierDiscount) + ((rc.grossExVat != null) ? ' · לפני מבצע: ₪' + fmtMoney(rc.grossExVat) : '') + '</div>' + ((rc.supplierPromoItems || []).length ? '<div class="text-[11px] mt-1">כוכבית: ' + (rc.supplierPromoItems || []).map(x => x.name).join(' · ') + '</div>' : '') + '</div>' : '') +
