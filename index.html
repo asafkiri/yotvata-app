@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v122 בחירת מוצר חכמה</title>
+    <title>הזמנות יטבתה - v123 תוצאות ממוקדות</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v122 בחירת מוצר חכמה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v123 תוצאות ממוקדות</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -6045,6 +6045,48 @@ function aiFindingHtml(f) {
   const icon = f.type === 'shortage' ? '🔴' : (f.type === 'surplus' ? '🟠' : (f.type === 'promo_missing' ? '🏷️' : 'ℹ️'));
   return '<div class="rounded-xl border p-2.5 text-sm font-black ' + cls + '">' + icon + ' ' + htmlEscape(f.text || '') + '</div>';
 }
+function aiIsActionableFinding(finding) {
+  return !!finding && ['shortage', 'surplus', 'price', 'promo_missing'].includes(String(finding.type || ''));
+}
+function aiCompactFindingGroupHtml(type, title, findings) {
+  const rows = (findings || []).filter(finding => String(finding && finding.type || '') === type);
+  if (!rows.length) return '';
+  const style = type === 'shortage'
+    ? { box: 'bg-rose-50 border-rose-200', head: 'text-rose-800', badge: 'bg-rose-100 text-rose-800', icon: 'fa-circle-minus' }
+    : (type === 'surplus'
+      ? { box: 'bg-amber-50 border-amber-200', head: 'text-amber-800', badge: 'bg-amber-100 text-amber-800', icon: 'fa-circle-plus' }
+      : (type === 'promo_missing'
+        ? { box: 'bg-orange-50 border-orange-200', head: 'text-orange-900', badge: 'bg-orange-100 text-orange-900', icon: 'fa-tags' }
+        : { box: 'bg-blue-50 border-blue-200', head: 'text-blue-900', badge: 'bg-blue-100 text-blue-900', icon: 'fa-shekel-sign' }));
+  const compactRows = rows.map(finding => {
+    if (type === 'shortage' || type === 'surplus') {
+      const label = type === 'shortage' ? 'חסר' : 'עודף';
+      return '<div class="flex items-start justify-between gap-3 py-2 border-t border-black/5 first:border-t-0">' +
+        '<div class="min-w-0 text-sm font-black text-slate-800">' + htmlEscape(finding.name || '') + '</div>' +
+        '<div class="shrink-0 text-sm font-black ' + style.head + '">' + label + ' ' + Number(finding.qty || 0) + ' יח׳</div>' +
+      '</div>';
+    }
+    return '<div class="py-2 border-t border-black/5 first:border-t-0 text-sm font-black text-slate-800">' + htmlEscape(finding.text || '') + '</div>';
+  }).join('');
+  return '<div class="rounded-xl border p-3 ' + style.box + '">' +
+    '<div class="flex items-center justify-between gap-2 mb-1 ' + style.head + '"><div class="font-black"><i class="fa-solid ' + style.icon + ' ml-1"></i>' + title + '</div><span class="rounded-full px-2 py-0.5 text-[10px] font-black ' + style.badge + '">' + rows.length + '</span></div>' +
+    '<div>' + compactRows + '</div></div>';
+}
+function aiActionableFindingsHtml(findings) {
+  const actionable = (Array.isArray(findings) ? findings : []).filter(aiIsActionableFinding);
+  if (!actionable.length) return '';
+  return '<div class="mt-3"><div class="font-black text-base text-slate-800 mb-2">אלה הבעיות שנמצאו:</div><div class="space-y-2">' +
+    aiCompactFindingGroupHtml('shortage', 'חוסרים', actionable) +
+    aiCompactFindingGroupHtml('surplus', 'עודפים', actionable) +
+    aiCompactFindingGroupHtml('price', 'בעיות מחיר', actionable) +
+    aiCompactFindingGroupHtml('promo_missing', 'מבצע קיים במערכת אך לא בתעודה', actionable) +
+  '</div></div>';
+}
+function aiInformationalFindingsHtml(findings) {
+  const informational = (Array.isArray(findings) ? findings : []).filter(finding => !aiIsActionableFinding(finding));
+  if (!informational.length) return '';
+  return '<div class="mt-3"><div class="text-xs font-black text-slate-600 mb-1">מידע נוסף שנקרא מהתעודה</div><div class="space-y-2">' + informational.map(aiFindingHtml).join('') + '</div></div>';
+}
 function aiRecognizedProductsHtml(evaluation) {
   const entries = evaluation && evaluation.aggregates instanceof Map ? Array.from(evaluation.aggregates.values()) : [];
   if (!entries.length) return '<div class="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-bold text-slate-500">עדיין לא זוהה מוצר בוודאות מול הברקוד והמאגר.</div>';
@@ -6258,21 +6300,36 @@ function aiInvoiceCaptureHtml() {
       ? '<div class="text-[10px] font-bold text-slate-400 mb-2">מודל שביצע את הקריאה: <span dir="ltr">' + htmlEscape(aiScanResponse.model) + '</span></div>'
       : '';
     const recognizedHtml = aiRecognizedProductsHtml(ev);
+    const actionableFindings = (Array.isArray(ev.findings) ? ev.findings : []).filter(aiIsActionableFinding);
+    const informationalFindingsHtml = aiInformationalFindingsHtml(ev.findings);
     const suggestionsHtml = Array.isArray(ev.barcodeSuggestions) && ev.barcodeSuggestions.length
       ? '<div class="mt-3"><div class="font-black text-sm text-amber-900 mb-2">התאמות שמחכות לאישור שלך:</div><div class="space-y-2">' + ev.barcodeSuggestions.map(aiBarcodeSuggestionHtml).join('') + '</div></div>'
       : '';
     const findingsHtml = !ev.findingsReady
       ? '<div class="rounded-xl bg-amber-50 border border-amber-300 p-3 font-black text-amber-900">' + (!ev.allRowsMapped ? 'הסכום והיחידות נקראו, אך חוסר/עודף ומחירים יחושבו רק לאחר אישור כל המוצרים.' : 'חוסר/עודף ומחירים לא חושבו, מפני שלפחות שורה אחת חסרה נתון או אינה עוברת את בדיקת החשבון.') + '</div>'
-      : (ev.findings.length ? '<div class="font-black text-sm text-slate-700 mb-2">מה נמצא:</div><div class="space-y-2">' + ev.findings.map(aiFindingHtml).join('') + '</div>' : '<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-3 font-black text-emerald-800">לא נמצא פער בין הנייר למה שנסרק בפועל.</div>');
+      : (actionableFindings.length
+        ? aiActionableFindingsHtml(actionableFindings)
+        : '<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-3 font-black text-emerald-800"><i class="fa-solid fa-circle-check ml-1"></i>הכול תואם — לא נמצאו חוסר, עודף או בעיית מחיר/מבצע.</div>');
+    const errorsHtml = ev.errors.length
+      ? '<div class="mt-3 rounded-xl bg-rose-50 border border-rose-300 p-3"><div class="font-black text-rose-800 mb-1">אי אפשר לאשר עדיין:</div>' + ev.errors.map(x => '<div class="text-xs font-bold text-rose-700 mt-1">• ' + htmlEscape(x) + '</div>').join('') + '</div>'
+      : '';
+    const warningsHtml = ev.warnings.length
+      ? '<div class="mt-3 rounded-xl bg-amber-50 border border-amber-200 p-2"><div class="font-black text-xs text-amber-800">אזהרות קריאה (' + ev.warnings.length + ')</div>' + ev.warnings.map(x => '<div class="text-[11px] font-bold text-amber-800 mt-1">• ' + htmlEscape(x) + '</div>').join('') + '</div>'
+      : '';
+    const technicalDetails = '<details class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">' +
+      '<summary class="cursor-pointer font-black text-sm text-slate-600"><i class="fa-solid fa-circle-info ml-1"></i>פרטי הקריאה ופעולות נוספות</summary>' +
+      '<div class="mt-3">' + modelInfo + scanMeta + checks + recognizedHtml + informationalFindingsHtml + warningsHtml +
+        '<button data-role="ai-edit-images" class="btn-tap w-full bg-white border-2 border-blue-200 text-blue-700 rounded-xl py-3 font-black mt-3"><i class="fa-solid fa-rotate"></i> חזור לתמונות וסובב ידנית</button>' +
+        '<button data-role="ai-rescan" class="btn-tap w-full bg-white border-2 border-slate-200 text-slate-700 rounded-xl py-3 font-black mt-2">מחק את התמונות וצלם מחדש</button>' +
+        '<button data-role="rc-goto-manual" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">עבור לבדיקה ידנית</button>' +
+      '</div></details>';
+    const applyButton = ev.valid
+      ? '<button data-role="ai-apply" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-3.5 font-black mt-4"><i class="fa-solid fa-check"></i> ' + (actionableFindings.length ? 'אשר את הבעיות והמשך' : 'הכול תואם — המשך') + '</button>'
+      : '';
     return '<div class="bg-white rounded-2xl border-2 ' + (ev.valid ? 'border-violet-300' : 'border-rose-300') + ' p-4 shadow-sm mb-24">' +
       '<div class="font-black text-xl text-slate-800 mb-1"><i class="fa-solid fa-wand-magic-sparkles text-violet-600"></i> תוצאות הסריקה החכמה</div>' +
-      '<div class="text-xs text-slate-500 font-bold mb-2">ה-AI לא משנה ולא סוגר דבר לבד. בדוק ואשר רק אם זה תואם לנייר ולסחורה.</div>' + modelInfo + scanMeta + checks + recognizedHtml + suggestionsHtml + findingsHtml +
-      (ev.errors.length ? '<div class="mt-3 rounded-xl bg-rose-50 border border-rose-300 p-3"><div class="font-black text-rose-800 mb-1">אי אפשר לאשר עדיין:</div>' + ev.errors.map(x => '<div class="text-xs font-bold text-rose-700 mt-1">• ' + htmlEscape(x) + '</div>').join('') + '</div>' : '') +
-      (ev.warnings.length ? '<details class="mt-3 rounded-xl bg-amber-50 border border-amber-200 p-2"><summary class="font-black text-xs text-amber-800">אזהרות קריאה (' + ev.warnings.length + ')</summary>' + ev.warnings.map(x => '<div class="text-[11px] font-bold text-amber-800 mt-1">• ' + htmlEscape(x) + '</div>').join('') + '</details>' : '') +
-      (ev.valid ? '<button data-role="ai-apply" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-3.5 font-black mt-4"><i class="fa-solid fa-check"></i> כן, זה מה שקרה — החל על התעודה</button>' : '') +
-      '<button data-role="ai-edit-images" class="btn-tap w-full bg-white border-2 border-blue-200 text-blue-700 rounded-xl py-3 font-black mt-2"><i class="fa-solid fa-rotate"></i> חזור לתמונות וסובב ידנית</button>' +
-      '<button data-role="ai-rescan" class="btn-tap w-full bg-white border-2 border-slate-200 text-slate-700 rounded-xl py-3 font-black mt-2">מחק את התמונות וצלם מחדש</button>' +
-      '<button data-role="rc-goto-manual" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">עבור לבדיקה ידנית</button></div>';
+      '<div class="text-xs text-slate-500 font-bold mb-2">מוצגות רק בעיות שדורשות החלטה. פרטי הקריאה המלאים זמינים למטה.</div>' +
+      suggestionsHtml + findingsHtml + errorsHtml + applyButton + technicalDetails + '</div>';
   }
   const docCards = aiScanDocuments.map((doc, i) => {
     const noteText = 'סכום צפוי: ₪' + fmtMoney(doc.amount || 0) + (doc.units != null ? ' · ' + doc.units + ' יחידות' : '');
