@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v120 קיזוז פנימי וסיבולת עיגול</title>
+    <title>הזמנות יטבתה - v122 בחירת מוצר חכמה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v120 קיזוז פנימי וסיבולת עיגול</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v122 בחירת מוצר חכמה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -512,7 +512,7 @@ let aiScanError = '';
 let aiScanAutoRotationNote = '';
 let aiScanAttemptCount = 0;
 const AI_SCAN_MAX_AUTO_ROTATION_RETRIES = 2;
-const AI_SCAN_MIN_SERVICE_VERSION = 119;
+const AI_SCAN_MIN_SERVICE_VERSION = 122;
 const AI_BARCODE_SUFFIX_DIGITS = 6;
 let aiOrientationSession = null;
 let aiOrientationBusy = false;
@@ -5404,6 +5404,21 @@ function aiRowArithmeticError(row, qty) {
   if (gross == null && unitQtyCents != null && discount != null && total != null && Math.abs((unitQtyCents - discount) - total) > unitToleranceCents) return 'מחיר × כמות פחות ההנחה אינו תואם לסכום השורה';
   return '';
 }
+function aiRowHasArithmeticProof(row, qty) {
+  if (qty == null || !isFinite(Number(qty))) return false;
+  const unitRaw = row.unitPriceExVat == null || row.unitPriceExVat === '' ? null : Number(row.unitPriceExVat);
+  const hasUnit = unitRaw != null && isFinite(unitRaw);
+  const hasGross = aiMoneyCents(row.grossLineTotalExVat) != null;
+  const hasDiscount = aiMoneyCents(row.lineDiscountExVat) != null;
+  const hasTotal = aiMoneyCents(row.lineTotalExVat) != null;
+  // סכום שורה לבדו אינו "בדיקת חשבון". נדרשים לפחות שני צדדים של
+  // משוואה שנקראו מהנייר: מחיר×כמות מול ברוטו, או ברוטו/מחיר פחות הנחה
+  // מול סכום השורה. כך לא מציגים למשתמש אישור ירוק על מספר בודד.
+  const hasCheckableRelation = (hasUnit && hasGross)
+    || (hasGross && hasDiscount && hasTotal)
+    || (!hasGross && hasUnit && hasDiscount && hasTotal);
+  return hasCheckableRelation && !aiRowArithmeticError(row, qty);
+}
 function aiIsValidEan13(value) {
   const barcode = normalizeBarcode(value);
   if (!/^\d{13}$/.test(barcode)) return false;
@@ -5482,6 +5497,28 @@ function aiSuggestedBarcodeValue(row) {
 }
 function aiSuggestedProductIdValue(row) {
   return String(row && (row.barcodeSuggestedProductId != null ? row.barcodeSuggestedProductId : (row.suggestedProductId != null ? row.suggestedProductId : '')) || '');
+}
+function aiLocalSuggestedNameCandidates(row) {
+  // המועמדים מגיעים מהשרת כרמז תצוגה בלבד. הזהות, השם והברקוד נלקחים
+  // מחדש מהקטלוג המקומי; מועמד שאינו מופיע גם ברשימת הרמזים של השורה,
+  // שברקודו השתנה או שאינו ייחודי במאגר — נפסל. אין בחירת ברירת מחדל.
+  const rawCandidates = row && Array.isArray(row.barcodeSuggestedCandidates) ? row.barcodeSuggestedCandidates : [];
+  const rawHintIds = row && Array.isArray(row.catalogCandidateHintIds) ? row.catalogCandidateHintIds : [];
+  if (rawCandidates.length < 2 || rawCandidates.length > 6 || rawHintIds.length < 2 || !String(row && row.description || '').trim()) return [];
+  const hintIds = new Set(rawHintIds.map(id => String(id == null ? '' : id)).filter(Boolean));
+  const seen = new Set(), output = [];
+  for (const candidate of rawCandidates) {
+    const productId = String(candidate && candidate.productId != null ? candidate.productId : '');
+    const candidateBarcode = normalizeBarcode(candidate && candidate.barcode || '');
+    if (!productId || !hintIds.has(productId) || seen.has(productId) || !aiCatalogBarcodeIsSafe(candidateBarcode)) return [];
+    const product = products.find(item => String(item && item.id) === productId);
+    const localBarcode = normalizeBarcode(product && product.barcode || '');
+    const barcodeMatches = aiCatalogBarcodeMatches(candidateBarcode, false);
+    if (!product || localBarcode !== candidateBarcode || barcodeMatches.length !== 1 || String(barcodeMatches[0].product && barcodeMatches[0].product.id) !== productId) return [];
+    seen.add(productId);
+    output.push({ product, barcode: localBarcode });
+  }
+  return output.length >= 2 ? output : [];
 }
 function aiBarcodeEvidenceCandidate(value, readType, catalogHintId) {
   const observed = normalizeBarcode(value);
@@ -5584,17 +5621,41 @@ function aiResolveInvoiceBarcode(row) {
     } else if (sourceMethod === 'suggested_correction' || sourceMethod === 'suggested_one_digit_correction') {
       const correctionMatches = aiCatalogBarcodeOneDigitMatches(sourceObserved);
       if (sourceReadType !== 'full' || !aiBarcodeOneDigitDifference(sourceObserved, resolved) || correctionMatches.length !== 1 || correctionMatches[0].barcode !== resolved) return { error: 'אישור המשתמש אינו תואם לקריאת ברקוד יחידה' };
+    } else if (sourceMethod === 'suggested_name_only') {
+      if (String(row && row.barcodeUserConfirmedFromCatalogHintId || '') !== String(matches[0].product.id)) return { error: 'אישור המשתמש אינו תואם למועמד השם שהוצג' };
+    } else if (sourceMethod === 'suggested_name_multiple') {
+      const nameCandidates = aiLocalSuggestedNameCandidates(row);
+      const selectedId = String(row && row.barcodeUserConfirmedFromCatalogHintId || '');
+      const selectedCandidate = nameCandidates.find(candidate => String(candidate.product && candidate.product.id) === selectedId);
+      if (!selectedCandidate || selectedCandidate.barcode !== resolved || String(matches[0].product.id) !== selectedId) return { error: 'אישור המשתמש אינו תואם לאחת מאפשרויות השם שהוצגו' };
     } else return { error: 'לא נמצאה הוכחה שהמוצר אושר דרך ההצעה' };
     return { product: matches[0].product, barcode: matches[0].barcode, observed: sourceObserved, method };
   }
-  if (method === 'suggested_pattern' || method === 'suggested_suffix' || method === 'suggested_correction' || method === 'suggested_one_digit_correction') {
+  if (method === 'suggested_name_multiple') {
+    const nameCandidates = aiLocalSuggestedNameCandidates(row);
+    if (nameCandidates.length < 2) return { error: 'רשימת המוצרים האפשריים אינה תקינה או אינה תואמת עוד למאגר המקומי' };
+    return {
+      error: 'נדרשת בחירת משתמש בין כמה מוצרים בעלי שם דומה',
+      suggestion: {
+        candidates: nameCandidates,
+        observed: observedPattern || observed || 'לא נקרא',
+        method,
+        printedDescription: String(row && row.description || '').trim(),
+        nameOnly: true,
+        multipleName: true
+      }
+    };
+  }
+  if (method === 'suggested_pattern' || method === 'suggested_suffix' || method === 'suggested_correction' || method === 'suggested_one_digit_correction' || method === 'suggested_name_only') {
     const suggestedBarcode = aiSuggestedBarcodeValue(row);
     const suggestedMatches = aiCatalogBarcodeMatches(suggestedBarcode, false);
     if (suggestedMatches.length !== 1) return { error: suggestedMatches.length > 1 ? 'הברקוד המוצע קיים ביותר ממוצר אחד במאגר' : 'הברקוד המוצע אינו קיים במאגר' };
     const suggestedProduct = suggestedMatches[0].product;
     const suggestedProductId = aiSuggestedProductIdValue(row);
     if (suggestedProductId && suggestedProduct.id !== suggestedProductId) return { error: 'זהות המוצר המוצע אינה תואמת למאגר המקומי' };
-    if (method === 'suggested_pattern') {
+    if (method === 'suggested_name_only') {
+      if (String(row && row.catalogHintId || '') !== String(suggestedProduct.id) || !String(row && row.description || '').trim()) return { error: 'הצעת השם אינה קשורה למועמד יחיד במאגר המקומי' };
+    } else if (method === 'suggested_pattern') {
       if (!['full_pattern', 'suffix_pattern'].includes(readType)) return { error: 'סוג קריאת התבנית המוצעת אינו תקין' };
       const info = aiBarcodePatternInfo(observedPattern);
       if (!info || !info.hasWildcard) return { error: 'תבנית הברקוד המוצעת אינה תקינה' };
@@ -5614,13 +5675,14 @@ function aiResolveInvoiceBarcode(row) {
       }
     }
     return {
-      error: 'נדרש אישור ידני להתאמת הברקוד',
+      error: method === 'suggested_name_only' ? 'נדרש אישור ידני להתאמה לפי שם' : 'נדרש אישור ידני להתאמת הברקוד',
       suggestion: {
         barcode: suggestedBarcode,
         product: suggestedProduct,
         observed: observedPattern || observed || 'לא נקרא',
         method,
-        printedDescription: String(row && row.description || '').trim()
+        printedDescription: String(row && row.description || '').trim(),
+        nameOnly: method === 'suggested_name_only'
       }
     };
   }
@@ -5690,7 +5752,7 @@ function aiEvaluateInvoiceScan(payload) {
         unresolvedBarcodeRows++;
         errors.push(rowPrefix + (barcodeMatch.error || 'הברקוד לא זוהה במאגר'));
         if (barcodeMatch.suggestion) {
-          barcodeSuggestions.push({
+          const commonSuggestion = {
             documentIndex: index,
             rowIndex,
             lineNumber: rowNumber,
@@ -5700,10 +5762,29 @@ function aiEvaluateInvoiceScan(payload) {
             printedDescription: barcodeMatch.suggestion.printedDescription || String(row.description || '').trim(),
             observed: barcodeMatch.suggestion.observed || 'לא נקרא',
             method: barcodeMatch.suggestion.method,
-            suggestedBarcode: barcodeMatch.suggestion.barcode,
-            suggestedProductId: barcodeMatch.suggestion.product.id,
-            suggestedProductName: barcodeMatch.suggestion.product.name || String(row.barcodeSuggestedProductName || '').trim()
-          });
+            nameOnly: barcodeMatch.suggestion.nameOnly === true,
+            quantity: qty,
+            lineTotal: cents == null ? null : cents / 100,
+            arithmeticVerified: cents != null && aiRowHasArithmeticProof(row, qty),
+            rowConfidence: isFinite(rowConfidence) ? rowConfidence : 0
+          };
+          if (barcodeMatch.suggestion.multipleName === true) {
+            commonSuggestion.multipleName = true;
+            commonSuggestion.candidates = barcodeMatch.suggestion.candidates.map(candidate => ({
+              productId: candidate.product.id,
+              productName: candidate.product.name || '',
+              barcode: candidate.barcode
+            }));
+          } else {
+            const suggestedLine = (reconcileData || []).find(line => line.productId === barcodeMatch.suggestion.product.id);
+            const receivedQty = suggestedLine ? (Number(suggestedLine.received) || 0) : 0;
+            commonSuggestion.suggestedBarcode = barcodeMatch.suggestion.barcode;
+            commonSuggestion.suggestedProductId = barcodeMatch.suggestion.product.id;
+            commonSuggestion.suggestedProductName = barcodeMatch.suggestion.product.name || String(row.barcodeSuggestedProductName || '').trim();
+            commonSuggestion.receivedQty = receivedQty;
+            commonSuggestion.quantityMatchesReceived = qty != null && qty === receivedQty;
+          }
+          barcodeSuggestions.push(commonSuggestion);
         }
         return;
       }
@@ -5742,6 +5823,31 @@ function aiEvaluateInvoiceScan(payload) {
   if (receiptNoteUnits != null && extractedUnits !== Number(receiptNoteUnits)) errors.push('סך היחידות שנקרא (' + extractedUnits + ') אינו זהה ל-' + receiptNoteUnits + ' שהוקלדו בתחילת הקליטה');
   const documentDiscountCents = rowTotalCents - extractedTotalCents;
   if (documentDiscountCents !== verifiedDocumentDiscountCents) errors.push('סך הנחות המסמך שנקראו אינו סוגר בדיוק את סכום כל השורות');
+  // הצגת הצלבת כמות למועמד לפי שם נעשית על סכום כל הופעות המוצר, ולא על
+  // שורה בודדת. זו ראיית חיזוק בלבד; היא אינה הופכת שם לברקוד ואינה מחילה דבר.
+  const suggestedQtyByProduct = new Map();
+  barcodeSuggestions.forEach(suggestion => {
+    if (suggestion.multipleName === true || suggestion.quantity == null) return;
+    const id = String(suggestion.suggestedProductId || '');
+    suggestedQtyByProduct.set(id, (suggestedQtyByProduct.get(id) || 0) + Number(suggestion.quantity || 0));
+  });
+  barcodeSuggestions.forEach(suggestion => {
+    if (suggestion.multipleName === true) {
+      (Array.isArray(suggestion.candidates) ? suggestion.candidates : []).forEach(candidate => {
+        const id = String(candidate.productId || '');
+        const confirmedQty = aggregates.has(id) ? Number(aggregates.get(id).qty || 0) : 0;
+        const receivedLine = (reconcileData || []).find(line => String(line.productId) === id);
+        candidate.receivedQty = receivedLine ? (Number(receivedLine.received) || 0) : 0;
+        candidate.paperQtyIfChosen = confirmedQty + Number(suggestion.quantity || 0);
+        candidate.quantityMatchesReceived = suggestion.quantity != null && candidate.paperQtyIfChosen === candidate.receivedQty;
+      });
+      return;
+    }
+    const id = String(suggestion.suggestedProductId || '');
+    const confirmedQty = aggregates.has(id) ? Number(aggregates.get(id).qty || 0) : 0;
+    suggestion.paperQtyForCandidate = confirmedQty + Number(suggestedQtyByProduct.get(id) || 0);
+    suggestion.quantityMatchesReceived = suggestion.paperQtyForCandidate === Number(suggestion.receivedQty || 0);
+  });
   const allRowsMapped = unresolvedBarcodeRows === 0;
   // אין להסיק חוסר/עודף מסל שאולי חסרה בו שורה שלמה. כל שגיאת סכום,
   // יחידות, מספר שורות או מבנה משאירה את הממצאים מוסתרים.
@@ -5868,9 +5974,9 @@ async function aiRequestInvoiceScan(token, documents) {
       // מזהים בלבד; השרת בוחר מתוכם רשומות מהקטלוג המקומי ואינו סומך על
       // שם או ברקוד שמגיעים מרשימת המשנה.
       receivedProductIds: aiReceivedProductIds(),
-      // השרת זקוק לשם לצורך הצעת מועמד במקרה לא ודאי. מול המודל השרת מחליף
-      // את המזהה האמיתי בכינוי זמני וחושף רק alias+name; הברקוד נשאר בצד
-      // השרת ומשמש להתאמה דטרמיניסטית אחרי הקריאה.
+      // השרת מחליף מזהים אמיתיים בכינויים זמניים. בשלב הראשון מוצגים למודל
+      // רק שמות המוצרים שהגיעו; רק בקריאה חוזרת של שורות בעייתיות הוא מקבל
+      // שמות+ברקודים כמועמדים. הראיה החזותית נשמרת בשדה נפרד ונבדקת מקומית.
       catalog: products.map(p => ({ id: p.id, name: p.name || '', barcode: normalizeBarcode(p.barcode || '') })).filter(p => /^\d{6,20}$/.test(p.barcode))
     })
   });
@@ -5939,6 +6045,23 @@ function aiFindingHtml(f) {
   const icon = f.type === 'shortage' ? '🔴' : (f.type === 'surplus' ? '🟠' : (f.type === 'promo_missing' ? '🏷️' : 'ℹ️'));
   return '<div class="rounded-xl border p-2.5 text-sm font-black ' + cls + '">' + icon + ' ' + htmlEscape(f.text || '') + '</div>';
 }
+function aiRecognizedProductsHtml(evaluation) {
+  const entries = evaluation && evaluation.aggregates instanceof Map ? Array.from(evaluation.aggregates.values()) : [];
+  if (!entries.length) return '<div class="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-bold text-slate-500">עדיין לא זוהה מוצר בוודאות מול הברקוד והמאגר.</div>';
+  entries.sort((left, right) => String(left && left.product && left.product.name || '').localeCompare(String(right && right.product && right.product.name || ''), 'he'));
+  const cards = entries.map(entry => {
+    const methods = Array.from(new Set((entry.rows || []).map(row => String(row.barcodeMatchMethod || '')).filter(Boolean)));
+    const proof = methods.every(method => method === 'exact_full') ? 'ברקוד מלא' : (methods.some(method => method === 'user_confirmed') ? 'אושר ידנית' : 'ברקוד/סיומת ייחודיים');
+    return '<div class="rounded-xl border border-emerald-200 bg-white p-2.5 flex items-center justify-between gap-3">' +
+      '<div class="min-w-0"><div class="font-black text-slate-800 truncate">' + htmlEscape(entry.product && entry.product.name || '') + '</div><div class="text-[10px] font-bold text-emerald-700"><i class="fa-solid fa-shield-halved ml-1"></i>' + proof + '</div></div>' +
+      '<div class="text-left shrink-0"><div class="font-black text-slate-800">' + Number(entry.qty || 0) + ' יח׳</div><div class="text-[10px] font-bold text-slate-500">₪' + fmtMoney(Number(entry.totalCents || 0) / 100) + '</div></div>' +
+    '</div>';
+  }).join('');
+  return '<div class="mt-3 rounded-2xl border-2 border-emerald-200 bg-emerald-50 p-3">' +
+    '<div class="font-black text-emerald-900"><i class="fa-solid fa-list-check ml-1"></i>מוצרים שזוהו בוודאות (' + entries.length + ')</div>' +
+    (!evaluation.findingsReady ? '<div class="text-[10px] font-bold text-emerald-800 mt-1 mb-2">תצוגה בלבד — המוצרים האלה לא יוחלו עד שכל שורות התעודה ייפתרו.</div>' : '<div class="mb-2"></div>') +
+    '<div class="space-y-2">' + cards + '</div></div>';
+}
 function aiNormalizeRowRegion(value) {
   // rowRegion מגיע מהמודל ומשמש לתצוגה בלבד. לעולם לא משתמשים בו להתאמת
   // מוצר, ורק מלבן שלם שנמצא בתוך תחום 0..1000 מתקבל לחיתוך חזותי.
@@ -5985,23 +6108,116 @@ function aiBarcodeResolutionScopeHtml(scope) {
   if (scope === 'full_catalog') return '<div class="mt-1 text-[10px] font-bold text-slate-500"><i class="fa-solid fa-database ml-1"></i>המועמד נמצא בחיפוש בכלל מאגר המוצרים</div>';
   return '';
 }
+function aiSuggestionCrossCheckHtml(suggestion) {
+  const paperQty = Number(suggestion && suggestion.paperQtyForCandidate);
+  const receivedQty = Number(suggestion && suggestion.receivedQty);
+  const qtyKnown = Number.isFinite(paperQty) && Number.isFinite(receivedQty);
+  const qtyMatches = qtyKnown && suggestion.quantityMatchesReceived === true;
+  const arithmeticOk = suggestion && suggestion.arithmeticVerified === true;
+  const lineTotal = suggestion && suggestion.lineTotal != null ? ' · סכום שורה ₪' + fmtMoney(suggestion.lineTotal) : '';
+  return '<div class="mt-2 rounded-lg border p-2 ' + (qtyMatches && arithmeticOk ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-amber-50 border-amber-200 text-amber-900') + '">' +
+    '<div class="text-[10px] font-black"><i class="fa-solid fa-scale-balanced ml-1"></i>הצלבה מספרית — ראיית חיזוק, לא תחליף לברקוד</div>' +
+    '<div class="text-[11px] font-bold mt-1">' + (arithmeticOk ? '✓ הכמות וסכום השורה נקראו ועברו בדיקת חשבון' : '⚠ חשבון השורה אינו מאומת במלואו') + lineTotal + '</div>' +
+    (qtyKnown ? '<div class="text-[11px] font-bold mt-1">' + (qtyMatches ? '✓' : '⚠') + ' סך הכמות בנייר למועמד: ' + paperQty + ' · נסרק בפועל: ' + receivedQty + (qtyMatches ? ' — תואם' : ' — ייתכן חוסר/עודף') + '</div>' : '') +
+  '</div>';
+}
+function aiMultipleNameSuggestionHtml(suggestion) {
+  const printed = suggestion.printedDescription || 'השם המודפס לא נקרא';
+  const candidates = Array.isArray(suggestion.candidates) ? suggestion.candidates : [];
+  const candidateButtons = candidates.map(candidate => {
+    const paperQty = Number(candidate.paperQtyIfChosen), receivedQty = Number(candidate.receivedQty);
+    const qtyKnown = Number.isFinite(paperQty) && Number.isFinite(receivedQty);
+    const qtyMatches = qtyKnown && candidate.quantityMatchesReceived === true;
+    const qtyText = qtyKnown
+      ? '<div class="text-[10px] font-bold mt-1 ' + (qtyMatches ? 'text-emerald-700' : 'text-amber-800') + '">' + (qtyMatches ? '✓' : '⚠') + ' אם ייבחר: בנייר ' + paperQty + ' · נסרק ' + receivedQty + (qtyMatches ? ' — תואם' : ' — ייתכן חוסר/עודף') + '</div>'
+      : '';
+    return '<button data-role="ai-confirm-name-candidate" data-doc="' + suggestion.documentIndex + '" data-row="' + suggestion.rowIndex + '" data-candidate-id="' + htmlEscape(candidate.productId || '') + '" class="btn-tap w-full text-right rounded-xl border-2 border-blue-200 bg-white p-3 hover:border-blue-500 focus:border-blue-600">' +
+      '<div class="flex items-center justify-between gap-2"><div><div class="font-black text-slate-800">' + htmlEscape(candidate.productName || '') + '</div><div dir="ltr" class="text-[10px] font-bold text-slate-400">' + htmlEscape(candidate.barcode || '') + '</div>' + qtyText + '</div><div class="shrink-0 rounded-lg bg-blue-600 text-white px-3 py-2 text-xs font-black">בחר</div></div></button>';
+  }).join('');
+  return '<div class="rounded-xl border-2 border-blue-300 bg-blue-50 p-3">' +
+    '<div class="text-sm font-black text-blue-900 mb-1"><i class="fa-solid fa-list-check"></i> השם מתאים לכמה מוצרים — אתה בוחר</div>' +
+    '<div class="text-[11px] font-bold text-slate-600">בתעודה הודפס: <span class="text-slate-900">' + htmlEscape(printed) + '</span></div>' +
+    '<div class="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-[11px] font-black text-amber-900"><i class="fa-solid fa-triangle-exclamation ml-1"></i>הכמות והסכום מחזקים את הבדיקה, אך אינם בוחרים טעם או מוצר. בדוק את צילום השורה ולחץ על המוצר הנכון.</div>' +
+    aiSuggestionCrossCheckHtml(suggestion) +
+    aiBarcodeSuggestionPreviewHtml(suggestion) +
+    '<div class="mt-2 space-y-2" role="group" aria-label="בחר את המוצר שמופיע בשורת התעודה">' + candidateButtons + '</div>' +
+  '</div>';
+}
 function aiBarcodeSuggestionHtml(suggestion) {
+  if (suggestion && suggestion.multipleName === true) return aiMultipleNameSuggestionHtml(suggestion);
   const printed = suggestion.printedDescription || 'השם המודפס לא נקרא';
   const observed = suggestion.observed || 'לא נקרא';
+  const evidenceLabel = suggestion.nameOnly
+    ? '<div class="text-[11px] font-black text-rose-700 mt-1"><i class="fa-solid fa-font ml-1"></i>הברקוד לא הוכיח מוצר; זו הצעה לפי השם המודפס בלבד.</div>'
+    : '<div class="text-[11px] font-bold text-slate-600 mt-1">ספרות/תבנית שנקראו: <span dir="ltr" class="inline-block font-black text-amber-900 tracking-wider">' + htmlEscape(observed) + '</span></div>';
   return '<div class="rounded-xl border-2 border-amber-300 bg-amber-50 p-3">' +
     '<div class="text-xs font-black text-amber-900 mb-1"><i class="fa-solid fa-triangle-exclamation"></i> נדרש אישור התאמת מוצר</div>' +
     '<div class="text-[11px] font-bold text-slate-600">בתעודה הודפס: <span class="text-slate-800">' + htmlEscape(printed) + '</span></div>' +
-    '<div class="text-[11px] font-bold text-slate-600 mt-1">ספרות/תבנית שנקראו: <span dir="ltr" class="inline-block font-black text-amber-900 tracking-wider">' + htmlEscape(observed) + '</span></div>' +
+    evidenceLabel +
     '<div class="mt-2 rounded-lg bg-white border border-amber-200 p-2"><div class="text-[10px] font-bold text-slate-400">המוצר שהשרת מציע — עדיין לא הוחל</div><div class="font-black text-slate-800">' + htmlEscape(suggestion.suggestedProductName || '') + '</div><div dir="ltr" class="text-[10px] font-bold text-slate-400">' + htmlEscape(suggestion.suggestedBarcode || '') + '</div>' + aiBarcodeResolutionScopeHtml(suggestion.barcodeResolutionScope) + '</div>' +
+    aiSuggestionCrossCheckHtml(suggestion) +
     aiBarcodeSuggestionPreviewHtml(suggestion) +
     '<button data-role="ai-confirm-barcode-suggestion" data-doc="' + suggestion.documentIndex + '" data-row="' + suggestion.rowIndex + '" class="btn-tap w-full mt-2 py-2.5 rounded-xl bg-amber-600 text-white font-black"><i class="fa-solid fa-check"></i> כן, זה המוצר שמופיע בשורה</button>' +
   '</div>';
+}
+function aiConfirmNameCandidate(documentIndex, rowIndex, candidateProductId) {
+  if (!aiScanResponse || !aiScanResponse.scan || !Array.isArray(aiScanResponse.scan.documents)) return false;
+  const doc = aiScanResponse.scan.documents.find(item => Number(item && item.noteIndex) === Number(documentIndex));
+  const row = doc && Array.isArray(doc.rows) ? doc.rows[Number(rowIndex)] : null;
+  if (!row || String(row.barcodeMatchMethod || '') !== 'suggested_name_multiple') {
+    showToast('אפשרויות המוצר כבר אינן זמינות — הפעל את הסריקה מחדש', null, null, 3400); return false;
+  }
+  // אין אמון במזהה שהגיע מה-DOM: מפיקים מחדש את הרשימה המותרת מהשורה,
+  // מאמתים כל ברקוד מול הקטלוג המקומי ורק אז מקבלים את בחירת המשתמש.
+  const candidates = aiLocalSuggestedNameCandidates(row);
+  const selectedId = String(candidateProductId == null ? '' : candidateProductId);
+  const selected = candidates.find(candidate => String(candidate.product && candidate.product.id) === selectedId);
+  if (!selected) {
+    showToast('המוצר שנבחר אינו אחת האפשרויות התקינות של השורה', null, null, 3800); return false;
+  }
+  const exactMatches = aiCatalogBarcodeMatches(selected.barcode, false);
+  if (exactMatches.length !== 1 || String(exactMatches[0].product && exactMatches[0].product.id) !== selectedId) {
+    showToast('הברקוד של המוצר שנבחר אינו ייחודי עוד במאגר', null, null, 3800); return false;
+  }
+  const qtyRaw = row.quantity == null || row.quantity === '' ? NaN : Number(row.quantity);
+  const quantity = Number.isFinite(qtyRaw) ? qtyRaw : null;
+  const lineTotal = aiLineTotal(row, quantity);
+  const confirmedItem = aiScanEvaluation && aiScanEvaluation.aggregates instanceof Map ? aiScanEvaluation.aggregates.get(selectedId) : null;
+  const receivedLine = (reconcileData || []).find(line => String(line.productId) === selectedId);
+  const paperQtyIfChosen = quantity == null ? null : Number(confirmedItem && confirmedItem.qty || 0) + quantity;
+  const receivedQty = receivedLine ? (Number(receivedLine.received) || 0) : 0;
+  row.barcodeUserConfirmedFromObserved = row.barcodeObserved;
+  row.barcodeUserConfirmedFromReadType = row.barcodeReadType;
+  row.barcodeUserConfirmedFromMethod = 'suggested_name_multiple';
+  row.barcodeUserConfirmedFromCatalogHintId = selectedId;
+  row.barcodeUserConfirmedCandidateIds = candidates.map(candidate => String(candidate.product.id));
+  row.barcodeUserConfirmedCrossCheck = {
+    quantity,
+    lineTotalExVat: lineTotal == null ? null : r2(lineTotal),
+    arithmeticVerified: quantity != null && aiRowHasArithmeticProof(row, quantity),
+    paperQtyIfChosen,
+    receivedQty,
+    quantityMatchesReceived: paperQtyIfChosen != null && paperQtyIfChosen === receivedQty,
+    totalVerifiedAtChoice: !!(aiScanEvaluation && aiScanEvaluation.totalVerified),
+    unitsVerifiedAtChoice: !!(aiScanEvaluation && aiScanEvaluation.unitsVerified)
+  };
+  row.barcode = selected.barcode;
+  row.barcodeMatchMethod = 'user_confirmed';
+  row.barcodeSuggested = null;
+  row.barcodeSuggestedProductId = null;
+  row.barcodeSuggestedProductName = null;
+  row.userConfirmedAt = Date.now();
+  aiScanEvaluation = aiEvaluateInvoiceScan(aiScanResponse);
+  aiScanError = aiScanEvaluation.valid ? '' : 'הפענוח עדיין דורש בדיקה — התעודה לא שונתה.';
+  if (currentView === 'reconcile') renderReconcile();
+  showToast('המוצר שבחרת אושר. התוצאות חושבו מחדש.', null, null, 2600);
+  return true;
 }
 function aiConfirmBarcodeSuggestion(documentIndex, rowIndex) {
   if (!aiScanResponse || !aiScanResponse.scan || !Array.isArray(aiScanResponse.scan.documents)) return false;
   const doc = aiScanResponse.scan.documents.find(item => Number(item && item.noteIndex) === Number(documentIndex));
   const row = doc && Array.isArray(doc.rows) ? doc.rows[Number(rowIndex)] : null;
-  if (!row || !['suggested_pattern', 'suggested_suffix', 'suggested_correction', 'suggested_one_digit_correction'].includes(String(row.barcodeMatchMethod || ''))) {
+  if (!row || !['suggested_pattern', 'suggested_suffix', 'suggested_correction', 'suggested_one_digit_correction', 'suggested_name_only'].includes(String(row.barcodeMatchMethod || ''))) {
     showToast('ההצעה כבר אינה זמינה — הפעל את הסריקה מחדש', null, null, 3200); return false;
   }
   // מאמתים מחדש מול הקטלוג המקומי בזמן הלחיצה. אין אמון בנתוני ה-DOM או בשם.
@@ -6015,6 +6231,7 @@ function aiConfirmBarcodeSuggestion(documentIndex, rowIndex) {
   row.barcodeUserConfirmedFromObserved = row.barcodeObserved;
   row.barcodeUserConfirmedFromReadType = row.barcodeReadType;
   row.barcodeUserConfirmedFromMethod = row.barcodeMatchMethod;
+  row.barcodeUserConfirmedFromCatalogHintId = row.catalogHintId;
   row.barcode = matches[0].barcode;
   row.barcodeMatchMethod = 'user_confirmed';
   row.barcodeSuggested = null;
@@ -6040,6 +6257,7 @@ function aiInvoiceCaptureHtml() {
     const modelInfo = aiScanResponse && aiScanResponse.model
       ? '<div class="text-[10px] font-bold text-slate-400 mb-2">מודל שביצע את הקריאה: <span dir="ltr">' + htmlEscape(aiScanResponse.model) + '</span></div>'
       : '';
+    const recognizedHtml = aiRecognizedProductsHtml(ev);
     const suggestionsHtml = Array.isArray(ev.barcodeSuggestions) && ev.barcodeSuggestions.length
       ? '<div class="mt-3"><div class="font-black text-sm text-amber-900 mb-2">התאמות שמחכות לאישור שלך:</div><div class="space-y-2">' + ev.barcodeSuggestions.map(aiBarcodeSuggestionHtml).join('') + '</div></div>'
       : '';
@@ -6048,7 +6266,7 @@ function aiInvoiceCaptureHtml() {
       : (ev.findings.length ? '<div class="font-black text-sm text-slate-700 mb-2">מה נמצא:</div><div class="space-y-2">' + ev.findings.map(aiFindingHtml).join('') + '</div>' : '<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-3 font-black text-emerald-800">לא נמצא פער בין הנייר למה שנסרק בפועל.</div>');
     return '<div class="bg-white rounded-2xl border-2 ' + (ev.valid ? 'border-violet-300' : 'border-rose-300') + ' p-4 shadow-sm mb-24">' +
       '<div class="font-black text-xl text-slate-800 mb-1"><i class="fa-solid fa-wand-magic-sparkles text-violet-600"></i> תוצאות הסריקה החכמה</div>' +
-      '<div class="text-xs text-slate-500 font-bold mb-2">ה-AI לא משנה ולא סוגר דבר לבד. בדוק ואשר רק אם זה תואם לנייר ולסחורה.</div>' + modelInfo + scanMeta + checks + suggestionsHtml + findingsHtml +
+      '<div class="text-xs text-slate-500 font-bold mb-2">ה-AI לא משנה ולא סוגר דבר לבד. בדוק ואשר רק אם זה תואם לנייר ולסחורה.</div>' + modelInfo + scanMeta + checks + recognizedHtml + suggestionsHtml + findingsHtml +
       (ev.errors.length ? '<div class="mt-3 rounded-xl bg-rose-50 border border-rose-300 p-3"><div class="font-black text-rose-800 mb-1">אי אפשר לאשר עדיין:</div>' + ev.errors.map(x => '<div class="text-xs font-bold text-rose-700 mt-1">• ' + htmlEscape(x) + '</div>').join('') + '</div>' : '') +
       (ev.warnings.length ? '<details class="mt-3 rounded-xl bg-amber-50 border border-amber-200 p-2"><summary class="font-black text-xs text-amber-800">אזהרות קריאה (' + ev.warnings.length + ')</summary>' + ev.warnings.map(x => '<div class="text-[11px] font-bold text-amber-800 mt-1">• ' + htmlEscape(x) + '</div>').join('') + '</details>' : '') +
       (ev.valid ? '<button data-role="ai-apply" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-3.5 font-black mt-4"><i class="fa-solid fa-check"></i> כן, זה מה שקרה — החל על התעודה</button>' : '') +
@@ -6069,6 +6287,68 @@ function aiInvoiceCaptureHtml() {
     (aiScanError ? '<div class="rounded-xl bg-rose-50 border border-rose-300 p-2.5 text-xs font-black text-rose-700 mb-3">' + htmlEscape(aiScanError) + '</div>' : '') + docCards +
     '<button data-role="ai-run" ' + (ready ? '' : 'disabled') + ' class="btn-tap w-full rounded-xl py-3.5 font-black ' + (ready ? 'bg-violet-600 text-white' : 'bg-slate-200 text-slate-400') + '"><i class="fa-solid fa-wand-magic-sparkles"></i> פענח את כל התעודות ב-AI</button>' +
     '<div class="text-[10px] text-slate-400 font-bold text-center mt-2">בדרך כלל מתבצעת קריאת AI אחת. רק אם נקראות 0 שורות, המערכת עשויה לנסות עד שתי זוויות נוספות.</div><button data-role="rc-goto-manual" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">המשך בלי AI — בדיקה ידנית</button></div>';
+}
+function aiConfirmedMappingsAudit() {
+  const documents = aiScanResponse && aiScanResponse.scan && Array.isArray(aiScanResponse.scan.documents)
+    ? aiScanResponse.scan.documents
+    : [];
+  const output = [];
+  documents.forEach((doc, documentIndex) => {
+    (Array.isArray(doc && doc.rows) ? doc.rows : []).forEach((row, rowIndex) => {
+      if (String(row && row.barcodeMatchMethod || '') !== 'user_confirmed') return;
+      const resolution = aiResolveInvoiceBarcode(row);
+      if (!resolution || !resolution.product || !resolution.barcode || resolution.error) return;
+      const sourceMethod = String(row.barcodeUserConfirmedFromMethod || '');
+      const qtyRaw = row.quantity == null || row.quantity === '' ? NaN : Number(row.quantity);
+      const qty = isFinite(qtyRaw) ? qtyRaw : null;
+      const lineTotal = aiLineTotal(row, qty);
+      const multipleNameChoice = sourceMethod === 'suggested_name_multiple';
+      const currentCandidateIds = multipleNameChoice
+        ? aiLocalSuggestedNameCandidates(row).map(candidate => String(candidate.product.id))
+        : [];
+      const storedCandidateIds = multipleNameChoice && Array.isArray(row.barcodeUserConfirmedCandidateIds)
+        ? row.barcodeUserConfirmedCandidateIds.map(id => String(id == null ? '' : id)).filter(Boolean)
+        : [];
+      const storedCandidatesStillValid = storedCandidateIds.length === currentCandidateIds.length &&
+        storedCandidateIds.length >= 2 && storedCandidateIds.every(id => currentCandidateIds.includes(id));
+      const candidateProductIds = storedCandidatesStillValid ? storedCandidateIds : currentCandidateIds;
+      const rawCrossCheck = multipleNameChoice && row.barcodeUserConfirmedCrossCheck && typeof row.barcodeUserConfirmedCrossCheck === 'object'
+        ? row.barcodeUserConfirmedCrossCheck
+        : null;
+      const choiceCrossCheck = rawCrossCheck ? {
+        quantity: rawCrossCheck.quantity != null && Number.isFinite(Number(rawCrossCheck.quantity)) ? Number(rawCrossCheck.quantity) : null,
+        lineTotalExVat: rawCrossCheck.lineTotalExVat != null && Number.isFinite(Number(rawCrossCheck.lineTotalExVat)) ? r2(Number(rawCrossCheck.lineTotalExVat)) : null,
+        arithmeticVerified: rawCrossCheck.arithmeticVerified === true,
+        paperQtyIfChosen: rawCrossCheck.paperQtyIfChosen != null && Number.isFinite(Number(rawCrossCheck.paperQtyIfChosen)) ? Number(rawCrossCheck.paperQtyIfChosen) : null,
+        receivedQty: rawCrossCheck.receivedQty != null && Number.isFinite(Number(rawCrossCheck.receivedQty)) ? Number(rawCrossCheck.receivedQty) : null,
+        quantityMatchesReceived: rawCrossCheck.quantityMatchesReceived === true,
+        totalVerifiedAtChoice: rawCrossCheck.totalVerifiedAtChoice === true,
+        unitsVerifiedAtChoice: rawCrossCheck.unitsVerifiedAtChoice === true
+      } : null;
+      output.push({
+        documentIndex: Number.isInteger(Number(doc.noteIndex)) ? Number(doc.noteIndex) : documentIndex,
+        rowIndex,
+        lineNumber: row.lineNumber == null ? null : Number(row.lineNumber),
+        sourcePage: row.sourcePage == null ? null : Number(row.sourcePage),
+        productId: resolution.product.id,
+        productName: String(resolution.product.name || '').slice(0, 160),
+        barcode: resolution.barcode,
+        confirmationSource: sourceMethod,
+        nameOnly: sourceMethod === 'suggested_name_only' || multipleNameChoice,
+        sourceReadType: String(row.barcodeUserConfirmedFromReadType || '').slice(0, 32),
+        sourceObserved: String(row.barcodeUserConfirmedFromObserved == null ? '' : row.barcodeUserConfirmedFromObserved).slice(0, 64),
+        catalogHintId: String(row.barcodeUserConfirmedFromCatalogHintId == null ? '' : row.barcodeUserConfirmedFromCatalogHintId).slice(0, 160) || null,
+        selectedProductId: multipleNameChoice ? resolution.product.id : null,
+        candidateProductIds,
+        choiceCrossCheck,
+        printedDescription: String(row.description || '').slice(0, 160),
+        quantity: qty,
+        lineTotalExVat: lineTotal == null ? null : r2(lineTotal),
+        confirmedAt: Number(row.userConfirmedAt) || null
+      });
+    });
+  });
+  return output;
 }
 function aiApplyInvoiceResult() {
   const ev = aiScanEvaluation; if (!ev || !ev.valid || !reconcileData) return;
@@ -6095,7 +6375,8 @@ function aiApplyInvoiceResult() {
   const claims = ev.findings.filter(f => (f.type === 'promo_missing' || f.type === 'price') && Number(f.amount) > 0.02);
   reconcileSupplierCreditClaim = claims.length ? { status: 'open', source: 'ai_invoice_scan', amount: r2(claims.reduce((sum, f) => sum + Number(f.amount || 0), 0)), items: claims.map(f => ({ productId: f.productId, name: f.name, qty: f.qty, expectedUnitPrice: f.expectedPrice, chargedUnitPrice: f.paperPrice, amount: r2(f.amount || 0), reason: f.type })) } : null;
   const safeFindings = ev.findings.map(f => ({ type: f.type, productId: f.productId || null, name: f.name || '', qty: f.qty != null ? f.qty : null, amount: f.amount != null ? f.amount : null, expectedPrice: f.expectedPrice != null ? f.expectedPrice : null, paperPrice: f.paperPrice != null ? f.paperPrice : null, text: f.text || '' }));
-  reconcileAiAudit = { version: 2, scannedAt: Date.now(), model: aiScanResponse && aiScanResponse.model || 'unknown', requestId: aiScanResponse && aiScanResponse.requestId || null, attempts: aiScanAttemptCount || 1, autoRotation: aiScanAutoRotationNote || '', totalVerified: !!ev.totalVerified, unitsVerified: !!ev.unitsVerified, documents: ev.docSummaries, findings: safeFindings, hasDiscrepancy: safeFindings.some(f => ['shortage', 'surplus', 'price', 'promo_missing'].includes(f.type)) };
+  const confirmedMappings = aiConfirmedMappingsAudit();
+  reconcileAiAudit = { version: 4, scannedAt: Date.now(), model: aiScanResponse && aiScanResponse.model || 'unknown', requestId: aiScanResponse && aiScanResponse.requestId || null, attempts: aiScanAttemptCount || 1, autoRotation: aiScanAutoRotationNote || '', totalVerified: !!ev.totalVerified, unitsVerified: !!ev.unitsVerified, documents: ev.docSummaries, confirmedMappings, findings: safeFindings, hasDiscrepancy: safeFindings.some(f => ['shortage', 'surplus', 'price', 'promo_missing'].includes(f.type)) };
   const exactUnits = reconcileUnitsBalanced();
   const exactMoney = reconcileMoneyBalanced();
   if (!exactMoney || !exactUnits) {
@@ -6107,6 +6388,14 @@ function aiApplyInvoiceResult() {
     reconcileAiAudit = before.audit;
     aiScanError = 'הפענוח עבר בדיקות ראשוניות, אבל אינו נסגר ביחידות ובגבול העיגול המותר. שום נתון לא שונה — צלם שוב.';
     aiScanEvaluation.valid = false; renderReconcile(); return;
+  }
+  if (confirmedMappings.length) {
+    const nameOnlyCount = confirmedMappings.filter(item => item.nameOnly).length;
+    logAction('ai', 'אישור התאמות מסריקת AI', confirmedMappings.length + ' התאמות אושרו ידנית' + (nameOnlyCount ? ' · ' + nameOnlyCount + ' לפי שם' : ''), {
+      requestId: aiScanResponse && aiScanResponse.requestId || null,
+      count: confirmedMappings.length,
+      nameOnlyCount
+    });
   }
   rcStep = 'balanced'; buzz(24); showToast('הנתונים הוחלו — בדוק את החוסר, העודף, המחיר והמבצע לפני האישור', null, null, 4300); renderReconcile();
 }
@@ -9178,6 +9467,7 @@ app.addEventListener('click', (e) => {
   if (role === 'ai-rescan') { resetAiInvoiceScan(); rcStep = 'ai'; renderReconcile(); return; }
   if (role === 'ai-open-suggestion-page') { aiOpenBarcodeSuggestionPage(parseInt(t.dataset.doc, 10), parseInt(t.dataset.page, 10)); return; }
   if (role === 'ai-confirm-barcode-suggestion') { aiConfirmBarcodeSuggestion(parseInt(t.dataset.doc, 10), parseInt(t.dataset.row, 10)); return; }
+  if (role === 'ai-confirm-name-candidate') { aiConfirmNameCandidate(parseInt(t.dataset.doc, 10), parseInt(t.dataset.row, 10), t.dataset.candidateId); return; }
   if (role === 'ai-apply') { aiApplyInvoiceResult(); return; }
   if (role === 'admin-login') { requireAdmin('כניסת מנהל', () => { if (currentView === 'settings') renderSettings(); }); return; }
   if (role === 'admin-logout') { exitAdminMode(); return; }
