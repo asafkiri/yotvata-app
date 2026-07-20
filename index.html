@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v126 מוצר חדש מהתעודה</title>
+    <title>הזמנות יטבתה - v127 מצב מחיר מומלץ</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v126 מוצר חדש מהתעודה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v127 מצב מחיר מומלץ</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -912,9 +912,11 @@ function startListeners() {
   onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'pricing'), (snap) => {
     const d = snap.data();
     const incoming = (d && Array.isArray(d.categories)) ? d.categories : [];
+    const incomingRoundingMode = d && d.roundingMode === 'exact' ? 'exact' : 'ninety';
     pricingCatsLoaded = true;
-    const pricingChanged = JSON.stringify(incoming) !== JSON.stringify(pricingCats);
+    const pricingChanged = JSON.stringify(incoming) !== JSON.stringify(pricingCats) || incomingRoundingMode !== pricingRoundingMode;
     pricingCats = incoming;
+    pricingRoundingMode = incomingRoundingMode;
     const prodModalOpen = $('prodModal') && !$('prodModal').classList.contains('hidden');
     if (prodModalOpen) fillProdCategoryOptions(($('prod_category') && $('prod_category').value) || '');
     if (!pricingChanged) return;
@@ -1355,12 +1357,13 @@ function adminClickActionName(role) {
     'cfg-save': 'שמירת הגדרות מערכת', 'add-product': 'הוספת מוצר', 'del-product': 'מחיקת מוצר', 'toggle-hidden': 'הסתרת/הצגת מוצר', 'sync-local-units': 'סנכרון ארגז/יחידה לענן',
     'del-contact': 'מחיקת איש קשר', 'clear-history': 'מחיקת היסטוריית הזמנות', 'clear-returns-history': 'מחיקת היסטוריית חזרות', 'clear-receipts': 'מחיקת תעודות קליטה',
     'rc-fix-open': 'תיקון תעודה מההיסטוריה', 'rc-fix-save': 'שמירת תיקון תעודה', 'pcat-add': 'עריכת קטגוריות רווחיות', 'pcat-up': 'עריכת קטגוריות רווחיות',
+    'pcat-round-mode': 'שינוי שיטת המחיר המומלץ',
     'pcat-down': 'עריכת קטגוריות רווחיות', 'pcat-del': 'מחיקת קטגוריה רווחית', 'promo-new': 'יצירת מבצע', 'pe-save': 'שמירת מבצע', 'pe-delete': 'מחיקת מבצע',
     'trash-delete': 'מחיקה לצמיתות מסל מחזור', 'trash-clear': 'ריקון סל מחזור', 'trash-restore': 'שחזור מסל מחזור', 'del-receipt': 'מחיקת תעודה', 'backup-import-confirm': 'ייבוא גיבוי מלא'
   };
   return map[role] || 'פעולה זו דורשת מנהל';
 }
-const ADMIN_CLICK_ROLES = new Set(['cfg-save','add-product','del-product','toggle-hidden','sync-local-units','del-contact','clear-history','clear-returns-history','clear-receipts','rc-fix-open','rc-fix-save','pcat-add','pcat-up','pcat-down','pcat-del','promo-new','pe-save','pe-delete','trash-delete','trash-clear','trash-restore','del-receipt','backup-import-confirm','rc-credit-verify','rc-credit-cancel','rc-credit-defer','rc-credit-offset','rc-supplier-verify-open','rc-supplier-defer-open']);
+const ADMIN_CLICK_ROLES = new Set(['cfg-save','add-product','del-product','toggle-hidden','sync-local-units','del-contact','clear-history','clear-returns-history','clear-receipts','rc-fix-open','rc-fix-save','pcat-round-mode','pcat-add','pcat-up','pcat-down','pcat-del','promo-new','pe-save','pe-delete','trash-delete','trash-clear','trash-restore','del-receipt','backup-import-confirm','rc-credit-verify','rc-credit-cancel','rc-credit-defer','rc-credit-offset','rc-supplier-verify-open','rc-supplier-defer-open']);
 const ADMIN_INPUT_ROLES = new Set(['price-set','pcat-name','pcat-pct','cat-set','avg','avg-set','box-set']);
 function restoreLockedAdminInput(t) {
   const role = t && t.getAttribute && t.getAttribute('data-role');
@@ -8640,18 +8643,20 @@ function priceRowHtml(p) {
   '</div>';
 }
 // ===== מחיר מומלץ לפי קטגוריות רווחיות =====
-// עלות (ללא מע"מ) × (1 + אחוז/100) × מע"מ 18% → עיגול לחוק ה-X.90:
-// עד X.2 מעגלים מטה ל-(X-1).90, מעל X.2 מעגלים ל-X.90
+// עלות (ללא מע"מ) × (1 + אחוז/100) × מע"מ 18%.
+// exact מחזיר את תוצאת הנוסחה בשתי ספרות; ninety מעגל כלפי מעלה למחיר שמסתיים ב-X.90.
 let pricingCats = [], pricingCatsLoaded = false;
+let pricingRoundingMode = 'ninety'; // ברירת המחדל משאירה את המחיר המומלץ במצב סיומת .90
 let pricingCatsTimer = null, pricingCatsOpen = false;
 function recommendedPrice(cost, pct) {
   if (!(cost > 0)) return null;
   const raw = r2(cost * 1.18 * (1 + (Number(pct) || 0) / 100));
-  const base = Math.floor(raw);
-  const frac = r2(raw - base);
-  let rec = frac <= 0.2 ? base - 0.10 : base + 0.90;
-  if (rec < 0.9) rec = 0.90;
-  return r2(rec);
+  if (pricingRoundingMode === 'exact') return raw;
+  const rawCents = Math.round(raw * 100);
+  const wholeShekels = Math.floor(rawCents / 100);
+  const sameShekelNinety = wholeShekels * 100 + 90;
+  const roundedCents = rawCents <= sameShekelNinety ? sameShekelNinety : sameShekelNinety + 100;
+  return r2(Math.max(90, roundedCents) / 100);
 }
 function pricingCatOf(p) {
   if (!p || !p.category) return null;
@@ -8666,12 +8671,13 @@ function savePricingCats() {
   if (!db) return;
   clearTimeout(pricingCatsTimer);
   pricingCatsTimer = setTimeout(() => {
-    runCloudTaskSilent('save pricing categories', { op: 'set', path: dataPath('settings', 'pricing'), data: { categories: pricingCats, updatedAt: Date.now() }, merge: true, operationId: 'pricing_settings' });
+    runCloudTaskSilent('save pricing categories', { op: 'set', path: dataPath('settings', 'pricing'), data: { categories: pricingCats, roundingMode: pricingRoundingMode, updatedAt: Date.now() }, merge: true, operationId: 'pricing_settings' });
   }, 700);
 }
 function pricingCatsCardHtml() {
+  const modeLabel = pricingRoundingMode === 'exact' ? 'מדויק' : 'סיומת .90';
   if (!pricingCatsOpen) {
-    return '<button data-role="pcat-toggle" class="btn-tap w-full bg-white border border-slate-200 text-slate-700 rounded-xl py-2.5 px-3 font-black text-sm flex items-center justify-between gap-2 mb-3"><span><i class="fa-solid fa-percent text-emerald-600"></i> קטגוריות רווחיות — מחיר מומלץ' + (pricingCats.length ? ' (' + pricingCats.length + ')' : '') + '</span><i class="fa-solid fa-chevron-down"></i></button>';
+    return '<button data-role="pcat-toggle" class="btn-tap w-full bg-white border border-slate-200 text-slate-700 rounded-xl py-2.5 px-3 font-black text-sm flex items-center justify-between gap-2 mb-3"><span><i class="fa-solid fa-percent text-emerald-600"></i> קטגוריות רווחיות — מחיר מומלץ' + (pricingCats.length ? ' (' + pricingCats.length + ')' : '') + ' <span class="text-[10px] text-emerald-700">· ' + modeLabel + '</span></span><i class="fa-solid fa-chevron-down"></i></button>';
   }
   const rows = pricingCats.map((c, i) =>
     '<div class="flex items-center gap-2">' +
@@ -8687,6 +8693,14 @@ function pricingCatsCardHtml() {
   return '<div class="bg-white border-2 border-emerald-200 rounded-2xl p-3 shadow-sm mb-3">' +
     '<button data-role="pcat-toggle" class="btn-tap w-full flex items-center justify-between gap-2 font-black text-sm text-slate-800 mb-1"><span><i class="fa-solid fa-percent text-emerald-600"></i> קטגוריות רווחיות — מחיר מומלץ</span><i class="fa-solid fa-chevron-up"></i></button>' +
     '<div class="text-[11px] text-slate-400 font-bold mb-2">לכל קטגוריה אחוז רווח. סדר המחלקות כאן קובע את הסדר במסך ההזמנה. אחוז 0 = ללא המלצה (מוצרי פיקוח)</div>' +
+    '<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-2 mb-2">' +
+      '<div class="text-[11px] font-black text-emerald-900 mb-1.5">צורת המחיר המומלץ</div>' +
+      '<div class="grid grid-cols-2 gap-1.5 bg-white/70 rounded-lg p-1">' +
+        '<button data-role="pcat-round-mode" data-mode="ninety" class="btn-tap rounded-md py-2 text-xs font-black ' + (pricingRoundingMode === 'ninety' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500') + '">סיומת .90</button>' +
+        '<button data-role="pcat-round-mode" data-mode="exact" class="btn-tap rounded-md py-2 text-xs font-black ' + (pricingRoundingMode === 'exact' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500') + '">מחיר מדויק</button>' +
+      '</div>' +
+      '<div class="text-[10px] text-emerald-800/80 font-bold mt-1.5">מדויק = תוצאת האחוז עד שתי ספרות · ‎.90 = עיגול כלפי מעלה לסיומת ‎.90</div>' +
+    '</div>' +
     '<div class="space-y-1.5">' + rows + '</div>' +
     '<button data-role="pcat-add" class="btn-tap w-full bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg py-2 font-black text-xs mt-2"><i class="fa-solid fa-plus"></i> הוסף קטגוריה</button>' +
   '</div>';
@@ -10219,6 +10233,10 @@ app.addEventListener('click', (e) => {
   else if (role === 'pr-new') openProdModal(null, false, '');
   else if (role === 'pr-scan') openPriceScanner();
   else if (role === 'pcat-toggle') { pricingCatsOpen = !pricingCatsOpen; if (currentView === 'prices') renderPrices(); }
+  else if (role === 'pcat-round-mode') {
+    const nextMode = t.dataset.mode === 'exact' ? 'exact' : 'ninety';
+    if (nextMode !== pricingRoundingMode) { pricingRoundingMode = nextMode; savePricingCats(); if (currentView === 'prices') renderPrices(); }
+  }
   else if (role === 'pcat-add') { pricingCats.push({ id: 'cat_' + Date.now(), name: '', pct: 30 }); savePricingCats(); if (currentView === 'prices') renderPrices(); }
   else if (role === 'pcat-up') { const i = parseInt(t.dataset.i, 10); if (i > 0) { const tmp = pricingCats[i]; pricingCats[i] = pricingCats[i - 1]; pricingCats[i - 1] = tmp; savePricingCats(); if (currentView === 'prices') renderPrices(); } }
   else if (role === 'pcat-down') { const i = parseInt(t.dataset.i, 10); if (i < pricingCats.length - 1) { const tmp = pricingCats[i]; pricingCats[i] = pricingCats[i + 1]; pricingCats[i + 1] = tmp; savePricingCats(); if (currentView === 'prices') renderPrices(); } }
