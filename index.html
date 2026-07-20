@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v127 מצב מחיר מומלץ</title>
+    <title>הזמנות יטבתה - v128 עיגול מחיר מדויק</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v127 מצב מחיר מומלץ</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v128 עיגול מחיר מדויק</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -4052,7 +4052,7 @@ function updateNprRecHint() {
   const cost = parseFloat((($('npr_price') || {}).value || '').replace(',', '.'));
   if (!(cost > 0)) { h.textContent = 'קטגוריה: ' + c.name + ' (' + c.pct + '%) — הקלד עלות לקבלת מחיר מומלץ'; h.classList.remove('hidden'); return; }
   const rec = recommendedPrice(cost, c.pct);
-  h.textContent = '💡 מומלץ למכירה: ₪' + rec.toFixed(2) + ' (' + c.name + ' · ' + c.pct + '%)';
+  h.textContent = '💡 מומלץ למכירה: ₪' + formatRecommendedPrice(rec) + ' (' + c.name + ' · ' + c.pct + '%)';
   h.classList.remove('hidden');
 }
 function hideNewProduct() {
@@ -8621,7 +8621,7 @@ function priceRowHtml(p) {
   const recLine = (pricingCats.length
     ? '<div class="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-slate-100">' + catSel +
       (rec != null
-        ? '<span class="text-xs font-black text-emerald-700">💡 מומלץ למכירה: ₪' + rec.toFixed(2) + '</span>'
+        ? '<span class="text-xs font-black text-emerald-700">💡 מומלץ למכירה: ₪' + formatRecommendedPrice(rec) + '</span>'
         : '<span class="text-[10px] text-slate-300 font-bold">' + (cat ? ((Number(cat.pct) || 0) === 0 ? 'מחיר מפוקח — ללא המלצה' : 'הזן מחיר עלות') : 'שייך קטגוריה למחיר מומלץ') + '</span>') +
       '</div>'
     : '');
@@ -8644,19 +8644,28 @@ function priceRowHtml(p) {
 }
 // ===== מחיר מומלץ לפי קטגוריות רווחיות =====
 // עלות (ללא מע"מ) × (1 + אחוז/100) × מע"מ 18%.
-// exact מחזיר את תוצאת הנוסחה בשתי ספרות; ninety מעגל כלפי מעלה למחיר שמסתיים ב-X.90.
+// exact מעגל לעשירית: מאיות 0–2 למטה, ומאיות 3–9 למעלה; ninety מעגל כלפי מעלה למחיר שמסתיים ב-X.90.
 let pricingCats = [], pricingCatsLoaded = false;
 let pricingRoundingMode = 'ninety'; // ברירת המחדל משאירה את המחיר המומלץ במצב סיומת .90
 let pricingCatsTimer = null, pricingCatsOpen = false;
 function recommendedPrice(cost, pct) {
   if (!(cost > 0)) return null;
   const raw = r2(cost * 1.18 * (1 + (Number(pct) || 0) / 100));
-  if (pricingRoundingMode === 'exact') return raw;
   const rawCents = Math.round(raw * 100);
+  if (pricingRoundingMode === 'exact') {
+    const wholeTenths = Math.floor(rawCents / 10);
+    const remainingCents = rawCents % 10;
+    return r2((wholeTenths + (remainingCents >= 3 ? 1 : 0)) / 10);
+  }
   const wholeShekels = Math.floor(rawCents / 100);
   const sameShekelNinety = wholeShekels * 100 + 90;
   const roundedCents = rawCents <= sameShekelNinety ? sameShekelNinety : sameShekelNinety + 100;
   return r2(Math.max(90, roundedCents) / 100);
+}
+function formatRecommendedPrice(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return '';
+  return pricingRoundingMode === 'exact' ? n.toFixed(1).replace(/\.0$/, '') : n.toFixed(2);
 }
 function pricingCatOf(p) {
   if (!p || !p.category) return null;
@@ -8699,7 +8708,7 @@ function pricingCatsCardHtml() {
         '<button data-role="pcat-round-mode" data-mode="ninety" class="btn-tap rounded-md py-2 text-xs font-black ' + (pricingRoundingMode === 'ninety' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500') + '">סיומת .90</button>' +
         '<button data-role="pcat-round-mode" data-mode="exact" class="btn-tap rounded-md py-2 text-xs font-black ' + (pricingRoundingMode === 'exact' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500') + '">מחיר מדויק</button>' +
       '</div>' +
-      '<div class="text-[10px] text-emerald-800/80 font-bold mt-1.5">מדויק = תוצאת האחוז עד שתי ספרות · ‎.90 = עיגול כלפי מעלה לסיומת ‎.90</div>' +
+      '<div class="text-[10px] text-emerald-800/80 font-bold mt-1.5">מדויק = עשירית אחת: ‎.02 ומטה יורד, ‎.03 ומעלה עולה · ‎.90 = עיגול כלפי מעלה לסיומת ‎.90</div>' +
     '</div>' +
     '<div class="space-y-1.5">' + rows + '</div>' +
     '<button data-role="pcat-add" class="btn-tap w-full bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg py-2 font-black text-xs mt-2"><i class="fa-solid fa-plus"></i> הוסף קטגוריה</button>' +
@@ -8775,7 +8784,7 @@ function updateProdRecHint() {
     out.textContent = 'הזן מחיר קנייה לקבלת מחיר מכירה מומלץ'; out.classList.remove('hidden'); return;
   }
   const rec = recommendedPrice(cost, cat.pct);
-  out.textContent = '💡 מומלץ למכירה: ₪' + rec.toFixed(2) + ' (' + cat.name + ' · ' + cat.pct + '%)';
+  out.textContent = '💡 מומלץ למכירה: ₪' + formatRecommendedPrice(rec) + ' (' + cat.name + ' · ' + cat.pct + '%)';
   out.classList.remove('hidden');
 }
 function fillBillingPackOptions(selectedId, exceptId) {
@@ -9138,7 +9147,7 @@ function signRecInnerHtml(s, idx) {
   if (!rec) return '';
   const label = rec.type === 'pct'
     ? 'המלצה: <b>' + rec.value + '%</b> <span class="opacity-70">(ההנחה שקיבלת מהספק)</span>'
-    : 'המלצת מחיר: <b>₪' + fmtMoney(rec.value) + '</b> <span class="opacity-70">(עלות מקס׳ ₪' + fmtMoney(rec.cost) + ' + מע״מ + ' + r2(Number(signMarginPct) || 0) + '% רווח)</span>';
+    : 'המלצת מחיר: <b>₪' + formatRecommendedPrice(rec.value) + '</b> <span class="opacity-70">(עלות מקס׳ ₪' + fmtMoney(rec.cost) + ' + מע״מ + ' + r2(Number(signMarginPct) || 0) + '% רווח)</span>';
   return '<div class="flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">' +
     '<span class="text-[11px] font-bold text-amber-900 leading-tight"><i class="fa-solid fa-lightbulb"></i> ' + label + '</span>' +
     '<button data-role="sign-apply-rec" data-id="' + idx + '" class="btn-tap shrink-0 text-[11px] font-black text-amber-900 bg-amber-200 px-2.5 py-1.5 rounded-md">השתמש</button>' +
