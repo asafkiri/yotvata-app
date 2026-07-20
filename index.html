@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v118 סריקת AI בטוחה וגמישה</title>
+    <title>הזמנות יטבתה - v119 סריקת AI דו־שלבית</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v118 סריקת AI בטוחה וגמישה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v119 סריקת AI דו־שלבית</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -512,7 +512,7 @@ let aiScanError = '';
 let aiScanAutoRotationNote = '';
 let aiScanAttemptCount = 0;
 const AI_SCAN_MAX_AUTO_ROTATION_RETRIES = 2;
-const AI_SCAN_MIN_SERVICE_VERSION = 118;
+const AI_SCAN_MIN_SERVICE_VERSION = 119;
 const AI_BARCODE_SUFFIX_DIGITS = 6;
 let aiOrientationSession = null;
 let aiOrientationBusy = false;
@@ -5221,9 +5221,16 @@ function aiSetOrientationBusy(busy) {
 function aiPaintOrientationReview() {
   const location = aiOrientationSession && aiOrientationLocation(aiOrientationSession.page);
   if (!location) { aiCloseOrientationReview(); return false; }
+  const reviewOnly = !!(aiOrientationSession && aiOrientationSession.reviewOnly);
   const img = $('aiOrientationImage'), label = $('aiOrientationLabel');
   if (img) img.src = location.page.dataUrl;
   if (label) label.textContent = 'תעודה ' + (location.docIndex + 1) + ' · עמוד ' + (location.pageIndex + 1) + ((Number(location.page.rotation) || 0) ? ' · סיבוב ' + (Number(location.page.rotation) || 0) + '°' : '');
+  const title = $('aiOrientationTitle'), cancel = $('aiOrientationCancel'), left = $('aiOrientationLeft'), right = $('aiOrientationRight'), confirm = $('aiOrientationConfirm');
+  if (title) title.textContent = reviewOnly ? 'צילום העמוד המקורי' : 'בדיקת כיוון התעודה';
+  if (cancel) cancel.classList.toggle('hidden', reviewOnly);
+  if (left) left.classList.toggle('hidden', reviewOnly);
+  if (right) right.classList.toggle('hidden', reviewOnly);
+  if (confirm) confirm.innerHTML = reviewOnly ? '<i class="fa-solid fa-xmark ml-1"></i> סגור וחזור לתוצאות' : '<i class="fa-solid fa-check ml-1"></i> התמונה ישרה — המשך';
   return true;
 }
 function aiOpenOrientationReview(docIndex, pageIndex, requireReconfirm) {
@@ -5231,7 +5238,9 @@ function aiOpenOrientationReview(docIndex, pageIndex, requireReconfirm) {
   const doc = aiScanDocuments[docIndex], page = doc && doc.pages[pageIndex];
   if (!page) return false;
   if (requireReconfirm) page.orientationConfirmed = false;
-  aiOrientationSession = { page };
+  // אחרי שכבר התקבלה תוצאה, פתיחה ללא דרישת אישור היא צפייה בלבד. היא לא
+  // מאפשרת סיבוב/מחיקה ולא מאפסת את הפענוח שהמשתמש בודק כרגע.
+  aiOrientationSession = { page, reviewOnly: !requireReconfirm && !!aiScanResponse };
   const modal = $('aiOrientationModal');
   if (modal) { modal.classList.remove('hidden'); modal.classList.add('flex'); }
   aiSetOrientationBusy(false);
@@ -5256,7 +5265,7 @@ function aiCloseOrientationReview() {
 }
 async function aiRotateOrientationReview(deltaTurns) {
   const session = aiOrientationSession, location = session && aiOrientationLocation(session.page);
-  if (!location || aiOrientationBusy) return;
+  if (!location || aiOrientationBusy || session.reviewOnly) return;
   aiSetOrientationBusy(true);
   try {
     const page = location.page;
@@ -5280,6 +5289,7 @@ async function aiRotateOrientationReview(deltaTurns) {
 function aiConfirmOrientationReview() {
   const location = aiOrientationSession && aiOrientationLocation(aiOrientationSession.page);
   if (!location || aiOrientationBusy) return;
+  if (aiOrientationSession.reviewOnly) { aiCloseOrientationReview(); return; }
   location.page.orientationConfirmed = true;
   aiCloseOrientationReview();
   aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0;
@@ -5289,6 +5299,7 @@ function aiConfirmOrientationReview() {
 function aiCancelOrientationReview() {
   const location = aiOrientationSession && aiOrientationLocation(aiOrientationSession.page);
   if (!location || aiOrientationBusy) return;
+  if (aiOrientationSession.reviewOnly) { aiCloseOrientationReview(); return; }
   location.doc.pages.splice(location.pageIndex, 1);
   aiCloseOrientationReview();
   aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0;
@@ -5391,13 +5402,24 @@ function aiRowArithmeticError(row, qty) {
   if (gross == null && unitQtyCents != null && discount != null && total != null && Math.abs((unitQtyCents - discount) - total) > unitToleranceCents) return 'מחיר × כמות פחות ההנחה אינו תואם לסכום השורה';
   return '';
 }
+function aiIsValidEan13(value) {
+  const barcode = normalizeBarcode(value);
+  if (!/^\d{13}$/.test(barcode)) return false;
+  let sum = 0;
+  for (let i = 0; i < 12; i++) sum += Number(barcode[i]) * (i % 2 === 0 ? 1 : 3);
+  return (10 - (sum % 10)) % 10 === Number(barcode[12]);
+}
+function aiCatalogBarcodeIsSafe(value) {
+  const barcode = normalizeBarcode(value);
+  return /^\d{6,20}$/.test(barcode) && (barcode.length !== 13 || aiIsValidEan13(barcode));
+}
 function aiCatalogBarcodeMatches(observed, suffixMode, minimumDigits) {
   const minDigits = Number.isInteger(minimumDigits) ? minimumDigits : 6;
   if (!/^\d{4,20}$/.test(observed || '') || observed.length < minDigits) return [];
   const seen = new Set(), matches = [];
   products.forEach(product => {
     const barcode = normalizeBarcode(product && product.barcode || '');
-    if (!/^\d{6,20}$/.test(barcode)) return;
+    if (!aiCatalogBarcodeIsSafe(barcode)) return;
     if ((suffixMode ? barcode.endsWith(observed) : barcode === observed) && !seen.has(product.id)) {
       seen.add(product.id); matches.push({ product, barcode });
     }
@@ -5425,7 +5447,7 @@ function aiCatalogBarcodeOneDigitMatches(observedValue) {
   const seen = new Set(), matches = [];
   products.forEach(product => {
     const barcode = normalizeBarcode(product && product.barcode || '');
-    if (!aiBarcodeOneDigitDifference(observedValue, barcode) || seen.has(product.id)) return;
+    if (!aiCatalogBarcodeIsSafe(barcode) || !aiBarcodeOneDigitDifference(observedValue, barcode) || seen.has(product.id)) return;
     seen.add(product.id); matches.push({ product, barcode });
   });
   return matches;
@@ -5433,7 +5455,7 @@ function aiCatalogBarcodeOneDigitMatches(observedValue) {
 function aiBarcodeMatchesPattern(barcodeValue, patternValue, suffixMode) {
   const barcode = normalizeBarcode(barcodeValue);
   const info = aiBarcodePatternInfo(patternValue);
-  if (!/^\d{6,20}$/.test(barcode) || !info) return false;
+  if (!aiCatalogBarcodeIsSafe(barcode) || !info) return false;
   if (!suffixMode && barcode.length !== info.pattern.length) return false;
   if (suffixMode && barcode.length < info.pattern.length) return false;
   const candidate = suffixMode ? barcode.slice(-info.pattern.length) : barcode;
@@ -5459,6 +5481,52 @@ function aiSuggestedBarcodeValue(row) {
 function aiSuggestedProductIdValue(row) {
   return String(row && (row.barcodeSuggestedProductId != null ? row.barcodeSuggestedProductId : (row.suggestedProductId != null ? row.suggestedProductId : '')) || '');
 }
+function aiBarcodeEvidenceCandidate(value, readType, catalogHintId) {
+  const observed = normalizeBarcode(value);
+  const pattern = aiNormalizeBarcodePattern(value);
+  const hintId = String(catalogHintId == null ? '' : catalogHintId);
+  const hintMatches = match => !!match && hintId !== '' && String(match.product && match.product.id) === hintId;
+  if (readType === 'full') {
+    if (!/^\d{6,20}$/.test(observed) || (observed.length === 13 && !aiIsValidEan13(observed))) return null;
+    const exact = aiCatalogBarcodeMatches(observed, false);
+    if (exact.length === 1) return exact[0].barcode;
+    const corrected = aiCatalogBarcodeOneDigitMatches(observed);
+    return corrected.length === 1 && hintMatches(corrected[0]) ? corrected[0].barcode : null;
+  }
+  if (readType === 'suffix') {
+    if (!/^\d{4,20}$/.test(observed)) return null;
+    const matches = aiCatalogBarcodeMatches(observed, true, 4);
+    return matches.length === 1 && (observed.length >= AI_BARCODE_SUFFIX_DIGITS || hintMatches(matches[0])) ? matches[0].barcode : null;
+  }
+  if (readType === 'full_pattern' || readType === 'suffix_pattern') {
+    const info = aiBarcodePatternInfo(pattern);
+    if (!info || !info.hasWildcard) return null;
+    const matches = aiCatalogBarcodePatternMatches(info.pattern, readType === 'suffix_pattern');
+    return matches.length === 1 && (info.knownDigits >= AI_BARCODE_SUFFIX_DIGITS || (info.knownDigits >= 4 && hintMatches(matches[0])))
+      ? matches[0].barcode
+      : null;
+  }
+  return null;
+}
+function aiBarcodeRetryEvidenceError(row) {
+  if (!row || typeof row !== 'object') return '';
+  if (row.barcodeRetryConflict === true || String(row.barcodeMatchMethod || '') === 'conflicting_reads') {
+    return 'שתי קריאות עצמאיות החזירו ספרות שונות — אין התאמה אוטומטית ויש לבדוק את צילום השורה';
+  }
+  const owns = key => Object.prototype.hasOwnProperty.call(row, key);
+  const hasInitial = owns('barcodeInitialReadType');
+  const hasRetry = owns('barcodeRetryReadType');
+  if (row.barcodeRetryApplied === true && (!hasInitial || !hasRetry)) {
+    return 'חסרה ראיית המקור של הקריאה החוזרת — אין התאמה אוטומטית ויש לסרוק מחדש';
+  }
+  if (!hasInitial || !hasRetry) return '';
+  const initialCandidate = aiBarcodeEvidenceCandidate(row.barcodeInitialObserved, String(row.barcodeInitialReadType || ''), row.catalogHintIdInitial);
+  const retryCandidate = aiBarcodeEvidenceCandidate(row.barcodeRetryObserved, String(row.barcodeRetryReadType || ''), row.barcodeRetryCatalogHintId);
+  if (initialCandidate && retryCandidate && initialCandidate !== retryCandidate) {
+    return 'שתי קריאות עצמאיות החזירו ספרות שונות — אין התאמה אוטומטית ויש לבדוק את צילום השורה';
+  }
+  return '';
+}
 function aiResolveInvoiceBarcode(row) {
   const readType = String(row && row.barcodeReadType || '');
   const method = String(row && row.barcodeMatchMethod || '');
@@ -5466,6 +5534,11 @@ function aiResolveInvoiceBarcode(row) {
   const observed = normalizeBarcode(observedRaw);
   const observedPattern = aiNormalizeBarcodePattern(observedRaw);
   const resolved = normalizeBarcode(row && row.barcode != null ? row.barcode : '');
+  const retryEvidenceError = aiBarcodeRetryEvidenceError(row);
+  if (retryEvidenceError) return { error: retryEvidenceError };
+  if (method === 'invalid_checksum') {
+    return { error: 'הברקוד המלא שנקרא נכשל בבדיקת ספרת הביקורת — אין התאמה אוטומטית ויש לבדוק את צילום השורה' };
+  }
   if (method === 'exact_full') {
     if (readType !== 'full' || !/^\d{6,20}$/.test(observed) || resolved !== observed) return { error: 'הברקוד המלא שחזר אינו תואם לספרות שנקראו בתמונה' };
     const matches = aiCatalogBarcodeMatches(observed, false);
@@ -5619,6 +5692,9 @@ function aiEvaluateInvoiceScan(payload) {
             documentIndex: index,
             rowIndex,
             lineNumber: rowNumber,
+            sourcePage: Number(row.sourcePage),
+            rowRegion: row.rowRegion || null,
+            barcodeResolutionScope: String(row.barcodeResolutionScope || ''),
             printedDescription: barcodeMatch.suggestion.printedDescription || String(row.description || '').trim(),
             observed: barcodeMatch.suggestion.observed || 'לא נקרא',
             method: barcodeMatch.suggestion.method,
@@ -5771,6 +5847,14 @@ function aiEvaluationIsBetter(candidate, currentBest) {
   }
   return false;
 }
+function aiReceivedProductIds() {
+  const ids = new Set();
+  (reconcileData || []).forEach(line => {
+    const id = String(line && line.productId != null ? line.productId : '').trim();
+    if (id && (Number(line && line.received) || 0) > 0) ids.add(id);
+  });
+  return Array.from(ids);
+}
 async function aiRequestInvoiceScan(token, documents) {
   if (!aiAllPagesOrientationConfirmed(documents)) throw new Error('לא כל התמונות אושרו כישרות — שום תמונה לא נשלחה ל-AI.');
   const response = await fetch(AI_SCAN_WORKER_URL, {
@@ -5778,8 +5862,13 @@ async function aiRequestInvoiceScan(token, documents) {
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
     body: JSON.stringify({
       documents: documents.map(d => ({ noteIndex: d.noteIndex, pages: d.pages.map(p => p.dataUrl) })),
-      // השרת זקוק לשם לצורך הצעת מועמד במקרה לא ודאי. השרת חושף למודל רק
-      // id+name; הברקוד נשאר בצד השרת ומשמש להתאמה דטרמיניסטית אחרי הקריאה.
+      // שלב ההתאמה הראשון בשרת משתמש רק במוצרים שנסרקו והגיעו. נשלחים
+      // מזהים בלבד; השרת בוחר מתוכם רשומות מהקטלוג המקומי ואינו סומך על
+      // שם או ברקוד שמגיעים מרשימת המשנה.
+      receivedProductIds: aiReceivedProductIds(),
+      // השרת זקוק לשם לצורך הצעת מועמד במקרה לא ודאי. מול המודל השרת מחליף
+      // את המזהה האמיתי בכינוי זמני וחושף רק alias+name; הברקוד נשאר בצד
+      // השרת ומשמש להתאמה דטרמיניסטית אחרי הקריאה.
       catalog: products.map(p => ({ id: p.id, name: p.name || '', barcode: normalizeBarcode(p.barcode || '') })).filter(p => /^\d{6,20}$/.test(p.barcode))
     })
   });
@@ -5848,6 +5937,52 @@ function aiFindingHtml(f) {
   const icon = f.type === 'shortage' ? '🔴' : (f.type === 'surplus' ? '🟠' : (f.type === 'promo_missing' ? '🏷️' : 'ℹ️'));
   return '<div class="rounded-xl border p-2.5 text-sm font-black ' + cls + '">' + icon + ' ' + htmlEscape(f.text || '') + '</div>';
 }
+function aiNormalizeRowRegion(value) {
+  // rowRegion מגיע מהמודל ומשמש לתצוגה בלבד. לעולם לא משתמשים בו להתאמת
+  // מוצר, ורק מלבן שלם שנמצא בתוך תחום 0..1000 מתקבל לחיתוך חזותי.
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const x = Number(value.x), y = Number(value.y), width = Number(value.width), height = Number(value.height);
+  if (![x, y, width, height].every(Number.isInteger)) return null;
+  if (x < 0 || y < 0 || width <= 0 || height <= 0 || x > 1000 || y > 1000 || width > 1000 || height > 1000) return null;
+  if (x + width > 1000 || y + height > 1000) return null;
+  return { x, y, width, height };
+}
+function aiBarcodeSuggestionPage(suggestion) {
+  const docIndex = Number(suggestion && suggestion.documentIndex);
+  const sourcePage = Number(suggestion && suggestion.sourcePage);
+  const pageIndex = sourcePage - 1;
+  if (!Number.isInteger(docIndex) || docIndex < 0 || !Number.isInteger(pageIndex) || pageIndex < 0) return null;
+  const doc = aiScanDocuments[docIndex], page = doc && doc.pages[pageIndex];
+  return page ? { docIndex, pageIndex, page } : null;
+}
+function aiOpenBarcodeSuggestionPage(docIndex, pageIndex) {
+  if (!Number.isInteger(Number(docIndex)) || !Number.isInteger(Number(pageIndex))) return false;
+  return aiOpenOrientationReview(Number(docIndex), Number(pageIndex), false);
+}
+function aiBarcodeSuggestionPreviewHtml(suggestion) {
+  const location = aiBarcodeSuggestionPage(suggestion);
+  if (!location) return '<div class="mt-2 rounded-lg border border-slate-200 bg-slate-50 p-2 text-[11px] font-bold text-slate-500">צילום העמוד המתאים אינו זמין במכשיר.</div>';
+  const region = aiNormalizeRowRegion(suggestion && suggestion.rowRegion);
+  let image;
+  if (region) {
+    const widthPct = (100000 / region.width).toFixed(4);
+    const heightPct = (100000 / region.height).toFixed(4);
+    const leftPct = (-100 * region.x / region.width).toFixed(4);
+    const topPct = (-100 * region.y / region.height).toFixed(4);
+    image = '<div class="relative h-28 overflow-hidden rounded-lg bg-white border border-slate-200" dir="ltr"><img src="' + location.page.dataUrl + '" alt="תקריב משורת התעודה" class="absolute max-w-none" style="width:' + widthPct + '%;height:' + heightPct + '%;left:' + leftPct + '%;top:' + topPct + '%;object-fit:fill"></div>' +
+      '<div class="text-[10px] font-bold text-slate-500 mt-1">תקריב משוער של השורה — המלבן סומן בידי ה־AI ומשמש לתצוגה בלבד.</div>';
+  } else {
+    image = '<div class="h-32 rounded-lg overflow-hidden bg-white border border-slate-200"><img src="' + location.page.dataUrl + '" alt="צילום עמוד התעודה" class="w-full h-full object-contain"></div>' +
+      '<div class="text-[10px] font-bold text-slate-500 mt-1">מיקום השורה לא נקרא בוודאות, לכן מוצג העמוד המלא.</div>';
+  }
+  return '<div class="mt-2 rounded-xl border border-slate-200 bg-slate-50 p-2">' + image +
+    '<button data-role="ai-open-suggestion-page" data-doc="' + location.docIndex + '" data-page="' + location.pageIndex + '" class="btn-tap w-full mt-2 py-2 rounded-lg bg-white border border-blue-200 text-blue-700 text-xs font-black"><i class="fa-solid fa-expand ml-1"></i> פתח את צילום העמוד</button></div>';
+}
+function aiBarcodeResolutionScopeHtml(scope) {
+  if (scope === 'received_subset') return '<div class="mt-1 text-[10px] font-bold text-blue-700"><i class="fa-solid fa-layer-group ml-1"></i>המועמד נמצא תחילה בין המוצרים שהגיעו</div>';
+  if (scope === 'full_catalog') return '<div class="mt-1 text-[10px] font-bold text-slate-500"><i class="fa-solid fa-database ml-1"></i>המועמד נמצא בחיפוש בכלל מאגר המוצרים</div>';
+  return '';
+}
 function aiBarcodeSuggestionHtml(suggestion) {
   const printed = suggestion.printedDescription || 'השם המודפס לא נקרא';
   const observed = suggestion.observed || 'לא נקרא';
@@ -5855,7 +5990,8 @@ function aiBarcodeSuggestionHtml(suggestion) {
     '<div class="text-xs font-black text-amber-900 mb-1"><i class="fa-solid fa-triangle-exclamation"></i> נדרש אישור התאמת מוצר</div>' +
     '<div class="text-[11px] font-bold text-slate-600">בתעודה הודפס: <span class="text-slate-800">' + htmlEscape(printed) + '</span></div>' +
     '<div class="text-[11px] font-bold text-slate-600 mt-1">ספרות/תבנית שנקראו: <span dir="ltr" class="inline-block font-black text-amber-900 tracking-wider">' + htmlEscape(observed) + '</span></div>' +
-    '<div class="mt-2 rounded-lg bg-white border border-amber-200 p-2"><div class="text-[10px] font-bold text-slate-400">המוצר שהשרת מציע — עדיין לא הוחל</div><div class="font-black text-slate-800">' + htmlEscape(suggestion.suggestedProductName || '') + '</div><div dir="ltr" class="text-[10px] font-bold text-slate-400">' + htmlEscape(suggestion.suggestedBarcode || '') + '</div></div>' +
+    '<div class="mt-2 rounded-lg bg-white border border-amber-200 p-2"><div class="text-[10px] font-bold text-slate-400">המוצר שהשרת מציע — עדיין לא הוחל</div><div class="font-black text-slate-800">' + htmlEscape(suggestion.suggestedProductName || '') + '</div><div dir="ltr" class="text-[10px] font-bold text-slate-400">' + htmlEscape(suggestion.suggestedBarcode || '') + '</div>' + aiBarcodeResolutionScopeHtml(suggestion.barcodeResolutionScope) + '</div>' +
+    aiBarcodeSuggestionPreviewHtml(suggestion) +
     '<button data-role="ai-confirm-barcode-suggestion" data-doc="' + suggestion.documentIndex + '" data-row="' + suggestion.rowIndex + '" class="btn-tap w-full mt-2 py-2.5 rounded-xl bg-amber-600 text-white font-black"><i class="fa-solid fa-check"></i> כן, זה המוצר שמופיע בשורה</button>' +
   '</div>';
 }
@@ -5890,7 +6026,7 @@ function aiConfirmBarcodeSuggestion(documentIndex, rowIndex) {
   return true;
 }
 function aiInvoiceCaptureHtml() {
-  if (aiScanBusy) return '<div class="bg-white rounded-2xl border-2 border-violet-200 p-6 text-center mb-24"><i class="fa-solid fa-spinner fa-spin text-4xl text-violet-600"></i><div class="font-black text-lg mt-3">' + htmlEscape(aiScanProgressText || (aiScanResponse ? 'מכין את התוצאות…' : 'ה-AI קורא את כל דפי התעודות…')) + '</div><div class="text-xs text-slate-500 mt-1">אל תסגור את המסך. הפעולה עשויה לקחת עד שתי דקות.</div></div>';
+  if (aiScanBusy) return '<div class="bg-white rounded-2xl border-2 border-violet-200 p-6 text-center mb-24"><i class="fa-solid fa-spinner fa-spin text-4xl text-violet-600"></i><div class="font-black text-lg mt-3">' + htmlEscape(aiScanProgressText || (aiScanResponse ? 'מכין את התוצאות…' : 'ה-AI קורא את כל דפי התעודות…')) + '</div><div class="text-xs text-slate-500 mt-1">אל תסגור את המסך. הקריאה והאימות עשויים לקחת כמה דקות.</div></div>';
   if (aiScanEvaluation) {
     const ev = aiScanEvaluation;
     const amountCls = ev.totalVerified ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-300 text-rose-800';
@@ -9000,6 +9136,7 @@ app.addEventListener('click', (e) => {
   if (role === 'ai-run') { aiRunInvoiceScan(); return; }
   if (role === 'ai-edit-images') { aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; renderReconcile(); return; }
   if (role === 'ai-rescan') { resetAiInvoiceScan(); rcStep = 'ai'; renderReconcile(); return; }
+  if (role === 'ai-open-suggestion-page') { aiOpenBarcodeSuggestionPage(parseInt(t.dataset.doc, 10), parseInt(t.dataset.page, 10)); return; }
   if (role === 'ai-confirm-barcode-suggestion') { aiConfirmBarcodeSuggestion(parseInt(t.dataset.doc, 10), parseInt(t.dataset.row, 10)); return; }
   if (role === 'ai-apply') { aiApplyInvoiceResult(); return; }
   if (role === 'admin-login') { requireAdmin('כניסת מנהל', () => { if (currentView === 'settings') renderSettings(); }); return; }
