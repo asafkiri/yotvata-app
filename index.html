@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v123 תוצאות ממוקדות</title>
+    <title>הזמנות יטבתה - v124 חוסרים ישירים</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v123 תוצאות ממוקדות</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v124 חוסרים ישירים</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5566,6 +5566,74 @@ function aiBarcodeRetryEvidenceError(row) {
   }
   return '';
 }
+// התאמה לפי שם אינה מסתמכת על המחיר כדי לבחור בין מוצרים. ה-AI חייב
+// להחזיר מועמד שם יחיד, ורק אז המחיר המודפס וחשבון השורה משמשים כהצלבה
+// עצמאית מול המחיר המקומי. כך שורת מבצע יכולה להיסגר לפי מחיר הבסיס
+// והברוטו, בלי להסתיר אחר כך טעות מחיר או מבצע בסכום הנטו.
+function aiNamePriceMatchProof(row, product) {
+  if (!row || !product) return { ok: false, reason: 'missing_candidate' };
+  const description = String(row.description || '').trim();
+  const hintId = String(row.catalogHintId == null ? '' : row.catalogHintId);
+  const candidateIds = Array.isArray(row.catalogCandidateHintIds) ? row.catalogCandidateHintIds.filter(id => String(id == null ? '' : id)) : [];
+  const localBarcode = normalizeBarcode(product.barcode || '');
+  const localMatches = aiCatalogBarcodeMatches(localBarcode, false);
+  const qtyRaw = row.quantity == null || row.quantity === '' ? NaN : Number(row.quantity);
+  const qty = Number.isFinite(qtyRaw) && qtyRaw > 0 && Math.abs(qtyRaw - Math.round(qtyRaw)) < 0.001 ? Math.round(qtyRaw) : null;
+  const confidence = Number(row.confidence);
+  const basePrice = Number(product.price);
+  if (!description || !hintId || hintId !== String(product.id) || candidateIds.length || localMatches.length !== 1 || String(localMatches[0].product && localMatches[0].product.id) !== String(product.id)) {
+    return { ok: false, reason: 'identity_not_unique' };
+  }
+  if (qty == null || !Number.isFinite(confidence) || confidence < 0.78 || !Number.isFinite(basePrice) || basePrice <= 0) {
+    return { ok: false, reason: 'weak_row' };
+  }
+  if (!aiRowHasArithmeticProof(row, qty)) return { ok: false, reason: 'arithmetic_not_proven' };
+
+  const unitRaw = row.unitPriceExVat == null || row.unitPriceExVat === '' ? null : Number(row.unitPriceExVat);
+  const unitCents = unitRaw != null && Number.isFinite(unitRaw) ? aiMoneyCents(unitRaw) : null;
+  const baseCents = aiMoneyCents(basePrice);
+  const grossCents = aiMoneyCents(row.grossLineTotalExVat);
+  const discountCents = aiMoneyCents(row.lineDiscountExVat);
+  const netCents = aiMoneyCents(row.lineTotalExVat);
+  const expectedGrossCents = aiMoneyCents(basePrice * qty);
+  const lineToleranceCents = Math.min(RECEIPT_ROUNDING_TOLERANCE_CENTS, Math.max(1, Math.ceil(qty * 0.5 + 0.5)));
+  const unitMatchesBase = unitCents != null && baseCents != null && unitCents === baseCents;
+  const grossMatchesBase = grossCents != null && expectedGrossCents != null && Math.abs(grossCents - expectedGrossCents) <= (unitMatchesBase ? lineToleranceCents : 1);
+  const grossNetConsistent = grossCents == null || netCents == null
+    ? true
+    : (discountCents != null ? Math.abs((grossCents - discountCents) - netCents) <= 1 : Math.abs(grossCents - netCents) <= 1);
+  const unitNetConsistent = grossCents != null || netCents == null || discountCents == null
+    ? true
+    : Math.abs((aiMoneyCents(unitRaw * qty) - discountCents) - netCents) <= lineToleranceCents;
+
+  let proofModel = '';
+  if (unitMatchesBase && grossMatchesBase && grossNetConsistent) proofModel = discountCents != null && discountCents > 0 ? 'base_unit_gross_discount_net' : 'base_unit_gross';
+  else if (grossMatchesBase && discountCents != null && netCents != null && grossNetConsistent) proofModel = 'base_gross_discount_net';
+  else if (unitMatchesBase && grossCents == null && discountCents != null && netCents != null && unitNetConsistent) proofModel = 'base_unit_discount_net';
+  if (!proofModel) return {
+    ok: false,
+    reason: 'price_not_corroborated',
+    basePrice,
+    unitPrice: unitRaw,
+    grossLineTotal: grossCents == null ? null : grossCents / 100,
+    expectedGross: expectedGrossCents == null ? null : expectedGrossCents / 100
+  };
+  return {
+    ok: true,
+    proofModel,
+    quantity: qty,
+    rowConfidence: confidence,
+    basePrice,
+    unitPrice: unitRaw,
+    grossLineTotal: grossCents == null ? null : grossCents / 100,
+    lineDiscount: discountCents == null ? null : discountCents / 100,
+    lineTotal: netCents == null ? null : netCents / 100,
+    expectedGross: expectedGrossCents == null ? null : expectedGrossCents / 100,
+    grossDeltaCents: grossCents == null || expectedGrossCents == null ? null : grossCents - expectedGrossCents,
+    toleranceCents: lineToleranceCents,
+    arithmeticVerified: true
+  };
+}
 function aiResolveInvoiceBarcode(row) {
   const readType = String(row && row.barcodeReadType || '');
   const method = String(row && row.barcodeMatchMethod || '');
@@ -5655,6 +5723,17 @@ function aiResolveInvoiceBarcode(row) {
     if (suggestedProductId && suggestedProduct.id !== suggestedProductId) return { error: 'זהות המוצר המוצע אינה תואמת למאגר המקומי' };
     if (method === 'suggested_name_only') {
       if (String(row && row.catalogHintId || '') !== String(suggestedProduct.id) || !String(row && row.description || '').trim()) return { error: 'הצעת השם אינה קשורה למועמד יחיד במאגר המקומי' };
+      const namePriceProof = aiNamePriceMatchProof(row, suggestedProduct);
+      if (namePriceProof.ok) {
+        return {
+          product: suggestedProduct,
+          barcode: suggestedBarcode,
+          observed: observedPattern || observed || 'לא נקרא',
+          method: 'verified_name_price',
+          sourceMethod: method,
+          identityEvidence: namePriceProof
+        };
+      }
     } else if (method === 'suggested_pattern') {
       if (!['full_pattern', 'suffix_pattern'].includes(readType)) return { error: 'סוג קריאת התבנית המוצעת אינו תקין' };
       const info = aiBarcodePatternInfo(observedPattern);
@@ -5789,9 +5868,10 @@ function aiEvaluateInvoiceScan(payload) {
         return;
       }
       if (['unique_suffix', 'unique_full_pattern', 'unique_suffix_pattern'].includes(barcodeMatch.method)) warnings.push(product.name + ': הותאם בוודאות לפי הספרות שנקראו (' + barcodeMatch.observed + ')');
+      if (barcodeMatch.method === 'verified_name_price') warnings.push(product.name + ': הותאם לפי שם יחיד והצלבת מחיר/חשבון מקומית');
       if (qty == null || cents == null || arithmeticError) return;
       const old = aggregates.get(product.id) || { product, qty: 0, totalCents: 0, rows: [], promotionTexts: [], priceVariants: new Set() };
-      old.qty += qty; old.totalCents += cents; old.rows.push({ document: index + 1, page: row.sourcePage, line: row.lineNumber, confidence: isFinite(rowConfidence) ? rowConfidence : 0, barcodeObserved: barcodeMatch.observed, barcodeMatchMethod: barcodeMatch.method });
+      old.qty += qty; old.totalCents += cents; old.rows.push({ document: index + 1, page: row.sourcePage, line: row.lineNumber, confidence: isFinite(rowConfidence) ? rowConfidence : 0, barcodeObserved: barcodeMatch.observed, barcodeMatchMethod: barcodeMatch.method, identityEvidence: barcodeMatch.identityEvidence || null });
       // קיבוץ אבחוני בלבד לזיהוי מחירים מודפסים שונים; אינו משתתף בחישוב הסכום.
       // כאן השוואה ברמת אגורות מכוונת, כדי שעיגולי שורה תקינים לא ייראו כמחירים שונים.
       if (qty > 0) old.priceVariants.add(r2(cents / 100 / qty));
@@ -6166,41 +6246,25 @@ function aiSuggestionCrossCheckHtml(suggestion) {
 function aiMultipleNameSuggestionHtml(suggestion) {
   const printed = suggestion.printedDescription || 'השם המודפס לא נקרא';
   const candidates = Array.isArray(suggestion.candidates) ? suggestion.candidates : [];
-  const candidateButtons = candidates.map(candidate => {
-    const paperQty = Number(candidate.paperQtyIfChosen), receivedQty = Number(candidate.receivedQty);
-    const qtyKnown = Number.isFinite(paperQty) && Number.isFinite(receivedQty);
-    const qtyMatches = qtyKnown && candidate.quantityMatchesReceived === true;
-    const qtyText = qtyKnown
-      ? '<div class="text-[10px] font-bold mt-1 ' + (qtyMatches ? 'text-emerald-700' : 'text-amber-800') + '">' + (qtyMatches ? '✓' : '⚠') + ' אם ייבחר: בנייר ' + paperQty + ' · נסרק ' + receivedQty + (qtyMatches ? ' — תואם' : ' — ייתכן חוסר/עודף') + '</div>'
-      : '';
-    return '<button data-role="ai-confirm-name-candidate" data-doc="' + suggestion.documentIndex + '" data-row="' + suggestion.rowIndex + '" data-candidate-id="' + htmlEscape(candidate.productId || '') + '" class="btn-tap w-full text-right rounded-xl border-2 border-blue-200 bg-white p-3 hover:border-blue-500 focus:border-blue-600">' +
-      '<div class="flex items-center justify-between gap-2"><div><div class="font-black text-slate-800">' + htmlEscape(candidate.productName || '') + '</div><div dir="ltr" class="text-[10px] font-bold text-slate-400">' + htmlEscape(candidate.barcode || '') + '</div>' + qtyText + '</div><div class="shrink-0 rounded-lg bg-blue-600 text-white px-3 py-2 text-xs font-black">בחר</div></div></button>';
-  }).join('');
-  return '<div class="rounded-xl border-2 border-blue-300 bg-blue-50 p-3">' +
-    '<div class="text-sm font-black text-blue-900 mb-1"><i class="fa-solid fa-list-check"></i> השם מתאים לכמה מוצרים — אתה בוחר</div>' +
-    '<div class="text-[11px] font-bold text-slate-600">בתעודה הודפס: <span class="text-slate-900">' + htmlEscape(printed) + '</span></div>' +
-    '<div class="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-[11px] font-black text-amber-900"><i class="fa-solid fa-triangle-exclamation ml-1"></i>הכמות והסכום מחזקים את הבדיקה, אך אינם בוחרים טעם או מוצר. בדוק את צילום השורה ולחץ על המוצר הנכון.</div>' +
-    aiSuggestionCrossCheckHtml(suggestion) +
-    aiBarcodeSuggestionPreviewHtml(suggestion) +
-    '<div class="mt-2 space-y-2" role="group" aria-label="בחר את המוצר שמופיע בשורת התעודה">' + candidateButtons + '</div>' +
-  '</div>';
+  const candidateButtons = candidates.map(candidate => '<button data-role="ai-confirm-name-candidate" data-doc="' + suggestion.documentIndex + '" data-row="' + suggestion.rowIndex + '" data-candidate-id="' + htmlEscape(candidate.productId || '') + '" class="btn-tap w-full flex items-center justify-between gap-2 rounded-lg border border-violet-200 bg-white px-3 py-2.5 text-right font-black text-slate-800"><span>' + htmlEscape(candidate.productName || '') + '</span><span class="shrink-0 text-violet-700 text-xs">בחר</span></button>').join('');
+  return '<details class="rounded-xl border border-violet-200 bg-violet-50 p-3">' +
+    '<summary class="cursor-pointer list-none flex items-center justify-between gap-2 font-black text-violet-900"><span><i class="fa-solid fa-circle-question ml-1"></i>צריך לבחור מוצר: ' + htmlEscape(printed) + '</span><span class="text-xs shrink-0">פתח ובחר</span></summary>' +
+    '<div class="mt-3 space-y-2" role="group" aria-label="בחר את המוצר שמופיע בשורת התעודה">' + candidateButtons + '</div>' +
+  '</details>';
 }
 function aiBarcodeSuggestionHtml(suggestion) {
   if (suggestion && suggestion.multipleName === true) return aiMultipleNameSuggestionHtml(suggestion);
   const printed = suggestion.printedDescription || 'השם המודפס לא נקרא';
-  const observed = suggestion.observed || 'לא נקרא';
-  const evidenceLabel = suggestion.nameOnly
-    ? '<div class="text-[11px] font-black text-rose-700 mt-1"><i class="fa-solid fa-font ml-1"></i>הברקוד לא הוכיח מוצר; זו הצעה לפי השם המודפס בלבד.</div>'
-    : '<div class="text-[11px] font-bold text-slate-600 mt-1">ספרות/תבנית שנקראו: <span dir="ltr" class="inline-block font-black text-amber-900 tracking-wider">' + htmlEscape(observed) + '</span></div>';
-  return '<div class="rounded-xl border-2 border-amber-300 bg-amber-50 p-3">' +
-    '<div class="text-xs font-black text-amber-900 mb-1"><i class="fa-solid fa-triangle-exclamation"></i> נדרש אישור התאמת מוצר</div>' +
-    '<div class="text-[11px] font-bold text-slate-600">בתעודה הודפס: <span class="text-slate-800">' + htmlEscape(printed) + '</span></div>' +
-    evidenceLabel +
-    '<div class="mt-2 rounded-lg bg-white border border-amber-200 p-2"><div class="text-[10px] font-bold text-slate-400">המוצר שהשרת מציע — עדיין לא הוחל</div><div class="font-black text-slate-800">' + htmlEscape(suggestion.suggestedProductName || '') + '</div><div dir="ltr" class="text-[10px] font-bold text-slate-400">' + htmlEscape(suggestion.suggestedBarcode || '') + '</div>' + aiBarcodeResolutionScopeHtml(suggestion.barcodeResolutionScope) + '</div>' +
-    aiSuggestionCrossCheckHtml(suggestion) +
-    aiBarcodeSuggestionPreviewHtml(suggestion) +
-    '<button data-role="ai-confirm-barcode-suggestion" data-doc="' + suggestion.documentIndex + '" data-row="' + suggestion.rowIndex + '" class="btn-tap w-full mt-2 py-2.5 rounded-xl bg-amber-600 text-white font-black"><i class="fa-solid fa-check"></i> כן, זה המוצר שמופיע בשורה</button>' +
-  '</div>';
+  const productName = suggestion.suggestedProductName || printed;
+  return '<details class="rounded-xl border border-amber-200 bg-amber-50 p-3">' +
+    '<summary class="cursor-pointer list-none flex items-center justify-between gap-2 font-black text-amber-900"><span><i class="fa-solid fa-circle-question ml-1"></i>צריך לאשר מוצר: ' + htmlEscape(printed) + '</span><span class="text-xs shrink-0">פתח</span></summary>' +
+    '<button data-role="ai-confirm-barcode-suggestion" data-doc="' + suggestion.documentIndex + '" data-row="' + suggestion.rowIndex + '" class="btn-tap w-full mt-3 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-white px-3 py-2.5 text-right font-black text-slate-800"><span>' + htmlEscape(productName) + '</span><span class="shrink-0 text-amber-700 text-xs">בחר</span></button>' +
+  '</details>';
+}
+function aiPendingChoicesHtml(suggestions) {
+  const rows = Array.isArray(suggestions) ? suggestions : [];
+  if (!rows.length) return '';
+  return '<div class="rounded-xl border border-violet-200 bg-white p-3"><div class="flex items-center justify-between gap-2 mb-2 text-violet-900"><div class="font-black"><i class="fa-solid fa-list-check ml-1"></i>בחירת מוצר</div><span class="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-black">' + rows.length + '</span></div><div class="space-y-2">' + rows.map(aiBarcodeSuggestionHtml).join('') + '</div></div>';
 }
 function aiConfirmNameCandidate(documentIndex, rowIndex, candidateProductId) {
   if (!aiScanResponse || !aiScanResponse.scan || !Array.isArray(aiScanResponse.scan.documents)) return false;
@@ -6290,46 +6354,24 @@ function aiInvoiceCaptureHtml() {
   if (aiScanBusy) return '<div class="bg-white rounded-2xl border-2 border-violet-200 p-6 text-center mb-24"><i class="fa-solid fa-spinner fa-spin text-4xl text-violet-600"></i><div class="font-black text-lg mt-3">' + htmlEscape(aiScanProgressText || (aiScanResponse ? 'מכין את התוצאות…' : 'ה-AI קורא את כל דפי התעודות…')) + '</div><div class="text-xs text-slate-500 mt-1">אל תסגור את המסך. הקריאה והאימות עשויים לקחת כמה דקות.</div></div>';
   if (aiScanEvaluation) {
     const ev = aiScanEvaluation;
-    const amountCls = ev.totalVerified ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-300 text-rose-800';
-    const unitsCls = ev.unitsVerified ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-rose-50 border-rose-300 text-rose-800';
-    const checks = '<div class="grid grid-cols-2 gap-2 mb-3"><div class="rounded-xl border p-2 text-center ' + amountCls + '"><div class="text-[10px] font-bold">סכום שנקרא</div><div class="font-black">₪' + fmtMoney(ev.extractedTotal) + (ev.totalVerified ? ' ✓' : ' ✗') + '</div></div><div class="rounded-xl border p-2 text-center ' + unitsCls + '"><div class="text-[10px] font-bold">יחידות שנקראו</div><div class="font-black">' + ev.extractedUnits + (ev.unitsVerified ? ' ✓' : ' ✗') + '</div></div></div>';
-    const scanMeta = (aiScanAutoRotationNote || aiScanAttemptCount > 1)
-      ? '<div class="rounded-xl bg-blue-50 border border-blue-200 p-2.5 text-xs font-black text-blue-800 mb-3"><i class="fa-solid fa-rotate"></i> ' + htmlEscape(aiScanAutoRotationNote || 'נבדקו זוויות נוספות') + ' · ' + aiScanAttemptCount + ' ניסיונות</div>'
-      : '';
-    const modelInfo = aiScanResponse && aiScanResponse.model
-      ? '<div class="text-[10px] font-bold text-slate-400 mb-2">מודל שביצע את הקריאה: <span dir="ltr">' + htmlEscape(aiScanResponse.model) + '</span></div>'
-      : '';
-    const recognizedHtml = aiRecognizedProductsHtml(ev);
     const actionableFindings = (Array.isArray(ev.findings) ? ev.findings : []).filter(aiIsActionableFinding);
-    const informationalFindingsHtml = aiInformationalFindingsHtml(ev.findings);
-    const suggestionsHtml = Array.isArray(ev.barcodeSuggestions) && ev.barcodeSuggestions.length
-      ? '<div class="mt-3"><div class="font-black text-sm text-amber-900 mb-2">התאמות שמחכות לאישור שלך:</div><div class="space-y-2">' + ev.barcodeSuggestions.map(aiBarcodeSuggestionHtml).join('') + '</div></div>'
-      : '';
-    const findingsHtml = !ev.findingsReady
-      ? '<div class="rounded-xl bg-amber-50 border border-amber-300 p-3 font-black text-amber-900">' + (!ev.allRowsMapped ? 'הסכום והיחידות נקראו, אך חוסר/עודף ומחירים יחושבו רק לאחר אישור כל המוצרים.' : 'חוסר/עודף ומחירים לא חושבו, מפני שלפחות שורה אחת חסרה נתון או אינה עוברת את בדיקת החשבון.') + '</div>'
-      : (actionableFindings.length
+    const pendingChoices = Array.isArray(ev.barcodeSuggestions) ? ev.barcodeSuggestions : [];
+    const choicesHtml = aiPendingChoicesHtml(pendingChoices);
+    const findingsHtml = ev.findingsReady
+      ? (actionableFindings.length
         ? aiActionableFindingsHtml(actionableFindings)
-        : '<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-3 font-black text-emerald-800"><i class="fa-solid fa-circle-check ml-1"></i>הכול תואם — לא נמצאו חוסר, עודף או בעיית מחיר/מבצע.</div>');
-    const errorsHtml = ev.errors.length
-      ? '<div class="mt-3 rounded-xl bg-rose-50 border border-rose-300 p-3"><div class="font-black text-rose-800 mb-1">אי אפשר לאשר עדיין:</div>' + ev.errors.map(x => '<div class="text-xs font-bold text-rose-700 mt-1">• ' + htmlEscape(x) + '</div>').join('') + '</div>'
+        : '<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-3 font-black text-emerald-800"><i class="fa-solid fa-circle-check ml-1"></i>הכול תואם — לא נמצאו חוסר, עודף או בעיית מחיר/מבצע.</div>')
       : '';
-    const warningsHtml = ev.warnings.length
-      ? '<div class="mt-3 rounded-xl bg-amber-50 border border-amber-200 p-2"><div class="font-black text-xs text-amber-800">אזהרות קריאה (' + ev.warnings.length + ')</div>' + ev.warnings.map(x => '<div class="text-[11px] font-bold text-amber-800 mt-1">• ' + htmlEscape(x) + '</div>').join('') + '</div>'
+    const blockingHtml = !ev.valid && !pendingChoices.length
+      ? '<div class="rounded-xl bg-rose-50 border border-rose-200 p-3 text-center"><div class="font-black text-rose-800">הסריקה לא נסגרה בוודאות</div><div class="text-xs font-bold text-rose-700 mt-1">יש לצלם מחדש או לעבור לבדיקה ידנית.</div><button data-role="ai-rescan" class="btn-tap w-full bg-white border-2 border-rose-200 text-rose-700 rounded-xl py-2.5 font-black mt-3">צלם מחדש</button><button data-role="rc-goto-manual" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">עבור לבדיקה ידנית</button></div>'
       : '';
-    const technicalDetails = '<details class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">' +
-      '<summary class="cursor-pointer font-black text-sm text-slate-600"><i class="fa-solid fa-circle-info ml-1"></i>פרטי הקריאה ופעולות נוספות</summary>' +
-      '<div class="mt-3">' + modelInfo + scanMeta + checks + recognizedHtml + informationalFindingsHtml + warningsHtml +
-        '<button data-role="ai-edit-images" class="btn-tap w-full bg-white border-2 border-blue-200 text-blue-700 rounded-xl py-3 font-black mt-3"><i class="fa-solid fa-rotate"></i> חזור לתמונות וסובב ידנית</button>' +
-        '<button data-role="ai-rescan" class="btn-tap w-full bg-white border-2 border-slate-200 text-slate-700 rounded-xl py-3 font-black mt-2">מחק את התמונות וצלם מחדש</button>' +
-        '<button data-role="rc-goto-manual" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">עבור לבדיקה ידנית</button>' +
-      '</div></details>';
     const applyButton = ev.valid
-      ? '<button data-role="ai-apply" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-3.5 font-black mt-4"><i class="fa-solid fa-check"></i> ' + (actionableFindings.length ? 'אשר את הבעיות והמשך' : 'הכול תואם — המשך') + '</button>'
+      ? '<button data-role="ai-apply" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-3.5 font-black mt-4"><i class="fa-solid fa-check"></i> ' + (actionableFindings.length ? 'אשר והמשך' : 'הכול תואם — המשך') + '</button>'
       : '';
     return '<div class="bg-white rounded-2xl border-2 ' + (ev.valid ? 'border-violet-300' : 'border-rose-300') + ' p-4 shadow-sm mb-24">' +
       '<div class="font-black text-xl text-slate-800 mb-1"><i class="fa-solid fa-wand-magic-sparkles text-violet-600"></i> תוצאות הסריקה החכמה</div>' +
-      '<div class="text-xs text-slate-500 font-bold mb-2">מוצגות רק בעיות שדורשות החלטה. פרטי הקריאה המלאים זמינים למטה.</div>' +
-      suggestionsHtml + findingsHtml + errorsHtml + applyButton + technicalDetails + '</div>';
+      '<div class="text-xs text-slate-500 font-bold mb-3">רק חוסרים, עודפים ובעיות שדורשות ממך החלטה.</div>' +
+      '<div class="space-y-2">' + choicesHtml + findingsHtml + blockingHtml + '</div>' + applyButton + '</div>';
   }
   const docCards = aiScanDocuments.map((doc, i) => {
     const noteText = 'סכום צפוי: ₪' + fmtMoney(doc.amount || 0) + (doc.units != null ? ' · ' + doc.units + ' יחידות' : '');
@@ -6344,6 +6386,45 @@ function aiInvoiceCaptureHtml() {
     (aiScanError ? '<div class="rounded-xl bg-rose-50 border border-rose-300 p-2.5 text-xs font-black text-rose-700 mb-3">' + htmlEscape(aiScanError) + '</div>' : '') + docCards +
     '<button data-role="ai-run" ' + (ready ? '' : 'disabled') + ' class="btn-tap w-full rounded-xl py-3.5 font-black ' + (ready ? 'bg-violet-600 text-white' : 'bg-slate-200 text-slate-400') + '"><i class="fa-solid fa-wand-magic-sparkles"></i> פענח את כל התעודות ב-AI</button>' +
     '<div class="text-[10px] text-slate-400 font-bold text-center mt-2">בדרך כלל מתבצעת קריאת AI אחת. רק אם נקראות 0 שורות, המערכת עשויה לנסות עד שתי זוויות נוספות.</div><button data-role="rc-goto-manual" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">המשך בלי AI — בדיקה ידנית</button></div>';
+}
+function aiAutomaticNamePriceMappingsAudit() {
+  const documents = aiScanResponse && aiScanResponse.scan && Array.isArray(aiScanResponse.scan.documents)
+    ? aiScanResponse.scan.documents
+    : [];
+  const output = [];
+  documents.forEach((doc, documentIndex) => {
+    (Array.isArray(doc && doc.rows) ? doc.rows : []).forEach((row, rowIndex) => {
+      const resolution = aiResolveInvoiceBarcode(row);
+      if (!resolution || resolution.method !== 'verified_name_price' || !resolution.product || !resolution.barcode || !resolution.identityEvidence) return;
+      const proof = resolution.identityEvidence;
+      output.push({
+        documentIndex: Number.isInteger(Number(doc.noteIndex)) ? Number(doc.noteIndex) : documentIndex,
+        rowIndex,
+        lineNumber: row.lineNumber == null ? null : Number(row.lineNumber),
+        sourcePage: row.sourcePage == null ? null : Number(row.sourcePage),
+        productId: resolution.product.id,
+        productName: String(resolution.product.name || '').slice(0, 160),
+        barcode: resolution.barcode,
+        barcodeSource: 'catalog_after_name_price_crosscheck',
+        confirmationSource: 'verified_name_price',
+        catalogHintId: String(row.catalogHintId == null ? '' : row.catalogHintId).slice(0, 160) || null,
+        printedDescription: String(row.description || '').slice(0, 160),
+        quantity: proof.quantity,
+        basePrice: proof.basePrice,
+        unitPriceExVat: proof.unitPrice,
+        grossLineTotalExVat: proof.grossLineTotal,
+        lineDiscountExVat: proof.lineDiscount,
+        lineTotalExVat: proof.lineTotal,
+        expectedGrossExVat: proof.expectedGross,
+        grossDeltaCents: proof.grossDeltaCents,
+        toleranceCents: proof.toleranceCents,
+        proofModel: proof.proofModel,
+        arithmeticVerified: proof.arithmeticVerified === true,
+        rowConfidence: proof.rowConfidence
+      });
+    });
+  });
+  return output;
 }
 function aiConfirmedMappingsAudit() {
   const documents = aiScanResponse && aiScanResponse.scan && Array.isArray(aiScanResponse.scan.documents)
@@ -6433,7 +6514,8 @@ function aiApplyInvoiceResult() {
   reconcileSupplierCreditClaim = claims.length ? { status: 'open', source: 'ai_invoice_scan', amount: r2(claims.reduce((sum, f) => sum + Number(f.amount || 0), 0)), items: claims.map(f => ({ productId: f.productId, name: f.name, qty: f.qty, expectedUnitPrice: f.expectedPrice, chargedUnitPrice: f.paperPrice, amount: r2(f.amount || 0), reason: f.type })) } : null;
   const safeFindings = ev.findings.map(f => ({ type: f.type, productId: f.productId || null, name: f.name || '', qty: f.qty != null ? f.qty : null, amount: f.amount != null ? f.amount : null, expectedPrice: f.expectedPrice != null ? f.expectedPrice : null, paperPrice: f.paperPrice != null ? f.paperPrice : null, text: f.text || '' }));
   const confirmedMappings = aiConfirmedMappingsAudit();
-  reconcileAiAudit = { version: 4, scannedAt: Date.now(), model: aiScanResponse && aiScanResponse.model || 'unknown', requestId: aiScanResponse && aiScanResponse.requestId || null, attempts: aiScanAttemptCount || 1, autoRotation: aiScanAutoRotationNote || '', totalVerified: !!ev.totalVerified, unitsVerified: !!ev.unitsVerified, documents: ev.docSummaries, confirmedMappings, findings: safeFindings, hasDiscrepancy: safeFindings.some(f => ['shortage', 'surplus', 'price', 'promo_missing'].includes(f.type)) };
+  const automaticMappings = aiAutomaticNamePriceMappingsAudit();
+  reconcileAiAudit = { version: 5, scannedAt: Date.now(), model: aiScanResponse && aiScanResponse.model || 'unknown', requestId: aiScanResponse && aiScanResponse.requestId || null, attempts: aiScanAttemptCount || 1, autoRotation: aiScanAutoRotationNote || '', totalVerified: !!ev.totalVerified, unitsVerified: !!ev.unitsVerified, documents: ev.docSummaries, confirmedMappings, automaticMappings, findings: safeFindings, hasDiscrepancy: safeFindings.some(f => ['shortage', 'surplus', 'price', 'promo_missing'].includes(f.type)) };
   const exactUnits = reconcileUnitsBalanced();
   const exactMoney = reconcileMoneyBalanced();
   if (!exactMoney || !exactUnits) {
