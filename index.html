@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v125 בלי אישור ביניים</title>
+    <title>הזמנות יטבתה - v126 מוצר חדש מהתעודה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v125 בלי אישור ביניים</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v126 מוצר חדש מהתעודה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -512,7 +512,7 @@ let aiScanError = '';
 let aiScanAutoRotationNote = '';
 let aiScanAttemptCount = 0;
 const AI_SCAN_MAX_AUTO_ROTATION_RETRIES = 2;
-const AI_SCAN_MIN_SERVICE_VERSION = 123;
+const AI_SCAN_MIN_SERVICE_VERSION = 124;
 const AI_BARCODE_SUFFIX_DIGITS = 6;
 let aiOrientationSession = null;
 let aiOrientationBusy = false;
@@ -561,6 +561,7 @@ let promoEditId = null;          // מוצר בעריכת מבצע
 let qtyProduct = null, qtyTarget = 'receipt'; // חלון כמות בסריקה
 let priceEditId = null, priceFromScan = false, priceQuery = ''; // מוצרים ומחירים
 let productCreateId = null, prodAfterSaveTarget = null, productEditorScanReturn = false;
+let aiUnknownProductCreateContext = null; // שורת AI בטוחה שממתינה ליצירת מוצר, ללא קריאה נוספת
 let promoUnitMode = 'unit'; // יחידת סף המבצע: 'unit' | 'carton'
 let promos = [], promoEdit = null, promoSearch = ''; // מבצעי סל
 let promoType = 'receipt'; // סוג מבצע בעורך: 'receipt' (בתעודה) | 'monthEnd' (מרכזת)
@@ -598,6 +599,23 @@ function setProductBarcodeBlocked(blocked) {
     btn.style.opacity = blocked ? '0.55' : '';
     btn.style.pointerEvents = blocked ? 'none' : '';
   });
+}
+function setAiUnknownProductBarcodeLock(locked, barcode) {
+  const input = $('prod_barcode'), scanButton = $('pr_scanbc');
+  if (input) {
+    if (locked) input.value = normalizeBarcode(barcode || '');
+    input.readOnly = !!locked;
+    input.setAttribute('aria-readonly', locked ? 'true' : 'false');
+    input.classList.toggle('bg-slate-100', !!locked);
+    input.classList.toggle('text-slate-500', !!locked);
+    input.title = locked ? 'הברקוד אומת מהתעודה ואינו ניתן לשינוי בזמן ההוספה' : '';
+  }
+  if (scanButton) {
+    scanButton.disabled = !!locked;
+    scanButton.style.opacity = locked ? '0.45' : '';
+    scanButton.style.pointerEvents = locked ? 'none' : '';
+    scanButton.title = locked ? 'הברקוד נעול לקריאה שאומתה מהתעודה' : 'סרוק ברקוד';
+  }
 }
 function setPromptBarcodeBlocked(blocked) {
   const btn = $('promptOk'); if (!btn) return;
@@ -637,6 +655,22 @@ async function findCloudProductByBarcode(value, exceptId) {
   } catch (e) {
     // החסימה המקומית עדיין פעילה גם אם בדיקת הרענון לא זמינה.
     console.warn('barcode freshness check failed', e);
+    return null;
+  }
+}
+// במסלול מוצר חדש מהתעודה חייבים להבחין בין אפס, התאמה יחידה וכפילויות
+// בענן. null מציין שהבדיקה עצמה לא הושלמה ולכן אסור להתקדם לכתיבה.
+async function findCloudProductMatchesByBarcode(value, exceptId) {
+  const key = normalizeBarcode(value);
+  if (!key || !db || !navigator.onLine) return null;
+  try {
+    const ref = collection(db, 'artifacts', appId, 'public', 'data', 'products');
+    const snap = await getDocs(ref);
+    return snap.docs
+      .filter(d => d.id !== exceptId && normalizeBarcode((d.data() || {}).barcode) === key)
+      .map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    console.warn('unknown product barcode freshness check failed', e);
     return null;
   }
 }
@@ -5134,7 +5168,7 @@ function resetAiInvoiceScan() {
   aiCloseOrientationReview();
   const source = receiptNotes.length ? receiptNotes.map(normNote) : [{ amount: receiptNoteTotal, units: receiptNoteUnits }];
   aiScanDocuments = source.map((note, i) => ({ noteIndex: i, amount: note.amount, units: note.units, pages: [] }));
-  aiScanBusy = false; aiScanProgressText = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; reconcileAiAudit = null;
+  aiScanBusy = false; aiScanProgressText = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; reconcileAiAudit = null; aiUnknownProductCreateContext = null;
 }
 function aiTotalPages() { return aiScanDocuments.reduce((sum, d) => sum + d.pages.length, 0); }
 function aiDataUrlBytes(dataUrl) {
@@ -5663,6 +5697,69 @@ function aiNamePriceMatchProof(row, product) {
     arithmeticVerified: true
   };
 }
+function aiVerifiedUnknownProductData(row, options) {
+  options = options || {};
+  if (!row || String(row.barcodeMatchMethod || '') !== 'verified_unknown_full') return { ok: false, error: 'השורה אינה מוצר חדש מאומת' };
+  const observed = normalizeBarcode(row.barcodeObserved || '');
+  const resolved = normalizeBarcode(row.barcode || '');
+  const initial = normalizeBarcode(row.barcodeInitialObserved || '');
+  const retry = normalizeBarcode(row.barcodeRetryObserved || '');
+  if (String(row.barcodeReadType || '') !== 'full' || !aiIsValidEan13(observed) || resolved) return { ok: false, error: 'הברקוד החדש אינו קריאה מלאה ותקינה' };
+  if (row.barcodeRetryApplied !== true || row.barcodeRetryConflict === true || String(row.barcodeInitialReadType || '') !== 'full' || String(row.barcodeRetryReadType || '') !== 'full' || initial !== observed || retry !== observed) {
+    return { ok: false, error: 'הברקוד החדש לא אומת בשתי קריאות מלאות וזהות' };
+  }
+  const retryConfidence = Number(row.barcodeRetryConfidence);
+  if (!Number.isFinite(retryConfidence) || retryConfidence < 0.78) return { ok: false, error: 'ביטחון קריאת האימות החוזרת של הברקוד נמוך מדי' };
+  if (options.allowCatalogExisting !== true && aiCatalogBarcodeMatches(observed, false).length !== 0) return { ok: false, error: 'הברקוד כבר קיים במאגר' };
+  const name = String(row.description || '').trim().slice(0, 160);
+  const qtyRaw = row.quantity == null || row.quantity === '' ? NaN : Number(row.quantity);
+  const quantity = Number.isFinite(qtyRaw) && qtyRaw > 0 && Math.abs(qtyRaw - Math.round(qtyRaw)) < 0.001 ? Math.round(qtyRaw) : null;
+  const confidence = Number(row.confidence);
+  const lineTotal = quantity == null ? null : aiLineTotal(row, quantity);
+  if (!name || quantity == null || !Number.isFinite(confidence) || confidence < 0.78 || lineTotal == null || !(lineTotal > 0) || !aiRowHasArithmeticProof(row, quantity)) {
+    return { ok: false, error: 'שם המוצר, הכמות, המחיר וחשבון השורה לא נקראו בביטחון מספיק' };
+  }
+  const unitRaw = row.unitPriceExVat == null || row.unitPriceExVat === '' ? null : Number(row.unitPriceExVat);
+  const grossRaw = row.grossLineTotalExVat == null || row.grossLineTotalExVat === '' ? null : Number(row.grossLineTotalExVat);
+  const safeUnitPrice = Number.isFinite(unitRaw) && unitRaw > 0
+    ? r2(unitRaw)
+    : (Number.isFinite(grossRaw) && grossRaw > 0 ? r2(grossRaw / quantity) : null);
+  if (!(safeUnitPrice > 0)) return { ok: false, error: 'לא נקרא מחיר יחידה רגיל ובטוח למוצר החדש' };
+  return { ok: true, barcode: observed, name, quantity, safeUnitPrice, lineTotal: r2(lineTotal), confidence };
+}
+function aiVerifiedUnknownProductRows(barcode) {
+  const expected = normalizeBarcode(barcode || '');
+  const rows = [];
+  if (!expected || !aiScanResponse || !aiScanResponse.scan || !Array.isArray(aiScanResponse.scan.documents)) return rows;
+  aiScanResponse.scan.documents.forEach((doc, documentPosition) => {
+    (Array.isArray(doc && doc.rows) ? doc.rows : []).forEach((row, rowIndex) => {
+      const verified = aiVerifiedUnknownProductData(row, { allowCatalogExisting: true });
+      if (!verified.ok || verified.barcode !== expected) return;
+      rows.push({ documentIndex: Number(doc.noteIndex), documentPosition, rowIndex, row, verified });
+    });
+  });
+  return rows;
+}
+function aiUnknownProductCreateContextStatus(context, barcodeValue, requireActive) {
+  const ctx = context || null;
+  const expected = normalizeBarcode(ctx && ctx.barcode || '');
+  if (!ctx || !expected || !aiIsValidEan13(expected)) return { ok: false, error: 'הקשר הישן של המוצר החדש אינו תקין' };
+  if (requireActive === true) {
+    if (aiUnknownProductCreateContext !== ctx || prodAfterSaveTarget !== 'ai_unknown' || priceEditId != null) return { ok: false, error: 'חלון המוצר כבר אינו קשור לשורת התעודה' };
+    const barcodeInput = $('prod_barcode'), scanButton = $('pr_scanbc');
+    if (!barcodeInput || barcodeInput.readOnly !== true || (scanButton && scanButton.disabled !== true)) return { ok: false, error: 'נעילת הברקוד המאומת אינה פעילה — השמירה נעצרה' };
+  }
+  if (ctx.response !== aiScanResponse) return { ok: false, error: 'תוצאות הסריקה השתנו מאז פתיחת המוצר' };
+  if (String(barcodeValue == null ? '' : barcodeValue).trim() !== expected || normalizeBarcode(barcodeValue) !== expected) {
+    return { ok: false, error: 'הברקוד המאומת מהתעודה השתנה — השמירה נעצרה' };
+  }
+  const doc = aiScanResponse && aiScanResponse.scan && Array.isArray(aiScanResponse.scan.documents)
+    ? aiScanResponse.scan.documents.find(item => Number(item && item.noteIndex) === Number(ctx.documentIndex)) : null;
+  const row = doc && Array.isArray(doc.rows) ? doc.rows[Number(ctx.rowIndex)] : null;
+  const verified = aiVerifiedUnknownProductData(row, { allowCatalogExisting: true });
+  if (!verified.ok || verified.barcode !== expected) return { ok: false, error: verified.error || 'ראיית הברקוד בשורת התעודה השתנתה' };
+  return { ok: true, barcode: expected, row, verified };
+}
 function aiResolveInvoiceBarcode(row) {
   const readType = String(row && row.barcodeReadType || '');
   const method = String(row && row.barcodeMatchMethod || '');
@@ -5674,6 +5771,29 @@ function aiResolveInvoiceBarcode(row) {
   if (retryEvidenceError) return { error: retryEvidenceError };
   if (method === 'invalid_checksum') {
     return { error: 'הברקוד המלא שנקרא נכשל בבדיקת ספרת הביקורת — אין התאמה אוטומטית ויש לבדוק את צילום השורה' };
+  }
+  if (method === 'verified_unknown_full') {
+    const unknown = aiVerifiedUnknownProductData(row, { allowCatalogExisting: true });
+    if (!unknown.ok) return { error: unknown.error };
+    const existing = aiCatalogBarcodeMatches(unknown.barcode, false);
+    if (existing.length > 1) return { error: 'הברקוד החדש קיים ביותר ממוצר אחד במאגר — יש לתקן את הכפילות לפני המשך' };
+    if (existing.length === 1) {
+      return { product: existing[0].product, barcode: existing[0].barcode, observed: unknown.barcode, method: 'verified_unknown_existing' };
+    }
+    return {
+      error: 'נמצא בתעודה ברקוד חדש שאינו קיים במערכת',
+      suggestion: {
+        unknownProduct: true,
+        barcode: unknown.barcode,
+        productName: unknown.name,
+        printedDescription: unknown.name,
+        quantity: unknown.quantity,
+        safeUnitPrice: unknown.safeUnitPrice,
+        lineTotal: unknown.lineTotal,
+        observed: unknown.barcode,
+        method
+      }
+    };
   }
   if (method === 'exact_full') {
     if (readType !== 'full' || !/^\d{6,20}$/.test(observed) || resolved !== observed) return { error: 'הברקוד המלא שחזר אינו תואם לספרות שנקראו בתמונה' };
@@ -5725,6 +5845,13 @@ function aiResolveInvoiceBarcode(row) {
       const selectedId = String(row && row.barcodeUserConfirmedFromCatalogHintId || '');
       const selectedCandidate = nameCandidates.find(candidate => String(candidate.product && candidate.product.id) === selectedId);
       if (!selectedCandidate || selectedCandidate.barcode !== resolved || String(matches[0].product.id) !== selectedId) return { error: 'אישור המשתמש אינו תואם לאחת מאפשרויות השם שהוצגו' };
+    } else if (sourceMethod === 'verified_unknown_full') {
+      const initial = normalizeBarcode(row && row.barcodeInitialObserved || '');
+      const retry = normalizeBarcode(row && row.barcodeRetryObserved || '');
+      const retryConfidence = Number(row && row.barcodeRetryConfidence);
+      if (sourceReadType !== 'full' || !aiIsValidEan13(sourceObserved) || resolved !== sourceObserved || row.barcodeRetryApplied !== true || row.barcodeRetryConflict === true || String(row.barcodeInitialReadType || '') !== 'full' || String(row.barcodeRetryReadType || '') !== 'full' || initial !== resolved || retry !== resolved || !Number.isFinite(retryConfidence) || retryConfidence < 0.78) {
+        return { error: 'המוצר החדש אינו תואם לברקוד שאומת בשתי הקריאות' };
+      }
     } else return { error: 'לא נמצאה הוכחה שהמוצר אושר דרך ההצעה' };
     return { product: matches[0].product, barcode: matches[0].barcode, observed: sourceObserved, method };
   }
@@ -5879,7 +6006,13 @@ function aiEvaluateInvoiceScan(payload) {
             arithmeticVerified: cents != null && aiRowHasArithmeticProof(row, qty),
             rowConfidence: isFinite(rowConfidence) ? rowConfidence : 0
           };
-          if (barcodeMatch.suggestion.multipleName === true) {
+          if (barcodeMatch.suggestion.unknownProduct === true) {
+            commonSuggestion.unknownProduct = true;
+            commonSuggestion.unknownBarcode = barcodeMatch.suggestion.barcode;
+            commonSuggestion.unknownProductName = barcodeMatch.suggestion.productName || commonSuggestion.printedDescription;
+            commonSuggestion.safeUnitPrice = barcodeMatch.suggestion.safeUnitPrice;
+            commonSuggestion.lineTotal = barcodeMatch.suggestion.lineTotal;
+          } else if (barcodeMatch.suggestion.multipleName === true) {
             commonSuggestion.multipleName = true;
             commonSuggestion.candidates = barcodeMatch.suggestion.candidates.map(candidate => ({
               productId: candidate.product.id,
@@ -5939,11 +6072,12 @@ function aiEvaluateInvoiceScan(payload) {
   // שורה בודדת. זו ראיית חיזוק בלבד; היא אינה הופכת שם לברקוד ואינה מחילה דבר.
   const suggestedQtyByProduct = new Map();
   barcodeSuggestions.forEach(suggestion => {
-    if (suggestion.multipleName === true || suggestion.quantity == null) return;
+    if (suggestion.multipleName === true || suggestion.unknownProduct === true || suggestion.quantity == null) return;
     const id = String(suggestion.suggestedProductId || '');
     suggestedQtyByProduct.set(id, (suggestedQtyByProduct.get(id) || 0) + Number(suggestion.quantity || 0));
   });
   barcodeSuggestions.forEach(suggestion => {
+    if (suggestion.unknownProduct === true) return;
     if (suggestion.multipleName === true) {
       (Array.isArray(suggestion.candidates) ? suggestion.candidates : []).forEach(candidate => {
         const id = String(candidate.productId || '');
@@ -6188,7 +6322,7 @@ function aiCompactFindingGroupHtml(type, title, findings, extraRowsHtml, extraCo
 }
 function aiActionableFindingsHtml(findings, pendingChoices) {
   const actionable = (Array.isArray(findings) ? findings : []).filter(aiIsActionableFinding);
-  const choices = (Array.isArray(pendingChoices) ? pendingChoices : []).filter(suggestion => suggestion && suggestion.multipleName === true && Array.isArray(suggestion.candidates) && suggestion.candidates.length >= 2);
+  const choices = (Array.isArray(pendingChoices) ? pendingChoices : []).filter(suggestion => suggestion && (suggestion.unknownProduct === true || (suggestion.multipleName === true && Array.isArray(suggestion.candidates) && suggestion.candidates.length >= 2)));
   const inlineChoiceRows = aiPendingChoicesHtml(choices);
   if (!actionable.length && !choices.length) return '';
   return '<div class="mt-3"><div class="font-black text-base text-slate-800 mb-2">אלה הבעיות שנמצאו:</div><div class="space-y-2">' +
@@ -6289,16 +6423,30 @@ function aiMultipleNameSuggestionHtml(suggestion) {
     '<div class="mt-3 space-y-2" role="group" aria-label="בחר את המוצר שמופיע בשורת התעודה">' + candidateButtons + '</div>' +
   '</details>';
 }
+function aiUnknownProductSuggestionHtml(suggestion) {
+  const name = suggestion && (suggestion.unknownProductName || suggestion.printedDescription) || 'מוצר חדש';
+  const barcode = normalizeBarcode(suggestion && suggestion.unknownBarcode || '');
+  const quantity = Number(suggestion && suggestion.quantity) || 0;
+  const unitPrice = Number(suggestion && suggestion.safeUnitPrice) || 0;
+  const lineTotal = Number(suggestion && suggestion.lineTotal) || 0;
+  return '<div class="py-2 border-t border-black/5 first:border-t-0">' +
+    '<div class="rounded-xl border border-violet-200 bg-white p-3">' +
+      '<div class="flex items-start justify-between gap-3"><div class="min-w-0"><div class="text-[10px] font-black text-violet-700"><i class="fa-solid fa-circle-plus ml-1"></i>מוצר חדש בתעודה</div><div class="text-sm font-black text-slate-800 mt-0.5">' + htmlEscape(name) + '</div><div class="text-[10px] font-bold text-slate-500 mt-1" dir="ltr">' + htmlEscape(barcode) + '</div></div>' +
+      '<div class="shrink-0 text-left"><div class="text-sm font-black text-rose-800">' + quantity + ' יח׳</div><div class="text-[10px] font-bold text-slate-500">₪' + fmtMoney(unitPrice) + ' ליח׳ · ₪' + fmtMoney(lineTotal) + '</div></div></div>' +
+      '<button data-role="ai-add-unknown-product" data-doc="' + suggestion.documentIndex + '" data-row="' + suggestion.rowIndex + '" class="btn-tap w-full mt-3 rounded-lg bg-violet-600 text-white py-2.5 text-sm font-black"><i class="fa-solid fa-plus ml-1"></i>הוסף והמשך</button>' +
+    '</div></div>';
+}
 function aiBarcodeSuggestionHtml(suggestion) {
   if (suggestion && suggestion.multipleName === true) return aiMultipleNameSuggestionHtml(suggestion);
+  if (suggestion && suggestion.unknownProduct === true) return aiUnknownProductSuggestionHtml(suggestion);
   // אין מסך אישור למועמד יחיד. התאמה מוכחת נסגרת אוטומטית; התאמה שלא
   // הוכחה נשארת חסומה לצילום מחדש/בדיקה ידנית ואינה מקבלת כפתור עוקף.
   return '';
 }
 function aiPendingChoicesHtml(suggestions) {
-  const rows = (Array.isArray(suggestions) ? suggestions : []).filter(suggestion => suggestion && suggestion.multipleName === true && Array.isArray(suggestion.candidates) && suggestion.candidates.length >= 2);
+  const rows = (Array.isArray(suggestions) ? suggestions : []).filter(suggestion => suggestion && (suggestion.unknownProduct === true || (suggestion.multipleName === true && Array.isArray(suggestion.candidates) && suggestion.candidates.length >= 2)));
   if (!rows.length) return '';
-  return rows.map(aiMultipleNameSuggestionHtml).join('');
+  return rows.map(suggestion => suggestion.unknownProduct === true ? aiUnknownProductSuggestionHtml(suggestion) : aiMultipleNameSuggestionHtml(suggestion)).join('');
 }
 function aiConfirmNameCandidate(documentIndex, rowIndex, candidateProductId) {
   if (!aiScanResponse || !aiScanResponse.scan || !Array.isArray(aiScanResponse.scan.documents)) return false;
@@ -6353,6 +6501,80 @@ function aiConfirmNameCandidate(documentIndex, rowIndex, candidateProductId) {
   showToast('המוצר שבחרת אושר. התוצאות חושבו מחדש.', null, null, 2600);
   return true;
 }
+function aiOpenUnknownProduct(documentIndex, rowIndex) {
+  if (!aiScanResponse || !aiScanResponse.scan || !Array.isArray(aiScanResponse.scan.documents)) return false;
+  const doc = aiScanResponse.scan.documents.find(item => Number(item && item.noteIndex) === Number(documentIndex));
+  const row = doc && Array.isArray(doc.rows) ? doc.rows[Number(rowIndex)] : null;
+  const unknown = aiVerifiedUnknownProductData(row, { allowCatalogExisting: true });
+  if (!unknown.ok) { showToast(unknown.error || 'המוצר החדש כבר אינו זמין להוספה', null, null, 3600); return false; }
+  aiUnknownProductCreateContext = { response: aiScanResponse, documentIndex: Number(documentIndex), rowIndex: Number(rowIndex), barcode: unknown.barcode };
+  const existing = aiCatalogBarcodeMatches(unknown.barcode, false);
+  if (existing.length > 1) { aiUnknownProductCreateContext = null; showToast('הברקוד קיים ביותר ממוצר אחד — יש לתקן את הכפילות לפני המשך', null, null, 4200); return false; }
+  if (existing.length === 1) return aiCompleteUnknownProduct(existing[0].product, aiUnknownProductCreateContext);
+  openProdModal(null, false, unknown.barcode, 'ai_unknown');
+  setAiUnknownProductBarcodeLock(true, unknown.barcode);
+  $('prod_name').value = unknown.name;
+  $('prod_price').value = unknown.safeUnitPrice;
+  updateProdRecHint();
+  const nameInput = $('prod_name'); if (nameInput) { nameInput.focus(); if (nameInput.select) nameInput.select(); }
+  return true;
+}
+function aiAdoptExistingUnknownProduct(product, createContext) {
+  const ctx = createContext || aiUnknownProductCreateContext;
+  const status = aiUnknownProductCreateContextStatus(ctx, ctx && ctx.barcode, true);
+  const candidateBarcode = normalizeBarcode(product && product.barcode || '');
+  if (!status.ok || !product || !product.id || candidateBarcode !== status.barcode) {
+    showToast(status.error || 'המוצר הקיים אינו תואם לברקוד המאומת מהתעודה', null, null, 4200);
+    return false;
+  }
+  const sameId = products.find(item => String(item && item.id) === String(product.id));
+  const otherMatches = aiCatalogBarcodeMatches(status.barcode, false).filter(match => String(match.product && match.product.id) !== String(product.id));
+  if (otherMatches.length) { showToast('נמצאה כפילות ברקוד במאגר — לא בוצע שיוך אוטומטי', null, null, 4300); return false; }
+  let canonical = sameId;
+  if (canonical) Object.assign(canonical, product);
+  else { canonical = { ...product }; products.push(canonical); }
+  const unique = aiCatalogBarcodeMatches(status.barcode, false);
+  if (unique.length !== 1 || String(unique[0].product && unique[0].product.id) !== String(canonical.id)) {
+    showToast('לא ניתן להוכיח שהמוצר הקיים יחיד במאגר', null, null, 4300);
+    return false;
+  }
+  const captured = ctx;
+  hideProdModal();
+  return aiCompleteUnknownProduct(canonical, captured);
+}
+function aiCompleteUnknownProduct(savedProduct, createContext) {
+  const ctx = createContext || aiUnknownProductCreateContext;
+  if (!ctx || !savedProduct || !aiScanResponse || !aiScanResponse.scan || !Array.isArray(aiScanResponse.scan.documents)) return false;
+  const status = aiUnknownProductCreateContextStatus(ctx, ctx.barcode, false);
+  if (!status.ok) { aiUnknownProductCreateContext = null; showToast(status.error || 'שורת התעודה השתנתה ולכן לא שויכה אוטומטית', null, null, 4300); return false; }
+  const barcode = normalizeBarcode(savedProduct.barcode || '');
+  const matches = aiCatalogBarcodeMatches(barcode, false);
+  const verifiedRows = aiVerifiedUnknownProductRows(barcode);
+  const includesSource = verifiedRows.some(item => Number(item.documentIndex) === Number(ctx.documentIndex) && Number(item.rowIndex) === Number(ctx.rowIndex));
+  if (barcode !== String(ctx.barcode || '') || !aiIsValidEan13(barcode) || matches.length !== 1 || String(matches[0].product && matches[0].product.id) !== String(savedProduct.id) || !verifiedRows.length || !includesSource) {
+    aiUnknownProductCreateContext = null;
+    showToast('המוצר נשמר, אבל שורת התעודה השתנתה ולכן לא שויכה אוטומטית', null, null, 4300);
+    return false;
+  }
+  const confirmedAt = Date.now();
+  verifiedRows.forEach(item => {
+    const row = item.row;
+    row.barcodeUserConfirmedFromObserved = barcode;
+    row.barcodeUserConfirmedFromReadType = 'full';
+    row.barcodeUserConfirmedFromMethod = 'verified_unknown_full';
+    row.barcodeUserConfirmedFromCatalogHintId = String(savedProduct.id);
+    row.barcode = barcode;
+    row.barcodeMatchMethod = 'user_confirmed';
+    row.userConfirmedAt = confirmedAt;
+  });
+  aiUnknownProductCreateContext = null;
+  aiScanEvaluation = aiEvaluateInvoiceScan(aiScanResponse);
+  aiScanError = aiScanEvaluation.valid ? '' : 'הפענוח עדיין דורש בדיקה — התעודה לא שונתה.';
+  if (currentView === 'reconcile') renderReconcile();
+  const rowCountText = verifiedRows.length > 1 ? (' · שויכו ' + verifiedRows.length + ' שורות') : '';
+  showToast((aiScanEvaluation.valid ? 'המוצר נוסף והתוצאות חושבו מחדש' : 'המוצר נוסף. נשארו עוד שורות שדורשות טיפול') + rowCountText + '.', null, null, 3200);
+  return true;
+}
 function aiConfirmBarcodeSuggestion(documentIndex, rowIndex) {
   if (!aiScanResponse || !aiScanResponse.scan || !Array.isArray(aiScanResponse.scan.documents)) return false;
   const doc = aiScanResponse.scan.documents.find(item => Number(item && item.noteIndex) === Number(documentIndex));
@@ -6389,9 +6611,9 @@ function aiInvoiceCaptureHtml() {
   if (aiScanEvaluation) {
     const ev = aiScanEvaluation;
     const actionableFindings = (Array.isArray(ev.findings) ? ev.findings : []).filter(aiIsActionableFinding);
-    // רק עמימות אמיתית בין שני מוצרים או יותר מוצגת לבחירה. היא נטמעת
-    // כשורה בתוך קבוצת החוסרים ולא יוצרת מסך או שלב אישור נפרד.
-    const pendingChoices = (Array.isArray(ev.barcodeSuggestions) ? ev.barcodeSuggestions : []).filter(suggestion => suggestion && suggestion.multipleName === true && Array.isArray(suggestion.candidates) && suggestion.candidates.length >= 2);
+    // עמימות בין מוצרים ומוצר חדש מאומת נטמעים כשורות בתוך קבוצת החוסרים.
+    // אין מסך ביניים: אחרי בחירה/יצירה אותה תוצאה מחושבת מחדש במקום.
+    const pendingChoices = (Array.isArray(ev.barcodeSuggestions) ? ev.barcodeSuggestions : []).filter(suggestion => suggestion && (suggestion.unknownProduct === true || (suggestion.multipleName === true && Array.isArray(suggestion.candidates) && suggestion.candidates.length >= 2)));
     const findingsHtml = (ev.findingsReady || pendingChoices.length)
       ? (actionableFindings.length || pendingChoices.length
         ? aiActionableFindingsHtml(actionableFindings, pendingChoices)
@@ -8563,6 +8785,8 @@ function fillProdCategoryOptions(selectedCategory) {
   updateProdRecHint();
 }
 function openProdModal(p, fromScan, presetCode, afterSaveTarget) {
+  setAiUnknownProductBarcodeLock(false);
+  if (afterSaveTarget !== 'ai_unknown') aiUnknownProductCreateContext = null;
   priceEditId = p ? p.id : null;
   priceFromScan = !!fromScan;
   productCreateId = p ? null : makeOperationId('prod');
@@ -8607,8 +8831,9 @@ function openProdModal(p, fromScan, presetCode, afterSaveTarget) {
 function hideProdModal() {
   const m = $('prodModal'); m.classList.add('hidden'); m.classList.remove('flex');
   barcodeDuplicateNotice.product = '';
+  setAiUnknownProductBarcodeLock(false);
   setProductBarcodeBlocked(false);
-  priceEditId = null; priceFromScan = false; productCreateId = null; prodAfterSaveTarget = null; productEditorScanReturn = false;
+  priceEditId = null; priceFromScan = false; productCreateId = null; prodAfterSaveTarget = null; productEditorScanReturn = false; aiUnknownProductCreateContext = null;
 }
 function calcCartonPrice() {
   const cp = parseFloat(($('prod_cartonPrice').value || '').toString().replace(',', '.'));
@@ -8623,6 +8848,10 @@ function calcCartonPrice() {
   updateProdRecHint();
 }
 function scanProdBarcode() {
+  if (prodAfterSaveTarget === 'ai_unknown' || aiUnknownProductCreateContext) {
+    showToast('הברקוד אומת מהתעודה ונעול בזמן הוספת המוצר', null, null, 2800);
+    return;
+  }
   scanPurpose = 'prodbarcode';
   productEditorScanReturn = true;
   const m = $('prodModal'); m.classList.add('hidden'); m.classList.remove('flex');
@@ -8645,14 +8874,37 @@ async function saveProd(again) {
   const billingPackSize = billingPackId ? billingPackSizeRaw : 0;
   if (!name) { $('prod_name').focus(); return; }
   const id = priceEditId;
+  const aiUnknownMode = prodAfterSaveTarget === 'ai_unknown';
+  const unknownCreateContext = aiUnknownMode ? aiUnknownProductCreateContext : null;
+  if (aiUnknownMode) {
+    const contextStatus = aiUnknownProductCreateContextStatus(unknownCreateContext, barcode, true);
+    if (!contextStatus.ok) { showToast(contextStatus.error, null, null, 4300); return; }
+  }
   if (!id && price == null) { showToast('הזן מחיר קנייה למוצר החדש', null, null, 2800); $('prod_price').focus(); return; }
   if (!id && prodAfterSaveTarget && !(price > 0)) { showToast('בקליטה או בחזרה חייבים מחיר קנייה גדול מ-0', null, null, 3200); $('prod_price').focus(); return; }
   const createOperationId = productCreateId || (productCreateId = makeOperationId('prod'));
   const docId = id || barcodeProductId(barcode) || createOperationId;
-  const duplicate = findProductByBarcode(barcode, docId);
-  if (duplicate) { syncProductBarcodeDuplicate(false); showDuplicateBarcode(duplicate, $('prod_barcode')); return; }
-  const cloudDuplicate = await findCloudProductByBarcode(barcode, docId);
-  if (cloudDuplicate) { setProductBarcodeBlocked(true); showDuplicateBarcode(cloudDuplicate, $('prod_barcode')); return; }
+  if (aiUnknownMode) {
+    const localMatches = aiCatalogBarcodeMatches(normalizeBarcode(barcode), false);
+    if (localMatches.length > 1) { showToast('נמצאה כפילות ברקוד במאגר — לא בוצע שיוך אוטומטי', null, null, 4300); return; }
+    if (localMatches.length === 1) { aiAdoptExistingUnknownProduct(localMatches[0].product, unknownCreateContext); return; }
+  } else {
+    const duplicate = findProductByBarcode(barcode, docId);
+    if (duplicate) { syncProductBarcodeDuplicate(false); showDuplicateBarcode(duplicate, $('prod_barcode')); return; }
+  }
+  if (aiUnknownMode) {
+    const beforeCloudLookup = aiUnknownProductCreateContextStatus(unknownCreateContext, $('prod_barcode').value, true);
+    if (!beforeCloudLookup.ok) { showToast(beforeCloudLookup.error, null, null, 4300); return; }
+    const cloudMatches = await findCloudProductMatchesByBarcode(barcode, null);
+    const afterCloudLookup = aiUnknownProductCreateContextStatus(unknownCreateContext, $('prod_barcode').value, true);
+    if (!afterCloudLookup.ok) { showToast(afterCloudLookup.error, null, null, 4300); return; }
+    if (cloudMatches == null) { showToast('לא ניתן לאמת כרגע שהברקוד חדש בענן — נסה שוב כשהחיבור יציב', null, null, 4300); return; }
+    if (cloudMatches.length > 1) { showToast('הברקוד קיים ביותר ממוצר אחד בענן — יש לתקן את הכפילות לפני המשך', null, null, 4500); return; }
+    if (cloudMatches.length === 1) { aiAdoptExistingUnknownProduct(cloudMatches[0], unknownCreateContext); return; }
+  } else {
+    const cloudDuplicate = await findCloudProductByBarcode(barcode, docId);
+    if (cloudDuplicate) { setProductBarcodeBlocked(true); showDuplicateBarcode(cloudDuplicate, $('prod_barcode')); return; }
+  }
   const category = ($('prod_category').value || '').trim() || null;
   if (!id && !pricingCatsLoaded) { showToast('הקבוצות עדיין נטענות — המתן רגע ונסה שוב', null, null, 3000); return; }
   if (!id && pricingCats.length && !category) { showToast('בחר קבוצה למוצר', null, null, 2500); $('prod_category').focus(); return; }
@@ -8678,6 +8930,10 @@ async function saveProd(again) {
     const pendingExisting = products.find(x => x.id === docId);
     Object.assign(data, { orderIndex: pendingExisting ? (pendingExisting.orderIndex || 0) : maxIdx + 1, operationId: createOperationId });
     let transactionDuplicate = null;
+    if (aiUnknownMode) {
+      const beforeCloudWrite = aiUnknownProductCreateContextStatus(unknownCreateContext, $('prod_barcode').value, true);
+      if (!beforeCloudWrite.ok) { showToast(beforeCloudWrite.error, null, null, 4300); return; }
+    }
     const saved = await runCloudTask('create product', {
       op: barcode ? 'create-if-absent' : 'set',
       path: dataPath('products', docId),
@@ -8685,6 +8941,20 @@ async function saveProd(again) {
       operationId: createOperationId
     }, { onDuplicateBarcode: (err) => { transactionDuplicate = err && err.product ? err.product : null; } });
     if (!saved) {
+      if (aiUnknownMode && transactionDuplicate) {
+        const beforeRaceLookup = aiUnknownProductCreateContextStatus(unknownCreateContext, $('prod_barcode').value, true);
+        if (!beforeRaceLookup.ok) { showToast(beforeRaceLookup.error, null, null, 4300); return; }
+        const raceMatches = await findCloudProductMatchesByBarcode(barcode, null);
+        const afterRaceLookup = aiUnknownProductCreateContextStatus(unknownCreateContext, $('prod_barcode').value, true);
+        if (!afterRaceLookup.ok) { showToast(afterRaceLookup.error, null, null, 4300); return; }
+        const duplicateBarcode = normalizeBarcode(transactionDuplicate.barcode || '');
+        if (Array.isArray(raceMatches) && raceMatches.length === 1 && duplicateBarcode === normalizeBarcode(barcode) && String(raceMatches[0].id) === String(transactionDuplicate.id)) {
+          aiAdoptExistingUnknownProduct(raceMatches[0], unknownCreateContext);
+          return;
+        }
+        showToast('מוצר נוסף במקביל, אך לא ניתן להוכיח שהוא ההתאמה היחידה — השמירה נעצרה', null, null, 4600);
+        return;
+      }
       if (transactionDuplicate) { setProductBarcodeBlocked(true); showDuplicateBarcode(transactionDuplicate, $('prod_barcode')); }
       return;
     }
@@ -8700,7 +8970,8 @@ async function saveProd(again) {
   hideProdModal();
   if (currentView === 'prices') renderPrices();
   else if (currentView === 'settings') renderSettings();
-  showToast(id ? 'המוצר עודכן' : 'המוצר נוסף', null, null, 1600);
+  if (afterTarget !== 'ai_unknown') showToast(id ? 'המוצר עודכן' : 'המוצר נוסף', null, null, 1600);
+  if (afterTarget === 'ai_unknown' && savedProduct) { aiCompleteUnknownProduct(savedProduct, unknownCreateContext); return; }
   if (afterTarget && savedProduct) { promptQty(savedProduct, afterTarget); return; }
   if (again) { if (wasFromScan) openPriceScanner(); else openProdModal(null, false, ''); }
 }
@@ -9642,6 +9913,7 @@ app.addEventListener('click', (e) => {
   if (role === 'ai-open-suggestion-page') { aiOpenBarcodeSuggestionPage(parseInt(t.dataset.doc, 10), parseInt(t.dataset.page, 10)); return; }
   if (role === 'ai-confirm-barcode-suggestion') { aiConfirmBarcodeSuggestion(parseInt(t.dataset.doc, 10), parseInt(t.dataset.row, 10)); return; }
   if (role === 'ai-confirm-name-candidate') { aiConfirmNameCandidate(parseInt(t.dataset.doc, 10), parseInt(t.dataset.row, 10), t.dataset.candidateId); return; }
+  if (role === 'ai-add-unknown-product') { aiOpenUnknownProduct(parseInt(t.dataset.doc, 10), parseInt(t.dataset.row, 10)); return; }
   if (role === 'ai-apply') { aiApplyInvoiceResult(); return; }
   if (role === 'admin-login') { requireAdmin('כניסת מנהל', () => { if (currentView === 'settings') renderSettings(); }); return; }
   if (role === 'admin-logout') { exitAdminMode(); return; }
