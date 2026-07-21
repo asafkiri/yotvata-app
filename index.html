@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v131 חוסרים ישירות</title>
+    <title>הזמנות יטבתה - v132 פתרון אוטומטי בטוח</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v131 חוסרים ישירות</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v132 פתרון אוטומטי בטוח</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5480,6 +5480,21 @@ function aiCatalogBarcodeMatches(observed, suffixMode, minimumDigits) {
   });
   return matches;
 }
+function aiCatalogBarcodeExactMatches(observedValue) {
+  // התאמה מלאה היא השוואת זהות ספרותית מול הקטלוג המקומי. אין כאן צורך
+  // בספרת ביקורת תקינה: בחלק מהקטלוגים קיימים קודים פנימיים/היסטוריים בני
+  // 13 ספרות שאינם EAN-13 תקני, אך צילום מלא וזהה הוא עדיין הוכחה חזקה.
+  // כל מסלולי הניחוש (סיומת, תבנית ותיקון ספרה) נשארים checksum-strict.
+  const observed = normalizeBarcode(observedValue);
+  if (!/^\d{6,20}$/.test(observed)) return [];
+  const seen = new Set(), matches = [];
+  products.forEach(product => {
+    const barcode = normalizeBarcode(product && product.barcode || '');
+    if (barcode !== observed || seen.has(product.id)) return;
+    seen.add(product.id); matches.push({ product, barcode });
+  });
+  return matches;
+}
 function aiNormalizeBarcodePattern(value) {
   return String(value == null ? '' : value).replace(/[\s\u200B-\u200D\uFEFF-]/g, '');
 }
@@ -5603,10 +5618,10 @@ function aiBarcodeRetryEvidenceError(row) {
   }
   return '';
 }
-// התאמה לפי שם אינה מסתמכת על המחיר כדי לבחור בין מוצרים. ה-AI חייב
-// להחזיר מועמד שם יחיד, ורק אז המחיר המודפס וחשבון השורה משמשים כהצלבה
-// עצמאית מול המחיר המקומי. כך שורת מבצע יכולה להיסגר לפי מחיר הבסיס
-// והברוטו, בלי להסתיר אחר כך טעות מחיר או מבצע בסכום הנטו.
+// התאמה לפי שם מתחילה רק מרשימת מועמדים מקומית ומאומתת. כשהשם מצביע על
+// מועמד יחיד, המחיר והחשבון מאמתים אותו. כשהשם מצביע על כמה מוצרים, כל
+// מועמד עובר בנפרד אותה הצלבת מחיר/כמות/חשבון ורק תוצאה יחידה מתקבלת.
+// כך מחיר אינו "מנחש" מתוך כל הקטלוג, אך כן יכול להכריע רשימת שמות קטנה.
 function aiSingleNameCandidateId(row) {
   if (!row || typeof row !== 'object') return '';
   const hintId = String(row.catalogHintId == null ? '' : row.catalogHintId);
@@ -5619,17 +5634,24 @@ function aiSingleNameCandidateId(row) {
   if (hintId && candidateIds.length === 0) return hintId;
   return '';
 }
-function aiNamePriceMatchProof(row, product) {
+function aiNamePriceMatchProof(row, product, options) {
+  options = options || {};
   if (!row || !product) return { ok: false, reason: 'missing_candidate' };
   const description = String(row.description || '').trim();
   const singleCandidateId = aiSingleNameCandidateId(row);
+  const candidateIds = Array.isArray(options.candidateIds)
+    ? Array.from(new Set(options.candidateIds.map(id => String(id == null ? '' : id)).filter(Boolean)))
+    : [];
+  const candidateSetIdentity = options.identityFromCandidateSet === true
+    && candidateIds.length >= 2
+    && candidateIds.includes(String(product.id));
   const localBarcode = normalizeBarcode(product.barcode || '');
   const localMatches = aiCatalogBarcodeMatches(localBarcode, false);
   const qtyRaw = row.quantity == null || row.quantity === '' ? NaN : Number(row.quantity);
   const qty = Number.isFinite(qtyRaw) && qtyRaw > 0 && Math.abs(qtyRaw - Math.round(qtyRaw)) < 0.001 ? Math.round(qtyRaw) : null;
   const confidence = Number(row.confidence);
   const basePrice = Number(product.price);
-  if (!description || !singleCandidateId || singleCandidateId !== String(product.id) || localMatches.length !== 1 || String(localMatches[0].product && localMatches[0].product.id) !== String(product.id)) {
+  if (!description || (!candidateSetIdentity && (!singleCandidateId || singleCandidateId !== String(product.id))) || localMatches.length !== 1 || String(localMatches[0].product && localMatches[0].product.id) !== String(product.id)) {
     return { ok: false, reason: 'identity_not_unique' };
   }
   // התאמה לפי שם היא מסלול חלופי לברקוד ולכן דורשת ודאות גבוהה יותר מסף
@@ -5800,7 +5822,7 @@ function aiResolveInvoiceBarcode(row) {
   }
   if (method === 'exact_full') {
     if (readType !== 'full' || !/^\d{6,20}$/.test(observed) || resolved !== observed) return { error: 'הברקוד המלא שחזר אינו תואם לספרות שנקראו בתמונה' };
-    const matches = aiCatalogBarcodeMatches(observed, false);
+    const matches = aiCatalogBarcodeExactMatches(observed);
     if (matches.length !== 1) return { error: matches.length > 1 ? 'הברקוד המלא קיים ביותר ממוצר אחד במאגר' : 'הברקוד המלא לא נמצא במאגר' };
     return { product: matches[0].product, barcode: matches[0].barcode, observed, method };
   }
@@ -5821,32 +5843,6 @@ function aiResolveInvoiceBarcode(row) {
     if (matches.length !== 1) return { error: matches.length > 1 ? 'תבנית הברקוד מתאימה ליותר ממוצר אחד' : 'תבנית הברקוד לא נמצאה במאגר' };
     if (matches[0].barcode !== resolved) return { error: 'הברקוד שהשרת פתר אינו תואם לתבנית שנקראה' };
     return { product: matches[0].product, barcode: matches[0].barcode, observed: info.pattern, method, knownDigits: info.knownDigits };
-  }
-  if (method === 'verified_suffix_name') {
-    if (readType !== 'suffix' || !/^\d{4,5}$/.test(observed) || !resolved.endsWith(observed)) return { error: 'הסיומת הקצרה אינה תואמת לספרות שנקראו בתמונה' };
-    const matches = aiCatalogBarcodeMatches(observed, true, 4);
-    if (matches.length !== 1 || matches[0].barcode !== resolved || aiSingleNameCandidateId(row) !== String(matches[0].product.id)) {
-      return { error: 'הסיומת הקצרה ורמז השם אינם מוכיחים מוצר יחיד במאגר המקומי' };
-    }
-    return { product: matches[0].product, barcode: matches[0].barcode, observed, method, identityEvidence: { proofModel: 'unique_short_suffix_and_name', knownDigits: observed.length } };
-  }
-  if (method === 'verified_pattern_name') {
-    if (!['full_pattern', 'suffix_pattern'].includes(readType)) return { error: 'סוג תבנית הברקוד אינו תקין' };
-    const info = aiBarcodePatternInfo(observedPattern);
-    const suffixMode = readType === 'suffix_pattern';
-    if (!info || !info.hasWildcard || info.knownDigits < 4 || info.knownDigits >= AI_BARCODE_SUFFIX_DIGITS) return { error: 'תבנית הברקוד אינה מכילה 4–5 ספרות ידועות' };
-    const matches = aiCatalogBarcodePatternMatches(info.pattern, suffixMode);
-    if (matches.length !== 1 || matches[0].barcode !== resolved || aiSingleNameCandidateId(row) !== String(matches[0].product.id)) {
-      return { error: 'תבנית הברקוד ורמז השם אינם מוכיחים מוצר יחיד במאגר המקומי' };
-    }
-    return { product: matches[0].product, barcode: matches[0].barcode, observed: info.pattern, method, identityEvidence: { proofModel: 'unique_short_pattern_and_name', knownDigits: info.knownDigits } };
-  }
-  if (method === 'verified_one_digit_name') {
-    const corrections = aiCatalogBarcodeOneDigitMatches(observed);
-    if (readType !== 'full' || !/^\d{6,20}$/.test(observed) || corrections.length !== 1 || corrections[0].barcode !== resolved || aiSingleNameCandidateId(row) !== String(corrections[0].product.id)) {
-      return { error: 'תיקון ספרת ה־OCR ורמז השם אינם מוכיחים מוצר יחיד במאגר המקומי' };
-    }
-    return { product: corrections[0].product, barcode: corrections[0].barcode, observed, method, identityEvidence: { proofModel: 'unique_one_digit_correction_and_name' } };
   }
   if (method === 'user_confirmed') {
     const sourceMethod = String(row && row.barcodeUserConfirmedFromMethod || '');
@@ -5887,17 +5883,26 @@ function aiResolveInvoiceBarcode(row) {
   if (method === 'suggested_name_multiple') {
     const nameCandidates = aiLocalSuggestedNameCandidates(row);
     if (nameCandidates.length < 2) return { error: 'רשימת המוצרים האפשריים אינה תקינה או אינה תואמת עוד למאגר המקומי' };
-    return {
-      error: 'נדרשת בחירת משתמש בין כמה מוצרים בעלי שם דומה',
-      suggestion: {
-        candidates: nameCandidates,
+    const candidateIds = nameCandidates.map(candidate => String(candidate.product && candidate.product.id));
+    const proven = nameCandidates.map(candidate => ({
+      candidate,
+      proof: aiNamePriceMatchProof(row, candidate.product, { candidateIds, identityFromCandidateSet: true })
+    })).filter(item => item.proof.ok);
+    if (proven.length === 1) {
+      return {
+        product: proven[0].candidate.product,
+        barcode: proven[0].candidate.barcode,
         observed: observedPattern || observed || 'לא נקרא',
-        method,
-        printedDescription: String(row && row.description || '').trim(),
-        nameOnly: true,
-        multipleName: true
-      }
-    };
+        method: 'verified_name_price',
+        sourceMethod: method,
+        identityEvidence: proven[0].proof
+      };
+    }
+    // שם דומה לבדו אינו מספיק. אם ההצלבה המספרית לא משאירה בדיוק מוצר
+    // אחד, אין מסך בחירה עוקף: עמימות אמיתית מחייבת צילום מחדש/בדיקה ידנית.
+    return { error: proven.length > 1
+      ? 'השם, המחיר והכמות עדיין מתאימים לכמה מוצרים — יש לצלם מחדש או לבדוק ידנית'
+      : 'אף אחד ממועמדי השם לא עבר הצלבת מחיר, כמות וחשבון שורה — יש לצלם מחדש או לבדוק ידנית' };
   }
   if (method === 'suggested_pattern' || method === 'suggested_suffix' || method === 'suggested_correction' || method === 'suggested_one_digit_correction' || method === 'suggested_name_only') {
     const suggestedBarcode = aiSuggestedBarcodeValue(row);
@@ -5905,7 +5910,7 @@ function aiResolveInvoiceBarcode(row) {
     if (suggestedMatches.length !== 1) return { error: suggestedMatches.length > 1 ? 'הברקוד המוצע קיים ביותר ממוצר אחד במאגר' : 'הברקוד המוצע אינו קיים במאגר' };
     const suggestedProduct = suggestedMatches[0].product;
     const suggestedProductId = aiSuggestedProductIdValue(row);
-    if (suggestedProductId && suggestedProduct.id !== suggestedProductId) return { error: 'זהות המוצר המוצע אינה תואמת למאגר המקומי' };
+    if (suggestedProductId && String(suggestedProduct.id) !== String(suggestedProductId)) return { error: 'זהות המוצר המוצע אינה תואמת למאגר המקומי' };
     if (method === 'suggested_name_only') {
       if (aiSingleNameCandidateId(row) !== String(suggestedProduct.id) || !String(row && row.description || '').trim()) return { error: 'הצעת השם אינה קשורה למועמד יחיד במאגר המקומי' };
       const namePriceProof = aiNamePriceMatchProof(row, suggestedProduct);
@@ -5930,28 +5935,50 @@ function aiResolveInvoiceBarcode(row) {
       const suffixMode = String(readType).indexOf('suffix') !== -1;
       const patternMatches = aiCatalogBarcodePatternMatches(info.pattern, suffixMode);
       if (!aiBarcodeMatchesPattern(suggestedBarcode, info.pattern, suffixMode) || patternMatches.length !== 1 || patternMatches[0].barcode !== suggestedBarcode) return { error: 'המוצר המוצע אינו תואם באופן יחיד לתבנית שנקראה' };
+      const namePriceProof = aiNamePriceMatchProof(row, suggestedProduct);
+      if (!namePriceProof.ok) return { error: 'התבנית החלקית אינה נתמכת גם בשם, במחיר, בכמות ובחשבון השורה — יש לצלם מחדש' };
+      return {
+        product: suggestedProduct,
+        barcode: suggestedBarcode,
+        observed: observedPattern || observed || 'לא נקרא',
+        method: 'verified_partial_barcode',
+        sourceMethod: method,
+        identityEvidence: namePriceProof
+      };
     } else if (method === 'suggested_suffix') {
       const suffixMatches = aiCatalogBarcodeMatches(observed, true, 4);
       if (readType !== 'suffix' || !/^\d{4,5}$/.test(observed) || !suggestedBarcode.endsWith(observed) || suffixMatches.length !== 1 || suffixMatches[0].barcode !== suggestedBarcode) {
         return { error: 'הצעת הסיומת אינה תואמת ל־4–5 הספרות שנקראו' };
       }
+      const namePriceProof = aiNamePriceMatchProof(row, suggestedProduct);
+      if (!namePriceProof.ok) return { error: 'סיומת הברקוד הקצרה אינה נתמכת גם בשם, במחיר, בכמות ובחשבון השורה — יש לצלם מחדש' };
+      return {
+        product: suggestedProduct,
+        barcode: suggestedBarcode,
+        observed: observedPattern || observed || 'לא נקרא',
+        method: 'verified_partial_barcode',
+        sourceMethod: method,
+        identityEvidence: namePriceProof
+      };
     } else {
       const correctionMatches = aiCatalogBarcodeOneDigitMatches(observed);
-      if (readType !== 'full' || !/^\d{6,20}$/.test(observed) || !aiBarcodeOneDigitDifference(observed, suggestedBarcode) || correctionMatches.length !== 1 || correctionMatches[0].barcode !== suggestedBarcode) {
+      if (readType !== 'full' || !/^\d{13}$/.test(observed) || !aiIsValidEan13(suggestedBarcode) || !aiBarcodeOneDigitDifference(observed, suggestedBarcode) || correctionMatches.length !== 1 || correctionMatches[0].barcode !== suggestedBarcode) {
         return { error: 'הצעת תיקון הספרה אינה תואמת לברקוד המלא שנקרא' };
       }
-    }
-    return {
-      error: 'נדרש אישור ידני להתאמת הברקוד',
-      suggestion: {
-        barcode: suggestedBarcode,
-        product: suggestedProduct,
-        observed: observedPattern || observed || 'לא נקרא',
-        method,
-        printedDescription: String(row && row.description || '').trim(),
-        nameOnly: method === 'suggested_name_only'
+      const confidence = Number(row && row.confidence);
+      const namePriceProof = aiNamePriceMatchProof(row, suggestedProduct);
+      if ((!Number.isFinite(confidence) || confidence < 0.78) && !namePriceProof.ok) {
+        return { error: 'תיקון הספרה אינו נתמך בביטחון קריאה או בהצלבת שם, מחיר, כמות וחשבון — יש לצלם מחדש' };
       }
-    };
+      return {
+        product: suggestedProduct,
+        barcode: suggestedBarcode,
+        observed: observedPattern || observed || 'לא נקרא',
+        method: 'verified_barcode_correction',
+        sourceMethod: method,
+        identityEvidence: namePriceProof.ok ? namePriceProof : { confidence }
+      };
+    }
   }
   if (method === 'ambiguous') return { error: 'הספרות שנקראו מתאימות ליותר ממוצר אחד — יש לבדוק ידנית' };
   if (readType === 'suffix' && observed.length < AI_BARCODE_SUFFIX_DIGITS) return { error: 'נקראו פחות מ־6 ספרות אחרונות של הברקוד' };
@@ -6017,6 +6044,7 @@ function aiFindingsClosure(evaluation, findings) {
 function aiEvaluateInvoiceScan(payload) {
   const scan = payload && payload.scan;
   const errors = [], warnings = [], findings = [], promoCandidates = [], barcodeSuggestions = [], aggregates = new Map(), docSummaries = [];
+  const unresolvedDocumentIndexes = new Set();
   let unresolvedBarcodeRows = 0, unusableRows = 0;
   if (!scan || !Array.isArray(scan.documents)) return { valid: false, totalVerified: false, unitsVerified: false, extractedTotal: 0, extractedUnits: 0, errors: ['השרת לא החזיר מסמכים תקינים'], warnings, findings, barcodeSuggestions, allRowsMapped: false, aggregates, docSummaries };
   if (!Number.isInteger(Number(payload.serviceVersion)) || Number(payload.serviceVersion) < AI_SCAN_MIN_SERVICE_VERSION) {
@@ -6075,6 +6103,7 @@ function aiEvaluateInvoiceScan(payload) {
       const product = barcodeMatch.product || null;
       if (!barcode || !product) {
         unresolvedBarcodeRows++;
+        unresolvedDocumentIndexes.add(index);
         errors.push(rowPrefix + (barcodeMatch.error || 'הברקוד לא זוהה במאגר'));
         if (barcodeMatch.suggestion) {
           const commonSuggestion = {
@@ -6120,8 +6149,9 @@ function aiEvaluateInvoiceScan(payload) {
         return;
       }
       if (['unique_suffix', 'unique_full_pattern', 'unique_suffix_pattern'].includes(barcodeMatch.method)) warnings.push(product.name + ': הותאם בוודאות לפי הספרות שנקראו (' + barcodeMatch.observed + ')');
-      if (['verified_suffix_name', 'verified_pattern_name', 'verified_one_digit_name'].includes(barcodeMatch.method)) warnings.push(product.name + ': הותאם אוטומטית לפי ראיית ברקוד יחידה ורמז שם תואם');
       if (barcodeMatch.method === 'verified_name_price') warnings.push(product.name + ': הותאם לפי שם יחיד והצלבת מחיר/חשבון מקומית');
+      if (barcodeMatch.method === 'verified_partial_barcode') warnings.push(product.name + ': הותאם לפי ספרות ברקוד ייחודיות והצלבת שם/מחיר/כמות');
+      if (barcodeMatch.method === 'verified_barcode_correction') warnings.push(product.name + ': הותאם לפי תיקון ספרה יחיד ומאומת');
       if (qty == null || cents == null || arithmeticError) return;
       const old = aggregates.get(product.id) || { product, qty: 0, totalCents: 0, rows: [], promotionTexts: [], priceVariants: new Set() };
       old.qty += qty; old.totalCents += cents; old.rows.push({ document: index + 1, page: row.sourcePage, line: row.lineNumber, confidence: isFinite(rowConfidence) ? rowConfidence : 0, barcodeObserved: barcodeMatch.observed, barcodeMatchMethod: barcodeMatch.method, identityEvidence: barcodeMatch.identityEvidence || null });
@@ -6248,14 +6278,13 @@ function aiEvaluateInvoiceScan(payload) {
   if (findingsReady && !closure.ok) errors.push(closure.reason || 'הממצאים אינם סוגרים את פער היחידות והסכום');
   const uniqueErrors = Array.from(new Set(errors));
   const uniqueWarnings = Array.from(new Set(warnings.concat(Array.isArray(scan.warnings) ? scan.warnings : [])));
-  return { valid: uniqueErrors.length === 0 && barcodeSuggestions.length === 0 && findingsReady && aggregates.size > 0 && totalVerified && unitsVerified && closure.ok, totalVerified, unitsVerified, closure, errors: uniqueErrors, warnings: uniqueWarnings, findings, barcodeSuggestions, allRowsMapped, findingsReady, aggregates, docSummaries, extractedTotal: extractedTotalCents / 100, extractedUnits, rowTotal: rowTotalCents / 100, supplierDiscount };
+  return { valid: uniqueErrors.length === 0 && barcodeSuggestions.length === 0 && findingsReady && aggregates.size > 0 && totalVerified && unitsVerified && closure.ok, totalVerified, unitsVerified, closure, errors: uniqueErrors, warnings: uniqueWarnings, findings, barcodeSuggestions, unresolvedDocumentIndexes: Array.from(unresolvedDocumentIndexes), allRowsMapped, findingsReady, aggregates, docSummaries, extractedTotal: extractedTotalCents / 100, extractedUnits, rowTotal: rowTotalCents / 100, supplierDiscount };
 }
 function aiRotationRetryDocumentIndexes(evaluation) {
   if (!evaluation || !Array.isArray(evaluation.docSummaries)) return [];
-  // אם סכום הנטו וכל היחידות כבר נקראו בדיוק, סיבוב נוסף לא יכול לשפר את
-  // עוגני החשבון ורק יוצר פענוח שני שעלול להחליף התאמות נכונות.
-  if (evaluation.totalVerified && evaluation.unitsVerified) return [];
+  if (evaluation.valid) return [];
   const summaries = new Map(evaluation.docSummaries.map(s => [Number(s.noteIndex), s]));
+  const unresolved = new Set((Array.isArray(evaluation.unresolvedDocumentIndexes) ? evaluation.unresolvedDocumentIndexes : []).map(Number));
   const indexes = [];
   aiScanDocuments.forEach((doc, index) => {
     const summary = summaries.get(index);
@@ -6265,7 +6294,7 @@ function aiRotationRetryDocumentIndexes(evaluation) {
     const rowsMissing = !summary || !(Number(summary.rows) > 0) || !(Number(summary.units) > 0);
     const unitsPartial = expectedUnits != null && isFinite(expectedUnits) && (!summary || Number(summary.units) !== expectedUnits);
     const subtotalPartial = expectedSubtotalCents != null && (!summary || actualSubtotalCents !== expectedSubtotalCents);
-    if (rowsMissing || unitsPartial || subtotalPartial) indexes.push(index);
+    if (rowsMissing || unitsPartial || subtotalPartial || unresolved.has(index)) indexes.push(index);
   });
   return indexes;
 }
@@ -6406,15 +6435,9 @@ function aiIsActionableFinding(finding) {
   return !!finding && ['shortage', 'surplus', 'price', 'promo_missing'].includes(String(finding.type || ''));
 }
 function aiIsPendingBarcodeChoice(suggestion) {
-  if (!suggestion) return false;
-  if (suggestion.unknownProduct === true) return true;
-  if (suggestion.multipleName === true) return Array.isArray(suggestion.candidates) && suggestion.candidates.length >= 2;
-  return !!suggestion.suggestedProductId && !!suggestion.suggestedBarcode && [
-    'suggested_pattern',
-    'suggested_suffix',
-    'suggested_correction',
-    'suggested_one_digit_correction'
-  ].includes(String(suggestion.method || ''));
+  // המסלול האינטראקטיבי היחיד שנותר הוא הוספת ברקוד חדש שאומת פעמיים.
+  // מוצר קיים נפתר אוטומטית עם הוכחה מספקת, או נחסם לצילום מחדש/ידני.
+  return !!suggestion && suggestion.unknownProduct === true;
 }
 function aiCompactFindingGroupHtml(type, title, findings, extraRowsHtml, extraCount) {
   const rows = (findings || []).filter(finding => String(finding && finding.type || '') === type);
@@ -6534,14 +6557,9 @@ function aiSuggestionCrossCheckHtml(suggestion) {
   '</div>';
 }
 function aiMultipleNameSuggestionHtml(suggestion) {
-  const printed = suggestion.printedDescription || 'השם המודפס לא נקרא';
-  const candidates = Array.isArray(suggestion.candidates) ? suggestion.candidates : [];
-  const candidateButtons = candidates.map(candidate => '<button data-role="ai-confirm-name-candidate" data-doc="' + suggestion.documentIndex + '" data-row="' + suggestion.rowIndex + '" data-candidate-id="' + htmlEscape(candidate.productId || '') + '" class="btn-tap w-full flex items-center justify-between gap-2 rounded-lg border border-rose-200 bg-white px-3 py-2.5 text-right font-black text-slate-800"><span>' + htmlEscape(candidate.productName || '') + '</span><span class="shrink-0 text-rose-700 text-xs">בחר</span></button>').join('');
-  const qtyText = suggestion.quantity == null ? '' : Number(suggestion.quantity) + ' יח׳ בנייר · ';
-  return '<details class="py-2 border-t border-black/5 first:border-t-0">' +
-    '<summary class="cursor-pointer list-none flex items-start justify-between gap-3 font-black"><span class="min-w-0 text-sm text-slate-800">' + htmlEscape(printed) + '</span><span class="shrink-0 text-sm text-rose-800">' + qtyText + 'בחר מוצר</span></summary>' +
-    '<div class="mt-3 space-y-2" role="group" aria-label="בחר את המוצר שמופיע בשורת התעודה">' + candidateButtons + '</div>' +
-  '</details>';
+  // נשמר כשם פונקציה לצורך תאימות לקוד ישן, אך אין עוד מסך בחירה למוצר קיים.
+  // התאמה עמומה נחסמת כבר בשלב האימות ומופנית לצילום מחדש או לבדיקה ידנית.
+  return '';
 }
 function aiUnknownProductSuggestionHtml(suggestion) {
   const name = suggestion && (suggestion.unknownProductName || suggestion.printedDescription) || 'מוצר חדש';
@@ -6557,22 +6575,8 @@ function aiUnknownProductSuggestionHtml(suggestion) {
     '</div></div>';
 }
 function aiBarcodeSuggestionHtml(suggestion) {
-  if (suggestion && suggestion.multipleName === true) return aiMultipleNameSuggestionHtml(suggestion);
   if (suggestion && suggestion.unknownProduct === true) return aiUnknownProductSuggestionHtml(suggestion);
-  if (!aiIsPendingBarcodeChoice(suggestion)) return '';
-  const printed = suggestion.printedDescription || 'תיאור המוצר לא נקרא';
-  const observed = String(suggestion.observed || '').trim();
-  const candidate = suggestion.suggestedProductName || 'המוצר היחיד שמתאים במאגר';
-  const quantity = suggestion.quantity == null ? '' : Number(suggestion.quantity) + ' יח׳ בנייר · ';
-  return '<details class="py-2 border-t border-black/5 first:border-t-0">' +
-    '<summary class="cursor-pointer list-none flex items-start justify-between gap-3 font-black"><span class="min-w-0 text-sm text-slate-800">' + htmlEscape(printed) + '</span><span class="shrink-0 text-sm text-rose-800">' + quantity + 'בדוק התאמה</span></summary>' +
-    '<div class="mt-3 rounded-xl border border-amber-200 bg-white p-3">' +
-      '<div class="text-[10px] font-black text-amber-800">נקראו רק חלק מספרות הברקוד</div>' +
-      (observed ? '<div class="text-[10px] font-bold text-slate-500 mt-1" dir="ltr">' + htmlEscape(observed) + '</div>' : '') +
-      '<div class="font-black text-slate-800 mt-2">המועמד היחיד: ' + htmlEscape(candidate) + '</div>' +
-      aiSuggestionCrossCheckHtml(suggestion) +
-      '<button data-role="ai-confirm-barcode-suggestion" data-doc="' + suggestion.documentIndex + '" data-row="' + suggestion.rowIndex + '" class="btn-tap w-full mt-3 rounded-lg bg-amber-600 text-white py-2.5 text-sm font-black"><i class="fa-solid fa-check ml-1"></i>זה המוצר שמופיע בשורה</button>' +
-    '</div></details>';
+  return '';
 }
 function aiPendingChoicesHtml(suggestions) {
   const rows = (Array.isArray(suggestions) ? suggestions : []).filter(aiIsPendingBarcodeChoice);
@@ -6583,7 +6587,7 @@ function aiPendingChoiceGroupHtml(suggestions) {
   const rows = (Array.isArray(suggestions) ? suggestions : []).filter(aiIsPendingBarcodeChoice);
   if (!rows.length) return '';
   return '<div class="rounded-xl border border-violet-200 bg-violet-50 p-3">' +
-    '<div class="flex items-center justify-between gap-2 mb-1 text-violet-900"><div class="font-black"><i class="fa-solid fa-list-check ml-1"></i>נדרשת התאמת מוצר</div><span class="rounded-full bg-violet-100 text-violet-900 px-2 py-0.5 text-[10px] font-black">' + rows.length + '</span></div>' +
+    '<div class="flex items-center justify-between gap-2 mb-1 text-violet-900"><div class="font-black"><i class="fa-solid fa-circle-plus ml-1"></i>מוצר חדש שנמצא בתעודה</div><span class="rounded-full bg-violet-100 text-violet-900 px-2 py-0.5 text-[10px] font-black">' + rows.length + '</span></div>' +
     '<div>' + aiPendingChoicesHtml(rows) + '</div></div>';
 }
 function aiConfirmNameCandidate(documentIndex, rowIndex, candidateProductId) {
@@ -6725,13 +6729,13 @@ function aiConfirmBarcodeSuggestion(documentIndex, rowIndex) {
   const suggestion = resolution && resolution.suggestion;
   if (!suggestion) { showToast(resolution && resolution.error || 'הצעת הברקוד אינה תקינה', null, null, 3600); return false; }
   const matches = aiCatalogBarcodeMatches(suggestion.barcode, false);
-  if (matches.length !== 1 || matches[0].product.id !== suggestion.product.id) {
+  if (matches.length !== 1 || String(matches[0].product.id) !== String(suggestion.product.id)) {
     showToast('הברקוד המוצע אינו מתאים עוד למוצר יחיד במאגר', null, null, 3800); return false;
   }
   row.barcodeUserConfirmedFromObserved = row.barcodeObserved;
   row.barcodeUserConfirmedFromReadType = row.barcodeReadType;
   row.barcodeUserConfirmedFromMethod = row.barcodeMatchMethod;
-  row.barcodeUserConfirmedFromCatalogHintId = row.catalogHintId;
+  row.barcodeUserConfirmedFromCatalogHintId = String(matches[0].product.id);
   row.barcode = matches[0].barcode;
   row.barcodeMatchMethod = 'user_confirmed';
   row.barcodeSuggested = null;
@@ -6749,15 +6753,15 @@ function aiInvoiceCaptureHtml() {
   if (aiScanEvaluation) {
     const ev = aiScanEvaluation;
     const actionableFindings = (Array.isArray(ev.findings) ? ev.findings : []).filter(aiIsActionableFinding);
-    // אין שלב אישור מוצרים. רק תוצאה חשבונאית סופית וסגורה מוצגת; כל שורה
-    // שנותרה עמומה מחזירה את המשתמש לצילום מחדש או לבדיקה הידנית.
+    const unknownSuggestions = (Array.isArray(ev.barcodeSuggestions) ? ev.barcodeSuggestions : []).filter(suggestion => suggestion && suggestion.unknownProduct === true);
     const findingsHtml = ev.valid
       ? (actionableFindings.length
         ? aiActionableFindingsHtml(actionableFindings)
         : '<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-3 font-black text-emerald-800"><i class="fa-solid fa-circle-check ml-1"></i>הכול תואם — לא נמצאו חוסר, עודף או בעיית מחיר/מבצע.</div>')
       : '';
+    const unknownHtml = unknownSuggestions.length ? aiPendingChoiceGroupHtml(unknownSuggestions) : '';
     const blockingReasonsHtml = (Array.isArray(ev.errors) ? ev.errors : []).slice(0, 6).map(error => '<li>' + htmlEscape(error) + '</li>').join('');
-    const blockingHtml = !ev.valid
+    const blockingHtml = !ev.valid && !unknownSuggestions.length
       ? '<div class="rounded-xl bg-rose-50 border border-rose-200 p-3 text-center"><div class="font-black text-rose-800">הסריקה לא נסגרה בוודאות</div><div class="text-xs font-bold text-rose-700 mt-1">יש לצלם מחדש או לעבור לבדיקה ידנית.</div>' + (blockingReasonsHtml ? '<details class="mt-2 text-right"><summary class="cursor-pointer text-[11px] font-black text-rose-700">הצג את סיבת הכשל</summary><ul class="list-disc pr-5 mt-2 space-y-1 text-[10px] font-bold text-rose-700">' + blockingReasonsHtml + '</ul></details>' : '') + '<button data-role="ai-rescan" class="btn-tap w-full bg-white border-2 border-rose-200 text-rose-700 rounded-xl py-2.5 font-black mt-3">צלם מחדש</button><button data-role="rc-goto-manual" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">עבור לבדיקה ידנית</button></div>'
       : '';
     const applyButton = ev.valid
@@ -6765,8 +6769,8 @@ function aiInvoiceCaptureHtml() {
       : '';
     return '<div class="bg-white rounded-2xl border-2 ' + (ev.valid ? 'border-violet-300' : 'border-rose-300') + ' p-4 shadow-sm mb-24">' +
       '<div class="font-black text-xl text-slate-800 mb-1"><i class="fa-solid fa-wand-magic-sparkles text-violet-600"></i> תוצאות הסריקה החכמה</div>' +
-      '<div class="text-xs text-slate-500 font-bold mb-3">מוצגים רק החוסרים, העודפים ובעיות המחיר הסופיים — ללא אישור מוצרים.</div>' +
-      '<div class="space-y-2">' + findingsHtml + blockingHtml + '</div>' + applyButton + '</div>';
+      '<div class="text-xs text-slate-500 font-bold mb-3">רק חוסרים, עודפים ובעיות שדורשות ממך החלטה.</div>' +
+      '<div class="space-y-2">' + findingsHtml + unknownHtml + blockingHtml + '</div>' + applyButton + '</div>';
   }
   const docCards = aiScanDocuments.map((doc, i) => {
     const noteText = 'סכום צפוי: ₪' + fmtMoney(doc.amount || 0) + (doc.units != null ? ' · ' + doc.units + ' יחידות' : '');
@@ -6790,9 +6794,7 @@ function aiAutomaticNamePriceMappingsAudit() {
   documents.forEach((doc, documentIndex) => {
     (Array.isArray(doc && doc.rows) ? doc.rows : []).forEach((row, rowIndex) => {
       const resolution = aiResolveInvoiceBarcode(row);
-      const automaticMethod = String(resolution && resolution.method || '');
-      const partialBarcodeMethod = ['verified_suffix_name', 'verified_pattern_name', 'verified_one_digit_name'].includes(automaticMethod);
-      if (!resolution || (!partialBarcodeMethod && automaticMethod !== 'verified_name_price') || !resolution.product || !resolution.barcode || !resolution.identityEvidence) return;
+      if (!resolution || resolution.method !== 'verified_name_price' || !resolution.product || !resolution.barcode || !resolution.identityEvidence) return;
       const proof = resolution.identityEvidence;
       output.push({
         documentIndex: Number.isInteger(Number(doc.noteIndex)) ? Number(doc.noteIndex) : documentIndex,
@@ -6802,23 +6804,22 @@ function aiAutomaticNamePriceMappingsAudit() {
         productId: resolution.product.id,
         productName: String(resolution.product.name || '').slice(0, 160),
         barcode: resolution.barcode,
-        barcodeSource: partialBarcodeMethod ? 'catalog_after_unique_partial_barcode_and_name' : 'catalog_after_name_price_crosscheck',
-        confirmationSource: automaticMethod,
+        barcodeSource: 'catalog_after_name_price_crosscheck',
+        confirmationSource: 'verified_name_price',
         catalogHintId: String(row.catalogHintId == null ? '' : row.catalogHintId).slice(0, 160) || null,
         printedDescription: String(row.description || '').slice(0, 160),
-        quantity: proof.quantity != null ? proof.quantity : (row.quantity == null ? null : Number(row.quantity)),
-        basePrice: proof.basePrice != null ? proof.basePrice : (Number(resolution.product.price) || null),
-        unitPriceExVat: proof.unitPrice != null ? proof.unitPrice : (row.unitPriceExVat == null ? null : Number(row.unitPriceExVat)),
-        grossLineTotalExVat: proof.grossLineTotal != null ? proof.grossLineTotal : (row.grossLineTotalExVat == null ? null : Number(row.grossLineTotalExVat)),
-        lineDiscountExVat: proof.lineDiscount != null ? proof.lineDiscount : (row.lineDiscountExVat == null ? null : Number(row.lineDiscountExVat)),
-        lineTotalExVat: proof.lineTotal != null ? proof.lineTotal : (row.lineTotalExVat == null ? null : Number(row.lineTotalExVat)),
-        expectedGrossExVat: proof.expectedGross != null ? proof.expectedGross : null,
-        grossDeltaCents: proof.grossDeltaCents != null ? proof.grossDeltaCents : null,
-        toleranceCents: proof.toleranceCents != null ? proof.toleranceCents : null,
+        quantity: proof.quantity,
+        basePrice: proof.basePrice,
+        unitPriceExVat: proof.unitPrice,
+        grossLineTotalExVat: proof.grossLineTotal,
+        lineDiscountExVat: proof.lineDiscount,
+        lineTotalExVat: proof.lineTotal,
+        expectedGrossExVat: proof.expectedGross,
+        grossDeltaCents: proof.grossDeltaCents,
+        toleranceCents: proof.toleranceCents,
         proofModel: proof.proofModel,
-        knownBarcodeDigits: proof.knownDigits != null ? proof.knownDigits : null,
-        arithmeticVerified: partialBarcodeMethod ? aiRowHasArithmeticProof(row, Number(row.quantity)) : proof.arithmeticVerified === true,
-        rowConfidence: proof.rowConfidence != null ? proof.rowConfidence : Number(row.confidence)
+        arithmeticVerified: proof.arithmeticVerified === true,
+        rowConfidence: proof.rowConfidence
       });
     });
   });
@@ -10072,8 +10073,6 @@ app.addEventListener('click', (e) => {
   if (role === 'ai-edit-images') { aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; renderReconcile(); return; }
   if (role === 'ai-rescan') { resetAiInvoiceScan(); rcStep = 'ai'; renderReconcile(); return; }
   if (role === 'ai-open-suggestion-page') { aiOpenBarcodeSuggestionPage(parseInt(t.dataset.doc, 10), parseInt(t.dataset.page, 10)); return; }
-  if (role === 'ai-confirm-barcode-suggestion') { aiConfirmBarcodeSuggestion(parseInt(t.dataset.doc, 10), parseInt(t.dataset.row, 10)); return; }
-  if (role === 'ai-confirm-name-candidate') { aiConfirmNameCandidate(parseInt(t.dataset.doc, 10), parseInt(t.dataset.row, 10), t.dataset.candidateId); return; }
   if (role === 'ai-add-unknown-product') { aiOpenUnknownProduct(parseInt(t.dataset.doc, 10), parseInt(t.dataset.row, 10)); return; }
   if (role === 'ai-apply') { aiApplyInvoiceResult(); return; }
   if (role === 'admin-login') { requireAdmin('כניסת מנהל', () => { if (currentView === 'settings') renderSettings(); }); return; }
