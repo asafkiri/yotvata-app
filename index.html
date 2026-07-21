@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v131 חוסרים ישירות</title>
+    <title>הזמנות יטבתה - v132 הכרעה אוטומטית</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v131 חוסרים ישירות</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v132 הכרעה אוטומטית</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5958,6 +5958,147 @@ function aiResolveInvoiceBarcode(row) {
   if (!['full', 'suffix', 'full_pattern', 'suffix_pattern', 'pattern', 'unreadable'].includes(readType)) return { error: 'חסרה הוכחת קריאת ברקוד מהצילום' };
   return { error: 'הברקוד לא נקרא או לא נמצא במאגר באופן חד־משמעי' };
 }
+// ===== v132: הכרעה אוטומטית מאחורי הקלעים =====
+// שורות שהשרת סימן כ"דורשות אישור" מוכרעות כאן דטרמיניסטית, בלי שלב משתמש:
+// ראיית ברקוד חלקית + הצלבת מחיר או כמות, או מועמד יחיד שהמחיר/הכמות מבדילים
+// אותו. כל הכרעה נרשמת ליומן. מה שלא ניתן להכריע הופך ל"שורת שארית" שמוצגת
+// בדף הבעיות עם תקריב — אך לעולם אינה נתבעת ואינה נוגעת במלאי.
+function aiRowEffectiveUnitCents(row, qty, cents) {
+  const unitRaw = row && row.unitPriceExVat != null && row.unitPriceExVat !== '' ? Number(row.unitPriceExVat) : null;
+  if (unitRaw != null && isFinite(unitRaw)) return aiMoneyCents(unitRaw);
+  if (qty != null && qty > 0 && cents != null) return Math.round(cents / qty);
+  return null;
+}
+function aiPriceCorroborates(row, qty, cents, product) {
+  // התאמת מחיר לקטלוג: מחיר בסיס או מחיר מבצע פעיל, בסיבולת 2 אגורות.
+  const base = Number(product && product.price);
+  if (!isFinite(base) || base <= 0) return false;
+  const effective = aiRowEffectiveUnitCents(row, qty, cents);
+  if (effective == null) return false;
+  const options = [aiMoneyCents(base)];
+  const pr = promoForProduct(product.id);
+  if (promoActive(pr, todayStr())) options.push(aiMoneyCents(discountedUnitPrice(base, Number(pr.pct) || 0)));
+  return options.some(option => option != null && Math.abs(option - effective) <= 2);
+}
+function aiRemainingReceived(productId, aggregates) {
+  const line = (reconcileData || []).find(l => l.productId === productId);
+  const received = line ? (Number(line.received) || 0) : 0;
+  const aggregated = aggregates.has(productId) ? (Number(aggregates.get(productId).qty) || 0) : 0;
+  return received - aggregated;
+}
+function aiAutoResolveMethodHe(method) {
+  if (method.indexOf('_qty_price') !== -1) return 'התאמת כמות ומחיר';
+  if (method.indexOf('_qty') !== -1) return 'התאמת כמות לספירה';
+  if (method === 'auto_name_price_unique') return 'המחיר מבדיל בין השמות הדומים';
+  if (method === 'auto_name_qty_unique') return 'הכמות מבדילה בין השמות הדומים';
+  if (method === 'auto_name_same_price_first') return 'מועמדים באותו מחיר — זהה כספית';
+  if (method.indexOf('_price') !== -1) return 'התאמת מחיר לקטלוג';
+  return 'הכרעה אוטומטית';
+}
+function aiAutoResolvePendingRow(pending, aggregates) {
+  const suggestion = pending.resolution && pending.resolution.suggestion;
+  if (!suggestion) return null;
+  const row = pending.row, qty = pending.qty, cents = pending.cents;
+  // שורה שהכמות, הסכום או החשבון שלה לא נקראו אינה ניתנת להכרעה אוטומטית.
+  if (qty == null || cents == null || pending.arithmeticError) return null;
+  if (suggestion.unknownProduct === true) return null;
+  if (suggestion.multipleName === true) {
+    const candidates = Array.isArray(suggestion.candidates) ? suggestion.candidates : [];
+    if (candidates.length < 2) return null;
+    const priceCandidates = candidates.filter(candidate => aiPriceCorroborates(row, qty, cents, candidate.product));
+    if (priceCandidates.length === 1) {
+      return { product: priceCandidates[0].product, barcode: priceCandidates[0].barcode, method: 'auto_name_price_unique' };
+    }
+    const pool = priceCandidates.length ? priceCandidates : candidates;
+    const qtyCandidates = qty > 0 ? pool.filter(candidate => aiRemainingReceived(candidate.product.id, aggregates) === qty) : [];
+    if (qtyCandidates.length === 1) {
+      return { product: qtyCandidates[0].product, barcode: qtyCandidates[0].barcode, method: 'auto_name_qty_unique' };
+    }
+    if (priceCandidates.length >= 2) {
+      const priceList = priceCandidates.map(candidate => aiMoneyCents(Number(candidate.product.price) || 0));
+      const samePrice = priceList.every(value => value != null && Math.abs(value - priceList[0]) <= 2);
+      if (samePrice) {
+        // מועמדים זהים במחיר: הבחירה זהה כספית לחלוטין. השרת דירג אותם
+        // מהמתאים ביותר; המלאי עשוי להתחלף בין טעמים דומים והדבר מתועד.
+        return { product: priceCandidates[0].product, barcode: priceCandidates[0].barcode, method: 'auto_name_same_price_first' };
+      }
+    }
+    return null;
+  }
+  if (suggestion.product && suggestion.barcode) {
+    // מועמד יחיד עם ראיית ספרות חלקית ייחודית במאגר; נדרש חיזוק עצמאי אחד.
+    const qtyMatch = qty > 0 && aiRemainingReceived(suggestion.product.id, aggregates) === qty;
+    const priceMatch = aiPriceCorroborates(row, qty, cents, suggestion.product);
+    if (qtyMatch || priceMatch) {
+      const method = 'auto_' + String(suggestion.method || 'suggested') + (qtyMatch && priceMatch ? '_qty_price' : (qtyMatch ? '_qty' : '_price'));
+      return { product: suggestion.product, barcode: suggestion.barcode, method };
+    }
+  }
+  return null;
+}
+function aiBuildPendingSuggestion(pending) {
+  const barcodeMatch = pending.resolution;
+  if (!barcodeMatch || !barcodeMatch.suggestion) return null;
+  const row = pending.row;
+  const commonSuggestion = {
+    documentIndex: pending.docIndex,
+    rowIndex: pending.rowIndex,
+    lineNumber: pending.rowNumber,
+    sourcePage: Number(row.sourcePage),
+    rowRegion: row.rowRegion || null,
+    barcodeResolutionScope: String(row.barcodeResolutionScope || ''),
+    printedDescription: barcodeMatch.suggestion.printedDescription || String(row.description || '').trim(),
+    observed: barcodeMatch.suggestion.observed || 'לא נקרא',
+    method: barcodeMatch.suggestion.method,
+    nameOnly: barcodeMatch.suggestion.nameOnly === true,
+    quantity: pending.qty,
+    lineTotal: pending.cents == null ? null : pending.cents / 100,
+    arithmeticVerified: pending.cents != null && aiRowHasArithmeticProof(row, pending.qty),
+    rowConfidence: pending.rowConfidence
+  };
+  if (barcodeMatch.suggestion.unknownProduct === true) {
+    commonSuggestion.unknownProduct = true;
+    commonSuggestion.unknownBarcode = barcodeMatch.suggestion.barcode;
+    commonSuggestion.unknownProductName = barcodeMatch.suggestion.productName || commonSuggestion.printedDescription;
+    commonSuggestion.safeUnitPrice = barcodeMatch.suggestion.safeUnitPrice;
+    commonSuggestion.lineTotal = barcodeMatch.suggestion.lineTotal;
+  } else if (barcodeMatch.suggestion.multipleName === true) {
+    commonSuggestion.multipleName = true;
+    commonSuggestion.candidates = barcodeMatch.suggestion.candidates.map(candidate => ({
+      productId: candidate.product.id,
+      productName: candidate.product.name || '',
+      barcode: candidate.barcode
+    }));
+  } else {
+    const suggestedLine = (reconcileData || []).find(line => line.productId === barcodeMatch.suggestion.product.id);
+    const receivedQty = suggestedLine ? (Number(suggestedLine.received) || 0) : 0;
+    commonSuggestion.suggestedBarcode = barcodeMatch.suggestion.barcode;
+    commonSuggestion.suggestedProductId = barcodeMatch.suggestion.product.id;
+    commonSuggestion.suggestedProductName = barcodeMatch.suggestion.product.name || String(row.barcodeSuggestedProductName || '').trim();
+    commonSuggestion.receivedQty = receivedQty;
+    commonSuggestion.quantityMatchesReceived = pending.qty != null && pending.qty === receivedQty;
+  }
+  return commonSuggestion;
+}
+function aiResidualGroupHtml(residuals) {
+  const rows = Array.isArray(residuals) ? residuals : [];
+  if (!rows.length) return '';
+  const items = rows.map(residual => {
+    const description = residual.description || 'שורה בתעודה';
+    const qtyText = residual.qty != null ? residual.qty + ' יח׳' : '';
+    const amountText = residual.amount != null ? '₪' + fmtMoney(residual.amount) : '';
+    const meta = [qtyText, amountText].filter(Boolean).join(' · ');
+    return '<details class="py-2 border-t border-black/5 first:border-t-0">' +
+      '<summary class="cursor-pointer list-none flex items-start justify-between gap-3"><span class="min-w-0 text-sm font-black text-slate-800">' + htmlEscape(description) + '</span><span class="shrink-0 text-xs font-black text-slate-600">' + htmlEscape(meta || ('תעודה ' + residual.docNumber)) + '</span></summary>' +
+      '<div class="mt-1 text-[11px] font-bold text-slate-600">תעודה ' + residual.docNumber + (residual.lineNumber != null ? ', שורה ' + residual.lineNumber : '') + ' — ' + htmlEscape(residual.reason || 'לא נקראה בוודאות') + '</div>' +
+      aiBarcodeSuggestionPreviewHtml(residual) +
+    '</details>';
+  }).join('');
+  return '<div class="rounded-xl border border-slate-300 bg-slate-50 p-3">' +
+    '<div class="flex items-center justify-between gap-2 mb-1 text-slate-700"><div class="font-black"><i class="fa-solid fa-eye-slash ml-1"></i>שורות שלא נקראו או לא זוהו</div><span class="rounded-full bg-slate-200 text-slate-700 px-2 py-0.5 text-[10px] font-black">' + rows.length + '</span></div>' +
+    '<div class="text-[10px] font-bold text-slate-500 mb-1">השורות האלה אינן משתתפות בחישוב ואינן נתבעות. צלם מחדש כדי לאמת עד הסוף.</div>' +
+    '<div>' + items + '</div></div>';
+}
 // ממצא AI אינו מספיק רק מפני שהשם או הברקוד נראים סבירים. לפני שמציגים
 // אותו כחוסר/עודף הוא חייב להסביר גם את פער היחידות וגם את פער הכסף הכולל.
 // הבדיקה משתמשת במחירי המערכת המדויקים ובתיקוני המחיר שנמצאו על הנייר,
@@ -6016,9 +6157,9 @@ function aiFindingsClosure(evaluation, findings) {
 }
 function aiEvaluateInvoiceScan(payload) {
   const scan = payload && payload.scan;
-  const errors = [], warnings = [], findings = [], promoCandidates = [], barcodeSuggestions = [], aggregates = new Map(), docSummaries = [];
+  const errors = [], warnings = [], findings = [], promoCandidates = [], barcodeSuggestions = [], aggregates = new Map(), docSummaries = [], residuals = [], pendings = [], autoResolutions = [];
   let unresolvedBarcodeRows = 0, unusableRows = 0;
-  if (!scan || !Array.isArray(scan.documents)) return { valid: false, totalVerified: false, unitsVerified: false, extractedTotal: 0, extractedUnits: 0, errors: ['השרת לא החזיר מסמכים תקינים'], warnings, findings, barcodeSuggestions, allRowsMapped: false, aggregates, docSummaries };
+  if (!scan || !Array.isArray(scan.documents)) return { valid: false, totalVerified: false, unitsVerified: false, extractedTotal: 0, extractedUnits: 0, errors: ['השרת לא החזיר מסמכים תקינים'], warnings, findings, barcodeSuggestions, allRowsMapped: false, aggregates, docSummaries, residuals, autoResolutions, basketComplete: false };
   if (!Number.isInteger(Number(payload.serviceVersion)) || Number(payload.serviceVersion) < AI_SCAN_MIN_SERVICE_VERSION) {
     errors.push('שירות הסריקה עדיין בגרסה ישנה שאינה מוכיחה את מקור הברקוד — יש להעלות קודם את server.js החדש');
   }
@@ -6056,14 +6197,18 @@ function aiEvaluateInvoiceScan(payload) {
       const rowPrefix = 'תעודה ' + (index + 1) + ', שורה ' + rowNumber + ': ';
       const qtyRaw = row.quantity == null || row.quantity === '' ? NaN : Number(row.quantity);
       const qty = isFinite(qtyRaw) && qtyRaw >= 0 && Math.abs(qtyRaw - Math.round(qtyRaw)) < 0.001 ? Math.round(qtyRaw) : null;
-      if (qty == null) { errors.push(rowPrefix + 'הכמות לא נקראה בוודאות'); unusableRows++; }
+      let rowUnusableReason = '';
+      if (qty == null) { errors.push(rowPrefix + 'הכמות לא נקראה בוודאות'); unusableRows++; rowUnusableReason = 'הכמות לא נקראה בוודאות'; }
       else { docUnits += qty; extractedUnits += qty; }
       const total = aiLineTotal(row, qty);
       const cents = total == null || total < 0 ? null : aiMoneyCents(total);
-      if (cents == null) { errors.push(rowPrefix + 'סכום השורה לא נקרא'); unusableRows++; }
+      if (cents == null) { errors.push(rowPrefix + 'סכום השורה לא נקרא'); unusableRows++; if (!rowUnusableReason) rowUnusableReason = 'סכום השורה לא נקרא'; }
       else { docRowsCents += cents; rowTotalCents += cents; }
       const arithmeticError = qty == null ? '' : aiRowArithmeticError(row, qty);
-      if (arithmeticError) { errors.push(rowPrefix + arithmeticError); unusableRows++; }
+      if (arithmeticError) { errors.push(rowPrefix + arithmeticError); unusableRows++; if (!rowUnusableReason) rowUnusableReason = arithmeticError; }
+      if (rowUnusableReason) {
+        residuals.push({ docNumber: index + 1, documentIndex: index, lineNumber: rowNumber, sourcePage: Number(row.sourcePage), rowRegion: row.rowRegion || null, description: String(row.description || '').trim(), qty, amount: cents == null ? null : cents / 100, reason: rowUnusableReason });
+      }
       const rowConfidence = Number(row.confidence);
       if (!isFinite(rowConfidence) || rowConfidence < 0.55) warnings.push(rowPrefix + 'ביטחון הקריאה נמוך — השורה תאושר רק אם הברקוד, החשבון והסיכומים נסגרים');
       else if (rowConfidence < 0.78) warnings.push(rowPrefix + 'ביטחון קריאה בינוני — מומלץ לבדוק מול התמונה');
@@ -6074,49 +6219,10 @@ function aiEvaluateInvoiceScan(payload) {
       const barcode = barcodeMatch.barcode || '';
       const product = barcodeMatch.product || null;
       if (!barcode || !product) {
-        unresolvedBarcodeRows++;
-        errors.push(rowPrefix + (barcodeMatch.error || 'הברקוד לא זוהה במאגר'));
-        if (barcodeMatch.suggestion) {
-          const commonSuggestion = {
-            documentIndex: index,
-            rowIndex,
-            lineNumber: rowNumber,
-            sourcePage: Number(row.sourcePage),
-            rowRegion: row.rowRegion || null,
-            barcodeResolutionScope: String(row.barcodeResolutionScope || ''),
-            printedDescription: barcodeMatch.suggestion.printedDescription || String(row.description || '').trim(),
-            observed: barcodeMatch.suggestion.observed || 'לא נקרא',
-            method: barcodeMatch.suggestion.method,
-            nameOnly: barcodeMatch.suggestion.nameOnly === true,
-            quantity: qty,
-            lineTotal: cents == null ? null : cents / 100,
-            arithmeticVerified: cents != null && aiRowHasArithmeticProof(row, qty),
-            rowConfidence: isFinite(rowConfidence) ? rowConfidence : 0
-          };
-          if (barcodeMatch.suggestion.unknownProduct === true) {
-            commonSuggestion.unknownProduct = true;
-            commonSuggestion.unknownBarcode = barcodeMatch.suggestion.barcode;
-            commonSuggestion.unknownProductName = barcodeMatch.suggestion.productName || commonSuggestion.printedDescription;
-            commonSuggestion.safeUnitPrice = barcodeMatch.suggestion.safeUnitPrice;
-            commonSuggestion.lineTotal = barcodeMatch.suggestion.lineTotal;
-          } else if (barcodeMatch.suggestion.multipleName === true) {
-            commonSuggestion.multipleName = true;
-            commonSuggestion.candidates = barcodeMatch.suggestion.candidates.map(candidate => ({
-              productId: candidate.product.id,
-              productName: candidate.product.name || '',
-              barcode: candidate.barcode
-            }));
-          } else {
-            const suggestedLine = (reconcileData || []).find(line => line.productId === barcodeMatch.suggestion.product.id);
-            const receivedQty = suggestedLine ? (Number(suggestedLine.received) || 0) : 0;
-            commonSuggestion.suggestedBarcode = barcodeMatch.suggestion.barcode;
-            commonSuggestion.suggestedProductId = barcodeMatch.suggestion.product.id;
-            commonSuggestion.suggestedProductName = barcodeMatch.suggestion.product.name || String(row.barcodeSuggestedProductName || '').trim();
-            commonSuggestion.receivedQty = receivedQty;
-            commonSuggestion.quantityMatchesReceived = qty != null && qty === receivedQty;
-          }
-          barcodeSuggestions.push(commonSuggestion);
-        }
+        // v132: אין שלב אישורי משתמש. השורה נאספת להכרעה אוטומטית שתרוץ
+        // אחרי שכל המסמכים נקראו (כדי שהצלבת הכמות תראה את התמונה המלאה).
+        // מה שלא יוכרע יירשם כשורת שארית — מוצג, לא נתבע, וחוסם רק את ההחלה.
+        pendings.push({ docIndex: index, rowIndex, rowNumber, rowPrefix, row, qty, cents, rowConfidence: isFinite(rowConfidence) ? rowConfidence : 0, arithmeticError, resolution: barcodeMatch });
         return;
       }
       if (['unique_suffix', 'unique_full_pattern', 'unique_suffix_pattern'].includes(barcodeMatch.method)) warnings.push(product.name + ': הותאם בוודאות לפי הספרות שנקראו (' + barcodeMatch.observed + ')');
@@ -6152,7 +6258,43 @@ function aiEvaluateInvoiceScan(payload) {
         errors.push('תעודה ' + (index + 1) + ': הנחת המסמך שנקראה אינה סוגרת בדיוק את סכום השורות');
       } else verifiedDocumentDiscountCents += printedDiscountCents;
     }
+    // v132: כשהקריאה עקבית פנימית (שורות מול סיכום מודפס) אך שונה מהעוגן
+    // שהוקלד — החשוד הסביר הוא ההקלדה, לא הקריאה. אומרים זאת במפורש.
+    if (subtotalCents != null && expectedCents != null && subtotalCents !== expectedCents && impliedDiscountCents != null && impliedDiscountCents >= 0 && (impliedDiscountCents === 0 || printedDiscountCents === impliedDiscountCents)) {
+      warnings.push('תעודה ' + (index + 1) + ': סכום השורות שנקראו נסגר בדיוק על ₪' + fmtMoney(subtotalCents / 100) + ' — ייתכן שהסכום שהוקלד (₪' + fmtMoney(expectedCents / 100) + ') שגוי. בדוק את ההקלדה.');
+    }
+    if (printedUnits != null && isFinite(printedUnits) && Math.round(printedUnits) === docUnits && inputDoc.units != null && docUnits !== Number(inputDoc.units)) {
+      warnings.push('תעודה ' + (index + 1) + ': היחידות שנקראו (' + docUnits + ') תואמות לשדה המודפס בתעודה — ייתכן שהיחידות שהוקלדו (' + inputDoc.units + ') שגויות.');
+    }
     docSummaries.push({ noteIndex: index, invoiceNumber: doc.invoiceNumber || '', subtotal: subtotalCents == null ? null : subtotalCents / 100, units: docUnits, rows: Array.isArray(doc.rows) ? doc.rows.length : 0, documentDiscount: printedDiscountCents == null ? null : printedDiscountCents / 100, confidence: isFinite(docConfidence) ? docConfidence : 0 });
+  });
+  // ===== v132: הכרעה אוטומטית של השורות שנותרו, בשני מעברים =====
+  // מעבר שני נחוץ כי הצלבת "כמות שנותרה בספירה" משתנה אחרי כל הכרעה.
+  let pendingList = pendings.slice();
+  for (let sweep = 0; sweep < 2 && pendingList.length; sweep++) {
+    const still = [];
+    pendingList.forEach(pending => {
+      const hit = aiAutoResolvePendingRow(pending, aggregates);
+      if (!hit) { still.push(pending); return; }
+      const old = aggregates.get(hit.product.id) || { product: hit.product, qty: 0, totalCents: 0, rows: [], promotionTexts: [], priceVariants: new Set() };
+      old.qty += pending.qty; old.totalCents += pending.cents;
+      old.rows.push({ document: pending.docIndex + 1, page: pending.row.sourcePage, line: pending.row.lineNumber, confidence: pending.rowConfidence, barcodeObserved: (pending.resolution.suggestion && pending.resolution.suggestion.observed) || 'לא נקרא', barcodeMatchMethod: hit.method, identityEvidence: { auto: true, reason: aiAutoResolveMethodHe(hit.method) } });
+      if (pending.qty > 0) old.priceVariants.add(r2(pending.cents / 100 / pending.qty));
+      if (pending.row.promotionText) old.promotionTexts.push(String(pending.row.promotionText));
+      aggregates.set(hit.product.id, old);
+      warnings.push(hit.product.name + ': הוכרע אוטומטית — ' + aiAutoResolveMethodHe(hit.method));
+      autoResolutions.push({ documentIndex: pending.docIndex, rowIndex: pending.rowIndex, lineNumber: pending.rowNumber, sourcePage: Number(pending.row.sourcePage), productId: hit.product.id, productName: String(hit.product.name || '').slice(0, 160), barcode: hit.barcode, method: hit.method, printedDescription: String(pending.row.description || '').slice(0, 160), observed: (pending.resolution.suggestion && pending.resolution.suggestion.observed) || null, quantity: pending.qty, lineTotalExVat: r2(pending.cents / 100), rowConfidence: pending.rowConfidence });
+    });
+    pendingList = still;
+  }
+  pendingList.forEach(pending => {
+    unresolvedBarcodeRows++;
+    errors.push(pending.rowPrefix + (pending.resolution.error || 'הברקוד לא זוהה במאגר'));
+    if (pending.qty != null && pending.cents != null && !pending.arithmeticError) {
+      residuals.push({ docNumber: pending.docIndex + 1, documentIndex: pending.docIndex, lineNumber: pending.rowNumber, sourcePage: Number(pending.row.sourcePage), rowRegion: pending.row.rowRegion || null, description: String(pending.row.description || '').trim(), qty: pending.qty, amount: pending.cents / 100, reason: pending.resolution.error || 'לא זוהה מוצר מתאים במאגר' });
+    }
+    const builtSuggestion = aiBuildPendingSuggestion(pending);
+    if (builtSuggestion) barcodeSuggestions.push(builtSuggestion);
   });
   if (returned.size !== aiScanDocuments.length) errors.push('מספר המסמכים שחזר אינו זהה למספר התעודות שצולמו');
   const expectedTotalCents = aiMoneyCents(receiptNoteTotal);
@@ -6187,10 +6329,13 @@ function aiEvaluateInvoiceScan(payload) {
     suggestion.quantityMatchesReceived = suggestion.paperQtyForCandidate === Number(suggestion.receivedQty || 0);
   });
   const allRowsMapped = unresolvedBarcodeRows === 0;
-  // אין להסיק חוסר/עודף מסל שאולי חסרה בו שורה שלמה. כל שגיאת סכום,
-  // יחידות, מספר שורות או מבנה משאירה את הממצאים מוסתרים.
+  // v132: דף הבעיות מוצג תמיד כשזוהו מוצרים. הרף המחמיר (findingsReady)
+  // נשאר תנאי להחלה בלבד. basketComplete מציין שכל שורות הנייר נקראו ושויכו —
+  // רק אז מותר להסיק "עודף" או "מבצע חסר", כי אלה מסקנות מהיעדר שורה.
+  // "חוסר" (הנייר מבטיח יותר ממה שנסרק) הוא ראיה חיובית ומוצג גם על סל חלקי.
   const findingsReady = allRowsMapped && unusableRows === 0 && errors.length === 0;
-  if (findingsReady) {
+  const basketComplete = allRowsMapped && unusableRows === 0;
+  if (aggregates.size > 0) {
     const day = todayStr();
     const paperBasketQty = pr => {
       if (!pr || !Array.isArray(pr.productIds)) return 0;
@@ -6211,12 +6356,12 @@ function aiEvaluateInvoiceScan(payload) {
       : r2(Number(a.product.price) || 0);
     const quantityDiff = a.qty - received;
     if (quantityDiff > 0) findings.push({ type: 'shortage', productId: a.product.id, name: a.product.name, qty: quantityDiff, expectedPrice: expected, text: 'חסר ' + quantityDiff + ' × ' + a.product.name });
-    else if (quantityDiff < 0) findings.push({ type: 'surplus', productId: a.product.id, name: a.product.name, qty: -quantityDiff, expectedPrice: expected, text: 'עודף ' + (-quantityDiff) + ' × ' + a.product.name });
+    else if (quantityDiff < 0 && basketComplete) findings.push({ type: 'surplus', productId: a.product.id, name: a.product.name, qty: -quantityDiff, expectedPrice: expected, text: 'עודף ' + (-quantityDiff) + ' × ' + a.product.name });
     const priceVariants = Array.from(a.priceVariants || []).sort((x, y) => x - y);
     if (priceVariants.length > 1) {
       const priceAmount = r2(a.totalCents / 100 - expected * a.qty);
       findings.push({ type: 'price', productId: a.product.id, name: a.product.name, qty: a.qty, expectedPrice: expected, paperPrice: a.paperUnitPrice, amount: priceAmount, text: 'אותו מוצר חויב ביותר ממחיר אחד: ' + a.product.name + ' — ' + priceVariants.map(x => '₪' + fmtMoney(x)).join(' · ') });
-    } else if (a.qty > 0 && expected > 0 && Math.abs(a.paperUnitPrice - expected) > 0.02) {
+    } else if (basketComplete && a.qty > 0 && expected > 0 && Math.abs(a.paperUnitPrice - expected) > 0.02) {
       const pr = productPromo, promoExpected = !!(pr && paperPromoTriggered(pr) && a.paperUnitPrice > expected + 0.02);
       const priceFinding = { type: promoExpected ? 'promo_missing' : 'price', productId: a.product.id, name: a.product.name, qty: a.qty, expectedPrice: expected, paperPrice: a.paperUnitPrice, amount: r2((a.paperUnitPrice - expected) * a.qty), text: (promoExpected ? 'המבצע לא מופיע אצל הספק: ' : 'מחיר שונה: ') + a.product.name + ' — במערכת ₪' + fmtMoney(expected) + ', בנייר ₪' + fmtMoney(a.paperUnitPrice) };
       // לעיתים יטבתה מדפיסה את המבצעים כהנחה אחת בתחתית המסמך ולא כהנחת שורה.
@@ -6232,7 +6377,7 @@ function aiEvaluateInvoiceScan(payload) {
     } else {
       findings.push(...promoCandidates);
     }
-    (reconcileData || []).forEach(line => {
+    if (basketComplete) (reconcileData || []).forEach(line => {
       if ((Number(line.received) || 0) > 0 && !aggregates.has(line.productId)) findings.push({ type: 'surplus', productId: line.productId, name: line.name, qty: Number(line.received) || 0, expectedPrice: Number(line.price) || 0, text: 'עודף ' + (Number(line.received) || 0) + ' × ' + line.name + ' — לא מופיע בתעודה' });
     });
     if (documentDiscountCents > 2) findings.push({ type: 'document_discount', amount: documentDiscountCents / 100, text: 'הנחת מסמך כללית: ₪' + fmtMoney(documentDiscountCents / 100) });
@@ -6248,7 +6393,7 @@ function aiEvaluateInvoiceScan(payload) {
   if (findingsReady && !closure.ok) errors.push(closure.reason || 'הממצאים אינם סוגרים את פער היחידות והסכום');
   const uniqueErrors = Array.from(new Set(errors));
   const uniqueWarnings = Array.from(new Set(warnings.concat(Array.isArray(scan.warnings) ? scan.warnings : [])));
-  return { valid: uniqueErrors.length === 0 && barcodeSuggestions.length === 0 && findingsReady && aggregates.size > 0 && totalVerified && unitsVerified && closure.ok, totalVerified, unitsVerified, closure, errors: uniqueErrors, warnings: uniqueWarnings, findings, barcodeSuggestions, allRowsMapped, findingsReady, aggregates, docSummaries, extractedTotal: extractedTotalCents / 100, extractedUnits, rowTotal: rowTotalCents / 100, supplierDiscount };
+  return { valid: uniqueErrors.length === 0 && barcodeSuggestions.length === 0 && findingsReady && aggregates.size > 0 && totalVerified && unitsVerified && closure.ok, totalVerified, unitsVerified, closure, errors: uniqueErrors, warnings: uniqueWarnings, findings, barcodeSuggestions, allRowsMapped, findingsReady, basketComplete, residuals, autoResolutions, aggregates, docSummaries, extractedTotal: extractedTotalCents / 100, extractedUnits, rowTotal: rowTotalCents / 100, supplierDiscount };
 }
 function aiRotationRetryDocumentIndexes(evaluation) {
   if (!evaluation || !Array.isArray(evaluation.docSummaries)) return [];
@@ -6344,6 +6489,108 @@ async function aiRequestInvoiceScan(token, documents) {
   }
   return payload;
 }
+// ===== v132: סריקה מקבילית — בקשה נפרדת לכל תעודה =====
+// תעודה אחת לבקשה = משימת קריאה קטנה וממוקדת למודל, כשל בתעודה אחת אינו
+// מפיל את השנייה, וניסיונות הסיבוב רצים רק על התעודה הבעייתית. חוזה ה-OCR
+// מול השרת לא השתנה; כל בקשה היא מסמך יחיד עם noteIndex=0 שממופה חזרה.
+async function aiRequestSingleDocScan(token, pages) {
+  const response = await fetch(AI_SCAN_WORKER_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+    body: JSON.stringify({
+      documents: [{ noteIndex: 0, pages: pages.map(p => p.dataUrl) }],
+      receivedProductIds: aiReceivedProductIds(),
+      catalog: products.map(p => ({ id: p.id, name: p.name || '', barcode: normalizeBarcode(p.barcode || '') })).filter(p => /^\d{6,20}$/.test(p.barcode))
+    })
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.ok) {
+    const code = payload.error || '';
+    const fatal = code === 'rate_limited' || code === 'invalid_auth' || code === 'auth_required';
+    const error = new Error(
+      code === 'rate_limited' ? 'בוצעו יותר מדי ניסיונות. המתן 10 דקות ונסה שוב.'
+        : (code === 'invalid_auth' || code === 'auth_required') ? 'האימות המאובטח נכשל. רענן את האפליקציה ונסה שוב.'
+        : (code === 'incomplete_model_output' || code === 'model_refusal' || code === 'invalid_model_output') ? 'ה-AI לא החזיר פענוח מלא ובטוח לתעודה זו.'
+        : (code === 'openai_error' && payload.message) ? 'שירות ה-AI החזיר שגיאה: ' + payload.message
+        : 'הסריקה החכמה לא הצליחה לתעודה זו.'
+    );
+    error.fatal = fatal;
+    throw error;
+  }
+  return payload;
+}
+function aiSingleDocScore(returnedDoc, inputDoc) {
+  const rows = returnedDoc && Array.isArray(returnedDoc.rows) ? returnedDoc.rows : [];
+  const units = rows.reduce((sum, row) => sum + (row.quantity == null ? 0 : Number(row.quantity) || 0), 0);
+  const subtotalCents = returnedDoc ? aiMoneyCents(returnedDoc.subtotalExVat) : null;
+  const expectedCents = aiMoneyCents(inputDoc.amount);
+  // עוגן שלא הוקלד נחשב מסופק — אחרת תעודה בלי עוגן הייתה נסרקת שלוש פעמים תמיד.
+  const unitsExact = inputDoc.units == null ? 1 : (units === Number(inputDoc.units) ? 1 : 0);
+  const subtotalExact = expectedCents == null ? 1 : (subtotalCents != null && subtotalCents === expectedCents ? 1 : 0);
+  const hasContent = rows.length > 0 && units > 0 ? 1 : 0;
+  const confidence = returnedDoc && isFinite(Number(returnedDoc.confidence)) ? Number(returnedDoc.confidence) : 0;
+  return [unitsExact, subtotalExact, hasContent, confidence];
+}
+function aiSingleDocScoreBetter(candidate, best) {
+  for (let i = 0; i < candidate.length; i++) {
+    if (candidate[i] > best[i]) return true;
+    if (candidate[i] < best[i]) return false;
+  }
+  return false;
+}
+async function aiScanSingleDocPipeline(token, docIndex) {
+  const inputDoc = aiScanDocuments[docIndex];
+  const runAttempt = async (pages) => {
+    const payload = await aiRequestSingleDocScan(token, pages);
+    const doc = payload.scan && Array.isArray(payload.scan.documents)
+      ? payload.scan.documents.find(item => Number(item && item.noteIndex) === 0) : null;
+    return { payload, doc, pages, score: aiSingleDocScore(doc, inputDoc) };
+  };
+  const isPerfect = attempt => attempt.score[0] === 1 && attempt.score[1] === 1 && attempt.score[2] === 1;
+  let attempts = 1;
+  let rotationText = '';
+  let best = await runAttempt(inputDoc.pages);
+  if (!isPerfect(best) && AI_SCAN_MAX_AUTO_ROTATION_RETRIES > 0) {
+    const rotatedPlus = await aiBuildRotatedDocuments([{ noteIndex: 0, pages: inputDoc.pages }], [0], 1);
+    const second = await runAttempt(rotatedPlus[0].pages);
+    attempts = 2;
+    if (aiSingleDocScoreBetter(second.score, best.score)) { best = second; rotationText = 'תעודה ' + (docIndex + 1) + ' יושרה אוטומטית ב־90°'; }
+    if (!isPerfect(best) && AI_SCAN_MAX_AUTO_ROTATION_RETRIES > 1) {
+      const bestIsOriginal = best.pages === inputDoc.pages;
+      const thirdSource = bestIsOriginal ? inputDoc.pages : best.pages;
+      const thirdTurns = bestIsOriginal ? 3 : 2;
+      const rotatedThird = await aiBuildRotatedDocuments([{ noteIndex: 0, pages: thirdSource }], [0], thirdTurns);
+      const third = await runAttempt(rotatedThird[0].pages);
+      attempts = 3;
+      if (aiSingleDocScoreBetter(third.score, best.score)) { best = third; rotationText = 'תעודה ' + (docIndex + 1) + ' יושרה אוטומטית בכיוון ההפוך'; }
+    }
+  }
+  if (!best.doc) {
+    const error = new Error('ה-AI לא החזיר פענוח עבור התעודה.');
+    throw error;
+  }
+  best.doc.noteIndex = docIndex;
+  return {
+    ok: true,
+    docIndex,
+    doc: best.doc,
+    pages: best.pages,
+    attempts,
+    rotationText,
+    serviceVersion: best.payload.serviceVersion,
+    model: best.payload.model || null,
+    requestId: best.payload.requestId || null,
+    usage: best.payload.usage || null,
+    warnings: best.payload.scan && Array.isArray(best.payload.scan.warnings) ? best.payload.scan.warnings : [],
+    retryAudit: {
+      attempted: best.payload.barcodeRetryAttempted === true,
+      targetCount: Number(best.payload.barcodeRetryCount) || 0,
+      mergedCount: Number(best.payload.barcodeRetryMergedCount) || 0,
+      requestId: best.payload.barcodeRetryRequestId || null,
+      error: best.payload.barcodeRetryError || null
+    }
+  };
+}
 async function aiRunInvoiceScan() {
   if (aiScanBusy) return;
   if (aiScanDocuments.length > 4) { showToast('ניתן לפענח עד 4 תעודות בפעולה אחת', null, null, 3200); return; }
@@ -6351,49 +6598,43 @@ async function aiRunInvoiceScan() {
   if (!aiScanDocuments.length || aiScanDocuments.some(d => !d.pages.length)) { showToast('צלם לפחות עמוד אחד מכל תעודה', null, null, 3000); return; }
   if (!aiAllPagesOrientationConfirmed()) { showToast('אשר שכל התמונות ישרות לפני הפענוח', null, null, 3200); aiOpenNextUnconfirmedOrientation(); return; }
   if (!auth || !auth.currentUser) { showToast('עדיין אין חיבור מאובטח — המתן רגע ונסה שוב', null, null, 3000); return; }
-  aiScanBusy = true; aiScanProgressText = 'ה-AI קורא את כל דפי התעודות…'; aiScanError = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; renderReconcile();
+  aiScanBusy = true; aiScanProgressText = aiScanDocuments.length > 1 ? 'ה-AI קורא ' + aiScanDocuments.length + ' תעודות במקביל…' : 'ה-AI קורא את דפי התעודה…'; aiScanError = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; renderReconcile();
   try {
     const token = await auth.currentUser.getIdToken();
-    const originalDocuments = aiScanDocuments;
-    let attemptDocuments = originalDocuments;
-    let payload = await aiRequestInvoiceScan(token, attemptDocuments);
-    aiScanAttemptCount = 1;
-    let evaluation = aiEvaluateInvoiceScan(payload);
-    let best = { documents: attemptDocuments, payload, evaluation, rotationText: '' };
-    let retryIndexes = aiRotationRetryDocumentIndexes(evaluation);
-
-    // ניסיון חוזר מתבצע כשמסמך לא נקרא, או כשהקריאה חלקית ואינה נסגרת מול
-    // הסכום/היחידות שהוקלדו. רק זווית התמונה משתנה; חוזה ה-OCR נשאר זהה.
-    if (retryIndexes.length && AI_SCAN_MAX_AUTO_ROTATION_RETRIES > 0) {
-      aiScanProgressText = 'הקריאה חלקית — מנסה זווית אחרת (2/3)…'; renderReconcile();
-      attemptDocuments = await aiBuildRotatedDocuments(originalDocuments, retryIndexes, 1);
-      payload = await aiRequestInvoiceScan(token, attemptDocuments);
-      aiScanAttemptCount = 2;
-      evaluation = aiEvaluateInvoiceScan(payload);
-      if (aiEvaluationIsBetter(evaluation, best.evaluation)) best = { documents: attemptDocuments, payload, evaluation, rotationText: 'הצילום יושר אוטומטית ב־90°' };
-      // ההחלטה על ניסיון שלישי נעשית מהפענוח הטוב ביותר שנמצא עד כה, לא
-      // בהכרח מהניסיון האחרון. כך ניסיון חלש לא גורר שרשרת סריקות מיותרת.
-      retryIndexes = aiRotationRetryDocumentIndexes(best.evaluation);
-
-      if (retryIndexes.length && AI_SCAN_MAX_AUTO_ROTATION_RETRIES > 1) {
-        aiScanProgressText = 'הקריאה עדיין חלקית — מנסה את הכיוון ההפוך (3/3)…'; renderReconcile();
-        // עוברים ל־−90° ביחס למקור. אם הפענוח הטוב ביותר הוא כבר +90°
-        // מוסיפים 180°; אם המקור עדיין טוב יותר, מסובבים אותו ישירות 270°.
-        const retryBaseDocuments = best.documents;
-        const retryQuarterTurns = retryBaseDocuments === originalDocuments ? 3 : 2;
-        attemptDocuments = await aiBuildRotatedDocuments(retryBaseDocuments, retryIndexes, retryQuarterTurns);
-        payload = await aiRequestInvoiceScan(token, attemptDocuments);
-        aiScanAttemptCount = 3;
-        evaluation = aiEvaluateInvoiceScan(payload);
-        if (aiEvaluationIsBetter(evaluation, best.evaluation)) best = { documents: attemptDocuments, payload, evaluation, rotationText: 'הצילום יושר אוטומטית בכיוון ההפוך' };
-      }
+    // v132: כל תעודה נסרקת בבקשה משלה, במקביל. כשל בתעודה אחת אינו מפיל
+    // את השאר: התעודות שהצליחו נכנסות לפענוח, והכשל מדווח כשגיאה בדף.
+    const results = await Promise.all(aiScanDocuments.map((doc, docIndex) =>
+      aiScanSingleDocPipeline(token, docIndex).catch(error => {
+        if (error && error.fatal) throw error;
+        return { ok: false, docIndex, errorMessage: (error && error.message) || 'הסריקה נכשלה לתעודה זו' };
+      })
+    ));
+    const okResults = results.filter(result => result.ok);
+    if (!okResults.length) {
+      aiScanError = (results[0] && results[0].errorMessage) || 'הסריקה החכמה נכשלה. נסה שוב או עבור לבדיקה ידנית.';
+      return;
     }
-
-    aiScanDocuments = best.documents;
-    aiScanResponse = best.payload;
-    aiScanEvaluation = best.evaluation;
-    aiScanAutoRotationNote = best.rotationText;
-    if (!aiScanEvaluation.valid) aiScanError = 'הפענוח לא עבר את בדיקות הבטיחות — התעודה לא שונתה.';
+    const mergedWarnings = [];
+    okResults.forEach(result => (result.warnings || []).forEach(warning => {
+      const text = (aiScanDocuments.length > 1 ? 'תעודה ' + (result.docIndex + 1) + ': ' : '') + warning;
+      if (!mergedWarnings.includes(text)) mergedWarnings.push(text);
+    }));
+    results.filter(result => !result.ok).forEach(result => mergedWarnings.push('תעודה ' + (result.docIndex + 1) + ': הפענוח נכשל — ' + (result.errorMessage || '')));
+    okResults.forEach(result => { aiScanDocuments[result.docIndex] = Object.assign({}, aiScanDocuments[result.docIndex], { pages: result.pages }); });
+    aiScanAttemptCount = results.reduce((max, result) => Math.max(max, result.attempts || 1), 1);
+    aiScanAutoRotationNote = okResults.map(result => result.rotationText).filter(Boolean).join(' · ');
+    aiScanResponse = {
+      ok: true,
+      serviceVersion: okResults.reduce((min, result) => Math.min(min, Number(result.serviceVersion) || 0), Number.MAX_SAFE_INTEGER),
+      scan: { documents: okResults.map(result => result.doc), warnings: mergedWarnings },
+      model: Array.from(new Set(okResults.map(result => result.model).filter(Boolean))).join(' · ') || 'unknown',
+      requestId: okResults.map(result => result.requestId).filter(Boolean).join(' · ') || null,
+      usage: null,
+      perDocument: results.map(result => result.ok
+        ? { docIndex: result.docIndex, ok: true, attempts: result.attempts, requestId: result.requestId, model: result.model, usage: result.usage, barcodeRetry: result.retryAudit }
+        : { docIndex: result.docIndex, ok: false, error: result.errorMessage || '' })
+    };
+    aiScanEvaluation = aiEvaluateInvoiceScan(aiScanResponse);
   } catch (error) { aiScanError = error && error.message ? error.message : 'הסריקה החכמה נכשלה'; }
   finally { aiScanBusy = false; aiScanProgressText = ''; if (currentView === 'reconcile') renderReconcile(); }
 }
@@ -6749,24 +6990,33 @@ function aiInvoiceCaptureHtml() {
   if (aiScanEvaluation) {
     const ev = aiScanEvaluation;
     const actionableFindings = (Array.isArray(ev.findings) ? ev.findings : []).filter(aiIsActionableFinding);
-    // אין שלב אישור מוצרים. רק תוצאה חשבונאית סופית וסגורה מוצגת; כל שורה
-    // שנותרה עמומה מחזירה את המשתמש לצילום מחדש או לבדיקה הידנית.
-    const findingsHtml = ev.valid
-      ? (actionableFindings.length
-        ? aiActionableFindingsHtml(actionableFindings)
-        : '<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-3 font-black text-emerald-800"><i class="fa-solid fa-circle-check ml-1"></i>הכול תואם — לא נמצאו חוסר, עודף או בעיית מחיר/מבצע.</div>')
-      : '';
+    const residuals = Array.isArray(ev.residuals) ? ev.residuals : [];
+    // v132: דף הבעיות מוצג תמיד — גם כשהסריקה לא נסגרה במלואה. ההתאמות
+    // הוכרעו אוטומטית מאחורי הקלעים; הרף המחמיר חוסם רק את "אשר והמשך".
+    const unknownCards = (Array.isArray(ev.barcodeSuggestions) ? ev.barcodeSuggestions : []).filter(suggestion => suggestion && suggestion.unknownProduct === true).map(aiUnknownProductSuggestionHtml).join('');
     const blockingReasonsHtml = (Array.isArray(ev.errors) ? ev.errors : []).slice(0, 6).map(error => '<li>' + htmlEscape(error) + '</li>').join('');
-    const blockingHtml = !ev.valid
-      ? '<div class="rounded-xl bg-rose-50 border border-rose-200 p-3 text-center"><div class="font-black text-rose-800">הסריקה לא נסגרה בוודאות</div><div class="text-xs font-bold text-rose-700 mt-1">יש לצלם מחדש או לעבור לבדיקה ידנית.</div>' + (blockingReasonsHtml ? '<details class="mt-2 text-right"><summary class="cursor-pointer text-[11px] font-black text-rose-700">הצג את סיבת הכשל</summary><ul class="list-disc pr-5 mt-2 space-y-1 text-[10px] font-bold text-rose-700">' + blockingReasonsHtml + '</ul></details>' : '') + '<button data-role="ai-rescan" class="btn-tap w-full bg-white border-2 border-rose-200 text-rose-700 rounded-xl py-2.5 font-black mt-3">צלם מחדש</button><button data-role="rc-goto-manual" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">עבור לבדיקה ידנית</button></div>'
+    const statusHtml = ev.valid
+      ? '<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-center"><div class="font-black text-emerald-800"><i class="fa-solid fa-circle-check ml-1"></i>הסריקה אומתה במלואה מול הסכום והיחידות שהוקלדו</div></div>'
+      : '<div class="rounded-xl bg-amber-50 border border-amber-300 p-3"><div class="font-black text-amber-900"><i class="fa-solid fa-triangle-exclamation ml-1"></i>דף בעיות — תצוגה בלבד</div>' +
+        '<div class="text-[11px] font-bold text-amber-800 mt-1">' + (residuals.length ? residuals.length + ' שורות לא נקראו או לא זוהו בוודאות. ' : '') + 'הקליטה למלאי תיפתח רק אחרי סריקה שנסגרת במלואה.' + (ev.basketComplete ? '' : ' עודפים ובעיות מחיר/מבצע יוצגו רק כשכל השורות ייקראו.') + '</div>' +
+        (blockingReasonsHtml ? '<details class="mt-2 text-right"><summary class="cursor-pointer text-[11px] font-black text-amber-800">מה עוד לא נסגר?</summary><ul class="list-disc pr-5 mt-2 space-y-1 text-[10px] font-bold text-amber-800">' + blockingReasonsHtml + '</ul></details>' : '') +
+        '<div class="flex gap-2 mt-3"><button data-role="ai-rescan" class="btn-tap flex-1 bg-white border-2 border-amber-300 text-amber-800 rounded-xl py-2.5 font-black">צלם מחדש</button><button data-role="rc-goto-manual" class="btn-tap flex-1 bg-white border border-slate-200 text-slate-500 rounded-xl py-2.5 font-black text-xs">בדיקה ידנית</button></div></div>';
+    const findingsHtml = actionableFindings.length
+      ? aiActionableFindingsHtml(actionableFindings)
+      : (ev.valid
+        ? '<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-3 font-black text-emerald-800"><i class="fa-solid fa-circle-check ml-1"></i>הכול תואם — לא נמצאו חוסר, עודף או בעיית מחיר/מבצע.</div>'
+        : (ev.aggregates instanceof Map && ev.aggregates.size ? '<div class="rounded-xl bg-slate-50 border border-slate-200 p-3 text-sm font-bold text-slate-600">במוצרים שזוהו לא נמצאו חוסרים.</div>' : ''));
+    const autoNote = Array.isArray(ev.autoResolutions) && ev.autoResolutions.length
+      ? '<div class="text-[10px] font-bold text-slate-500 text-center">' + ev.autoResolutions.length + ' שורות הותאמו אוטומטית לפי מחיר/כמות — מתועד ביומן.</div>'
       : '';
+    const recognizedHtml = ev.valid ? '' : aiRecognizedProductsHtml(ev);
     const applyButton = ev.valid
       ? '<button data-role="ai-apply" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-3.5 font-black mt-4"><i class="fa-solid fa-check"></i> ' + (actionableFindings.length ? 'אשר והמשך' : 'הכול תואם — המשך') + '</button>'
       : '';
-    return '<div class="bg-white rounded-2xl border-2 ' + (ev.valid ? 'border-violet-300' : 'border-rose-300') + ' p-4 shadow-sm mb-24">' +
+    return '<div class="bg-white rounded-2xl border-2 ' + (ev.valid ? 'border-violet-300' : 'border-amber-300') + ' p-4 shadow-sm mb-24">' +
       '<div class="font-black text-xl text-slate-800 mb-1"><i class="fa-solid fa-wand-magic-sparkles text-violet-600"></i> תוצאות הסריקה החכמה</div>' +
-      '<div class="text-xs text-slate-500 font-bold mb-3">מוצגים רק החוסרים, העודפים ובעיות המחיר הסופיים — ללא אישור מוצרים.</div>' +
-      '<div class="space-y-2">' + findingsHtml + blockingHtml + '</div>' + applyButton + '</div>';
+      '<div class="text-xs text-slate-500 font-bold mb-3">האפליקציה מכריעה את ההתאמות מאחורי הקלעים ומציגה רק את הבעיות.</div>' +
+      '<div class="space-y-2">' + statusHtml + findingsHtml + aiResidualGroupHtml(residuals) + unknownCards + recognizedHtml + autoNote + '</div>' + applyButton + '</div>';
   }
   const docCards = aiScanDocuments.map((doc, i) => {
     const noteText = 'סכום צפוי: ₪' + fmtMoney(doc.amount || 0) + (doc.units != null ? ' · ' + doc.units + ' יחידות' : '');
@@ -6913,7 +7163,7 @@ function aiApplyInvoiceResult() {
   const safeFindings = ev.findings.map(f => ({ type: f.type, productId: f.productId || null, name: f.name || '', qty: f.qty != null ? f.qty : null, amount: f.amount != null ? f.amount : null, expectedPrice: f.expectedPrice != null ? f.expectedPrice : null, paperPrice: f.paperPrice != null ? f.paperPrice : null, text: f.text || '' }));
   const confirmedMappings = aiConfirmedMappingsAudit();
   const automaticMappings = aiAutomaticNamePriceMappingsAudit();
-  reconcileAiAudit = { version: 5, scannedAt: Date.now(), model: aiScanResponse && aiScanResponse.model || 'unknown', requestId: aiScanResponse && aiScanResponse.requestId || null, attempts: aiScanAttemptCount || 1, autoRotation: aiScanAutoRotationNote || '', totalVerified: !!ev.totalVerified, unitsVerified: !!ev.unitsVerified, documents: ev.docSummaries, confirmedMappings, automaticMappings, findings: safeFindings, hasDiscrepancy: safeFindings.some(f => ['shortage', 'surplus', 'price', 'promo_missing'].includes(f.type)) };
+  reconcileAiAudit = { version: 6, scannedAt: Date.now(), model: aiScanResponse && aiScanResponse.model || 'unknown', requestId: aiScanResponse && aiScanResponse.requestId || null, attempts: aiScanAttemptCount || 1, autoRotation: aiScanAutoRotationNote || '', totalVerified: !!ev.totalVerified, unitsVerified: !!ev.unitsVerified, documents: ev.docSummaries, confirmedMappings, automaticMappings, clientAutoResolutions: (Array.isArray(ev.autoResolutions) ? ev.autoResolutions : []).slice(0, 200), perDocument: (aiScanResponse && aiScanResponse.perDocument) || null, findings: safeFindings, hasDiscrepancy: safeFindings.some(f => ['shortage', 'surplus', 'price', 'promo_missing'].includes(f.type)) };
   const exactUnits = reconcileUnitsBalanced();
   const exactMoney = reconcileMoneyBalanced();
   if (!exactMoney || !exactUnits) {
