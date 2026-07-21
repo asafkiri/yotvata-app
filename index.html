@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v143 חיתוך רציף</title>
+    <title>הזמנות יטבתה - v144 חיתוך מדווח</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v143 חיתוך רציף</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v144 חיתוך מדווח</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5340,8 +5340,10 @@ function aiFlattenIllumination(data, width, height, analysis) {
 // מקמט או קו צל לפצל את הדף לשניים. שוליים: אריח שלם + 1.5% לכל צד (v142).
 // כל ספק — מעט מדי נייר, מסגרת כמעט בגודל התמונה, כשל כלשהו — מחזיר
 // null, ובלי חיתוך הצינור ממשיך בדיוק כמו היום.
-function aiComputePaperCropBox(analysis, width, height) {
-  if (!analysis || analysis.ready !== true) return null;
+function aiComputePaperCropBox(analysis, width, height, debug) {
+  // v144: כל יציאה מתעדת סיבה, כדי שההחלטה תוצג במסך ולא תיעלם בשקט.
+  const note = (reason, value) => { if (debug) { debug.reason = reason; if (value != null) debug.value = value; } return null; };
+  if (!analysis || analysis.ready !== true) return note('no_analysis');
   const tile = analysis.tile, tilesX = analysis.tilesX, tilesY = analysis.tilesY;
   const globalHigh = analysis.globalHigh, paperRaw = analysis.paperRaw, chromaMean = analysis.chromaMean, whiteFrac = analysis.whiteFrac;
   const tilesCount = tilesX * tilesY;
@@ -5353,7 +5355,7 @@ function aiComputePaperCropBox(analysis, width, height) {
     if (paperLike && paperRaw[t] >= globalHigh * 0.62) { seeds[t] = 1; seedCount++; }
     if (paperLike && paperRaw[t] >= globalHigh * 0.45) growOk[t] = 1;
   }
-  if (seedCount < tilesCount * 0.18) return null;
+  if (seedCount < tilesCount * 0.18) return note('few_seeds', Math.round(100 * seedCount / tilesCount));
   const dilated = new Uint8Array(tilesCount);
   for (let ty = 0; ty < tilesY; ty++) for (let tx = 0; tx < tilesX; tx++) {
     const t = ty * tilesX + tx;
@@ -5386,7 +5388,7 @@ function aiComputePaperCropBox(analysis, width, height) {
     }
     areas.push(area);
   }
-  if (!areas.length) return null;
+  if (!areas.length) return note('tiny');
   let largest = 0;
   for (let i = 1; i < areas.length; i++) if (areas[i] > areas[largest]) largest = i;
   let tx0 = tilesX, ty0 = tilesY, tx1 = -1, ty1 = -1;
@@ -5397,7 +5399,7 @@ function aiComputePaperCropBox(analysis, width, height) {
     if (tx < tx0) tx0 = tx; if (tx > tx1) tx1 = tx;
     if (ty < ty0) ty0 = ty; if (ty > ty1) ty1 = ty;
   }
-  if (tx1 - tx0 < 5 || ty1 - ty0 < 5) return null;
+  if (tx1 - tx0 < 5 || ty1 - ty0 < 5) return note('tiny');
   // v143: צמיחה רק בהמשכיות לנייר. אריח מועמד מצטרף רק אם הוא ניצב מול
   // אריח נייר (זרע, או אריח שכבר סופח בהמשכיות) והוא בהיר לפחות 82% ממנו.
   // צל אמיתי דועך בהדרגה ולכן עובר; בד או משטח אפור בהיר הם מדרגת בהירות
@@ -5437,7 +5439,9 @@ function aiComputePaperCropBox(analysis, width, height) {
   const x1 = Math.min(width, (tx1 + 1) * tile + margin);
   const y1 = Math.min(height, (ty1 + 1) * tile + margin);
   // v142: חותכים גם חיסכון קטן; מוותרים רק כשאין כמעט מה להסיר (≥97%).
-  if ((x1 - x0) * (y1 - y0) >= width * height * 0.97) return null;
+  const boxAreaPct = Math.round(100 * (x1 - x0) * (y1 - y0) / (width * height));
+  if ((x1 - x0) * (y1 - y0) >= width * height * 0.97) return note('box_97', boxAreaPct);
+  if (debug) { debug.reason = 'cropped'; debug.value = 100 - boxAreaPct; }
   return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
 }
 // v139 (שלב 2): "סורק" עדין בתוך האפליקציה — גווני אפור ומתיחת ניגודיות מעוגנת-דיו.
@@ -5543,6 +5547,7 @@ async function aiCompressInvoiceImage(file) {
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
   let cropRegion = null;
+  const cropInfo = { v: 144 }; // v144: דו"ח החיתוך שמוצג במסך אישור הכיוון
   try {
     const proxyScale = Math.min(1, 1500 / Math.max(sourceWidth, sourceHeight));
     const proxyWidth = Math.max(1, Math.round(sourceWidth * proxyScale));
@@ -5556,7 +5561,7 @@ async function aiCompressInvoiceImage(file) {
       const analysis = {};
       const proxyPixels = proxyCtx.getImageData(0, 0, proxyWidth, proxyHeight);
       aiFlattenIllumination(proxyPixels.data, proxyWidth, proxyHeight, analysis);
-      const box = aiComputePaperCropBox(analysis, proxyWidth, proxyHeight);
+      const box = aiComputePaperCropBox(analysis, proxyWidth, proxyHeight, cropInfo);
       if (box) {
         const back = 1 / proxyScale;
         const cropX = Math.max(0, Math.floor(box.x * back));
@@ -5564,9 +5569,14 @@ async function aiCompressInvoiceImage(file) {
         const cropWidth = Math.min(sourceWidth - cropX, Math.ceil(box.width * back));
         const cropHeight = Math.min(sourceHeight - cropY, Math.ceil(box.height * back));
         if (cropWidth >= 64 && cropHeight >= 64) cropRegion = { x: cropX, y: cropY, width: cropWidth, height: cropHeight };
+        else cropInfo.reason = 'tiny';
       }
     }
-  } catch (cropError) { cropRegion = null; /* בלי חיתוך — ממשיכים כרגיל */ }
+  } catch (cropError) {
+    cropRegion = null; // בלי חיתוך — ממשיכים כרגיל, אבל הסיבה מדוּוחת
+    cropInfo.reason = 'error';
+    cropInfo.value = String(cropError && cropError.message || cropError || '').slice(0, 60);
+  }
   const region = cropRegion || { x: 0, y: 0, width: sourceWidth, height: sourceHeight };
   // מסמכי ספק צפופים זקוקים ליותר פרטים. v134: עד 3000px (~250 DPI על A4) —
   // ‎~56% יותר פיקסלים לכל אות לעומת 2400px, ומורידים איכות רק אם חייבים.
@@ -5584,7 +5594,7 @@ async function aiCompressInvoiceImage(file) {
     if (aiEnhanceDocumentPixels(pixels.data, width, height)) ctx.putImageData(pixels, 0, 0);
   } catch (enhanceError) { /* התמונה המקורית נשארת */ }
   const encoded = aiCanvasToInvoiceJpeg(canvas, 0.92);
-  return { dataUrl: encoded.dataUrl, baseDataUrl: encoded.dataUrl, rotation: 0, orientationConfirmed: false, cropped: !!cropRegion, name: file.name || ('עמוד-' + Date.now() + '.jpg'), bytes: encoded.bytes };
+  return { dataUrl: encoded.dataUrl, baseDataUrl: encoded.dataUrl, rotation: 0, orientationConfirmed: false, cropped: !!cropRegion, cropInfo: cropInfo, name: file.name || ('עמוד-' + Date.now() + '.jpg'), bytes: encoded.bytes };
 }
 function aiOrientationLocation(page) {
   for (let docIndex = 0; docIndex < aiScanDocuments.length; docIndex++) {
@@ -5601,13 +5611,27 @@ function aiSetOrientationBusy(busy) {
     const button = $(id); if (button) button.disabled = !!busy;
   });
 }
+// v144: החיתוך מדווח על עצמו — גרסה, החלטה וסיבה — בשורת הכותרת של
+// מסך אישור הכיוון. צילום מסך אחד עונה מה רץ ולמה, בלי סבבי ניחוש.
+function aiCropInfoText(page) {
+  const info = page && page.cropInfo;
+  if (!info || !info.v) return 'גרסת עמוד ישנה';
+  const version = 'v' + info.v;
+  if (page.cropped) return version + ' · נחתך' + (info.value != null ? ' ' + info.value + '%' : '');
+  if (info.reason === 'box_97') return version + ' · ללא חיתוך: המסגרת ' + (info.value != null ? info.value + '% ' : '') + 'מהתמונה';
+  if (info.reason === 'few_seeds') return version + ' · ללא חיתוך: זוהה מעט מדי נייר' + (info.value != null ? ' (' + info.value + '%)' : '');
+  if (info.reason === 'tiny') return version + ' · ללא חיתוך: מסגרת קטנה מדי';
+  if (info.reason === 'no_analysis') return version + ' · ללא חיתוך: הניתוח לא הבשיל';
+  if (info.reason === 'error') return version + ' · ללא חיתוך: שגיאה — ' + (info.value || '');
+  return version + ' · ללא חיתוך';
+}
 function aiPaintOrientationReview() {
   const location = aiOrientationSession && aiOrientationLocation(aiOrientationSession.page);
   if (!location) { aiCloseOrientationReview(); return false; }
   const reviewOnly = !!(aiOrientationSession && aiOrientationSession.reviewOnly);
   const img = $('aiOrientationImage'), label = $('aiOrientationLabel');
   if (img) img.src = location.page.dataUrl;
-  if (label) label.textContent = 'תעודה ' + (location.docIndex + 1) + ' · עמוד ' + (location.pageIndex + 1) + ((Number(location.page.rotation) || 0) ? ' · סיבוב ' + (Number(location.page.rotation) || 0) + '°' : '');
+  if (label) label.textContent = 'תעודה ' + (location.docIndex + 1) + ' · עמוד ' + (location.pageIndex + 1) + ((Number(location.page.rotation) || 0) ? ' · סיבוב ' + (Number(location.page.rotation) || 0) + '°' : '') + ' · ' + aiCropInfoText(location.page);
   const title = $('aiOrientationTitle'), cancel = $('aiOrientationCancel'), left = $('aiOrientationLeft'), right = $('aiOrientationRight'), confirm = $('aiOrientationConfirm');
   if (title) title.textContent = reviewOnly ? 'צילום העמוד המקורי' : 'בדיקת כיוון התעודה';
   if (cancel) cancel.classList.toggle('hidden', reviewOnly);
