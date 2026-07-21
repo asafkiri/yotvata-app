@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v139 עוגן דיו</title>
+    <title>הזמנות יטבתה - v140 השטחת תאורה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v139 עוגן דיו</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v140 השטחת תאורה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5194,13 +5194,132 @@ function aiLoadImage(dataUrl) {
     img.src = dataUrl;
   });
 }
-// v139: "סורק" עדין בתוך האפליקציה — גווני אפור ומתיחת ניגודיות מעוגנת-דיו.
+// v140: השטחת תאורה מקומית — שלב 1, לפני עוגן־הדיו. "הסורק של האייפון"
+// מלבין את הנייר אחיד בכל הדף גם כשהתאורה אינה אחידה (צל בפינה, מנורה מצד
+// אחד, קמט). התמונה מחולקת לאריחים (~94px בצילום 3000px); בכל אריח לובן
+// הנייר מוערך באחוזון 94 — גבוה מספיק כדי להתעלם מהדיו, ויציב מול רעש.
+// אריח שאינו נייר מזוהה בשני מסננים: בהירות נמוכה מ־40% מהלובן הגלובלי,
+// או צבעוניות ממוצעת מעל 28 (עץ ושולחן צבעוניים; נייר, גם עם גוון תאורה
+// חם, נשאר הרחק מתחת). אריח כזה מקבל את ממוצע שכניו התקינים, והשדה כולו
+// מוחלק 3×3. כל פיקסל מנורמל ב־gain = לובן־גלובלי / לובן־מקומי (מוגבל
+// 0.9–2.5), כך שהנייר מגיע לאותו לובן בכל מקום ויחס דיו/נייר נשמר.
+// תאורה כמעט אחידה (פיזור שדה < 5%) → אין שינוי כלל. עוגן־הדיו רץ אחר כך
+// על התוצאה ומבצע את המתיחה הסופית: נייר 243, דיו כהה, רקע כהה נשאר כהה.
+function aiFlattenIllumination(data, width, height) {
+  if (!width || !height || data.length < width * height * 4) return false;
+  const tile = Math.max(48, Math.round(Math.max(width, height) / 32));
+  const tilesX = Math.ceil(width / tile), tilesY = Math.ceil(height / tile);
+  if (tilesX < 3 || tilesY < 3) return false;
+  const tilesCount = tilesX * tilesY;
+  // מעבר ראשון: היסטוגרמת בהירות וצבעוניות לכל אריח, ובמקביל היסטוגרמת
+  // החלון המרכזי (אותו חלון ואותו אחוזון 99 כמו בעוגן־הדיו) ללובן הגלובלי.
+  const hists = new Uint32Array(tilesCount * 256);
+  const counts = new Uint32Array(tilesCount);
+  const chromaSum = new Float64Array(tilesCount);
+  const centralHist = new Uint32Array(256);
+  const x0 = Math.floor(width * 0.15), x1 = Math.ceil(width * 0.85);
+  const y0 = Math.floor(height * 0.10), y1 = Math.ceil(height * 0.90);
+  let centralTotal = 0;
+  for (let y = 0; y < height; y++) {
+    const rowTile = ((y / tile) | 0) * tilesX;
+    const centralRow = y >= y0 && y < y1;
+    let i = y * width * 4;
+    for (let x = 0; x < width; x++, i += 4) {
+      const r = data[i], g = data[i + 1], b = data[i + 2];
+      const luma = ((r * 299 + g * 587 + b * 114) / 1000) | 0;
+      const t = rowTile + ((x / tile) | 0);
+      hists[t * 256 + luma]++;
+      counts[t]++;
+      chromaSum[t] += Math.max(r, g, b) - Math.min(r, g, b);
+      if (centralRow && x >= x0 && x < x1) { centralHist[luma]++; centralTotal++; }
+    }
+  }
+  if (!centralTotal) return false;
+  let cum = 0, globalHigh = 255;
+  const highTarget = centralTotal * 0.99;
+  for (let v = 0; v < 256; v++) { cum += centralHist[v]; if (cum >= highTarget) { globalHigh = v; break; } }
+  if (globalHigh < 60) return false; // סצנה חשוכה מדי — לא נוגעים
+  // לובן מקומי לכל אריח (אחוזון 94) + סינון אריחים שאינם נייר.
+  const paper = new Float64Array(tilesCount);
+  const valid = new Uint8Array(tilesCount);
+  const minPaper = Math.max(32, globalHigh * 0.4);
+  for (let t = 0; t < tilesCount; t++) {
+    const target = counts[t] * 0.94;
+    const base = t * 256;
+    let c = 0, p = 255;
+    for (let v = 0; v < 256; v++) { c += hists[base + v]; if (c >= target) { p = v; break; } }
+    paper[t] = p;
+    valid[t] = counts[t] > 0 && p >= minPaper && (chromaSum[t] / counts[t]) <= 28 ? 1 : 0;
+  }
+  // אריחים פסולים מקבלים את ממוצע שכניהם התקינים, בגלים; מה שנשאר → גלובלי.
+  for (let round = 0; round < tilesX + tilesY; round++) {
+    let filled = 0;
+    for (let ty = 0; ty < tilesY; ty++) for (let tx = 0; tx < tilesX; tx++) {
+      const t = ty * tilesX + tx;
+      if (valid[t]) continue;
+      let sum = 0, n = 0;
+      if (tx > 0 && valid[t - 1] === 1) { sum += paper[t - 1]; n++; }
+      if (tx < tilesX - 1 && valid[t + 1] === 1) { sum += paper[t + 1]; n++; }
+      if (ty > 0 && valid[t - tilesX] === 1) { sum += paper[t - tilesX]; n++; }
+      if (ty < tilesY - 1 && valid[t + tilesX] === 1) { sum += paper[t + tilesX]; n++; }
+      if (n) { paper[t] = sum / n; valid[t] = 2; filled++; }
+    }
+    for (let t = 0; t < tilesCount; t++) if (valid[t] === 2) valid[t] = 1;
+    if (!filled) break;
+  }
+  for (let t = 0; t < tilesCount; t++) if (!valid[t]) paper[t] = globalHigh;
+  // החלקת 3×3 של שדה הלובן — מבטלת חריגים בודדים ותפרים בין אריחים.
+  const smooth = new Float64Array(tilesCount);
+  let fieldLow = 255, fieldHigh = 0;
+  for (let ty = 0; ty < tilesY; ty++) for (let tx = 0; tx < tilesX; tx++) {
+    let sum = 0, n = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const nx = tx + dx, ny = ty + dy;
+      if (nx < 0 || ny < 0 || nx >= tilesX || ny >= tilesY) continue;
+      sum += paper[ny * tilesX + nx]; n++;
+    }
+    const value = sum / n;
+    smooth[ty * tilesX + tx] = value;
+    if (value < fieldLow) fieldLow = value;
+    if (value > fieldHigh) fieldHigh = value;
+  }
+  // תאורה כמעט אחידה — אין מה להשטיח; שום פיקסל לא שונה עד לנקודה זו.
+  if (!(fieldHigh > 0) || (fieldHigh - fieldLow) / fieldHigh < 0.05) return false;
+  // מעבר שני: אינטרפולציה בי־לינארית בין מרכזי האריחים ונרמול כל פיקסל.
+  const xi0 = new Int32Array(width), xi1 = new Int32Array(width), xw = new Float32Array(width);
+  for (let x = 0; x < width; x++) {
+    let fx = (x - tile / 2) / tile;
+    if (fx < 0) fx = 0; else if (fx > tilesX - 1) fx = tilesX - 1;
+    const i0 = Math.floor(fx);
+    xi0[x] = i0; xi1[x] = Math.min(i0 + 1, tilesX - 1); xw[x] = fx - i0;
+  }
+  for (let y = 0; y < height; y++) {
+    let fy = (y - tile / 2) / tile;
+    if (fy < 0) fy = 0; else if (fy > tilesY - 1) fy = tilesY - 1;
+    const j0 = Math.floor(fy), wy = fy - j0;
+    const row0 = j0 * tilesX, row1 = Math.min(j0 + 1, tilesY - 1) * tilesX;
+    let i = y * width * 4;
+    for (let x = 0; x < width; x++, i += 4) {
+      const w = xw[x];
+      const top = smooth[row0 + xi0[x]] * (1 - w) + smooth[row0 + xi1[x]] * w;
+      const bottom = smooth[row1 + xi0[x]] * (1 - w) + smooth[row1 + xi1[x]] * w;
+      const local = top + (bottom - top) * wy;
+      let gain = local > 0 ? globalHigh / local : 1;
+      if (gain < 0.9) gain = 0.9; else if (gain > 2.5) gain = 2.5;
+      let out = Math.round((((data[i] * 299 + data[i + 1] * 587 + data[i + 2] * 114) / 1000) | 0) * gain);
+      if (out > 255) out = 255;
+      data[i] = out; data[i + 1] = out; data[i + 2] = out;
+    }
+  }
+  return true;
+}
+// v139 (שלב 2): "סורק" עדין בתוך האפליקציה — גווני אפור ומתיחת ניגודיות מעוגנת-דיו.
 // קודם נמצא לובן הנייר (אחוזון 99 בחלון המרכזי). כל מה שכהה בהרבה מהנייר
 // (שולחן, רקע) מוּצא מהחישוב, ונקודת השחור נבחרת מהתוכן הכהה הבא — הדיו.
 // לכן גם שולחן כהה בתוך הפריים אינו גונב את הניגודיות. אין חיתוך ואין
 // יישור: הכול נשאר בתמונה (רקע כהה פשוט נצבע שחור), ומסך אישור הכיוון
 // מציג את התוצאה לפני שנשלח דבר. תמונה שכבר חדה — לא נוגעים בה.
-function aiEnhanceDocumentPixels(data, width, height) {
+function aiInkAnchorContrast(data, width, height) {
   if (!width || !height || data.length < width * height * 4) return false;
   const x0 = Math.floor(width * 0.15), x1 = Math.ceil(width * 0.85);
   const y0 = Math.floor(height * 0.10), y1 = Math.ceil(height * 0.90);
@@ -5245,6 +5364,14 @@ function aiEnhanceDocumentPixels(data, width, height) {
     data[i] = out; data[i + 1] = out; data[i + 2] = out;
   }
   return true;
+}
+// v140: שני השלבים ברצף — קודם השטחת תאורה, ואז עוגן־הדיו (v139) על
+// התוצאה. די בכך ששלב אחד שינה פיקסלים כדי לשמור את התוצאה; כל חריגה
+// נתפסת ב־try/catch שב־aiCompressInvoiceImage וממשיכים עם המקור.
+function aiEnhanceDocumentPixels(data, width, height) {
+  const flattened = aiFlattenIllumination(data, width, height);
+  const anchored = aiInkAnchorContrast(data, width, height);
+  return flattened || anchored;
 }
 function aiCanvasToInvoiceJpeg(canvas, startQuality) {
   // v134: כל תעודה נוסעת בבקשה משלה, ולכן תקציב העמוד גדל ל-2.35MB.
