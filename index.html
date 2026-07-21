@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v146 שוליים מינימליים</title>
+    <title>הזמנות יטבתה - v147 ליבה צפופה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v146 שוליים מינימליים</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v147 ליבה צפופה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5393,15 +5393,28 @@ function aiComputePaperCropBox(analysis, width, height, debug) {
   if (!areas.length) return note('tiny');
   let largest = 0;
   for (let i = 1; i < areas.length; i++) if (areas[i] > areas[largest]) largest = i;
+  const keepMask = new Uint8Array(tilesCount);
   let tx0 = tilesX, ty0 = tilesY, tx1 = -1, ty1 = -1;
   for (let t = 0; t < tilesCount; t++) {
     const label = labels[t];
     if (label === -1 || (label !== largest && areas[label] < areas[largest] * 0.25)) continue;
+    keepMask[t] = 1;
     const tx = t % tilesX, ty = (t / tilesX) | 0;
     if (tx < tx0) tx0 = tx; if (tx > tx1) tx1 = tx;
     if (ty < ty0) ty0 = ty; if (ty > ty1) ty1 = ty;
   }
   if (tx1 - tx0 < 5 || ty1 - ty0 < 5) return note('tiny');
+  // v147: ליבה צפופה — תעודה היא גוש זרעים מלא; רקע בהיר מנומר (עץ עם
+  // גרעין לא-רווי) משאיר שרשראות רסיסים דלילות שהסגירה המורפולוגית
+  // מחברת אל המסגרת. עמודות ושורות שצפיפות הזרעים בהן נמוכה מ-35%
+  // נגזמות מהקצוות; ההשלמה, הצמיחה והעידון שאחריהן מחזירים כל קצה
+  // נייר אמיתי שנגזם בטעות.
+  const colDensity = (tx) => { let c = 0; for (let ty = ty0; ty <= ty1; ty++) if (keepMask[ty * tilesX + tx]) c++; return c / (ty1 - ty0 + 1); };
+  while (tx1 > tx0 + 5 && colDensity(tx1) < 0.35) tx1--;
+  while (tx0 < tx1 - 5 && colDensity(tx0) < 0.35) tx0++;
+  const rowDensity = (ty) => { let c = 0; for (let tx = tx0; tx <= tx1; tx++) if (keepMask[ty * tilesX + tx]) c++; return c / (tx1 - tx0 + 1); };
+  while (ty1 > ty0 + 5 && rowDensity(ty1) < 0.35) ty1--;
+  while (ty0 < ty1 - 5 && rowDensity(ty0) < 0.35) ty0++;
   // v145: השלמת קצה — אריח גבול מעורב (חצי נייר, חצי רקע) נפסל לעיתים
   // מהזרעים בגלל צבעוניות הרקע שבתוכו. לפני הצמיחה, כל צד מתרחב עד 2
   // אריחים אם ברצועה הסמוכה יש עדות בהירות של נייר (P94 ≥ 62% מהלובן),
@@ -5596,7 +5609,7 @@ async function aiCompressInvoiceImage(file) {
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
   let cropRegion = null;
-  const cropInfo = { v: 146 }; // v146: דו"ח החיתוך שמוצג במסך אישור הכיוון
+  const cropInfo = { v: 147 }; // v147: דו"ח החיתוך שמוצג במסך אישור הכיוון
   try {
     const proxyScale = Math.min(1, 1500 / Math.max(sourceWidth, sourceHeight));
     const proxyWidth = Math.max(1, Math.round(sourceWidth * proxyScale));
