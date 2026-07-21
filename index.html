@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v133 אישור וסגירה</title>
+    <title>הזמנות יטבתה - v135 שיוך לפי שם</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v133 אישור וסגירה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v135 שיוך לפי שם</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5195,14 +5195,16 @@ function aiLoadImage(dataUrl) {
   });
 }
 function aiCanvasToInvoiceJpeg(canvas, startQuality) {
-  let quality = Math.min(0.94, Math.max(0.50, Number(startQuality) || 0.92));
+  // v134: כל תעודה נוסעת בבקשה משלה, ולכן תקציב העמוד גדל ל-2.35MB.
+  // רצפת האיכות עלתה ל-0.62 — מתחת לזה ארטיפקטים של דחיסה מוחקים ספרות.
+  let quality = Math.min(0.94, Math.max(0.62, Number(startQuality) || 0.92));
   let dataUrl = canvas.toDataURL('image/jpeg', quality);
-  while (aiDataUrlBytes(dataUrl) > 1450000 && quality > 0.50) {
-    quality = Math.max(0.50, quality - 0.06);
+  while (aiDataUrlBytes(dataUrl) > 2350000 && quality > 0.62) {
+    quality = Math.max(0.62, quality - 0.06);
     dataUrl = canvas.toDataURL('image/jpeg', quality);
   }
   const bytes = aiDataUrlBytes(dataUrl);
-  if (bytes > 1550000) throw new Error('image_too_large');
+  if (bytes > 2500000) throw new Error('image_too_large');
   return { dataUrl, bytes };
 }
 function aiNormalizeQuarterTurns(value) {
@@ -5230,9 +5232,9 @@ async function aiCompressInvoiceImage(file) {
   const raw = await aiReadFile(file);
   const img = await aiLoadImage(raw);
   let width = img.naturalWidth || img.width, height = img.naturalHeight || img.height;
-  // מסמכי ספק צפופים זקוקים ליותר פרטים. שומרים עד 2400px ומורידים איכות
-  // רק אם מגבלת ההעלאה מחייבת זאת.
-  const maxSide = 2400;
+  // מסמכי ספק צפופים זקוקים ליותר פרטים. v134: עד 3000px (~250 DPI על A4) —
+  // ‎~56% יותר פיקסלים לכל אות לעומת 2400px, ומורידים איכות רק אם חייבים.
+  const maxSide = 3000;
   const scale = Math.min(1, maxSide / Math.max(width, height));
   width = Math.max(1, Math.round(width * scale)); height = Math.max(1, Math.round(height * scale));
   const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
@@ -5997,17 +5999,28 @@ function aiNormalizeNameForMatch(value) {
 function aiNameTokens(value) {
   return aiNormalizeNameForMatch(value).split(' ').filter(token => token.length > 1 || /\d/.test(token));
 }
+function aiNameTokenMatches(a, b) {
+  if (a === b) return true;
+  // מספרים ואחוזים דורשים שוויון מלא — "40" לעולם אינו "400", "1%" אינו "1.5%".
+  if (/\d/.test(a) || /\d/.test(b)) return false;
+  if (a.length < 3 || b.length < 3) return false;
+  // קיצורי הדפסה של הספק: "יוג" תואם ל"יוגורט", "שמנ" ל"שמנת".
+  return a.startsWith(b) || b.startsWith(a);
+}
 function aiPrintedNameMatchesProduct(description, productName) {
   const descTokens = aiNameTokens(description);
   const nameTokens = aiNameTokens(productName);
-  if (descTokens.length < 2 || nameTokens.length < 2) return false;
-  const descSet = new Set(descTokens), nameSet = new Set(nameTokens);
-  // התאמה דו־כיוונית: כל אסימוני הצד הקצר מופיעים בצד הארוך. מספרים הם
-  // אסימונים מלאים — "40" לעולם אינו תואם ל"400", כדי לא לערבב גדלים.
-  return descTokens.every(token => nameSet.has(token)) || nameTokens.every(token => descSet.has(token));
+  if (!descTokens.length || !nameTokens.length) return false;
+  const shorter = descTokens.length <= nameTokens.length ? descTokens : nameTokens;
+  const longer = shorter === descTokens ? nameTokens : descTokens;
+  // כל אסימוני הצד הקצר חייבים למצוא התאמה בצד הארוך.
+  if (!shorter.every(token => longer.some(other => aiNameTokenMatches(token, other)))) return false;
+  // ראיה מינימלית: לפחות שני אסימונים, או אסימון יחיד ארוך בהתאמה מדויקת.
+  return shorter.length >= 2 || (shorter[0].length >= 5 && longer.includes(shorter[0]));
 }
 function aiAutoResolveMethodHe(method) {
   if (method === 'auto_local_name_price') return 'שם ומחיר תואמים בקטלוג';
+  if (method === 'auto_local_name_qty_price_diff') return 'שם וכמות תואמים — המחיר שונה מהקטלוג';
   if (method === 'auto_local_name_qty') return 'שם, מחיר וכמות תואמים';
   if (method === 'auto_local_name_same_price') return 'שם ומחיר (מועמדים שווי מחיר)';
   if (method.indexOf('_qty_price') !== -1) return 'התאמת כמות ומחיר';
@@ -6024,25 +6037,39 @@ function aiAutoResolvePendingRow(pending, aggregates) {
   // שורה שהכמות, הסכום או החשבון שלה לא נקראו אינה ניתנת להכרעה אוטומטית.
   if (qty == null || cents == null || pending.arithmeticError) return null;
   if (!suggestion) {
-    // v133: השרת לא סיפק שום מועמד. נפילה מקומית לפי שם+מחיר: התיאור המודפס
-    // חייב להתאים לשם מוצר בקטלוג, והמחיר חייב לאשר (בסיס או מבצע פעיל).
+    // v135: השרת לא סיפק מועמד. שיוך מקומי לפי שם — עם סיבה מפורשת כשנכשל,
+    // כדי שהמשתמש יראה בדיוק למה השורה לא שויכה (שם/מחיר/עמימות).
     const description = String(row.description || '').trim();
     if (description.length < 4) return null;
     const nameMatches = [];
     for (const candidate of products) {
       if (!aiPrintedNameMatchesProduct(description, candidate.name)) continue;
-      if (!aiPriceCorroborates(row, qty, cents, candidate)) continue;
       nameMatches.push({ product: candidate, barcode: normalizeBarcode(candidate.barcode || '') });
-      if (nameMatches.length > 6) return null;
+      if (nameMatches.length > 6) { pending.fallbackReason = 'השם המודפס מתאים ליותר מדי מוצרים במאגר'; return null; }
     }
-    if (!nameMatches.length) return null;
-    if (nameMatches.length === 1) return { product: nameMatches[0].product, barcode: nameMatches[0].barcode, method: 'auto_local_name_price' };
-    const qtyMatches = qty > 0 ? nameMatches.filter(candidate => aiRemainingReceived(candidate.product.id, aggregates) === qty) : [];
-    if (qtyMatches.length === 1) return { product: qtyMatches[0].product, barcode: qtyMatches[0].barcode, method: 'auto_local_name_qty' };
-    const priceList = nameMatches.map(candidate => aiMoneyCents(Number(candidate.product.price) || 0));
+    if (!nameMatches.length) { pending.fallbackReason = 'השם המודפס לא נמצא במאגר המוצרים — בדוק את שם המוצר במאגר'; return null; }
+    const priceMatches = nameMatches.filter(candidate => aiPriceCorroborates(row, qty, cents, candidate.product));
+    if (priceMatches.length === 1) {
+      return { product: priceMatches[0].product, barcode: priceMatches[0].barcode, method: 'auto_local_name_price' };
+    }
+    if (!priceMatches.length) {
+      // המחיר לא אישר אף מועמד. מועמד-שם יחיד שהכמות שלו סוגרת בדיוק את
+      // הספירה עדיין משויך — והפרש המחיר יוצג כממצא מחיר, לא יוסתר.
+      if (nameMatches.length === 1 && qty > 0 && aiRemainingReceived(nameMatches[0].product.id, aggregates) === qty) {
+        return { product: nameMatches[0].product, barcode: nameMatches[0].barcode, method: 'auto_local_name_qty_price_diff' };
+      }
+      pending.fallbackReason = 'נמצא "' + String(nameMatches[0].product.name || '').slice(0, 60) + '" לפי השם, אך המחיר בנייר אינו תואם למחיר בקטלוג';
+      return null;
+    }
+    const localQtyMatches = qty > 0 ? priceMatches.filter(candidate => aiRemainingReceived(candidate.product.id, aggregates) === qty) : [];
+    if (localQtyMatches.length === 1) {
+      return { product: localQtyMatches[0].product, barcode: localQtyMatches[0].barcode, method: 'auto_local_name_qty' };
+    }
+    const priceList = priceMatches.map(candidate => aiMoneyCents(Number(candidate.product.price) || 0));
     if (priceList.every(value => value != null && Math.abs(value - priceList[0]) <= 2)) {
-      return { product: nameMatches[0].product, barcode: nameMatches[0].barcode, method: 'auto_local_name_same_price' };
+      return { product: priceMatches[0].product, barcode: priceMatches[0].barcode, method: 'auto_local_name_same_price' };
     }
+    pending.fallbackReason = 'כמה מוצרים מתאימים לשם ולמחיר — אין הכרעה בטוחה';
     return null;
   }
   if (suggestion.unknownProduct === true) return null;
@@ -6335,7 +6362,7 @@ function aiEvaluateInvoiceScan(payload) {
     unresolvedBarcodeRows++;
     errors.push(pending.rowPrefix + (pending.resolution.error || 'הברקוד לא זוהה במאגר'));
     if (pending.qty != null && pending.cents != null && !pending.arithmeticError) {
-      residuals.push({ docNumber: pending.docIndex + 1, documentIndex: pending.docIndex, lineNumber: pending.rowNumber, sourcePage: Number(pending.row.sourcePage), rowRegion: pending.row.rowRegion || null, description: String(pending.row.description || '').trim(), qty: pending.qty, amount: pending.cents / 100, reason: pending.resolution.error || 'לא זוהה מוצר מתאים במאגר' });
+      residuals.push({ docNumber: pending.docIndex + 1, documentIndex: pending.docIndex, lineNumber: pending.rowNumber, sourcePage: Number(pending.row.sourcePage), rowRegion: pending.row.rowRegion || null, description: String(pending.row.description || '').trim(), qty: pending.qty, amount: pending.cents / 100, reason: pending.fallbackReason || pending.resolution.error || 'לא זוהה מוצר מתאים במאגר' });
     }
     const builtSuggestion = aiBuildPendingSuggestion(pending);
     if (builtSuggestion) barcodeSuggestions.push(builtSuggestion);
@@ -7043,7 +7070,7 @@ function aiInvoiceCaptureHtml() {
     // ₪ שלא שויכו הם בעיה לכל דבר — הם חוסמים סגירה, ולכן חייבים להיראות.
     const residualLines = residuals.map(residual => {
       const meta = [(residual.qty != null ? residual.qty + ' יח׳' : ''), (residual.amount != null ? '₪' + fmtMoney(residual.amount) : '')].filter(Boolean).join(' · ');
-      return '<details class="rounded-xl border p-2.5 text-sm font-black bg-slate-50 border-slate-300 text-slate-700"><summary class="cursor-pointer list-none">🔎 לא זוהה: ' + htmlEscape(residual.description || ('שורה בתעודה ' + residual.docNumber)) + (meta ? ' — ' + htmlEscape(meta) : '') + '</summary>' +
+      return '<details class="rounded-xl border p-2.5 text-sm font-black bg-slate-50 border-slate-300 text-slate-700"><summary class="cursor-pointer list-none">🔎 נקראה אך לא שויכה: ' + htmlEscape(residual.description || ('שורה בתעודה ' + residual.docNumber)) + (meta ? ' — ' + htmlEscape(meta) : '') + '</summary>' +
         '<div class="mt-1 text-[10px] font-bold text-slate-500">תעודה ' + residual.docNumber + (residual.lineNumber != null ? ', שורה ' + residual.lineNumber : '') + ' · ' + htmlEscape(residual.reason || 'לא נקראה בוודאות') + ' · אינה נתבעת ואינה משתתפת בחישוב.</div>' +
         aiBarcodeSuggestionPreviewHtml(residual) + '</details>';
     }).join('');
