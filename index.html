@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v140 השטחת תאורה</title>
+    <title>הזמנות יטבתה - v141 חיתוך אוטומטי</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v140 השטחת תאורה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v141 חיתוך אוטומטי</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5205,7 +5205,7 @@ function aiLoadImage(dataUrl) {
 // 0.9–2.5), כך שהנייר מגיע לאותו לובן בכל מקום ויחס דיו/נייר נשמר.
 // תאורה כמעט אחידה (פיזור שדה < 5%) → אין שינוי כלל. עוגן־הדיו רץ אחר כך
 // על התוצאה ומבצע את המתיחה הסופית: נייר 243, דיו כהה, רקע כהה נשאר כהה.
-function aiFlattenIllumination(data, width, height) {
+function aiFlattenIllumination(data, width, height, analysis) {
   if (!width || !height || data.length < width * height * 4) return false;
   const tile = Math.max(48, Math.round(Math.max(width, height) / 32));
   const tilesX = Math.ceil(width / tile), tilesY = Math.ceil(height / tile);
@@ -5241,6 +5241,7 @@ function aiFlattenIllumination(data, width, height) {
   if (globalHigh < 60) return false; // סצנה חשוכה מדי — לא נוגעים
   // לובן מקומי לכל אריח (אחוזון 94) + סינון אריחים שאינם נייר.
   const paper = new Float64Array(tilesCount);
+  const chromaMean = new Float64Array(tilesCount);
   const valid = new Uint8Array(tilesCount);
   const minPaper = Math.max(32, globalHigh * 0.4);
   for (let t = 0; t < tilesCount; t++) {
@@ -5249,7 +5250,14 @@ function aiFlattenIllumination(data, width, height) {
     let c = 0, p = 255;
     for (let v = 0; v < 256; v++) { c += hists[base + v]; if (c >= target) { p = v; break; } }
     paper[t] = p;
-    valid[t] = counts[t] > 0 && p >= minPaper && (chromaSum[t] / counts[t]) <= 28 ? 1 : 0;
+    chromaMean[t] = counts[t] > 0 ? chromaSum[t] / counts[t] : 999;
+    valid[t] = counts[t] > 0 && p >= minPaper && chromaMean[t] <= 28 ? 1 : 0;
+  }
+  // v141: תיעוד נתוני האריחים למזהה גבולות הנייר (חיתוך) — לפני שמילוי
+  // השכנים משנה את שדה הלובן. התיעוד אינו משנה דבר בהשטחה עצמה.
+  if (analysis) {
+    analysis.tile = tile; analysis.tilesX = tilesX; analysis.tilesY = tilesY;
+    analysis.globalHigh = globalHigh; analysis.paperRaw = paper.slice(); analysis.chromaMean = chromaMean;
   }
   // אריחים פסולים מקבלים את ממוצע שכניהם התקינים, בגלים; מה שנשאר → גלובלי.
   for (let round = 0; round < tilesX + tilesY; round++) {
@@ -5283,6 +5291,7 @@ function aiFlattenIllumination(data, width, height) {
     if (value < fieldLow) fieldLow = value;
     if (value > fieldHigh) fieldHigh = value;
   }
+  if (analysis) { analysis.smooth = smooth; analysis.ready = true; }
   // תאורה כמעט אחידה — אין מה להשטיח; שום פיקסל לא שונה עד לנקודה זו.
   if (!(fieldHigh > 0) || (fieldHigh - fieldLow) / fieldHigh < 0.05) return false;
   // מעבר שני: אינטרפולציה בי־לינארית בין מרכזי האריחים ונרמול כל פיקסל.
@@ -5312,6 +5321,88 @@ function aiFlattenIllumination(data, width, height) {
     }
   }
   return true;
+}
+// v141: זיהוי מלבן הנייר לחיתוך, מנתוני האריחים של ההשטחה. שני ספים:
+// "גרעין" בטוח — אריח לא־צבעוני עם לובן ≥62% מהלובן הגלובלי — קובע את
+// המסגרת; ו"צמיחה" מבוקרת — עד 3 אריחים לצד, רק לעבר אריחים לא־צבעוניים
+// עם לובן ≥45% (נייר מוצל סביר). רקע כהה, עץ ובד נשארים בחוץ; צל רגיל
+// נבלע בגרעין עוד קודם. סגירה מורפולוגית ואיחוד רכיבים גדולים מונעים
+// מקמט או קו צל לפצל את הדף לשניים. שוליים: אריח שלם + 2.5% לכל צד.
+// כל ספק — מעט מדי נייר, מסגרת כמעט בגודל התמונה, כשל כלשהו — מחזיר
+// null, ובלי חיתוך הצינור ממשיך בדיוק כמו היום.
+function aiComputePaperCropBox(analysis, width, height) {
+  if (!analysis || analysis.ready !== true) return null;
+  const tile = analysis.tile, tilesX = analysis.tilesX, tilesY = analysis.tilesY;
+  const globalHigh = analysis.globalHigh, paperRaw = analysis.paperRaw, chromaMean = analysis.chromaMean;
+  const tilesCount = tilesX * tilesY;
+  const seeds = new Uint8Array(tilesCount);
+  const growOk = new Uint8Array(tilesCount);
+  let seedCount = 0;
+  for (let t = 0; t < tilesCount; t++) {
+    const lowChroma = chromaMean[t] <= 28;
+    if (lowChroma && paperRaw[t] >= globalHigh * 0.62) { seeds[t] = 1; seedCount++; }
+    if (lowChroma && paperRaw[t] >= globalHigh * 0.45) growOk[t] = 1;
+  }
+  if (seedCount < tilesCount * 0.18) return null;
+  const dilated = new Uint8Array(tilesCount);
+  for (let ty = 0; ty < tilesY; ty++) for (let tx = 0; tx < tilesX; tx++) {
+    const t = ty * tilesX + tx;
+    dilated[t] = seeds[t]
+      || (tx > 0 && seeds[t - 1]) || (tx < tilesX - 1 && seeds[t + 1])
+      || (ty > 0 && seeds[t - tilesX]) || (ty < tilesY - 1 && seeds[t + tilesX]) ? 1 : 0;
+  }
+  const closed = new Uint8Array(tilesCount);
+  for (let ty = 0; ty < tilesY; ty++) for (let tx = 0; tx < tilesX; tx++) {
+    const t = ty * tilesX + tx;
+    closed[t] = dilated[t]
+      && (tx === 0 || dilated[t - 1]) && (tx === tilesX - 1 || dilated[t + 1])
+      && (ty === 0 || dilated[t - tilesX]) && (ty === tilesY - 1 || dilated[t + tilesX]) ? 1 : 0;
+  }
+  const labels = new Int32Array(tilesCount).fill(-1);
+  const areas = [];
+  const stack = [];
+  for (let seed = 0; seed < tilesCount; seed++) {
+    if (!closed[seed] || labels[seed] !== -1) continue;
+    const label = areas.length;
+    let area = 0;
+    stack.length = 0; stack.push(seed); labels[seed] = label;
+    while (stack.length) {
+      const t = stack.pop(); area++;
+      const tx = t % tilesX, ty = (t / tilesX) | 0;
+      if (tx > 0 && closed[t - 1] && labels[t - 1] === -1) { labels[t - 1] = label; stack.push(t - 1); }
+      if (tx < tilesX - 1 && closed[t + 1] && labels[t + 1] === -1) { labels[t + 1] = label; stack.push(t + 1); }
+      if (ty > 0 && closed[t - tilesX] && labels[t - tilesX] === -1) { labels[t - tilesX] = label; stack.push(t - tilesX); }
+      if (ty < tilesY - 1 && closed[t + tilesX] && labels[t + tilesX] === -1) { labels[t + tilesX] = label; stack.push(t + tilesX); }
+    }
+    areas.push(area);
+  }
+  if (!areas.length) return null;
+  let largest = 0;
+  for (let i = 1; i < areas.length; i++) if (areas[i] > areas[largest]) largest = i;
+  let tx0 = tilesX, ty0 = tilesY, tx1 = -1, ty1 = -1;
+  for (let t = 0; t < tilesCount; t++) {
+    const label = labels[t];
+    if (label === -1 || (label !== largest && areas[label] < areas[largest] * 0.25)) continue;
+    const tx = t % tilesX, ty = (t / tilesX) | 0;
+    if (tx < tx0) tx0 = tx; if (tx > tx1) tx1 = tx;
+    if (ty < ty0) ty0 = ty; if (ty > ty1) ty1 = ty;
+  }
+  if (tx1 - tx0 < 5 || ty1 - ty0 < 5) return null;
+  const colHasGrow = (tx, from, to) => { for (let ty = from; ty <= to; ty++) if (growOk[ty * tilesX + tx]) return true; return false; };
+  const rowHasGrow = (ty, from, to) => { for (let tx = from; tx <= to; tx++) if (growOk[ty * tilesX + tx]) return true; return false; };
+  for (let step = 0; step < 3; step++) {
+    if (tx0 > 0 && colHasGrow(tx0 - 1, ty0, ty1)) tx0--;
+    if (tx1 < tilesX - 1 && colHasGrow(tx1 + 1, ty0, ty1)) tx1++;
+    if (ty0 > 0 && rowHasGrow(ty0 - 1, tx0, tx1)) ty0--;
+    if (ty1 < tilesY - 1 && rowHasGrow(ty1 + 1, tx0, tx1)) ty1++;
+  }
+  const margin = tile + Math.round(Math.max(width, height) * 0.025);
+  const x0 = Math.max(0, tx0 * tile - margin);
+  const y0 = Math.max(0, ty0 * tile - margin);
+  const x1 = Math.min(width, (tx1 + 1) * tile + margin);
+  const y1 = Math.min(height, (ty1 + 1) * tile + margin);
+  if ((x1 - x0) * (y1 - y0) >= width * height * 0.9) return null;
+  return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
 }
 // v139 (שלב 2): "סורק" עדין בתוך האפליקציה — גווני אפור ומתיחת ניגודיות מעוגנת-דיו.
 // קודם נמצא לובן הנייר (אחוזון 99 בחלון המרכזי). כל מה שכהה בהרבה מהנייר
@@ -5407,19 +5498,50 @@ async function aiRenderInvoiceRotation(sourceDataUrl, quarterTurns) {
   ctx.drawImage(img, -sourceWidth / 2, -sourceHeight / 2, sourceWidth, sourceHeight);
   return aiCanvasToInvoiceJpeg(canvas, 0.92);
 }
+// v141: לפני ההקטנה ל-3000px מזוהה מלבן הנייר על עותק מוקטן (1500px),
+// והחיתוך נעשה מהתמונה המקורית ברזולוציה מלאה — כך כל תקציב ה-3000px
+// הולך לשורות המוצרים במקום לרקע. אין זיהוי בטוח → אין חיתוך, והמסלול
+// נשאר זהה לחלוטין להתנהגות הקודמת. התוצאה מוצגת במסך אישור הכיוון.
 async function aiCompressInvoiceImage(file) {
   const raw = await aiReadFile(file);
   const img = await aiLoadImage(raw);
-  let width = img.naturalWidth || img.width, height = img.naturalHeight || img.height;
+  const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
+  let cropRegion = null;
+  try {
+    const proxyScale = Math.min(1, 1500 / Math.max(sourceWidth, sourceHeight));
+    const proxyWidth = Math.max(1, Math.round(sourceWidth * proxyScale));
+    const proxyHeight = Math.max(1, Math.round(sourceHeight * proxyScale));
+    const proxyCanvas = document.createElement('canvas');
+    proxyCanvas.width = proxyWidth; proxyCanvas.height = proxyHeight;
+    const proxyCtx = proxyCanvas.getContext('2d', { alpha: false });
+    if (proxyCtx) {
+      proxyCtx.fillStyle = '#fff'; proxyCtx.fillRect(0, 0, proxyWidth, proxyHeight);
+      proxyCtx.drawImage(img, 0, 0, proxyWidth, proxyHeight);
+      const analysis = {};
+      const proxyPixels = proxyCtx.getImageData(0, 0, proxyWidth, proxyHeight);
+      aiFlattenIllumination(proxyPixels.data, proxyWidth, proxyHeight, analysis);
+      const box = aiComputePaperCropBox(analysis, proxyWidth, proxyHeight);
+      if (box) {
+        const back = 1 / proxyScale;
+        const cropX = Math.max(0, Math.floor(box.x * back));
+        const cropY = Math.max(0, Math.floor(box.y * back));
+        const cropWidth = Math.min(sourceWidth - cropX, Math.ceil(box.width * back));
+        const cropHeight = Math.min(sourceHeight - cropY, Math.ceil(box.height * back));
+        if (cropWidth >= 64 && cropHeight >= 64) cropRegion = { x: cropX, y: cropY, width: cropWidth, height: cropHeight };
+      }
+    }
+  } catch (cropError) { cropRegion = null; /* בלי חיתוך — ממשיכים כרגיל */ }
+  const region = cropRegion || { x: 0, y: 0, width: sourceWidth, height: sourceHeight };
   // מסמכי ספק צפופים זקוקים ליותר פרטים. v134: עד 3000px (~250 DPI על A4) —
   // ‎~56% יותר פיקסלים לכל אות לעומת 2400px, ומורידים איכות רק אם חייבים.
   const maxSide = 3000;
-  const scale = Math.min(1, maxSide / Math.max(width, height));
-  width = Math.max(1, Math.round(width * scale)); height = Math.max(1, Math.round(height * scale));
+  const scale = Math.min(1, maxSide / Math.max(region.width, region.height));
+  const width = Math.max(1, Math.round(region.width * scale)), height = Math.max(1, Math.round(region.height * scale));
   const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
   const ctx = canvas.getContext('2d', { alpha: false });
   if (!ctx) throw new Error('canvas_failed');
-  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, width, height); ctx.drawImage(img, 0, 0, width, height);
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(img, region.x, region.y, region.width, region.height, 0, 0, width, height);
   // v137: שיפור קריאות עדין. כל כשל (זיכרון במכשיר ישן וכו') → ממשיכים עם המקור.
   try {
     const pixels = ctx.getImageData(0, 0, width, height);
