@@ -1,12 +1,9 @@
-Warning: truncated output (original token count: 197298)
-Total output lines: 10618
-
 <!DOCTYPE html>
 <html lang="he" dir="rtl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v133 התאמה חשבונאית ישירה</title>
+    <title>הזמנות יטבתה - v131 חוסרים ישירות</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -105,7 +102,7 @@ Total output lines: 10618
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v133 התאמה חשבונאית ישירה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v131 חוסרים ישירות</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -514,13 +511,9 @@ let aiScanEvaluation = null;
 let aiScanError = '';
 let aiScanAutoRotationNote = '';
 let aiScanAttemptCount = 0;
-// הכיוון מאושר ידנית לפני השליחה. כל פעולת סריקה מבצעת בקשת שירות אחת;
-// הקריאה הממוקדת, אם נדרשת, מתבצעת בתוך אותה בקשה בצד השרת.
-const AI_SCAN_MAX_AUTO_ROTATION_RETRIES = 0;
-const AI_SCAN_MIN_SERVICE_VERSION = 128;
+const AI_SCAN_MAX_AUTO_ROTATION_RETRIES = 2;
+const AI_SCAN_MIN_SERVICE_VERSION = 127;
 const AI_BARCODE_SUFFIX_DIGITS = 6;
-const AI_DIRECT_RECONCILIATION_METHOD = 'focused_retry_context_v1';
-const AI_DIRECT_RECONCILIATION_MIN_CONFIDENCE = 0.78;
 let aiOrientationSession = null;
 let aiOrientationBusy = false;
 let reconcileAiAudit = null;     // מטא-נתונים בלבד, ללא תמונות
@@ -5267,18 +5260,817 @@ function aiSetOrientationBusy(busy) {
 function aiPaintOrientationReview() {
   const location = aiOrientationSession && aiOrientationLocation(aiOrientationSession.page);
   if (!location) { aiCloseOrientationReview(); return false; }
-  const reviewOnly = !!(aiOrien…17298 tokens truncated…rectMapping.barcode,
-            observed: String(row && row.description || '').trim() || 'התאמה חשבונאית ממוקדת',
-            method: 'direct_reconciliation_provisional',
-            identityEvidence: {
-              proofModel: AI_DIRECT_RECONCILIATION_METHOD,
-              targetId: directTargetId,
-              confidence: directMapping.confidence
-            }
-          };
-          directReconciliation.usedMappings.set(directTargetId, directMapping);
-        }
+  const reviewOnly = !!(aiOrientationSession && aiOrientationSession.reviewOnly);
+  const img = $('aiOrientationImage'), label = $('aiOrientationLabel');
+  if (img) img.src = location.page.dataUrl;
+  if (label) label.textContent = 'תעודה ' + (location.docIndex + 1) + ' · עמוד ' + (location.pageIndex + 1) + ((Number(location.page.rotation) || 0) ? ' · סיבוב ' + (Number(location.page.rotation) || 0) + '°' : '');
+  const title = $('aiOrientationTitle'), cancel = $('aiOrientationCancel'), left = $('aiOrientationLeft'), right = $('aiOrientationRight'), confirm = $('aiOrientationConfirm');
+  if (title) title.textContent = reviewOnly ? 'צילום העמוד המקורי' : 'בדיקת כיוון התעודה';
+  if (cancel) cancel.classList.toggle('hidden', reviewOnly);
+  if (left) left.classList.toggle('hidden', reviewOnly);
+  if (right) right.classList.toggle('hidden', reviewOnly);
+  if (confirm) confirm.innerHTML = reviewOnly ? '<i class="fa-solid fa-xmark ml-1"></i> סגור וחזור לתוצאות' : '<i class="fa-solid fa-check ml-1"></i> התמונה ישרה — המשך';
+  return true;
+}
+function aiOpenOrientationReview(docIndex, pageIndex, requireReconfirm) {
+  if (aiScanBusy || aiOrientationBusy) return false;
+  const doc = aiScanDocuments[docIndex], page = doc && doc.pages[pageIndex];
+  if (!page) return false;
+  if (requireReconfirm) page.orientationConfirmed = false;
+  // אחרי שכבר התקבלה תוצאה, פתיחה ללא דרישת אישור היא צפייה בלבד. היא לא
+  // מאפשרת סיבוב/מחיקה ולא מאפסת את הפענוח שהמשתמש בודק כרגע.
+  aiOrientationSession = { page, reviewOnly: !requireReconfirm && !!aiScanResponse };
+  const modal = $('aiOrientationModal');
+  if (modal) { modal.classList.remove('hidden'); modal.classList.add('flex'); }
+  aiSetOrientationBusy(false);
+  aiPaintOrientationReview();
+  return true;
+}
+function aiOpenNextUnconfirmedOrientation() {
+  if (aiOrientationSession || aiScanBusy || aiOrientationBusy) return false;
+  for (let docIndex = 0; docIndex < aiScanDocuments.length; docIndex++) {
+    const pageIndex = aiScanDocuments[docIndex].pages.findIndex(page => !page.orientationConfirmed);
+    if (pageIndex !== -1) return aiOpenOrientationReview(docIndex, pageIndex, false);
+  }
+  return false;
+}
+function aiCloseOrientationReview() {
+  aiOrientationSession = null;
+  aiOrientationBusy = false;
+  const modal = $('aiOrientationModal');
+  if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+  const overlay = $('aiOrientationBusy');
+  if (overlay) { overlay.classList.add('hidden'); overlay.classList.remove('flex'); }
+}
+async function aiRotateOrientationReview(deltaTurns) {
+  const session = aiOrientationSession, location = session && aiOrientationLocation(session.page);
+  if (!location || aiOrientationBusy || session.reviewOnly) return;
+  aiSetOrientationBusy(true);
+  try {
+    const page = location.page;
+    const baseDataUrl = page.baseDataUrl || page.dataUrl;
+    const currentTurns = aiNormalizeQuarterTurns((Number(page.rotation) || 0) / 90);
+    const targetTurns = aiNormalizeQuarterTurns(currentTurns + deltaTurns);
+    const rendered = await aiRenderInvoiceRotation(baseDataUrl, targetTurns);
+    // מעדכנים רק לאחר שסיבוב מלא הצליח, כדי שכשל לא ישאיר חצי שינוי.
+    if (!aiOrientationSession || aiOrientationSession.page !== page || !aiOrientationLocation(page)) return;
+    page.baseDataUrl = baseDataUrl;
+    page.dataUrl = rendered.dataUrl;
+    page.rotation = targetTurns * 90;
+    page.bytes = rendered.bytes;
+    page.orientationConfirmed = false;
+    aiPaintOrientationReview();
+  } catch (error) {
+    const label = $('aiOrientationLabel');
+    if (label) label.textContent = error && error.message === 'image_too_large' ? 'לא ניתן לסובב בלי לחרוג ממגבלת הגודל' : 'הסיבוב נכשל — התמונה המקורית לא השתנתה';
+  } finally { aiSetOrientationBusy(false); }
+}
+function aiConfirmOrientationReview() {
+  const location = aiOrientationSession && aiOrientationLocation(aiOrientationSession.page);
+  if (!location || aiOrientationBusy) return;
+  if (aiOrientationSession.reviewOnly) { aiCloseOrientationReview(); return; }
+  location.page.orientationConfirmed = true;
+  aiCloseOrientationReview();
+  aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0;
+  if (currentView === 'reconcile') renderReconcile();
+  setTimeout(aiOpenNextUnconfirmedOrientation, 0);
+}
+function aiCancelOrientationReview() {
+  const location = aiOrientationSession && aiOrientationLocation(aiOrientationSession.page);
+  if (!location || aiOrientationBusy) return;
+  if (aiOrientationSession.reviewOnly) { aiCloseOrientationReview(); return; }
+  location.doc.pages.splice(location.pageIndex, 1);
+  aiCloseOrientationReview();
+  aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0;
+  if (currentView === 'reconcile') renderReconcile();
+  setTimeout(aiOpenNextUnconfirmedOrientation, 0);
+}
+function aiAllPagesOrientationConfirmed(documents) {
+  const list = documents || aiScanDocuments;
+  return list.length > 0 && list.every(doc => doc.pages.length > 0 && doc.pages.every(page => page.orientationConfirmed === true));
+}
+async function aiAddInvoiceFiles(docIndex, files) {
+  const doc = aiScanDocuments[docIndex]; if (!doc || !files || !files.length || aiScanBusy) return;
+  const slots = Math.max(0, 8 - aiTotalPages());
+  if (!slots) { showToast('ניתן לצרף עד 8 עמודים בסריקה אחת', null, null, 3000); return; }
+  aiScanBusy = true; aiScanProgressText = 'מכין את התמונות באיכות גבוהה…'; aiScanError = ''; renderReconcile();
+  try {
+    const picked = Array.from(files).slice(0, slots);
+    for (const file of picked) doc.pages.push(await aiCompressInvoiceImage(file));
+    aiScanResponse = null; aiScanEvaluation = null; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0;
+  } catch (error) {
+    aiScanError = error && error.message === 'image_too_large' ? 'התמונה גדולה מדי. צלם שוב מקרוב ובחדות.' : 'לא הצלחתי להכין את התמונה. נסה לצלם שוב.';
+  } finally {
+    aiScanBusy = false; aiScanProgressText = '';
+    if (currentView === 'reconcile') renderReconcile();
+    setTimeout(aiOpenNextUnconfirmedOrientation, 0);
+  }
+}
+function aiRemoveInvoicePage(docIndex, pageIndex) {
+  const doc = aiScanDocuments[docIndex]; if (!doc || aiScanBusy) return;
+  doc.pages.splice(pageIndex, 1); aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; renderReconcile();
+}
+async function aiRotateInvoicePage(docIndex, pageIndex) {
+  const doc = aiScanDocuments[docIndex], page = doc && doc.pages[pageIndex];
+  if (!page || aiScanBusy) return;
+  aiScanBusy = true; aiScanProgressText = 'מסובב את עמוד ' + (pageIndex + 1) + '…'; aiScanError = ''; renderReconcile();
+  try {
+    const baseDataUrl = page.baseDataUrl || page.dataUrl;
+    const currentTurns = aiNormalizeQuarterTurns((Number(page.rotation) || 0) / 90);
+    const targetTurns = aiNormalizeQuarterTurns(currentTurns + 1);
+    const rendered = await aiRenderInvoiceRotation(baseDataUrl, targetTurns);
+    page.baseDataUrl = baseDataUrl;
+    page.dataUrl = rendered.dataUrl;
+    page.rotation = targetTurns * 90;
+    page.bytes = rendered.bytes;
+    page.orientationConfirmed = false;
+    aiScanResponse = null; aiScanEvaluation = null; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0;
+  } catch (error) {
+    aiScanError = error && error.message === 'image_too_large' ? 'לא ניתן לסובב בלי לחרוג ממגבלת הגודל.' : 'סיבוב התמונה נכשל. התמונה המקורית נשארה ללא שינוי.';
+  } finally {
+    aiScanBusy = false; aiScanProgressText = '';
+    if (currentView === 'reconcile') renderReconcile();
+    if (!page.orientationConfirmed) setTimeout(() => aiOpenOrientationReview(docIndex, pageIndex, false), 0);
+  }
+}
+async function aiBuildRotatedDocuments(sourceDocuments, documentIndexes, deltaTurns) {
+  const targets = new Set(documentIndexes || []), output = [];
+  for (let docIndex = 0; docIndex < sourceDocuments.length; docIndex++) {
+    const sourceDoc = sourceDocuments[docIndex];
+    if (!targets.has(docIndex)) { output.push(Object.assign({}, sourceDoc, { pages: sourceDoc.pages.slice() })); continue; }
+    const pages = [];
+    for (const page of sourceDoc.pages) {
+      const baseDataUrl = page.baseDataUrl || page.dataUrl;
+      const currentTurns = aiNormalizeQuarterTurns((Number(page.rotation) || 0) / 90);
+      const targetTurns = aiNormalizeQuarterTurns(currentTurns + deltaTurns);
+      const rendered = await aiRenderInvoiceRotation(baseDataUrl, targetTurns);
+      pages.push(Object.assign({}, page, { baseDataUrl, dataUrl: rendered.dataUrl, rotation: targetTurns * 90, bytes: rendered.bytes }));
+    }
+    output.push(Object.assign({}, sourceDoc, { pages }));
+  }
+  return output;
+}
+function aiMoneyCents(value) {
+  if (value == null || value === '') return null;
+  const n = Number(value);
+  return isFinite(n) ? Math.round(n * 100) : null;
+}
+function aiLineTotal(row, qty) {
+  if (aiMoneyCents(row.lineTotalExVat) != null) return r2(Number(row.lineTotalExVat));
+  if (aiMoneyCents(row.grossLineTotalExVat) != null) return r2(Number(row.grossLineTotalExVat) - (Number(row.lineDiscountExVat) || 0));
+  if (aiMoneyCents(row.unitPriceExVat) != null && qty != null) return r2(Number(row.unitPriceExVat) * qty - (Number(row.lineDiscountExVat) || 0));
+  return null;
+}
+function aiRowArithmeticError(row, qty) {
+  // מחיר יחידה עשוי להכיל יותר משתי ספרות אחרי הנקודה. מכפילים אותו בכמות
+  // בדיוק מלא ורק את תוצאת השורה ממירים לאגורות; אחרת 1.79333 יהפוך ל-1.79
+  // לפני הכפלה וייצור פער שווא של 8 אגורות בכמות 24.
+  const unitRaw = row.unitPriceExVat == null || row.unitPriceExVat === '' ? null : Number(row.unitPriceExVat);
+  const unitQtyCents = unitRaw != null && isFinite(unitRaw) ? aiMoneyCents(unitRaw * qty) : null;
+  const gross = aiMoneyCents(row.grossLineTotalExVat);
+  const discount = aiMoneyCents(row.lineDiscountExVat);
+  const total = aiMoneyCents(row.lineTotalExVat);
+  // מחיר יחידה שמודפס בדיוק באגורות הוא לעיתים תצוגה מעוגלת של מחיר פנימי
+  // מדויק יותר. השגיאה האפשרית היא עד חצי אגורה לכל יחידה, ועוד חצי אגורה
+  // בעיגול סכום השורה. סכום השורה המודפס נשאר מקור האמת.
+  const unitPrintedInCents = unitRaw != null && isFinite(unitRaw) && Math.abs((unitRaw * 100) - Math.round(unitRaw * 100)) < 0.000001;
+  const unitToleranceCents = unitPrintedInCents ? Math.max(1, Math.ceil(Math.abs(Number(qty) || 0) * 0.5 + 0.5)) : 1;
+  // בודקים רק מספרים שה-AI טוען שקרא בפועל. ערך null אינו מושלם מהקטלוג.
+  if (unitQtyCents != null && gross != null && Math.abs(gross - unitQtyCents) > unitToleranceCents) return 'מחיר × כמות אינו תואם לסכום הברוטו בשורה';
+  if (gross != null && discount != null && total != null && Math.abs((gross - discount) - total) > 1) return 'סכום הברוטו פחות הנחת השורה אינו תואם לסכום השורה';
+  if (gross == null && unitQtyCents != null && discount != null && total != null && Math.abs((unitQtyCents - discount) - total) > unitToleranceCents) return 'מחיר × כמות פחות ההנחה אינו תואם לסכום השורה';
+  return '';
+}
+function aiRowHasArithmeticProof(row, qty) {
+  if (qty == null || !isFinite(Number(qty))) return false;
+  const unitRaw = row.unitPriceExVat == null || row.unitPriceExVat === '' ? null : Number(row.unitPriceExVat);
+  const hasUnit = unitRaw != null && isFinite(unitRaw);
+  const hasGross = aiMoneyCents(row.grossLineTotalExVat) != null;
+  const hasDiscount = aiMoneyCents(row.lineDiscountExVat) != null;
+  const hasTotal = aiMoneyCents(row.lineTotalExVat) != null;
+  // סכום שורה לבדו אינו "בדיקת חשבון". נדרשים לפחות שני צדדים של
+  // משוואה שנקראו מהנייר: מחיר×כמות מול ברוטו, או ברוטו/מחיר פחות הנחה
+  // מול סכום השורה. כך לא מציגים למשתמש אישור ירוק על מספר בודד.
+  const hasCheckableRelation = (hasUnit && hasGross)
+    || (hasGross && hasDiscount && hasTotal)
+    || (!hasGross && hasUnit && hasDiscount && hasTotal);
+  return hasCheckableRelation && !aiRowArithmeticError(row, qty);
+}
+function aiIsValidEan13(value) {
+  const barcode = normalizeBarcode(value);
+  if (!/^\d{13}$/.test(barcode)) return false;
+  let sum = 0;
+  for (let i = 0; i < 12; i++) sum += Number(barcode[i]) * (i % 2 === 0 ? 1 : 3);
+  return (10 - (sum % 10)) % 10 === Number(barcode[12]);
+}
+function aiCatalogBarcodeIsSafe(value) {
+  const barcode = normalizeBarcode(value);
+  return /^\d{6,20}$/.test(barcode) && (barcode.length !== 13 || aiIsValidEan13(barcode));
+}
+function aiCatalogBarcodeMatches(observed, suffixMode, minimumDigits) {
+  const minDigits = Number.isInteger(minimumDigits) ? minimumDigits : 6;
+  if (!/^\d{4,20}$/.test(observed || '') || observed.length < minDigits) return [];
+  const seen = new Set(), matches = [];
+  products.forEach(product => {
+    const barcode = normalizeBarcode(product && product.barcode || '');
+    if (!aiCatalogBarcodeIsSafe(barcode)) return;
+    if ((suffixMode ? barcode.endsWith(observed) : barcode === observed) && !seen.has(product.id)) {
+      seen.add(product.id); matches.push({ product, barcode });
+    }
+  });
+  return matches;
+}
+function aiNormalizeBarcodePattern(value) {
+  return String(value == null ? '' : value).replace(/[\s\u200B-\u200D\uFEFF-]/g, '');
+}
+function aiBarcodePatternInfo(value) {
+  const pattern = aiNormalizeBarcodePattern(value);
+  if (!/^[0-9?]{4,20}$/.test(pattern)) return null;
+  return { pattern, knownDigits: (pattern.match(/[0-9]/g) || []).length, hasWildcard: pattern.indexOf('?') !== -1 };
+}
+function aiBarcodeOneDigitDifference(leftValue, rightValue) {
+  const left = normalizeBarcode(leftValue), right = normalizeBarcode(rightValue);
+  if (!/^\d{6,20}$/.test(left) || left.length !== right.length) return false;
+  let differences = 0;
+  for (let i = 0; i < left.length; i++) {
+    if (left[i] !== right[i] && ++differences > 1) return false;
+  }
+  return differences === 1;
+}
+function aiCatalogBarcodeOneDigitMatches(observedValue) {
+  const seen = new Set(), matches = [];
+  products.forEach(product => {
+    const barcode = normalizeBarcode(product && product.barcode || '');
+    if (!aiCatalogBarcodeIsSafe(barcode) || !aiBarcodeOneDigitDifference(observedValue, barcode) || seen.has(product.id)) return;
+    seen.add(product.id); matches.push({ product, barcode });
+  });
+  return matches;
+}
+function aiBarcodeMatchesPattern(barcodeValue, patternValue, suffixMode) {
+  const barcode = normalizeBarcode(barcodeValue);
+  const info = aiBarcodePatternInfo(patternValue);
+  if (!aiCatalogBarcodeIsSafe(barcode) || !info) return false;
+  if (!suffixMode && barcode.length !== info.pattern.length) return false;
+  if (suffixMode && barcode.length < info.pattern.length) return false;
+  const candidate = suffixMode ? barcode.slice(-info.pattern.length) : barcode;
+  for (let i = 0; i < info.pattern.length; i++) {
+    if (info.pattern[i] !== '?' && info.pattern[i] !== candidate[i]) return false;
+  }
+  return true;
+}
+function aiCatalogBarcodePatternMatches(patternValue, suffixMode) {
+  const info = aiBarcodePatternInfo(patternValue);
+  if (!info) return [];
+  const seen = new Set(), matches = [];
+  products.forEach(product => {
+    const barcode = normalizeBarcode(product && product.barcode || '');
+    if (!aiBarcodeMatchesPattern(barcode, info.pattern, suffixMode) || seen.has(product.id)) return;
+    seen.add(product.id); matches.push({ product, barcode });
+  });
+  return matches;
+}
+function aiSuggestedBarcodeValue(row) {
+  return normalizeBarcode(row && (row.barcodeSuggested != null ? row.barcodeSuggested : (row.suggestedBarcode != null ? row.suggestedBarcode : row.barcode)) || '');
+}
+function aiSuggestedProductIdValue(row) {
+  return String(row && (row.barcodeSuggestedProductId != null ? row.barcodeSuggestedProductId : (row.suggestedProductId != null ? row.suggestedProductId : '')) || '');
+}
+function aiLocalSuggestedNameCandidates(row) {
+  // המועמדים מגיעים מהשרת כרמז תצוגה בלבד. הזהות, השם והברקוד נלקחים
+  // מחדש מהקטלוג המקומי; מועמד שאינו מופיע גם ברשימת הרמזים של השורה,
+  // שברקודו השתנה או שאינו ייחודי במאגר — נפסל. אין בחירת ברירת מחדל.
+  const rawCandidates = row && Array.isArray(row.barcodeSuggestedCandidates) ? row.barcodeSuggestedCandidates : [];
+  const rawHintIds = row && Array.isArray(row.catalogCandidateHintIds) ? row.catalogCandidateHintIds : [];
+  if (rawCandidates.length < 2 || rawCandidates.length > 6 || rawHintIds.length < 2 || !String(row && row.description || '').trim()) return [];
+  const hintIds = new Set(rawHintIds.map(id => String(id == null ? '' : id)).filter(Boolean));
+  const seen = new Set(), output = [];
+  for (const candidate of rawCandidates) {
+    const productId = String(candidate && candidate.productId != null ? candidate.productId : '');
+    const candidateBarcode = normalizeBarcode(candidate && candidate.barcode || '');
+    if (!productId || !hintIds.has(productId) || seen.has(productId) || !aiCatalogBarcodeIsSafe(candidateBarcode)) return [];
+    const product = products.find(item => String(item && item.id) === productId);
+    const localBarcode = normalizeBarcode(product && product.barcode || '');
+    const barcodeMatches = aiCatalogBarcodeMatches(candidateBarcode, false);
+    if (!product || localBarcode !== candidateBarcode || barcodeMatches.length !== 1 || String(barcodeMatches[0].product && barcodeMatches[0].product.id) !== productId) return [];
+    seen.add(productId);
+    output.push({ product, barcode: localBarcode });
+  }
+  return output.length >= 2 ? output : [];
+}
+function aiBarcodeEvidenceCandidate(value, readType, catalogHintId) {
+  const observed = normalizeBarcode(value);
+  const pattern = aiNormalizeBarcodePattern(value);
+  const hintId = String(catalogHintId == null ? '' : catalogHintId);
+  const hintMatches = match => !!match && hintId !== '' && String(match.product && match.product.id) === hintId;
+  if (readType === 'full') {
+    if (!/^\d{6,20}$/.test(observed) || (observed.length === 13 && !aiIsValidEan13(observed))) return null;
+    const exact = aiCatalogBarcodeMatches(observed, false);
+    if (exact.length === 1) return exact[0].barcode;
+    const corrected = aiCatalogBarcodeOneDigitMatches(observed);
+    return corrected.length === 1 && hintMatches(corrected[0]) ? corrected[0].barcode : null;
+  }
+  if (readType === 'suffix') {
+    if (!/^\d{4,20}$/.test(observed)) return null;
+    const matches = aiCatalogBarcodeMatches(observed, true, 4);
+    return matches.length === 1 && (observed.length >= AI_BARCODE_SUFFIX_DIGITS || hintMatches(matches[0])) ? matches[0].barcode : null;
+  }
+  if (readType === 'full_pattern' || readType === 'suffix_pattern') {
+    const info = aiBarcodePatternInfo(pattern);
+    if (!info || !info.hasWildcard) return null;
+    const matches = aiCatalogBarcodePatternMatches(info.pattern, readType === 'suffix_pattern');
+    return matches.length === 1 && (info.knownDigits >= AI_BARCODE_SUFFIX_DIGITS || (info.knownDigits >= 4 && hintMatches(matches[0])))
+      ? matches[0].barcode
+      : null;
+  }
+  return null;
+}
+function aiBarcodeRetryEvidenceError(row) {
+  if (!row || typeof row !== 'object') return '';
+  if (row.barcodeRetryConflict === true || String(row.barcodeMatchMethod || '') === 'conflicting_reads') {
+    return 'שתי קריאות עצמאיות החזירו ספרות שונות — אין התאמה אוטומטית ויש לבדוק את צילום השורה';
+  }
+  const owns = key => Object.prototype.hasOwnProperty.call(row, key);
+  const hasInitial = owns('barcodeInitialReadType');
+  const hasRetry = owns('barcodeRetryReadType');
+  if (row.barcodeRetryApplied === true && (!hasInitial || !hasRetry)) {
+    return 'חסרה ראיית המקור של הקריאה החוזרת — אין התאמה אוטומטית ויש לסרוק מחדש';
+  }
+  if (!hasInitial || !hasRetry) return '';
+  const initialCandidate = aiBarcodeEvidenceCandidate(row.barcodeInitialObserved, String(row.barcodeInitialReadType || ''), row.catalogHintIdInitial);
+  const retryCandidate = aiBarcodeEvidenceCandidate(row.barcodeRetryObserved, String(row.barcodeRetryReadType || ''), row.barcodeRetryCatalogHintId);
+  if (initialCandidate && retryCandidate && initialCandidate !== retryCandidate) {
+    return 'שתי קריאות עצמאיות החזירו ספרות שונות — אין התאמה אוטומטית ויש לבדוק את צילום השורה';
+  }
+  return '';
+}
+// התאמה לפי שם אינה מסתמכת על המחיר כדי לבחור בין מוצרים. ה-AI חייב
+// להחזיר מועמד שם יחיד, ורק אז המחיר המודפס וחשבון השורה משמשים כהצלבה
+// עצמאית מול המחיר המקומי. כך שורת מבצע יכולה להיסגר לפי מחיר הבסיס
+// והברוטו, בלי להסתיר אחר כך טעות מחיר או מבצע בסכום הנטו.
+function aiSingleNameCandidateId(row) {
+  if (!row || typeof row !== 'object') return '';
+  const hintId = String(row.catalogHintId == null ? '' : row.catalogHintId);
+  const candidateIds = Array.isArray(row.catalogCandidateHintIds)
+    ? row.catalogCandidateHintIds.map(id => String(id == null ? '' : id)).filter(Boolean)
+    : [];
+  // רק רמז יחיד מפורש מתקבל לאוטומציה. השרת מקדם מערך מקור בן מועמד יחיד
+  // ל-catalogHintId, אך חוסם רשימה עמומה שהצטמצמה עקב alias פסול/כפול.
+  // לכן מערך מועמדים בצד הלקוח לעולם אינו נחשב לזהות יחידה.
+  if (hintId && candidateIds.length === 0) return hintId;
+  return '';
+}
+function aiNamePriceMatchProof(row, product) {
+  if (!row || !product) return { ok: false, reason: 'missing_candidate' };
+  const description = String(row.description || '').trim();
+  const singleCandidateId = aiSingleNameCandidateId(row);
+  const localBarcode = normalizeBarcode(product.barcode || '');
+  const localMatches = aiCatalogBarcodeMatches(localBarcode, false);
+  const qtyRaw = row.quantity == null || row.quantity === '' ? NaN : Number(row.quantity);
+  const qty = Number.isFinite(qtyRaw) && qtyRaw > 0 && Math.abs(qtyRaw - Math.round(qtyRaw)) < 0.001 ? Math.round(qtyRaw) : null;
+  const confidence = Number(row.confidence);
+  const basePrice = Number(product.price);
+  if (!description || !singleCandidateId || singleCandidateId !== String(product.id) || localMatches.length !== 1 || String(localMatches[0].product && localMatches[0].product.id) !== String(product.id)) {
+    return { ok: false, reason: 'identity_not_unique' };
+  }
+  // התאמה לפי שם היא מסלול חלופי לברקוד ולכן דורשת ודאות גבוהה יותר מסף
+  // הקריאה הכללי. מחיר וכמות לבדם אינם מבדילים תמיד בין טעמים דומים.
+  if (qty == null || !Number.isFinite(confidence) || confidence < 0.78 || !Number.isFinite(basePrice) || basePrice <= 0) {
+    return { ok: false, reason: 'weak_row' };
+  }
+
+  const unitRaw = row.unitPriceExVat == null || row.unitPriceExVat === '' ? null : Number(row.unitPriceExVat);
+  const unitCents = unitRaw != null && Number.isFinite(unitRaw) ? aiMoneyCents(unitRaw) : null;
+  const baseCents = aiMoneyCents(basePrice);
+  const grossCents = aiMoneyCents(row.grossLineTotalExVat);
+  const discountCents = aiMoneyCents(row.lineDiscountExVat);
+  const netCents = aiMoneyCents(row.lineTotalExVat);
+  const expectedGrossCents = aiMoneyCents(basePrice * qty);
+  const lineToleranceCents = Math.min(RECEIPT_ROUNDING_TOLERANCE_CENTS, Math.max(1, Math.ceil(qty * 0.5 + 0.5)));
+  const unitMatchesBase = unitCents != null && baseCents != null && unitCents === baseCents;
+  // סיבולת מצטברת מוצדקת רק כשמחיר היחידה המודפס (והמעוגל) נקרא ותואם
+  // למחיר הקטלוג. בלי עוגן כזה סכום ברוטו/נטו חייב להתאים עד אגורה אחת.
+  const catalogTotalToleranceCents = unitMatchesBase ? lineToleranceCents : 1;
+  const grossMatchesBase = grossCents != null && expectedGrossCents != null && Math.abs(grossCents - expectedGrossCents) <= catalogTotalToleranceCents;
+  const grossNetConsistent = grossCents == null || netCents == null
+    ? true
+    : (discountCents != null ? Math.abs((grossCents - discountCents) - netCents) <= 1 : Math.abs(grossCents - netCents) <= 1);
+  const unitNetConsistent = unitCents == null || grossCents != null || netCents == null || discountCents == null
+    ? true
+    : Math.abs((aiMoneyCents(unitRaw * qty) - discountCents) - netCents) <= lineToleranceCents;
+  const baseNetNoDiscountConsistent = netCents != null && (discountCents == null || discountCents === 0)
+    && Math.abs(expectedGrossCents - netCents) <= catalogTotalToleranceCents;
+  const baseNetWithDiscountConsistent = netCents != null && discountCents != null
+    && Math.abs((expectedGrossCents - discountCents) - netCents) <= catalogTotalToleranceCents;
+  const unitNetNoDiscountConsistent = unitCents == null || netCents == null || discountCents != null
+    ? true
+    : Math.abs(aiMoneyCents(unitRaw * qty) - netCents) <= lineToleranceCents;
+  const hasNegativeMoney = [unitCents, grossCents, discountCents, netCents].some(value => value != null && value < 0);
+  if (hasNegativeMoney || aiRowArithmeticError(row, qty) || !grossNetConsistent || !unitNetConsistent || !unitNetNoDiscountConsistent) {
+    return { ok: false, reason: 'arithmetic_not_proven' };
+  }
+
+  let proofModel = '';
+  if (unitMatchesBase && grossMatchesBase && grossNetConsistent) proofModel = discountCents != null && discountCents > 0 ? 'base_unit_gross_discount_net' : 'base_unit_gross';
+  else if (grossMatchesBase && discountCents != null && netCents != null && grossNetConsistent) proofModel = 'base_gross_discount_net';
+  else if (unitMatchesBase && grossCents == null && discountCents != null && netCents != null && unitNetConsistent) proofModel = 'base_unit_discount_net';
+  else if (grossMatchesBase) proofModel = 'base_gross';
+  else if (baseNetWithDiscountConsistent) proofModel = unitMatchesBase ? 'base_unit_discount_net' : 'base_discount_net';
+  else if (baseNetNoDiscountConsistent) proofModel = unitMatchesBase ? 'base_unit_net_no_discount' : 'base_net_no_discount';
+  if (!proofModel) return {
+    ok: false,
+    reason: 'price_not_corroborated',
+    basePrice,
+    unitPrice: unitRaw,
+    grossLineTotal: grossCents == null ? null : grossCents / 100,
+    expectedGross: expectedGrossCents == null ? null : expectedGrossCents / 100
+  };
+  return {
+    ok: true,
+    proofModel,
+    quantity: qty,
+    rowConfidence: confidence,
+    basePrice,
+    unitPrice: unitRaw,
+    grossLineTotal: grossCents == null ? null : grossCents / 100,
+    lineDiscount: discountCents == null ? null : discountCents / 100,
+    lineTotal: netCents == null ? null : netCents / 100,
+    expectedGross: expectedGrossCents == null ? null : expectedGrossCents / 100,
+    grossDeltaCents: grossCents == null || expectedGrossCents == null ? null : grossCents - expectedGrossCents,
+    toleranceCents: catalogTotalToleranceCents,
+    arithmeticVerified: true
+  };
+}
+function aiVerifiedUnknownProductData(row, options) {
+  options = options || {};
+  if (!row || String(row.barcodeMatchMethod || '') !== 'verified_unknown_full') return { ok: false, error: 'השורה אינה מוצר חדש מאומת' };
+  const observed = normalizeBarcode(row.barcodeObserved || '');
+  const resolved = normalizeBarcode(row.barcode || '');
+  const initial = normalizeBarcode(row.barcodeInitialObserved || '');
+  const retry = normalizeBarcode(row.barcodeRetryObserved || '');
+  if (String(row.barcodeReadType || '') !== 'full' || !aiIsValidEan13(observed) || resolved) return { ok: false, error: 'הברקוד החדש אינו קריאה מלאה ותקינה' };
+  if (row.barcodeRetryApplied !== true || row.barcodeRetryConflict === true || String(row.barcodeInitialReadType || '') !== 'full' || String(row.barcodeRetryReadType || '') !== 'full' || initial !== observed || retry !== observed) {
+    return { ok: false, error: 'הברקוד החדש לא אומת בשתי קריאות מלאות וזהות' };
+  }
+  const retryConfidence = Number(row.barcodeRetryConfidence);
+  if (!Number.isFinite(retryConfidence) || retryConfidence < 0.78) return { ok: false, error: 'ביטחון קריאת האימות החוזרת של הברקוד נמוך מדי' };
+  if (options.allowCatalogExisting !== true && aiCatalogBarcodeMatches(observed, false).length !== 0) return { ok: false, error: 'הברקוד כבר קיים במאגר' };
+  const name = String(row.description || '').trim().slice(0, 160);
+  const qtyRaw = row.quantity == null || row.quantity === '' ? NaN : Number(row.quantity);
+  const quantity = Number.isFinite(qtyRaw) && qtyRaw > 0 && Math.abs(qtyRaw - Math.round(qtyRaw)) < 0.001 ? Math.round(qtyRaw) : null;
+  const confidence = Number(row.confidence);
+  const lineTotal = quantity == null ? null : aiLineTotal(row, quantity);
+  if (!name || quantity == null || !Number.isFinite(confidence) || confidence < 0.78 || lineTotal == null || !(lineTotal > 0) || !aiRowHasArithmeticProof(row, quantity)) {
+    return { ok: false, error: 'שם המוצר, הכמות, המחיר וחשבון השורה לא נקראו בביטחון מספיק' };
+  }
+  const unitRaw = row.unitPriceExVat == null || row.unitPriceExVat === '' ? null : Number(row.unitPriceExVat);
+  const grossRaw = row.grossLineTotalExVat == null || row.grossLineTotalExVat === '' ? null : Number(row.grossLineTotalExVat);
+  const safeUnitPrice = Number.isFinite(unitRaw) && unitRaw > 0
+    ? r2(unitRaw)
+    : (Number.isFinite(grossRaw) && grossRaw > 0 ? r2(grossRaw / quantity) : null);
+  if (!(safeUnitPrice > 0)) return { ok: false, error: 'לא נקרא מחיר יחידה רגיל ובטוח למוצר החדש' };
+  return { ok: true, barcode: observed, name, quantity, safeUnitPrice, lineTotal: r2(lineTotal), confidence };
+}
+function aiVerifiedUnknownProductRows(barcode) {
+  const expected = normalizeBarcode(barcode || '');
+  const rows = [];
+  if (!expected || !aiScanResponse || !aiScanResponse.scan || !Array.isArray(aiScanResponse.scan.documents)) return rows;
+  aiScanResponse.scan.documents.forEach((doc, documentPosition) => {
+    (Array.isArray(doc && doc.rows) ? doc.rows : []).forEach((row, rowIndex) => {
+      const verified = aiVerifiedUnknownProductData(row, { allowCatalogExisting: true });
+      if (!verified.ok || verified.barcode !== expected) return;
+      rows.push({ documentIndex: Number(doc.noteIndex), documentPosition, rowIndex, row, verified });
+    });
+  });
+  return rows;
+}
+function aiUnknownProductCreateContextStatus(context, barcodeValue, requireActive) {
+  const ctx = context || null;
+  const expected = normalizeBarcode(ctx && ctx.barcode || '');
+  if (!ctx || !expected || !aiIsValidEan13(expected)) return { ok: false, error: 'הקשר הישן של המוצר החדש אינו תקין' };
+  if (requireActive === true) {
+    if (aiUnknownProductCreateContext !== ctx || prodAfterSaveTarget !== 'ai_unknown' || priceEditId != null) return { ok: false, error: 'חלון המוצר כבר אינו קשור לשורת התעודה' };
+    const barcodeInput = $('prod_barcode'), scanButton = $('pr_scanbc');
+    if (!barcodeInput || barcodeInput.readOnly !== true || (scanButton && scanButton.disabled !== true)) return { ok: false, error: 'נעילת הברקוד המאומת אינה פעילה — השמירה נעצרה' };
+  }
+  if (ctx.response !== aiScanResponse) return { ok: false, error: 'תוצאות הסריקה השתנו מאז פתיחת המוצר' };
+  if (String(barcodeValue == null ? '' : barcodeValue).trim() !== expected || normalizeBarcode(barcodeValue) !== expected) {
+    return { ok: false, error: 'הברקוד המאומת מהתעודה השתנה — השמירה נעצרה' };
+  }
+  const doc = aiScanResponse && aiScanResponse.scan && Array.isArray(aiScanResponse.scan.documents)
+    ? aiScanResponse.scan.documents.find(item => Number(item && item.noteIndex) === Number(ctx.documentIndex)) : null;
+  const row = doc && Array.isArray(doc.rows) ? doc.rows[Number(ctx.rowIndex)] : null;
+  const verified = aiVerifiedUnknownProductData(row, { allowCatalogExisting: true });
+  if (!verified.ok || verified.barcode !== expected) return { ok: false, error: verified.error || 'ראיית הברקוד בשורת התעודה השתנתה' };
+  return { ok: true, barcode: expected, row, verified };
+}
+function aiResolveInvoiceBarcode(row) {
+  const readType = String(row && row.barcodeReadType || '');
+  const method = String(row && row.barcodeMatchMethod || '');
+  const observedRaw = row && row.barcodeObserved != null ? row.barcodeObserved : (row && row.barcodePattern != null ? row.barcodePattern : '');
+  const observed = normalizeBarcode(observedRaw);
+  const observedPattern = aiNormalizeBarcodePattern(observedRaw);
+  const resolved = normalizeBarcode(row && row.barcode != null ? row.barcode : '');
+  const retryEvidenceError = aiBarcodeRetryEvidenceError(row);
+  if (retryEvidenceError) return { error: retryEvidenceError };
+  if (method === 'invalid_checksum') {
+    return { error: 'הברקוד המלא שנקרא נכשל בבדיקת ספרת הביקורת — אין התאמה אוטומטית ויש לבדוק את צילום השורה' };
+  }
+  if (method === 'verified_unknown_full') {
+    const unknown = aiVerifiedUnknownProductData(row, { allowCatalogExisting: true });
+    if (!unknown.ok) return { error: unknown.error };
+    const existing = aiCatalogBarcodeMatches(unknown.barcode, false);
+    if (existing.length > 1) return { error: 'הברקוד החדש קיים ביותר ממוצר אחד במאגר — יש לתקן את הכפילות לפני המשך' };
+    if (existing.length === 1) {
+      return { product: existing[0].product, barcode: existing[0].barcode, observed: unknown.barcode, method: 'verified_unknown_existing' };
+    }
+    return {
+      error: 'נמצא בתעודה ברקוד חדש שאינו קיים במערכת',
+      suggestion: {
+        unknownProduct: true,
+        barcode: unknown.barcode,
+        productName: unknown.name,
+        printedDescription: unknown.name,
+        quantity: unknown.quantity,
+        safeUnitPrice: unknown.safeUnitPrice,
+        lineTotal: unknown.lineTotal,
+        observed: unknown.barcode,
+        method
       }
+    };
+  }
+  if (method === 'exact_full') {
+    if (readType !== 'full' || !/^\d{6,20}$/.test(observed) || resolved !== observed) return { error: 'הברקוד המלא שחזר אינו תואם לספרות שנקראו בתמונה' };
+    const matches = aiCatalogBarcodeMatches(observed, false);
+    if (matches.length !== 1) return { error: matches.length > 1 ? 'הברקוד המלא קיים ביותר ממוצר אחד במאגר' : 'הברקוד המלא לא נמצא במאגר' };
+    return { product: matches[0].product, barcode: matches[0].barcode, observed, method };
+  }
+  if (method === 'unique_suffix') {
+    if (readType !== 'suffix' || !/^\d{6,20}$/.test(observed) || !resolved.endsWith(observed)) return { error: 'סיומת הברקוד שחזרה אינה תואמת לספרות שנקראו בתמונה' };
+    const matches = aiCatalogBarcodeMatches(observed, true);
+    if (matches.length !== 1 || matches[0].barcode !== resolved) return { error: matches.length > 1 ? 'סיומת הברקוד מתאימה ליותר ממוצר אחד' : 'סיומת הברקוד לא נמצאה באופן יחיד במאגר' };
+    return { product: matches[0].product, barcode: matches[0].barcode, observed, method };
+  }
+  if (method === 'unique_full_pattern' || method === 'unique_suffix_pattern') {
+    const suffixMode = method === 'unique_suffix_pattern';
+    const expectedReadType = suffixMode ? 'suffix_pattern' : 'full_pattern';
+    if (readType !== expectedReadType) return { error: 'סוג קריאת התבנית אינו תואם למיקום הברקוד' };
+    const info = aiBarcodePatternInfo(observedPattern);
+    if (!info || !info.hasWildcard) return { error: 'תבנית הברקוד שחזרה אינה תקינה' };
+    if (info.knownDigits < AI_BARCODE_SUFFIX_DIGITS) return { error: 'תבנית הברקוד מכילה פחות מ־6 ספרות ידועות' };
+    const matches = aiCatalogBarcodePatternMatches(info.pattern, suffixMode);
+    if (matches.length !== 1) return { error: matches.length > 1 ? 'תבנית הברקוד מתאימה ליותר ממוצר אחד' : 'תבנית הברקוד לא נמצאה במאגר' };
+    if (matches[0].barcode !== resolved) return { error: 'הברקוד שהשרת פתר אינו תואם לתבנית שנקראה' };
+    return { product: matches[0].product, barcode: matches[0].barcode, observed: info.pattern, method, knownDigits: info.knownDigits };
+  }
+  if (method === 'verified_suffix_name') {
+    if (readType !== 'suffix' || !/^\d{4,5}$/.test(observed) || !resolved.endsWith(observed)) return { error: 'הסיומת הקצרה אינה תואמת לספרות שנקראו בתמונה' };
+    const matches = aiCatalogBarcodeMatches(observed, true, 4);
+    if (matches.length !== 1 || matches[0].barcode !== resolved || aiSingleNameCandidateId(row) !== String(matches[0].product.id)) {
+      return { error: 'הסיומת הקצרה ורמז השם אינם מוכיחים מוצר יחיד במאגר המקומי' };
+    }
+    return { product: matches[0].product, barcode: matches[0].barcode, observed, method, identityEvidence: { proofModel: 'unique_short_suffix_and_name', knownDigits: observed.length } };
+  }
+  if (method === 'verified_pattern_name') {
+    if (!['full_pattern', 'suffix_pattern'].includes(readType)) return { error: 'סוג תבנית הברקוד אינו תקין' };
+    const info = aiBarcodePatternInfo(observedPattern);
+    const suffixMode = readType === 'suffix_pattern';
+    if (!info || !info.hasWildcard || info.knownDigits < 4 || info.knownDigits >= AI_BARCODE_SUFFIX_DIGITS) return { error: 'תבנית הברקוד אינה מכילה 4–5 ספרות ידועות' };
+    const matches = aiCatalogBarcodePatternMatches(info.pattern, suffixMode);
+    if (matches.length !== 1 || matches[0].barcode !== resolved || aiSingleNameCandidateId(row) !== String(matches[0].product.id)) {
+      return { error: 'תבנית הברקוד ורמז השם אינם מוכיחים מוצר יחיד במאגר המקומי' };
+    }
+    return { product: matches[0].product, barcode: matches[0].barcode, observed: info.pattern, method, identityEvidence: { proofModel: 'unique_short_pattern_and_name', knownDigits: info.knownDigits } };
+  }
+  if (method === 'verified_one_digit_name') {
+    const corrections = aiCatalogBarcodeOneDigitMatches(observed);
+    if (readType !== 'full' || !/^\d{6,20}$/.test(observed) || corrections.length !== 1 || corrections[0].barcode !== resolved || aiSingleNameCandidateId(row) !== String(corrections[0].product.id)) {
+      return { error: 'תיקון ספרת ה־OCR ורמז השם אינם מוכיחים מוצר יחיד במאגר המקומי' };
+    }
+    return { product: corrections[0].product, barcode: corrections[0].barcode, observed, method, identityEvidence: { proofModel: 'unique_one_digit_correction_and_name' } };
+  }
+  if (method === 'user_confirmed') {
+    const sourceMethod = String(row && row.barcodeUserConfirmedFromMethod || '');
+    const sourceReadType = String(row && row.barcodeUserConfirmedFromReadType || readType);
+    const sourceObservedRaw = row && row.barcodeUserConfirmedFromObserved != null ? row.barcodeUserConfirmedFromObserved : observedRaw;
+    const sourceObserved = aiNormalizeBarcodePattern(sourceObservedRaw);
+    if (!Number.isFinite(Number(row && row.userConfirmedAt)) || Number(row.userConfirmedAt) <= 0 || !/^\d{6,20}$/.test(resolved)) return { error: 'אישור המשתמש אינו מכיל ברקוד מלא ותקין' };
+    const matches = aiCatalogBarcodeMatches(resolved, false);
+    if (matches.length !== 1) return { error: matches.length > 1 ? 'הברקוד שאושר קיים ביותר ממוצר אחד' : 'הברקוד שאושר אינו קיים במאגר' };
+    if (sourceMethod === 'suggested_pattern') {
+      const info = aiBarcodePatternInfo(sourceObserved);
+      const suffixMode = sourceReadType === 'suffix_pattern';
+      const patternMatches = info ? aiCatalogBarcodePatternMatches(info.pattern, suffixMode) : [];
+      if (!info || !info.hasWildcard || info.knownDigits < 4 || info.knownDigits >= AI_BARCODE_SUFFIX_DIGITS || !['full_pattern', 'suffix_pattern'].includes(sourceReadType) || !aiBarcodeMatchesPattern(resolved, info.pattern, suffixMode) || patternMatches.length !== 1 || patternMatches[0].barcode !== resolved) return { error: 'אישור המשתמש אינו תואם לתבנית מקורית ויחידה' };
+    } else if (sourceMethod === 'suggested_suffix') {
+      const suffixMatches = aiCatalogBarcodeMatches(sourceObserved, true, 4);
+      if (sourceReadType !== 'suffix' || !/^\d{4,5}$/.test(sourceObserved) || !resolved.endsWith(sourceObserved) || suffixMatches.length !== 1 || suffixMatches[0].barcode !== resolved) return { error: 'אישור המשתמש אינו תואם לסיומת המקורית' };
+    } else if (sourceMethod === 'suggested_correction' || sourceMethod === 'suggested_one_digit_correction') {
+      const correctionMatches = aiCatalogBarcodeOneDigitMatches(sourceObserved);
+      if (sourceReadType !== 'full' || !aiBarcodeOneDigitDifference(sourceObserved, resolved) || correctionMatches.length !== 1 || correctionMatches[0].barcode !== resolved) return { error: 'אישור המשתמש אינו תואם לקריאת ברקוד יחידה' };
+    } else if (sourceMethod === 'suggested_name_only') {
+      if (String(row && row.barcodeUserConfirmedFromCatalogHintId || '') !== String(matches[0].product.id)) return { error: 'אישור המשתמש אינו תואם למועמד השם שהוצג' };
+    } else if (sourceMethod === 'suggested_name_multiple') {
+      const nameCandidates = aiLocalSuggestedNameCandidates(row);
+      const selectedId = String(row && row.barcodeUserConfirmedFromCatalogHintId || '');
+      const selectedCandidate = nameCandidates.find(candidate => String(candidate.product && candidate.product.id) === selectedId);
+      if (!selectedCandidate || selectedCandidate.barcode !== resolved || String(matches[0].product.id) !== selectedId) return { error: 'אישור המשתמש אינו תואם לאחת מאפשרויות השם שהוצגו' };
+    } else if (sourceMethod === 'verified_unknown_full') {
+      const initial = normalizeBarcode(row && row.barcodeInitialObserved || '');
+      const retry = normalizeBarcode(row && row.barcodeRetryObserved || '');
+      const retryConfidence = Number(row && row.barcodeRetryConfidence);
+      if (sourceReadType !== 'full' || !aiIsValidEan13(sourceObserved) || resolved !== sourceObserved || row.barcodeRetryApplied !== true || row.barcodeRetryConflict === true || String(row.barcodeInitialReadType || '') !== 'full' || String(row.barcodeRetryReadType || '') !== 'full' || initial !== resolved || retry !== resolved || !Number.isFinite(retryConfidence) || retryConfidence < 0.78) {
+        return { error: 'המוצר החדש אינו תואם לברקוד שאומת בשתי הקריאות' };
+      }
+    } else return { error: 'לא נמצאה הוכחה שהמוצר אושר דרך ההצעה' };
+    return { product: matches[0].product, barcode: matches[0].barcode, observed: sourceObserved, method };
+  }
+  if (method === 'suggested_name_multiple') {
+    const nameCandidates = aiLocalSuggestedNameCandidates(row);
+    if (nameCandidates.length < 2) return { error: 'רשימת המוצרים האפשריים אינה תקינה או אינה תואמת עוד למאגר המקומי' };
+    return {
+      error: 'נדרשת בחירת משתמש בין כמה מוצרים בעלי שם דומה',
+      suggestion: {
+        candidates: nameCandidates,
+        observed: observedPattern || observed || 'לא נקרא',
+        method,
+        printedDescription: String(row && row.description || '').trim(),
+        nameOnly: true,
+        multipleName: true
+      }
+    };
+  }
+  if (method === 'suggested_pattern' || method === 'suggested_suffix' || method === 'suggested_correction' || method === 'suggested_one_digit_correction' || method === 'suggested_name_only') {
+    const suggestedBarcode = aiSuggestedBarcodeValue(row);
+    const suggestedMatches = aiCatalogBarcodeMatches(suggestedBarcode, false);
+    if (suggestedMatches.length !== 1) return { error: suggestedMatches.length > 1 ? 'הברקוד המוצע קיים ביותר ממוצר אחד במאגר' : 'הברקוד המוצע אינו קיים במאגר' };
+    const suggestedProduct = suggestedMatches[0].product;
+    const suggestedProductId = aiSuggestedProductIdValue(row);
+    if (suggestedProductId && suggestedProduct.id !== suggestedProductId) return { error: 'זהות המוצר המוצע אינה תואמת למאגר המקומי' };
+    if (method === 'suggested_name_only') {
+      if (aiSingleNameCandidateId(row) !== String(suggestedProduct.id) || !String(row && row.description || '').trim()) return { error: 'הצעת השם אינה קשורה למועמד יחיד במאגר המקומי' };
+      const namePriceProof = aiNamePriceMatchProof(row, suggestedProduct);
+      if (namePriceProof.ok) {
+        return {
+          product: suggestedProduct,
+          barcode: suggestedBarcode,
+          observed: observedPattern || observed || 'לא נקרא',
+          method: 'verified_name_price',
+          sourceMethod: method,
+          identityEvidence: namePriceProof
+        };
+      }
+      // מועמד יחיד שאינו עובר את הצלבת המחיר והכמות אינו "בחירה".
+      // אין להציג כפתור אישור עוקף; יש לצלם מחדש או לעבור לבדיקה ידנית.
+      return { error: 'ההתאמה היחידה לפי השם לא עברה הצלבת מחיר, כמות וחשבון שורה — יש לצלם מחדש' };
+    } else if (method === 'suggested_pattern') {
+      if (!['full_pattern', 'suffix_pattern'].includes(readType)) return { error: 'סוג קריאת התבנית המוצעת אינו תקין' };
+      const info = aiBarcodePatternInfo(observedPattern);
+      if (!info || !info.hasWildcard) return { error: 'תבנית הברקוד המוצעת אינה תקינה' };
+      if (info.knownDigits < 4 || info.knownDigits >= AI_BARCODE_SUFFIX_DIGITS) return { error: 'הצעת תבנית מותרת רק עם 4–5 ספרות ידועות' };
+      const suffixMode = String(readType).indexOf('suffix') !== -1;
+      const patternMatches = aiCatalogBarcodePatternMatches(info.pattern, suffixMode);
+      if (!aiBarcodeMatchesPattern(suggestedBarcode, info.pattern, suffixMode) || patternMatches.length !== 1 || patternMatches[0].barcode !== suggestedBarcode) return { error: 'המוצר המוצע אינו תואם באופן יחיד לתבנית שנקראה' };
+    } else if (method === 'suggested_suffix') {
+      const suffixMatches = aiCatalogBarcodeMatches(observed, true, 4);
+      if (readType !== 'suffix' || !/^\d{4,5}$/.test(observed) || !suggestedBarcode.endsWith(observed) || suffixMatches.length !== 1 || suffixMatches[0].barcode !== suggestedBarcode) {
+        return { error: 'הצעת הסיומת אינה תואמת ל־4–5 הספרות שנקראו' };
+      }
+    } else {
+      const correctionMatches = aiCatalogBarcodeOneDigitMatches(observed);
+      if (readType !== 'full' || !/^\d{6,20}$/.test(observed) || !aiBarcodeOneDigitDifference(observed, suggestedBarcode) || correctionMatches.length !== 1 || correctionMatches[0].barcode !== suggestedBarcode) {
+        return { error: 'הצעת תיקון הספרה אינה תואמת לברקוד המלא שנקרא' };
+      }
+    }
+    return {
+      error: 'נדרש אישור ידני להתאמת הברקוד',
+      suggestion: {
+        barcode: suggestedBarcode,
+        product: suggestedProduct,
+        observed: observedPattern || observed || 'לא נקרא',
+        method,
+        printedDescription: String(row && row.description || '').trim(),
+        nameOnly: method === 'suggested_name_only'
+      }
+    };
+  }
+  if (method === 'ambiguous') return { error: 'הספרות שנקראו מתאימות ליותר ממוצר אחד — יש לבדוק ידנית' };
+  if (readType === 'suffix' && observed.length < AI_BARCODE_SUFFIX_DIGITS) return { error: 'נקראו פחות מ־6 ספרות אחרונות של הברקוד' };
+  if (!['full', 'suffix', 'full_pattern', 'suffix_pattern', 'pattern', 'unreadable'].includes(readType)) return { error: 'חסרה הוכחת קריאת ברקוד מהצילום' };
+  return { error: 'הברקוד לא נקרא או לא נמצא במאגר באופן חד־משמעי' };
+}
+// ממצא AI אינו מספיק רק מפני שהשם או הברקוד נראים סבירים. לפני שמציגים
+// אותו כחוסר/עודף הוא חייב להסביר גם את פער היחידות וגם את פער הכסף הכולל.
+// הבדיקה משתמשת במחירי המערכת המדויקים ובתיקוני המחיר שנמצאו על הנייר,
+// ולכן אינה תלויה בשם המודפס ואינה יכולה להפוך מועמד לא פתור לחוסר אמיתי.
+function aiFindingsClosure(evaluation, findings) {
+  const rows = Array.isArray(findings) ? findings : (Array.isArray(evaluation && evaluation.findings) ? evaluation.findings : []);
+  const receivedRows = Array.isArray(reconcileData) ? reconcileData : [];
+  const expectedUnits = Number(receiptNoteUnits);
+  const receivedUnits = receivedRows.reduce((sum, line) => sum + (Number(line && line.received) || 0), 0);
+  const expectedUnitsDelta = isFinite(expectedUnits) ? expectedUnits - receivedUnits : null;
+  let actualUnitsDelta = 0;
+  const quantityDeltaByProduct = new Map();
+  rows.forEach(finding => {
+    if (!finding || !['shortage', 'surplus'].includes(String(finding.type || ''))) return;
+    const signedQty = (finding.type === 'shortage' ? 1 : -1) * (Number(finding.qty) || 0);
+    actualUnitsDelta += signedQty;
+    const id = String(finding.productId == null ? '' : finding.productId);
+    if (id) quantityDeltaByProduct.set(id, (quantityDeltaByProduct.get(id) || 0) + signedQty);
+  });
+  const unitsOk = expectedUnitsDelta != null && Math.abs(actualUnitsDelta - expectedUnitsDelta) < 0.001;
+
+  const receivedAmount = reconcileReceivedInc();
+  const expectedAmountDelta = r2((Number(receiptNoteTotal) || 0) - receivedAmount);
+  let adjustedAmount = 0;
+  const seen = new Set();
+  receivedRows.forEach(line => {
+    const id = String(line && line.productId != null ? line.productId : '');
+    seen.add(id);
+    const adjustedQty = Math.max(0, (Number(line && line.received) || 0) + (quantityDeltaByProduct.get(id) || 0));
+    adjustedAmount += lineTotalFromUnit(Number(line && line.price) || 0, adjustedQty);
+  });
+  quantityDeltaByProduct.forEach((delta, id) => {
+    if (seen.has(id) || delta <= 0) return;
+    const aggregate = evaluation && evaluation.aggregates instanceof Map ? evaluation.aggregates.get(id) : null;
+    const product = aggregate && aggregate.product;
+    const related = rows.find(finding => String(finding && finding.productId != null ? finding.productId : '') === id);
+    const expectedPrice = Number(related && related.expectedPrice);
+    const fallbackPrice = Number(product && product.price) || Number(aggregate && aggregate.paperUnitPrice) || 0;
+    adjustedAmount += lineTotalFromUnit(isFinite(expectedPrice) && expectedPrice > 0 ? expectedPrice : fallbackPrice, delta);
+  });
+  let pricingDelta = 0;
+  rows.forEach(finding => {
+    if (!finding || !['price', 'promo_missing'].includes(String(finding.type || ''))) return;
+    pricingDelta += Number(finding.amount) || 0;
+  });
+  const supplierDiscount = Math.max(0, Number(evaluation && evaluation.supplierDiscount) || 0);
+  const actualAmountDelta = r2(adjustedAmount - receivedAmount + pricingDelta - supplierDiscount);
+  const amountTolerance = Number(RECEIPT_ROUNDING_TOLERANCE_CENTS) || 0;
+  const amountDiffCents = Math.abs(Math.round(actualAmountDelta * 100) - Math.round(expectedAmountDelta * 100));
+  const amountOk = amountDiffCents === 0 || (unitsOk && amountDiffCents <= amountTolerance);
+  const ok = unitsOk && amountOk;
+  const reason = ok ? '' : (!unitsOk
+    ? 'הממצאים אינם סוגרים את פער היחידות: צפוי ' + expectedUnitsDelta + ', נמצא ' + actualUnitsDelta
+    : 'הממצאים אינם סוגרים את פער הסכום: צפוי ₪' + fmtMoney(expectedAmountDelta) + ', נמצא ₪' + fmtMoney(actualAmountDelta));
+  return { ok, unitsOk, amountOk, expectedUnitsDelta, actualUnitsDelta, expectedAmountDelta, actualAmountDelta, reason };
+}
+function aiEvaluateInvoiceScan(payload) {
+  const scan = payload && payload.scan;
+  const errors = [], warnings = [], findings = [], promoCandidates = [], barcodeSuggestions = [], aggregates = new Map(), docSummaries = [];
+  let unresolvedBarcodeRows = 0, unusableRows = 0;
+  if (!scan || !Array.isArray(scan.documents)) return { valid: false, totalVerified: false, unitsVerified: false, extractedTotal: 0, extractedUnits: 0, errors: ['השרת לא החזיר מסמכים תקינים'], warnings, findings, barcodeSuggestions, allRowsMapped: false, aggregates, docSummaries };
+  if (!Number.isInteger(Number(payload.serviceVersion)) || Number(payload.serviceVersion) < AI_SCAN_MIN_SERVICE_VERSION) {
+    errors.push('שירות הסריקה עדיין בגרסה ישנה שאינה מוכיחה את מקור הברקוד — יש להעלות קודם את server.js החדש');
+  }
+  const returned = new Map();
+  scan.documents.forEach(doc => {
+    const idx = Number(doc.noteIndex);
+    if (!Number.isInteger(idx) || returned.has(idx)) errors.push('מספור המסמכים שחזר מה-AI אינו תקין');
+    else returned.set(idx, doc);
+  });
+  let extractedTotalCents = 0, extractedUnits = 0, rowTotalCents = 0, verifiedDocumentDiscountCents = 0;
+  aiScanDocuments.forEach((inputDoc, index) => {
+    const doc = returned.get(index);
+    if (!doc) { errors.push('לא התקבל פענוח עבור תעודה ' + (index + 1)); return; }
+    if (Number(doc.pageCount) !== inputDoc.pages.length) errors.push('תעודה ' + (index + 1) + ': מספר העמודים שפוענחו אינו זהה למספר התמונות שצולמו');
+    const subtotalCents = aiMoneyCents(doc.subtotalExVat);
+    const expectedCents = aiMoneyCents(inputDoc.amount);
+    if (subtotalCents == null) errors.push('הסכום ללא מע״מ לא נקרא בתעודה ' + (index + 1));
+    else {
+      extractedTotalCents += subtotalCents;
+      if (expectedCents != null && subtotalCents !== expectedCents) errors.push('תעודה ' + (index + 1) + ': נקרא ₪' + fmtMoney(subtotalCents / 100) + ' במקום ₪' + fmtMoney(expectedCents / 100));
+    }
+    const vatCents = aiMoneyCents(doc.vatAmount), totalInclCents = aiMoneyCents(doc.totalInclVat);
+    if (subtotalCents != null && vatCents != null && totalInclCents != null && Math.abs((subtotalCents + vatCents) - totalInclCents) > 1) {
+      // סכומי מע״מ/ברוטו הם מידע מסכם בלבד. בתעודות משלוח הם לעיתים מחוץ
+      // לצילום או כוללים עיגול חשבונאי שונה. סכום הנטו שהוקלד נשאר בדיקה קשיחה.
+      warnings.push('תעודה ' + (index + 1) + ': סכומי המע״מ/ברוטו שנקראו אינם נסגרים בדיוק — האימות בוצע מול סכום הנטו');
+    }
+    const docConfidence = Number(doc.confidence);
+    if (!isFinite(docConfidence) || docConfidence < 0.55) warnings.push('תעודה ' + (index + 1) + ': ביטחון הקריאה של הכותרת נמוך — השורות יאושרו רק אם כל בדיקות הסכום והכמות נסגרות');
+    else if (docConfidence < 0.78) warnings.push('תעודה ' + (index + 1) + ': ביטחון הקריאה בינוני — בדוק היטב לפני אישור');
+    let docUnits = 0, docRowsCents = 0;
+    (Array.isArray(doc.warnings) ? doc.warnings : []).forEach(w => warnings.push('תעודה ' + (index + 1) + ': ' + w));
+    (Array.isArray(doc.rows) ? doc.rows : []).forEach((row, rowIndex) => {
+      const rowNumber = row.lineNumber || (rowIndex + 1);
+      const rowPrefix = 'תעודה ' + (index + 1) + ', שורה ' + rowNumber + ': ';
+      const qtyRaw = row.quantity == null || row.quantity === '' ? NaN : Number(row.quantity);
+      const qty = isFinite(qtyRaw) && qtyRaw >= 0 && Math.abs(qtyRaw - Math.round(qtyRaw)) < 0.001 ? Math.round(qtyRaw) : null;
+      if (qty == null) { errors.push(rowPrefix + 'הכמות לא נקראה בוודאות'); unusableRows++; }
+      else { docUnits += qty; extractedUnits += qty; }
+      const total = aiLineTotal(row, qty);
+      const cents = total == null || total < 0 ? null : aiMoneyCents(total);
+      if (cents == null) { errors.push(rowPrefix + 'סכום השורה לא נקרא'); unusableRows++; }
+      else { docRowsCents += cents; rowTotalCents += cents; }
+      const arithmeticError = qty == null ? '' : aiRowArithmeticError(row, qty);
+      if (arithmeticError) { errors.push(rowPrefix + arithmeticError); unusableRows++; }
+      const rowConfidence = Number(row.confidence);
+      if (!isFinite(rowConfidence) || rowConfidence < 0.55) warnings.push(rowPrefix + 'ביטחון הקריאה נמוך — השורה תאושר רק אם הברקוד, החשבון והסיכומים נסגרים');
+      else if (rowConfidence < 0.78) warnings.push(rowPrefix + 'ביטחון קריאה בינוני — מומלץ לבדוק מול התמונה');
+
+      // הכמות וסכום השורה נספרים גם אם המוצר עדיין לא הותאם. כך הסיכומים
+      // המודפסים נשארים גלויים ומדויקים, אך אין חישוב חוסר/עודף על סל חלקי.
+      const barcodeMatch = aiResolveInvoiceBarcode(row);
       const barcode = barcodeMatch.barcode || '';
       const product = barcodeMatch.product || null;
       if (!barcode || !product) {
@@ -5330,7 +6122,6 @@ function aiPaintOrientationReview() {
       if (['unique_suffix', 'unique_full_pattern', 'unique_suffix_pattern'].includes(barcodeMatch.method)) warnings.push(product.name + ': הותאם בוודאות לפי הספרות שנקראו (' + barcodeMatch.observed + ')');
       if (['verified_suffix_name', 'verified_pattern_name', 'verified_one_digit_name'].includes(barcodeMatch.method)) warnings.push(product.name + ': הותאם אוטומטית לפי ראיית ברקוד יחידה ורמז שם תואם');
       if (barcodeMatch.method === 'verified_name_price') warnings.push(product.name + ': הותאם לפי שם יחיד והצלבת מחיר/חשבון מקומית');
-      if (barcodeMatch.method === 'direct_reconciliation_provisional') warnings.push(product.name + ': הותאם זמנית בקריאה חשבונאית ממוקדת — יתקבל רק לאחר סגירה מדויקת ביחידות ובאגורות');
       if (qty == null || cents == null || arithmeticError) return;
       const old = aggregates.get(product.id) || { product, qty: 0, totalCents: 0, rows: [], promotionTexts: [], priceVariants: new Set() };
       old.qty += qty; old.totalCents += cents; old.rows.push({ document: index + 1, page: row.sourcePage, line: row.lineNumber, confidence: isFinite(rowConfidence) ? rowConfidence : 0, barcodeObserved: barcodeMatch.observed, barcodeMatchMethod: barcodeMatch.method, identityEvidence: barcodeMatch.identityEvidence || null });
@@ -5363,9 +6154,6 @@ function aiPaintOrientationReview() {
     }
     docSummaries.push({ noteIndex: index, invoiceNumber: doc.invoiceNumber || '', subtotal: subtotalCents == null ? null : subtotalCents / 100, units: docUnits, rows: Array.isArray(doc.rows) ? doc.rows.length : 0, documentDiscount: printedDiscountCents == null ? null : printedDiscountCents / 100, confidence: isFinite(docConfidence) ? docConfidence : 0 });
   });
-  if (directReconciliation.valid && directReconciliation.seenTargets.size !== directReconciliation.mappings.size) {
-    errors.push('השרת החזיר התאמה חשבונאית לשורה שאינה קיימת בפענוח הנוכחי');
-  }
   if (returned.size !== aiScanDocuments.length) errors.push('מספר המסמכים שחזר אינו זהה למספר התעודות שצולמו');
   const expectedTotalCents = aiMoneyCents(receiptNoteTotal);
   if (expectedTotalCents != null && extractedTotalCents !== expectedTotalCents) errors.push('סך כל המסמכים אינו זהה באגורות לסכום שהוקלד בתחילת הקליטה');
@@ -5456,13 +6244,11 @@ function aiPaintOrientationReview() {
     const doc = returned.get(index); return doc && inputDoc.units != null && (Array.isArray(doc.rows) ? doc.rows.reduce((sum, row) => sum + (row.quantity == null ? 0 : Number(row.quantity) || 0), 0) : 0) === Number(inputDoc.units);
   });
   const supplierDiscount = Math.max(0, verifiedDocumentDiscountCents / 100);
-  const directReconciliationUsed = directReconciliation.usedMappings.size > 0;
-  const closure = aiFindingsClosure({ aggregates, findings, supplierDiscount }, findings, { exactCents: directReconciliationUsed });
+  const closure = aiFindingsClosure({ aggregates, findings, supplierDiscount }, findings);
   if (findingsReady && !closure.ok) errors.push(closure.reason || 'הממצאים אינם סוגרים את פער היחידות והסכום');
   const uniqueErrors = Array.from(new Set(errors));
   const uniqueWarnings = Array.from(new Set(warnings.concat(Array.isArray(scan.warnings) ? scan.warnings : [])));
-  const directReconciliationMappings = Array.from(directReconciliation.usedMappings.values()).map(mapping => ({ targetId: mapping.targetId, noteIndex: mapping.noteIndex, rowIndex: mapping.rowIndex, productId: mapping.productId, confidence: mapping.confidence }));
-  return { valid: uniqueErrors.length === 0 && barcodeSuggestions.length === 0 && findingsReady && aggregates.size > 0 && totalVerified && unitsVerified && closure.ok, totalVerified, unitsVerified, closure, errors: uniqueErrors, warnings: uniqueWarnings, findings, barcodeSuggestions, allRowsMapped, findingsReady, aggregates, docSummaries, extractedTotal: extractedTotalCents / 100, extractedUnits, rowTotal: rowTotalCents / 100, supplierDiscount, directReconciliationUsed, directReconciliationMappings };
+  return { valid: uniqueErrors.length === 0 && barcodeSuggestions.length === 0 && findingsReady && aggregates.size > 0 && totalVerified && unitsVerified && closure.ok, totalVerified, unitsVerified, closure, errors: uniqueErrors, warnings: uniqueWarnings, findings, barcodeSuggestions, allRowsMapped, findingsReady, aggregates, docSummaries, extractedTotal: extractedTotalCents / 100, extractedUnits, rowTotal: rowTotalCents / 100, supplierDiscount };
 }
 function aiRotationRetryDocumentIndexes(evaluation) {
   if (!evaluation || !Array.isArray(evaluation.docSummaries)) return [];
@@ -5532,7 +6318,6 @@ function aiReceivedProductIds() {
 }
 async function aiRequestInvoiceScan(token, documents) {
   if (!aiAllPagesOrientationConfirmed(documents)) throw new Error('לא כל התמונות אושרו כישרות — שום תמונה לא נשלחה ל-AI.');
-  const reconciliationContext = aiBuildReconciliationContext();
   const response = await fetch(AI_SCAN_WORKER_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
@@ -5542,10 +6327,6 @@ async function aiRequestInvoiceScan(token, documents) {
       // מזהים בלבד; השרת בוחר מתוכם רשומות מהקטלוג המקומי ואינו סומך על
       // שם או ברקוד שמגיעים מרשימת המשנה.
       receivedProductIds: aiReceivedProductIds(),
-      // אותו request כולל גם את פערי היחידות/האגורות ואת שורות הקבלה
-      // המצומצמות. השרת רשאי לבצע באמצעותם קריאה ממוקדת פנימית, אך הלקוח
-      // יקבל את המיפוי רק כרמז ויחייב אחר כך סגירה דטרמיניסטית מלאה.
-      ...(reconciliationContext ? { reconciliationContext } : {}),
       // השרת מחליף מזהים אמיתיים בכינויים זמניים. בשלב הראשון מוצגים למודל
       // רק שמות המוצרים שהגיעו; רק בקריאה חוזרת של שורות בעייתיות הוא מקבל
       // שמות+ברקודים כמועמדים. הראיה החזותית נשמרת בשדה נפרד ונבדקת מקומית.
@@ -5581,8 +6362,8 @@ async function aiRunInvoiceScan() {
     let best = { documents: attemptDocuments, payload, evaluation, rotationText: '' };
     let retryIndexes = aiRotationRetryDocumentIndexes(evaluation);
 
-    // קוד הסיבוב נשאר כתאימות היסטורית בלבד. ב-v133 המכסה היא אפס: הכיוון
-    // אושר בידי המשתמש והקריאה הממוקדת מתבצעת בתוך אותה בקשת שירות.
+    // ניסיון חוזר מתבצע כשמסמך לא נקרא, או כשהקריאה חלקית ואינה נסגרת מול
+    // הסכום/היחידות שהוקלדו. רק זווית התמונה משתנה; חוזה ה-OCR נשאר זהה.
     if (retryIndexes.length && AI_SCAN_MAX_AUTO_ROTATION_RETRIES > 0) {
       aiScanProgressText = 'הקריאה חלקית — מנסה זווית אחרת (2/3)…'; renderReconcile();
       attemptDocuments = await aiBuildRotatedDocuments(originalDocuments, retryIndexes, 1);
@@ -5999,7 +6780,7 @@ function aiInvoiceCaptureHtml() {
   return '<div class="bg-white rounded-2xl border-2 border-violet-200 p-4 shadow-sm mb-24"><div class="font-black text-xl text-slate-800"><i class="fa-solid fa-camera-retro text-violet-600"></i> סריקה חכמה של התעודות</div><div class="text-xs text-slate-500 font-bold leading-relaxed mt-1 mb-2">הבלש הפשוט לא פתר את הפער. צלם פעם אחת כל עמוד מכל תעודה. התמונות נשלחות לפענוח בלבד ואינן נשמרות באפליקציה.</div><div class="rounded-xl bg-blue-50 border border-blue-200 p-2 text-[11px] font-black text-blue-800 mb-3"><i class="fa-solid fa-expand"></i> כל צילום נפתח בגודל גדול. סובב עד שהכותרת למעלה והכתב ישר, ואז אשר. ללא אישור התמונה לא תישלח.</div>' +
     (aiScanError ? '<div class="rounded-xl bg-rose-50 border border-rose-300 p-2.5 text-xs font-black text-rose-700 mb-3">' + htmlEscape(aiScanError) + '</div>' : '') + docCards +
     '<button data-role="ai-run" ' + (ready ? '' : 'disabled') + ' class="btn-tap w-full rounded-xl py-3.5 font-black ' + (ready ? 'bg-violet-600 text-white' : 'bg-slate-200 text-slate-400') + '"><i class="fa-solid fa-wand-magic-sparkles"></i> פענח את כל התעודות ב-AI</button>' +
-    '<div class="text-[10px] text-slate-400 font-bold text-center mt-2">מתבצעת בקשת סריקה אחת. אם נדרשת קריאה ממוקדת נוספת, השרת מבצע אותה בתוך אותה פעולה ובודק את התוצאה מול פער היחידות והאגורות.</div><button data-role="rc-goto-manual" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">המשך בלי AI — בדיקה ידנית</button></div>';
+    '<div class="text-[10px] text-slate-400 font-bold text-center mt-2">בדרך כלל מתבצעת קריאת AI אחת. אם הקריאה חסרה או אינה נסגרת מול הסכום והיחידות, המערכת עשויה לנסות עד שתי זוויות נוספות.</div><button data-role="rc-goto-manual" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">המשך בלי AI — בדיקה ידנית</button></div>';
 }
 function aiAutomaticNamePriceMappingsAudit() {
   const documents = aiScanResponse && aiScanResponse.scan && Array.isArray(aiScanResponse.scan.documents)
@@ -6132,8 +6913,7 @@ function aiApplyInvoiceResult() {
   const safeFindings = ev.findings.map(f => ({ type: f.type, productId: f.productId || null, name: f.name || '', qty: f.qty != null ? f.qty : null, amount: f.amount != null ? f.amount : null, expectedPrice: f.expectedPrice != null ? f.expectedPrice : null, paperPrice: f.paperPrice != null ? f.paperPrice : null, text: f.text || '' }));
   const confirmedMappings = aiConfirmedMappingsAudit();
   const automaticMappings = aiAutomaticNamePriceMappingsAudit();
-  const directReconciliationAudit = ev.directReconciliationUsed ? { method: AI_DIRECT_RECONCILIATION_METHOD, exactCentsVerified: !!(ev.closure && ev.closure.ok && ev.closure.exactCentsRequired), mappings: cloneSafe(ev.directReconciliationMappings || []) } : null;
-  reconcileAiAudit = { version: 6, scannedAt: Date.now(), model: aiScanResponse && aiScanResponse.model || 'unknown', requestId: aiScanResponse && aiScanResponse.requestId || null, attempts: aiScanAttemptCount || 1, autoRotation: aiScanAutoRotationNote || '', totalVerified: !!ev.totalVerified, unitsVerified: !!ev.unitsVerified, documents: ev.docSummaries, confirmedMappings, automaticMappings, directReconciliation: directReconciliationAudit, findings: safeFindings, hasDiscrepancy: safeFindings.some(f => ['shortage', 'surplus', 'price', 'promo_missing'].includes(f.type)) };
+  reconcileAiAudit = { version: 5, scannedAt: Date.now(), model: aiScanResponse && aiScanResponse.model || 'unknown', requestId: aiScanResponse && aiScanResponse.requestId || null, attempts: aiScanAttemptCount || 1, autoRotation: aiScanAutoRotationNote || '', totalVerified: !!ev.totalVerified, unitsVerified: !!ev.unitsVerified, documents: ev.docSummaries, confirmedMappings, automaticMappings, findings: safeFindings, hasDiscrepancy: safeFindings.some(f => ['shortage', 'surplus', 'price', 'promo_missing'].includes(f.type)) };
   const exactUnits = reconcileUnitsBalanced();
   const exactMoney = reconcileMoneyBalanced();
   if (!exactMoney || !exactUnits) {
