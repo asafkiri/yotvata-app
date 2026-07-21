@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v128 עיגול מחיר מדויק</title>
+    <title>הזמנות יטבתה - v129 סריקה גמישה ובטוחה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v128 עיגול מחיר מדויק</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v129 סריקה גמישה ובטוחה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -512,7 +512,7 @@ let aiScanError = '';
 let aiScanAutoRotationNote = '';
 let aiScanAttemptCount = 0;
 const AI_SCAN_MAX_AUTO_ROTATION_RETRIES = 2;
-const AI_SCAN_MIN_SERVICE_VERSION = 124;
+const AI_SCAN_MIN_SERVICE_VERSION = 125;
 const AI_BARCODE_SUFFIX_DIGITS = 6;
 let aiOrientationSession = null;
 let aiOrientationBusy = false;
@@ -5960,10 +5960,12 @@ function aiEvaluateInvoiceScan(payload) {
     }
     const vatCents = aiMoneyCents(doc.vatAmount), totalInclCents = aiMoneyCents(doc.totalInclVat);
     if (subtotalCents != null && vatCents != null && totalInclCents != null && Math.abs((subtotalCents + vatCents) - totalInclCents) > 1) {
-      errors.push('תעודה ' + (index + 1) + ': הסכום ללא מע״מ בתוספת המע״מ אינו תואם לסכום הכולל שנקרא');
+      // סכומי מע״מ/ברוטו הם מידע מסכם בלבד. בתעודות משלוח הם לעיתים מחוץ
+      // לצילום או כוללים עיגול חשבונאי שונה. סכום הנטו שהוקלד נשאר בדיקה קשיחה.
+      warnings.push('תעודה ' + (index + 1) + ': סכומי המע״מ/ברוטו שנקראו אינם נסגרים בדיוק — האימות בוצע מול סכום הנטו');
     }
     const docConfidence = Number(doc.confidence);
-    if (!isFinite(docConfidence) || docConfidence < 0.55) errors.push('תעודה ' + (index + 1) + ': ביטחון הקריאה נמוך מדי — יש לצלם מחדש');
+    if (!isFinite(docConfidence) || docConfidence < 0.55) warnings.push('תעודה ' + (index + 1) + ': ביטחון הקריאה של הכותרת נמוך — השורות יאושרו רק אם כל בדיקות הסכום והכמות נסגרות');
     else if (docConfidence < 0.78) warnings.push('תעודה ' + (index + 1) + ': ביטחון הקריאה בינוני — בדוק היטב לפני אישור');
     let docUnits = 0, docRowsCents = 0;
     (Array.isArray(doc.warnings) ? doc.warnings : []).forEach(w => warnings.push('תעודה ' + (index + 1) + ': ' + w));
@@ -5981,7 +5983,7 @@ function aiEvaluateInvoiceScan(payload) {
       const arithmeticError = qty == null ? '' : aiRowArithmeticError(row, qty);
       if (arithmeticError) { errors.push(rowPrefix + arithmeticError); unusableRows++; }
       const rowConfidence = Number(row.confidence);
-      if (!isFinite(rowConfidence) || rowConfidence < 0.55) errors.push(rowPrefix + 'ביטחון הקריאה נמוך מדי — יש לצלם מחדש');
+      if (!isFinite(rowConfidence) || rowConfidence < 0.55) warnings.push(rowPrefix + 'ביטחון הקריאה נמוך — השורה תאושר רק אם הברקוד, החשבון והסיכומים נסגרים');
       else if (rowConfidence < 0.78) warnings.push(rowPrefix + 'ביטחון קריאה בינוני — מומלץ לבדוק מול התמונה');
 
       // הכמות וסכום השורה נספרים גם אם המוצר עדיין לא הותאם. כך הסיכומים
@@ -6047,16 +6049,20 @@ function aiEvaluateInvoiceScan(payload) {
       aggregates.set(product.id, old);
     });
     const printedUnits = doc.printedUnits == null || doc.printedUnits === '' ? null : Number(doc.printedUnits);
-    if (printedUnits != null && isFinite(printedUnits) && Math.round(printedUnits) !== docUnits) errors.push('תעודה ' + (index + 1) + ': סך היחידות המודפס אינו תואם לסכום השורות שנקראו');
+    if (printedUnits != null && isFinite(printedUnits) && Math.round(printedUnits) !== docUnits) warnings.push('תעודה ' + (index + 1) + ': שדה היחידות המודפס נקרא אחרת מסכום השורות — נבדק מול הכמות שהוקלדה');
     const printedLines = doc.printedLines == null || doc.printedLines === '' ? null : Number(doc.printedLines);
-    if (printedLines != null && isFinite(printedLines) && Math.round(printedLines) !== (Array.isArray(doc.rows) ? doc.rows.length : 0)) errors.push('תעודה ' + (index + 1) + ': מספר שורות המוצרים המודפס אינו תואם למספר השורות שנקראו');
+    if (printedLines != null && isFinite(printedLines) && Math.round(printedLines) !== (Array.isArray(doc.rows) ? doc.rows.length : 0)) warnings.push('תעודה ' + (index + 1) + ': שדה מספר השורות המודפס אינו תואם לשורות שנקראו — סכום וכמות השורות נבדקו בנפרד');
     if (inputDoc.units != null && docUnits !== Number(inputDoc.units)) errors.push('תעודה ' + (index + 1) + ': נקראו ' + docUnits + ' יחידות במקום ' + inputDoc.units);
     const printedDiscountCents = aiMoneyCents(doc.documentDiscountExVat);
     const impliedDiscountCents = subtotalCents == null ? null : docRowsCents - subtotalCents;
     if (impliedDiscountCents != null) {
       if (impliedDiscountCents < 0) errors.push('תעודה ' + (index + 1) + ': סכום השורות נמוך מסכום התעודה — כנראה חסרה שורה או תוספת שלא נקראה');
       else if (impliedDiscountCents === 0) {
-        if (printedDiscountCents != null && printedDiscountCents !== 0) errors.push('תעודה ' + (index + 1) + ': הנחת המסמך המודפסת אינה תואמת לסכום השורות');
+        if (printedDiscountCents != null && printedDiscountCents !== 0) {
+          // כשסכומי השורות כבר שווים בדיוק לנטו, המספר המודפס הוא בדרך כלל
+          // סיכום של הנחות שורה/הפרש ברוטו ולא הנחה נוספת שיש להפחית שוב.
+          warnings.push('תעודה ' + (index + 1) + ': ההנחה המודפסת כבר מגולמת בסכומי השורות ולכן לא הופחתה פעם נוספת');
+        }
       } else if (printedDiscountCents == null) {
         errors.push('תעודה ' + (index + 1) + ': קיים פער של ₪' + fmtMoney(impliedDiscountCents / 100) + ' בין השורות לסכום, אך הנחת המסמך לא נקראה');
       } else if (printedDiscountCents !== impliedDiscountCents) {
@@ -6162,9 +6168,14 @@ function aiRotationRetryDocumentIndexes(evaluation) {
   const summaries = new Map(evaluation.docSummaries.map(s => [Number(s.noteIndex), s]));
   const indexes = [];
   aiScanDocuments.forEach((doc, index) => {
-    if (!(Number(doc.units) > 0)) return;
     const summary = summaries.get(index);
-    if (!summary || !(Number(summary.rows) > 0) || !(Number(summary.units) > 0)) indexes.push(index);
+    const expectedUnits = doc.units == null ? null : Number(doc.units);
+    const expectedSubtotalCents = aiMoneyCents(doc.amount);
+    const actualSubtotalCents = summary ? aiMoneyCents(summary.subtotal) : null;
+    const rowsMissing = !summary || !(Number(summary.rows) > 0) || !(Number(summary.units) > 0);
+    const unitsPartial = expectedUnits != null && isFinite(expectedUnits) && (!summary || Number(summary.units) !== expectedUnits);
+    const subtotalPartial = expectedSubtotalCents != null && (!summary || actualSubtotalCents !== expectedSubtotalCents);
+    if (rowsMissing || unitsPartial || subtotalPartial) indexes.push(index);
   });
   return indexes;
 }
@@ -6258,10 +6269,10 @@ async function aiRunInvoiceScan() {
     let best = { documents: attemptDocuments, payload, evaluation, rotationText: '' };
     let retryIndexes = aiRotationRetryDocumentIndexes(evaluation);
 
-    // ניסיון חוזר מתבצע רק כשמסמך שהיה אמור להכיל יחידות חזר עם אפס
-    // שורות/יחידות. פענוח חלקי, פער אמיתי או שגיאת רשת אינם מפעילים retry.
+    // ניסיון חוזר מתבצע כשמסמך לא נקרא, או כשהקריאה חלקית ואינה נסגרת מול
+    // הסכום/היחידות שהוקלדו. רק זווית התמונה משתנה; חוזה ה-OCR נשאר זהה.
     if (retryIndexes.length && AI_SCAN_MAX_AUTO_ROTATION_RETRIES > 0) {
-      aiScanProgressText = 'לא נמצאו שורות — מנסה זווית אחרת (2/3)…'; renderReconcile();
+      aiScanProgressText = 'הקריאה חלקית — מנסה זווית אחרת (2/3)…'; renderReconcile();
       attemptDocuments = await aiBuildRotatedDocuments(originalDocuments, retryIndexes, 1);
       payload = await aiRequestInvoiceScan(token, attemptDocuments);
       aiScanAttemptCount = 2;
@@ -6270,7 +6281,7 @@ async function aiRunInvoiceScan() {
       retryIndexes = aiRotationRetryDocumentIndexes(evaluation);
 
       if (retryIndexes.length && AI_SCAN_MAX_AUTO_ROTATION_RETRIES > 1) {
-        aiScanProgressText = 'עדיין לא נמצאו שורות — מנסה את הכיוון ההפוך (3/3)…'; renderReconcile();
+        aiScanProgressText = 'הקריאה עדיין חלקית — מנסה את הכיוון ההפוך (3/3)…'; renderReconcile();
         // המסמכים שנשארו באפס נמצאים כעת ב־+90°. תוספת של 180° מעבירה
         // אותם ל־−90° ביחס לזווית המקורית; מסמכים שכבר נקראו נשארים כפי שהם.
         attemptDocuments = await aiBuildRotatedDocuments(attemptDocuments, retryIndexes, 2);
@@ -6296,6 +6307,17 @@ function aiFindingHtml(f) {
 }
 function aiIsActionableFinding(finding) {
   return !!finding && ['shortage', 'surplus', 'price', 'promo_missing'].includes(String(finding.type || ''));
+}
+function aiIsPendingBarcodeChoice(suggestion) {
+  if (!suggestion) return false;
+  if (suggestion.unknownProduct === true) return true;
+  if (suggestion.multipleName === true) return Array.isArray(suggestion.candidates) && suggestion.candidates.length >= 2;
+  return !!suggestion.suggestedProductId && !!suggestion.suggestedBarcode && [
+    'suggested_pattern',
+    'suggested_suffix',
+    'suggested_correction',
+    'suggested_one_digit_correction'
+  ].includes(String(suggestion.method || ''));
 }
 function aiCompactFindingGroupHtml(type, title, findings, extraRowsHtml, extraCount) {
   const rows = (findings || []).filter(finding => String(finding && finding.type || '') === type);
@@ -6325,7 +6347,7 @@ function aiCompactFindingGroupHtml(type, title, findings, extraRowsHtml, extraCo
 }
 function aiActionableFindingsHtml(findings, pendingChoices) {
   const actionable = (Array.isArray(findings) ? findings : []).filter(aiIsActionableFinding);
-  const choices = (Array.isArray(pendingChoices) ? pendingChoices : []).filter(suggestion => suggestion && (suggestion.unknownProduct === true || (suggestion.multipleName === true && Array.isArray(suggestion.candidates) && suggestion.candidates.length >= 2)));
+  const choices = (Array.isArray(pendingChoices) ? pendingChoices : []).filter(aiIsPendingBarcodeChoice);
   const inlineChoiceRows = aiPendingChoicesHtml(choices);
   if (!actionable.length && !choices.length) return '';
   return '<div class="mt-3"><div class="font-black text-base text-slate-800 mb-2">אלה הבעיות שנמצאו:</div><div class="space-y-2">' +
@@ -6442,14 +6464,25 @@ function aiUnknownProductSuggestionHtml(suggestion) {
 function aiBarcodeSuggestionHtml(suggestion) {
   if (suggestion && suggestion.multipleName === true) return aiMultipleNameSuggestionHtml(suggestion);
   if (suggestion && suggestion.unknownProduct === true) return aiUnknownProductSuggestionHtml(suggestion);
-  // אין מסך אישור למועמד יחיד. התאמה מוכחת נסגרת אוטומטית; התאמה שלא
-  // הוכחה נשארת חסומה לצילום מחדש/בדיקה ידנית ואינה מקבלת כפתור עוקף.
-  return '';
+  if (!aiIsPendingBarcodeChoice(suggestion)) return '';
+  const printed = suggestion.printedDescription || 'תיאור המוצר לא נקרא';
+  const observed = String(suggestion.observed || '').trim();
+  const candidate = suggestion.suggestedProductName || 'המוצר היחיד שמתאים במאגר';
+  const quantity = suggestion.quantity == null ? '' : Number(suggestion.quantity) + ' יח׳ בנייר · ';
+  return '<details class="py-2 border-t border-black/5 first:border-t-0">' +
+    '<summary class="cursor-pointer list-none flex items-start justify-between gap-3 font-black"><span class="min-w-0 text-sm text-slate-800">' + htmlEscape(printed) + '</span><span class="shrink-0 text-sm text-rose-800">' + quantity + 'בדוק התאמה</span></summary>' +
+    '<div class="mt-3 rounded-xl border border-amber-200 bg-white p-3">' +
+      '<div class="text-[10px] font-black text-amber-800">נקראו רק חלק מספרות הברקוד</div>' +
+      (observed ? '<div class="text-[10px] font-bold text-slate-500 mt-1" dir="ltr">' + htmlEscape(observed) + '</div>' : '') +
+      '<div class="font-black text-slate-800 mt-2">המועמד היחיד: ' + htmlEscape(candidate) + '</div>' +
+      aiSuggestionCrossCheckHtml(suggestion) +
+      '<button data-role="ai-confirm-barcode-suggestion" data-doc="' + suggestion.documentIndex + '" data-row="' + suggestion.rowIndex + '" class="btn-tap w-full mt-3 rounded-lg bg-amber-600 text-white py-2.5 text-sm font-black"><i class="fa-solid fa-check ml-1"></i>זה המוצר שמופיע בשורה</button>' +
+    '</div></details>';
 }
 function aiPendingChoicesHtml(suggestions) {
-  const rows = (Array.isArray(suggestions) ? suggestions : []).filter(suggestion => suggestion && (suggestion.unknownProduct === true || (suggestion.multipleName === true && Array.isArray(suggestion.candidates) && suggestion.candidates.length >= 2)));
+  const rows = (Array.isArray(suggestions) ? suggestions : []).filter(aiIsPendingBarcodeChoice);
   if (!rows.length) return '';
-  return rows.map(suggestion => suggestion.unknownProduct === true ? aiUnknownProductSuggestionHtml(suggestion) : aiMultipleNameSuggestionHtml(suggestion)).join('');
+  return rows.map(aiBarcodeSuggestionHtml).join('');
 }
 function aiConfirmNameCandidate(documentIndex, rowIndex, candidateProductId) {
   if (!aiScanResponse || !aiScanResponse.scan || !Array.isArray(aiScanResponse.scan.documents)) return false;
@@ -6616,14 +6649,15 @@ function aiInvoiceCaptureHtml() {
     const actionableFindings = (Array.isArray(ev.findings) ? ev.findings : []).filter(aiIsActionableFinding);
     // עמימות בין מוצרים ומוצר חדש מאומת נטמעים כשורות בתוך קבוצת החוסרים.
     // אין מסך ביניים: אחרי בחירה/יצירה אותה תוצאה מחושבת מחדש במקום.
-    const pendingChoices = (Array.isArray(ev.barcodeSuggestions) ? ev.barcodeSuggestions : []).filter(suggestion => suggestion && (suggestion.unknownProduct === true || (suggestion.multipleName === true && Array.isArray(suggestion.candidates) && suggestion.candidates.length >= 2)));
+    const pendingChoices = (Array.isArray(ev.barcodeSuggestions) ? ev.barcodeSuggestions : []).filter(aiIsPendingBarcodeChoice);
     const findingsHtml = (ev.findingsReady || pendingChoices.length)
       ? (actionableFindings.length || pendingChoices.length
         ? aiActionableFindingsHtml(actionableFindings, pendingChoices)
         : '<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-3 font-black text-emerald-800"><i class="fa-solid fa-circle-check ml-1"></i>הכול תואם — לא נמצאו חוסר, עודף או בעיית מחיר/מבצע.</div>')
       : '';
+    const blockingReasonsHtml = (Array.isArray(ev.errors) ? ev.errors : []).slice(0, 6).map(error => '<li>' + htmlEscape(error) + '</li>').join('');
     const blockingHtml = !ev.valid && !pendingChoices.length
-      ? '<div class="rounded-xl bg-rose-50 border border-rose-200 p-3 text-center"><div class="font-black text-rose-800">הסריקה לא נסגרה בוודאות</div><div class="text-xs font-bold text-rose-700 mt-1">יש לצלם מחדש או לעבור לבדיקה ידנית.</div><button data-role="ai-rescan" class="btn-tap w-full bg-white border-2 border-rose-200 text-rose-700 rounded-xl py-2.5 font-black mt-3">צלם מחדש</button><button data-role="rc-goto-manual" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">עבור לבדיקה ידנית</button></div>'
+      ? '<div class="rounded-xl bg-rose-50 border border-rose-200 p-3 text-center"><div class="font-black text-rose-800">הסריקה לא נסגרה בוודאות</div><div class="text-xs font-bold text-rose-700 mt-1">יש לצלם מחדש או לעבור לבדיקה ידנית.</div>' + (blockingReasonsHtml ? '<details class="mt-2 text-right"><summary class="cursor-pointer text-[11px] font-black text-rose-700">הצג את סיבת הכשל</summary><ul class="list-disc pr-5 mt-2 space-y-1 text-[10px] font-bold text-rose-700">' + blockingReasonsHtml + '</ul></details>' : '') + '<button data-role="ai-rescan" class="btn-tap w-full bg-white border-2 border-rose-200 text-rose-700 rounded-xl py-2.5 font-black mt-3">צלם מחדש</button><button data-role="rc-goto-manual" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">עבור לבדיקה ידנית</button></div>'
       : '';
     const applyButton = ev.valid
       ? '<button data-role="ai-apply" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-3.5 font-black mt-4"><i class="fa-solid fa-check"></i> ' + (actionableFindings.length ? 'אשר והמשך' : 'הכול תואם — המשך') + '</button>'
@@ -6645,7 +6679,7 @@ function aiInvoiceCaptureHtml() {
   return '<div class="bg-white rounded-2xl border-2 border-violet-200 p-4 shadow-sm mb-24"><div class="font-black text-xl text-slate-800"><i class="fa-solid fa-camera-retro text-violet-600"></i> סריקה חכמה של התעודות</div><div class="text-xs text-slate-500 font-bold leading-relaxed mt-1 mb-2">הבלש הפשוט לא פתר את הפער. צלם פעם אחת כל עמוד מכל תעודה. התמונות נשלחות לפענוח בלבד ואינן נשמרות באפליקציה.</div><div class="rounded-xl bg-blue-50 border border-blue-200 p-2 text-[11px] font-black text-blue-800 mb-3"><i class="fa-solid fa-expand"></i> כל צילום נפתח בגודל גדול. סובב עד שהכותרת למעלה והכתב ישר, ואז אשר. ללא אישור התמונה לא תישלח.</div>' +
     (aiScanError ? '<div class="rounded-xl bg-rose-50 border border-rose-300 p-2.5 text-xs font-black text-rose-700 mb-3">' + htmlEscape(aiScanError) + '</div>' : '') + docCards +
     '<button data-role="ai-run" ' + (ready ? '' : 'disabled') + ' class="btn-tap w-full rounded-xl py-3.5 font-black ' + (ready ? 'bg-violet-600 text-white' : 'bg-slate-200 text-slate-400') + '"><i class="fa-solid fa-wand-magic-sparkles"></i> פענח את כל התעודות ב-AI</button>' +
-    '<div class="text-[10px] text-slate-400 font-bold text-center mt-2">בדרך כלל מתבצעת קריאת AI אחת. רק אם נקראות 0 שורות, המערכת עשויה לנסות עד שתי זוויות נוספות.</div><button data-role="rc-goto-manual" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">המשך בלי AI — בדיקה ידנית</button></div>';
+    '<div class="text-[10px] text-slate-400 font-bold text-center mt-2">בדרך כלל מתבצעת קריאת AI אחת. אם הקריאה חסרה או אינה נסגרת מול הסכום והיחידות, המערכת עשויה לנסות עד שתי זוויות נוספות.</div><button data-role="rc-goto-manual" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">המשך בלי AI — בדיקה ידנית</button></div>';
 }
 function aiAutomaticNamePriceMappingsAudit() {
   const documents = aiScanResponse && aiScanResponse.scan && Array.isArray(aiScanResponse.scan.documents)
