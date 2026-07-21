@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v137 סורק משופר</title>
+    <title>הזמנות יטבתה - v138 ניגודיות ממוקדת</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v137 סורק משופר</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v138 ניגודיות ממוקדת</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5194,28 +5194,37 @@ function aiLoadImage(dataUrl) {
     img.src = dataUrl;
   });
 }
-// v137: "סורק" עדין בתוך האפליקציה — גווני אפור ומתיחת ניגודיות שמרנית,
-// כמו מסמך סרוק. אין חיתוך ואין יישור אוטומטי: אף פיקסל אינו נזרק, ומסך
-// אישור הכיוון מציג את התוצאה לפני שנשלח דבר. תמונה שכבר חדה נשארת כמות
-// שהיא (span>=200), ותמונה כמעט אחידה לא נגעים בה (span<8).
-function aiEnhanceDocumentPixels(data) {
-  const n = data.length, total = n / 4;
-  if (!total) return false;
+// v138: "סורק" עדין בתוך האפליקציה — גווני אפור ומתיחת ניגודיות שמרנית.
+// ההיסטוגרמה מחושבת רק מהאזור המרכזי של הפריים (שם הדף), כדי ששולחן כהה
+// בשוליים לא "יגנוב" את הנקודה השחורה וישאיר את הדיו אפור. המיפוי מוחל על
+// כל התמונה. אין חיתוך ואין יישור: אף פיקסל אינו נזרק, ומסך אישור הכיוון
+// מציג את התוצאה לפני שנשלח דבר. תמונה שכבר חדה או כמעט אחידה — לא נגעים.
+function aiEnhanceDocumentPixels(data, width, height) {
+  if (!width || !height || data.length < width * height * 4) return false;
+  const x0 = Math.floor(width * 0.15), x1 = Math.ceil(width * 0.85);
+  const y0 = Math.floor(height * 0.10), y1 = Math.ceil(height * 0.90);
   const hist = new Uint32Array(256);
-  for (let i = 0; i < n; i += 4) {
-    hist[((data[i] * 299 + data[i + 1] * 587 + data[i + 2] * 114) / 1000) | 0]++;
+  let total = 0;
+  for (let y = y0; y < y1; y++) {
+    let i = (y * width + x0) * 4;
+    for (let x = x0; x < x1; x++, i += 4) {
+      hist[((data[i] * 299 + data[i + 1] * 587 + data[i + 2] * 114) / 1000) | 0]++;
+      total++;
+    }
   }
-  const lowTarget = total * 0.005, highTarget = total * 0.995;
+  if (!total) return false;
+  const lowTarget = total * 0.01, highTarget = total * 0.99;
   let cum = 0, low = 0, high = 255;
   for (let v = 0; v < 256; v++) { cum += hist[v]; if (cum >= lowTarget) { low = v; break; } }
   cum = 0;
   for (let v = 0; v < 256; v++) { cum += hist[v]; if (cum >= highTarget) { high = v; break; } }
   const span = high - low;
   if (span < 8 || span >= 200) return false;
-  // שיפוע מוגבל פי 2.2 — מתיחה אגרסיבית מדי מוחקת הדפסה דהויה וספרות דקות.
-  const slope = Math.min(2.2, 231 / span);
+  // שיפוע מוגבל פי 3 — מספיק להלבין נייר ולהכהות דיו דהוי, בלי לפוצץ רעש.
+  const slope = Math.min(3.0, 233 / span);
   const lut = new Uint8ClampedArray(256);
-  for (let v = 0; v < 256; v++) lut[v] = Math.round((v - low) * slope + 12);
+  for (let v = 0; v < 256; v++) lut[v] = Math.round((v - low) * slope + 10);
+  const n = data.length;
   for (let i = 0; i < n; i += 4) {
     const out = lut[((data[i] * 299 + data[i + 1] * 587 + data[i + 2] * 114) / 1000) | 0];
     data[i] = out; data[i + 1] = out; data[i + 2] = out;
@@ -5272,7 +5281,7 @@ async function aiCompressInvoiceImage(file) {
   // v137: שיפור קריאות עדין. כל כשל (זיכרון במכשיר ישן וכו') → ממשיכים עם המקור.
   try {
     const pixels = ctx.getImageData(0, 0, width, height);
-    if (aiEnhanceDocumentPixels(pixels.data)) ctx.putImageData(pixels, 0, 0);
+    if (aiEnhanceDocumentPixels(pixels.data, width, height)) ctx.putImageData(pixels, 0, 0);
   } catch (enhanceError) { /* התמונה המקורית נשארת */ }
   const encoded = aiCanvasToInvoiceJpeg(canvas, 0.92);
   return { dataUrl: encoded.dataUrl, baseDataUrl: encoded.dataUrl, rotation: 0, orientationConfirmed: false, name: file.name || ('עמוד-' + Date.now() + '.jpg'), bytes: encoded.bytes };
