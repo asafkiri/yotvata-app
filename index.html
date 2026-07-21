@@ -6,7 +6,7 @@ Total output lines: 10618
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v132 התאמה חשבונאית ישירה</title>
+    <title>הזמנות יטבתה - v133 התאמה חשבונאית ישירה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -105,7 +105,7 @@ Total output lines: 10618
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v132 התאמה חשבונאית ישירה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v133 התאמה חשבונאית ישירה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5581,7 +5581,7 @@ async function aiRunInvoiceScan() {
     let best = { documents: attemptDocuments, payload, evaluation, rotationText: '' };
     let retryIndexes = aiRotationRetryDocumentIndexes(evaluation);
 
-    // קוד הסיבוב נשאר כתאימות היסטורית בלבד. ב-v132 המכסה היא אפס: הכיוון
+    // קוד הסיבוב נשאר כתאימות היסטורית בלבד. ב-v133 המכסה היא אפס: הכיוון
     // אושר בידי המשתמש והקריאה הממוקדת מתבצעת בתוך אותה בקשת שירות.
     if (retryIndexes.length && AI_SCAN_MAX_AUTO_ROTATION_RETRIES > 0) {
       aiScanProgressText = 'הקריאה חלקית — מנסה זווית אחרת (2/3)…'; renderReconcile();
