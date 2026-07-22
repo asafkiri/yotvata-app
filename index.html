@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v149 הדק אוטומטי</title>
+    <title>הזמנות יטבתה - v150 הדק מכויל</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v149 הדק אוטומטי</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v150 הדק מכויל</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5627,7 +5627,7 @@ async function aiCompressInvoiceImage(file) {
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
   let cropRegion = null;
-  const cropInfo = { v: 149 }; // v149: דו"ח החיתוך שמוצג במסך אישור הכיוון
+  const cropInfo = { v: 150 }; // v150: דו"ח החיתוך שמוצג במסך אישור הכיוון
   try {
     const proxyScale = Math.min(1, 1500 / Math.max(sourceWidth, sourceHeight));
     const proxyWidth = Math.max(1, Math.round(sourceWidth * proxyScale));
@@ -5899,8 +5899,8 @@ function aiLiveCamPaintPreview() {
   try { ctx.drawImage(video, rect.x, rect.y, rect.w, rect.h); } catch (paintError) { return; }
   const rel = state.lastBox;
   if (rel) {
-    ctx.strokeStyle = state.holdCount >= 3 ? '#34d399' : '#fbbf24';
-    ctx.lineWidth = 3;
+    ctx.strokeStyle = state.holdCount >= 1 ? '#34d399' : '#fbbf24';
+    ctx.lineWidth = state.holdCount >= 1 ? 5 : 3;
     ctx.strokeRect(rect.x + rel.x * rect.w, rect.y + rel.y * rect.h, rel.w * rect.w, rel.h * rect.h);
   }
 }
@@ -5942,7 +5942,11 @@ function aiLiveCamAnalyzeFrame() {
     let conditionsMet = false;
     if (box) {
       const areaFraction = (box.width * box.height) / (pw * ph);
-      const touchesEdge = box.x <= 2 || box.y <= 2 || box.x + box.width >= pw - 2 || box.y + box.height >= ph - 2;
+      // v150: נגיעה בקצה אחד מותרת (הסורק מטפל בזה); רק גלישה משני צדדים
+      // נגדיים — תעודה גדולה מהפריים — חוסמת ירייה.
+      const touchLeft = box.x <= 2, touchTop = box.y <= 2;
+      const touchRight = box.x + box.width >= pw - 2, touchBottom = box.y + box.height >= ph - 2;
+      const overflow = (touchLeft && touchRight) || (touchTop && touchBottom);
       const sharp = aiLiveCamSharpness(rawData, pw, ph, box);
       state.sharpMax = Math.max(state.sharpMax * 0.97, sharp);
       const entry = { cx: box.x + box.width / 2, cy: box.y + box.height / 2, w: box.width, h: box.height };
@@ -5951,13 +5955,13 @@ function aiLiveCamAnalyzeFrame() {
       let stable = state.history.length === 4;
       if (stable) {
         for (const past of state.history) {
-          if (Math.abs(past.cx - entry.cx) > pw * 0.02 || Math.abs(past.cy - entry.cy) > ph * 0.02
-            || Math.abs(past.w - entry.w) > pw * 0.03 || Math.abs(past.h - entry.h) > ph * 0.03) { stable = false; break; }
+          if (Math.abs(past.cx - entry.cx) > pw * 0.025 || Math.abs(past.cy - entry.cy) > ph * 0.025
+            || Math.abs(past.w - entry.w) > pw * 0.035 || Math.abs(past.h - entry.h) > ph * 0.035) { stable = false; break; }
         }
       }
       const sharpOk = state.sharpMax > 0 && sharp >= state.sharpMax * 0.85;
-      if (areaFraction < 0.2) status = 'קרב את המצלמה לתעודה';
-      else if (touchesEdge) status = 'התרחק מעט — שכל התעודה תיכנס לפריים';
+      if (areaFraction < 0.12) status = 'קרב את המצלמה לתעודה';
+      else if (overflow) status = 'התרחק — התעודה גדולה מהפריים';
       else if (!stable) status = 'תעודה זוהתה — החזק יציב…';
       else if (!sharpOk) status = 'ממתין לפוקוס…';
       else conditionsMet = true;
@@ -5971,7 +5975,7 @@ function aiLiveCamAnalyzeFrame() {
         aiLiveCamTakePhoto();
         return;
       }
-      status = 'יציב… עוד רגע';
+      status = 'אל תזוז — מצלם…';
     } else {
       state.holdCount = 0;
     }
