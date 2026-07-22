@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v155 חיתוך מהמקור</title>
+    <title>הזמנות יטבתה - v156 חיתוך על המקור</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v155 חיתוך מהמקור</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v156 חיתוך על המקור</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -217,7 +217,7 @@
       <div class="relative flex-1 min-h-0 p-3 flex items-center justify-center overflow-hidden">
         <img id="aiOrientationImage" alt="תצוגה מקדימה של התעודה" class="w-full h-full object-contain rounded-xl bg-white shadow-2xl">
         <!-- v154: שכבת החיתוך הידני — נסתרת עד לחיצה על "חיתוך ידני" -->
-        <canvas id="aiCropCanvas" class="hidden absolute inset-3" style="touch-action:none;"></canvas>
+        <canvas id="aiCropCanvas" class="hidden" style="position:absolute; touch-action:none;"></canvas>
         <div id="aiOrientationBusy" class="hidden absolute inset-0 bg-black/55 items-center justify-center text-white">
           <div class="text-center"><i class="fa-solid fa-spinner fa-spin text-4xl"></i><div class="font-black mt-2">מסובב…</div></div>
         </div>
@@ -5634,7 +5634,7 @@ async function aiCompressInvoiceImage(file) {
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
   let cropRegion = null;
-  const cropInfo = { v: 155 }; // v155: דו"ח החיתוך שמוצג במסך אישור הכיוון
+  const cropInfo = { v: 156 }; // v156: דו"ח החיתוך שמוצג במסך אישור הכיוון
   try {
     const proxyScale = Math.min(1, 1500 / Math.max(sourceWidth, sourceHeight));
     const proxyWidth = Math.max(1, Math.round(sourceWidth * proxyScale));
@@ -5706,28 +5706,81 @@ function aiSetOrientationBusy(busy) {
     const button = $(id); if (button) button.disabled = !!busy;
   });
 }
-// ===== v154: חיתוך ידני במסך אישור הכיוון =====
-// הפתרון האוניברסלי לרקעים שהחיתוך האוטומטי מוותר עליהם בצדק (משטח
-// מתכת בהיר, שמיכה בהירה): המשתמש גורר מסגרת בעצמו. הפעולה מתבצעת על
-// התמונה כפי שהיא מוצגת (אחרי סיבוב), נכנסת לאותו תקציב JPEG, ומדווחת
-// בשורת הכותרת כמו החיתוך האוטומטי. עובד בכל מכשיר, על כל רקע.
+// ===== v156: חיתוך ידני על המקור הגולמי =====
+// שני לקחי שטח: (1) שכבת החיתוך קרסה לגודל ברירת המחדל של קנבס — מעכשיו
+// הקופסה נמדדת מהמכל בכל ציור, בלי תלות במחלקות CSS. (2) מצב חיתוך מציג
+// את התמונה המקורית הגולמית (מסובבת לפי המשתמש) — רואים בדיוק על מה
+// גוזרים, והגזירה רצה על המקור דרך כל הצינור: סטטיסטיקה נקייה מהנייר
+// והדיו בלבד, 3000px מלאים, דור JPEG יחיד. עמוד ישן ללא מקור שמור —
+// חיתוך על התמונה המעובדת כבעבר.
 let aiCropState = null;
+function aiCropSyncCanvasBox() {
+  const canvas = $('aiCropCanvas');
+  if (!canvas || !canvas.parentElement) return null;
+  const bounds = canvas.parentElement.getBoundingClientRect();
+  const pad = 12; // p-3 של המכל
+  const width = Math.max(1, Math.round(bounds.width - 2 * pad));
+  const height = Math.max(1, Math.round(bounds.height - 2 * pad));
+  canvas.style.left = pad + 'px';
+  canvas.style.top = pad + 'px';
+  canvas.style.width = width + 'px';
+  canvas.style.height = height + 'px';
+  if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
+  return { width, height };
+}
 function aiCropContainRect(imageWidth, imageHeight, boxWidth, boxHeight) {
   const s = Math.min(boxWidth / imageWidth, boxHeight / imageHeight);
   const w = imageWidth * s, h = imageHeight * s;
   return { x: (boxWidth - w) / 2, y: (boxHeight - h) / 2, w, h, s };
 }
+async function aiBuildCropView(page) {
+  // בונה את תצוגת החיתוך: המקור הגולמי מסובב לפי המשתמש (עד 2200px),
+  // או — לעמוד ללא מקור — התמונה המעובדת המוצגת.
+  const turns = aiNormalizeQuarterTurns((Number(page.rotation) || 0) / 90);
+  if (page.sourceBlob) {
+    const raw = await aiReadFile(page.sourceBlob);
+    const img = await aiLoadImage(raw);
+    const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
+    const viewScale = Math.min(1, 2200 / Math.max(sourceWidth, sourceHeight));
+    const scaledWidth = Math.max(1, Math.round(sourceWidth * viewScale));
+    const scaledHeight = Math.max(1, Math.round(sourceHeight * viewScale));
+    const swap = turns % 2 === 1;
+    const view = document.createElement('canvas');
+    view.width = swap ? scaledHeight : scaledWidth;
+    view.height = swap ? scaledWidth : scaledHeight;
+    const ctx = view.getContext('2d', { alpha: false });
+    if (!ctx) throw new Error('canvas_failed');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, view.width, view.height);
+    ctx.translate(view.width / 2, view.height / 2);
+    ctx.rotate(turns * Math.PI / 2);
+    ctx.drawImage(img, -scaledWidth / 2, -scaledHeight / 2, scaledWidth, scaledHeight);
+    return { view, viewScale, turns, fromSource: true };
+  }
+  const img = await aiLoadImage(page.dataUrl);
+  const view = document.createElement('canvas');
+  view.width = img.naturalWidth || img.width;
+  view.height = img.naturalHeight || img.height;
+  const ctx = view.getContext('2d', { alpha: false });
+  if (!ctx) throw new Error('canvas_failed');
+  ctx.drawImage(img, 0, 0);
+  return { view, viewScale: 1, turns, fromSource: false };
+}
 function aiEnterCropMode() {
   if (aiCropState || aiOrientationBusy) return;
   const location = aiOrientationSession && aiOrientationLocation(aiOrientationSession.page);
   if (!location) return;
-  const image = new Image();
-  image.onload = () => {
+  aiSetOrientationBusy(true);
+  aiBuildCropView(location.page).then((built) => {
+    aiSetOrientationBusy(false);
     if (!aiOrientationSession || aiCropState) return;
-    const marginX = Math.round(image.naturalWidth * 0.04), marginY = Math.round(image.naturalHeight * 0.04);
+    const marginX = Math.round(built.view.width * 0.04), marginY = Math.round(built.view.height * 0.04);
     aiCropState = {
-      img: image,
-      rect: { x: marginX, y: marginY, w: image.naturalWidth - 2 * marginX, h: image.naturalHeight - 2 * marginY },
+      view: built.view,
+      viewScale: built.viewScale,
+      turns: built.turns,
+      fromSource: built.fromSource,
+      rect: { x: marginX, y: marginY, w: built.view.width - 2 * marginX, h: built.view.height - 2 * marginY },
       drag: null,
     };
     const canvas = $('aiCropCanvas'); if (canvas) canvas.classList.remove('hidden');
@@ -5736,9 +5789,10 @@ function aiEnterCropMode() {
     const confirm = $('aiOrientationConfirm'); if (confirm) confirm.classList.add('hidden');
     const actions = $('aiCropActions'); if (actions) actions.classList.remove('hidden');
     aiCropDraw();
-  };
-  image.onerror = () => { showToast('טעינת התמונה לחיתוך נכשלה', null, null, 2500); };
-  image.src = location.page.dataUrl;
+  }).catch(() => {
+    aiSetOrientationBusy(false);
+    showToast('טעינת התמונה לחיתוך נכשלה', null, null, 2500);
+  });
 }
 function aiExitCropMode() {
   aiCropState = null;
@@ -5754,24 +5808,26 @@ function aiExitCropMode() {
   const actions = $('aiCropActions'); if (actions) actions.classList.add('hidden');
 }
 function aiCropDraw() {
-  const state = aiCropState, canvas = $('aiCropCanvas');
-  if (!state || !canvas) return;
-  const dw = canvas.clientWidth, dh = canvas.clientHeight;
-  if (!dw || !dh) return;
-  if (canvas.width !== dw || canvas.height !== dh) { canvas.width = dw; canvas.height = dh; }
+  const state = aiCropState; if (!state) return;
+  const canvas = $('aiCropCanvas'); if (!canvas) return;
+  const box = aiCropSyncCanvasBox(); if (!box) return;
   const ctx = canvas.getContext('2d');
-  const fit = aiCropContainRect(state.img.naturalWidth, state.img.naturalHeight, dw, dh);
+  const fit = aiCropContainRect(state.view.width, state.view.height, box.width, box.height);
   const r = state.rect;
   const dx = fit.x + r.x * fit.s, dy = fit.y + r.y * fit.s, dW = r.w * fit.s, dH = r.h * fit.s;
-  ctx.clearRect(0, 0, dw, dh);
+  ctx.clearRect(0, 0, box.width, box.height);
+  ctx.drawImage(state.view, fit.x, fit.y, fit.w, fit.h);
+  // עמעום מחוץ למסגרת בארבע רצועות — התמונה בתוך המסגרת נשארת נקייה.
   ctx.fillStyle = 'rgba(2, 6, 23, 0.55)';
-  ctx.fillRect(fit.x, fit.y, fit.w, fit.h);
-  ctx.clearRect(dx, dy, dW, dH);
+  ctx.fillRect(fit.x, fit.y, fit.w, Math.max(0, dy - fit.y));
+  ctx.fillRect(fit.x, dy + dH, fit.w, Math.max(0, fit.y + fit.h - (dy + dH)));
+  ctx.fillRect(fit.x, dy, Math.max(0, dx - fit.x), dH);
+  ctx.fillRect(dx + dW, dy, Math.max(0, fit.x + fit.w - (dx + dW)), dH);
   ctx.strokeStyle = '#34d399';
   ctx.lineWidth = 3;
   ctx.strokeRect(dx, dy, dW, dH);
   ctx.fillStyle = '#34d399';
-  const handle = 16;
+  const handle = 18;
   [[dx, dy], [dx + dW, dy], [dx, dy + dH], [dx + dW, dy + dH]].forEach((corner) => {
     ctx.fillRect(corner[0] - handle / 2, corner[1] - handle / 2, handle, handle);
   });
@@ -5780,13 +5836,17 @@ function aiCropPointerPosition(canvas, event) {
   const bounds = canvas.getBoundingClientRect();
   return { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
 }
-function aiCropHitTest(position) {
+function aiCropFit() {
   const state = aiCropState, canvas = $('aiCropCanvas');
   if (!state || !canvas) return null;
-  const fit = aiCropContainRect(state.img.naturalWidth, state.img.naturalHeight, canvas.clientWidth, canvas.clientHeight);
+  return aiCropContainRect(state.view.width, state.view.height, canvas.clientWidth, canvas.clientHeight);
+}
+function aiCropHitTest(position) {
+  const state = aiCropState; const fit = aiCropFit();
+  if (!state || !fit) return null;
   const r = state.rect;
   const corners = { tl: [r.x, r.y], tr: [r.x + r.w, r.y], bl: [r.x, r.y + r.h], br: [r.x + r.w, r.y + r.h] };
-  const grabRadius = 30;
+  const grabRadius = 32;
   for (const key of Object.keys(corners)) {
     const cx = fit.x + corners[key][0] * fit.s, cy = fit.y + corners[key][1] * fit.s;
     if (Math.abs(position.x - cx) <= grabRadius && Math.abs(position.y - cy) <= grabRadius) return { mode: 'corner', corner: key };
@@ -5810,11 +5870,11 @@ function aiCropPointerMove(event) {
   const canvas = $('aiCropCanvas'); if (!canvas) return;
   event.preventDefault();
   const position = aiCropPointerPosition(canvas, event);
-  const fit = aiCropContainRect(state.img.naturalWidth, state.img.naturalHeight, canvas.clientWidth, canvas.clientHeight);
-  if (!fit.s) return;
+  const fit = aiCropFit();
+  if (!fit || !fit.s) return;
   const deltaX = (position.x - state.drag.lastX) / fit.s, deltaY = (position.y - state.drag.lastY) / fit.s;
   state.drag.lastX = position.x; state.drag.lastY = position.y;
-  const r = state.rect, iw = state.img.naturalWidth, ih = state.img.naturalHeight;
+  const r = state.rect, iw = state.view.width, ih = state.view.height;
   const minW = iw * 0.15, minH = ih * 0.15;
   if (state.drag.mode === 'move') {
     r.x = Math.min(Math.max(0, r.x + deltaX), iw - r.w);
@@ -5840,29 +5900,25 @@ function aiCropPointerUp() {
   const state = aiCropState; if (!state) return;
   state.drag = null;
 }
-// v155: מיפוי מלבן מהתצוגה המסובבת חזרה לתמונה המעובדת הלא-מסובבת.
-// הסיבוב בקנבס הוא עם כיוון השעון; אלו ההיפוכים המדויקים לרבעי סיבוב.
-function aiUnrotateRect(rect, quarterTurns, processedWidth, processedHeight) {
+// מיפוי מלבן מהתצוגה המסובבת חזרה לצירי המקור הלא-מסובב. סיבוב הקנבס
+// הוא עם כיוון השעון; אלו ההיפוכים המדויקים לרבעי סיבוב (מאומת בבדיקות).
+function aiUnrotateRect(rect, quarterTurns, unrotatedWidth, unrotatedHeight) {
   const turns = aiNormalizeQuarterTurns(quarterTurns);
-  if (turns === 1) return { x: rect.y, y: processedHeight - (rect.x + rect.w), w: rect.h, h: rect.w };
-  if (turns === 2) return { x: processedWidth - (rect.x + rect.w), y: processedHeight - (rect.y + rect.h), w: rect.w, h: rect.h };
-  if (turns === 3) return { x: processedWidth - (rect.y + rect.h), y: rect.x, w: rect.h, h: rect.w };
+  if (turns === 1) return { x: rect.y, y: unrotatedHeight - (rect.x + rect.w), w: rect.h, h: rect.w };
+  if (turns === 2) return { x: unrotatedWidth - (rect.x + rect.w), y: unrotatedHeight - (rect.y + rect.h), w: rect.w, h: rect.h };
+  if (turns === 3) return { x: unrotatedWidth - (rect.y + rect.h), y: rect.x, w: rect.h, h: rect.w };
   return { x: rect.x, y: rect.y, w: rect.w, h: rect.h };
 }
-// v155: הרצת זנב הצינור מחדש על אזור נבחר מתוך המקור הגולמי — הקטנה
-// ל-3000px, השטחת תאורה ועוגן דיו על הנייר בלבד, וקידוד JPEG יחיד.
-async function aiReprocessFromSource(page, processedRect) {
+// הרצת זנב הצינור מחדש על אזור נתון במקור הגולמי — 3000px, השטחה ועוגן
+// דיו על הנייר בלבד, קידוד JPEG יחיד.
+async function aiReprocessFromSource(page, originalRect) {
   const raw = await aiReadFile(page.sourceBlob);
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
-  const back = 1 / (page.processScale || 1);
-  const sourceRegion = page.sourceRegion || { x: 0, y: 0, width: sourceWidth, height: sourceHeight };
-  let x = Math.round(sourceRegion.x + processedRect.x * back);
-  let y = Math.round(sourceRegion.y + processedRect.y * back);
-  x = Math.max(0, Math.min(sourceWidth - 64, x));
-  y = Math.max(0, Math.min(sourceHeight - 64, y));
-  const w = Math.max(64, Math.min(sourceWidth - x, Math.round(processedRect.w * back)));
-  const h = Math.max(64, Math.min(sourceHeight - y, Math.round(processedRect.h * back)));
+  let x = Math.max(0, Math.min(sourceWidth - 64, Math.round(originalRect.x)));
+  let y = Math.max(0, Math.min(sourceHeight - 64, Math.round(originalRect.y)));
+  const w = Math.max(64, Math.min(sourceWidth - x, Math.round(originalRect.w)));
+  const h = Math.max(64, Math.min(sourceHeight - y, Math.round(originalRect.h)));
   const maxSide = 3000;
   const outScale = Math.min(1, maxSide / Math.max(w, h));
   const width = Math.max(1, Math.round(w * outScale)), height = Math.max(1, Math.round(h * outScale));
@@ -5888,25 +5944,25 @@ async function aiApplyManualCrop() {
   aiSetOrientationBusy(true);
   try {
     const r = state.rect;
-    const removed = Math.round(100 * (1 - (r.w * r.h) / (state.img.naturalWidth * state.img.naturalHeight)));
-    if (page.sourceBlob && page.sourceRegion && page.processScale) {
-      // v155: מסלול המקור — המסגרת ממופה דרך הסיבוב אל המעובד הלא-מסובב,
-      // משם אל המקור הגולמי, והעיבוד רץ מחדש על האזור הנקי בלבד.
-      const turns = aiNormalizeQuarterTurns((Number(page.rotation) || 0) / 90);
-      const swapped = turns % 2 === 1;
-      const processedWidth = swapped ? state.img.naturalHeight : state.img.naturalWidth;
-      const processedHeight = swapped ? state.img.naturalWidth : state.img.naturalHeight;
-      const processedRect = aiUnrotateRect(r, turns, processedWidth, processedHeight);
-      const result = await aiReprocessFromSource(page, processedRect);
-      const rendered = await aiRenderInvoiceRotation(result.encoded.dataUrl, turns);
+    const removed = Math.round(100 * (1 - (r.w * r.h) / (state.view.width * state.view.height)));
+    if (state.fromSource && page.sourceBlob) {
+      // מסלול המקור: מהתצוגה המסובבת אל צירי המקור, ומשם דרך כל הצינור.
+      const swap = state.turns % 2 === 1;
+      const unrotatedWidth = swap ? state.view.height : state.view.width;
+      const unrotatedHeight = swap ? state.view.width : state.view.height;
+      const unrotated = aiUnrotateRect(r, state.turns, unrotatedWidth, unrotatedHeight);
+      const back = 1 / (state.viewScale || 1);
+      const originalRect = { x: unrotated.x * back, y: unrotated.y * back, w: unrotated.w * back, h: unrotated.h * back };
+      const result = await aiReprocessFromSource(page, originalRect);
+      const rendered = await aiRenderInvoiceRotation(result.encoded.dataUrl, state.turns);
       page.baseDataUrl = result.encoded.dataUrl;
       page.dataUrl = rendered.dataUrl;
-      page.rotation = turns * 90;
+      page.rotation = state.turns * 90;
       page.bytes = rendered.bytes;
       page.sourceRegion = result.region;
       page.processScale = result.scale;
     } else {
-      // עמוד ללא מקור שמור — מסלול v154: חיתוך מהתמונה המעובדת המוצגת.
+      // עמוד ללא מקור שמור — חיתוך על התמונה המעובדת המוצגת.
       const canvas = document.createElement('canvas');
       canvas.width = Math.max(1, Math.round(r.w));
       canvas.height = Math.max(1, Math.round(r.h));
@@ -5914,7 +5970,7 @@ async function aiApplyManualCrop() {
       if (!ctx) throw new Error('canvas_failed');
       ctx.fillStyle = '#fff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(state.img, Math.round(r.x), Math.round(r.y), Math.round(r.w), Math.round(r.h), 0, 0, canvas.width, canvas.height);
+      ctx.drawImage(state.view, Math.round(r.x), Math.round(r.y), Math.round(r.w), Math.round(r.h), 0, 0, canvas.width, canvas.height);
       const encoded = aiCanvasToInvoiceJpeg(canvas, 0.92);
       page.baseDataUrl = encoded.dataUrl;
       page.dataUrl = encoded.dataUrl;
@@ -5922,7 +5978,7 @@ async function aiApplyManualCrop() {
       page.bytes = encoded.bytes;
     }
     page.cropped = true;
-    page.cropInfo = { v: 155, reason: 'manual', value: removed };
+    page.cropInfo = { v: 156, reason: 'manual', value: removed };
     page.orientationConfirmed = false;
     aiScanResponse = null; aiScanEvaluation = null; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0;
     aiExitCropMode();
