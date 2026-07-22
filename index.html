@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v152 טווח קרוב</title>
+    <title>הזמנות יטבתה - v153 חזרה לידני</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v152 טווח קרוב</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v153 חזרה לידני</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5627,7 +5627,7 @@ async function aiCompressInvoiceImage(file) {
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
   let cropRegion = null;
-  const cropInfo = { v: 152 }; // v152: דו"ח החיתוך שמוצג במסך אישור הכיוון
+  const cropInfo = { v: 153 }; // v153: דו"ח החיתוך שמוצג במסך אישור הכיוון
   try {
     const proxyScale = Math.min(1, 1500 / Math.max(sourceWidth, sourceHeight));
     const proxyWidth = Math.max(1, Math.round(sourceWidth * proxyScale));
@@ -5820,7 +5820,10 @@ async function aiAddInvoiceFiles(docIndex, files) {
     setTimeout(aiOpenNextUnconfirmedOrientation, 0);
   }
 }
-// ===== v149: מצלמה חיה — הדק אוטומטי =====
+// ===== v149-v152: מצלמה חיה — רדומה מאז v153 =====
+// v153: ההשוואה בשטח הכריעה — הצילום הידני של אפליקציית המצלמה חד יותר
+// (מיזוג מרובה-פריימים שדפדפן לא מקבל), והכפתור הוסר מכרטיס הצילום.
+// הקוד נשאר שלם ורדום; החזרת שורת הכפתור בכרטיס מחיה אותו במלואו.
 // שני תיקוני שטח מהשיאומי: (1) אלמנט הווידאו אינו מצויר במכשיר (באג
 // קומפוזיציה של MIUI — גם דף הבדיקה הראה "זרם חי" שחור) בעוד הפריימים
 // עצמם זורמים, ולכן התצוגה נצבעת ידנית על הקנבס מתוך פריימי הווידאו.
@@ -7815,8 +7818,7 @@ function aiInvoiceCaptureHtml() {
     return '<div class="rounded-2xl border-2 border-slate-200 p-3 mb-3"><div class="flex items-center justify-between gap-2"><div><div class="font-black text-slate-800">תעודה ' + (i + 1) + '</div><div class="text-[11px] font-bold text-slate-500">' + noteText + '</div></div><span class="text-xs font-black ' + (doc.pages.length ? 'text-emerald-700' : 'text-rose-600') + '">' + doc.pages.length + ' עמודים</span></div>' +
       (pages ? '<div class="flex gap-2 overflow-x-auto py-3">' + pages + '</div>' : '<div class="rounded-xl bg-amber-50 border border-amber-200 p-2 text-xs font-bold text-amber-800 my-3">צלם את כל דפי התעודה. צילום אחד ברור לכל דף.</div>') +
       '<input id="aiDocFile_' + i + '" data-role="ai-file" data-doc="' + i + '" type="file" accept="image/*" capture="environment" multiple class="hidden">' +
-      '<button data-role="ai-add-photo" data-doc="' + i + '" class="btn-tap w-full bg-slate-100 text-slate-700 rounded-xl py-2.5 font-black"><i class="fa-solid fa-camera"></i> ' + (doc.pages.length ? 'הוסף עמוד נוסף' : 'צלם תעודה') + '</button>' +
-      (aiLiveCameraSupported() ? '<button data-role="ai-live-cam" data-doc="' + i + '" class="btn-tap w-full bg-violet-50 text-violet-700 border border-violet-200 rounded-xl py-2.5 font-black mt-2"><i class="fa-solid fa-video"></i> צילום חי — עם זיהוי תעודה</button>' : '') + '</div>';
+      '<button data-role="ai-add-photo" data-doc="' + i + '" class="btn-tap w-full bg-slate-100 text-slate-700 rounded-xl py-2.5 font-black"><i class="fa-solid fa-camera"></i> ' + (doc.pages.length ? 'הוסף עמוד נוסף' : 'צלם תעודה') + '</button></div>';
   }).join('');
   const ready = aiAllPagesOrientationConfirmed();
   return '<div class="bg-white rounded-2xl border-2 border-violet-200 p-4 shadow-sm mb-24"><div class="font-black text-xl text-slate-800"><i class="fa-solid fa-camera-retro text-violet-600"></i> סריקה חכמה של התעודות</div><div class="text-xs text-slate-500 font-bold leading-relaxed mt-1 mb-2">הבלש הפשוט לא פתר את הפער. צלם פעם אחת כל עמוד מכל תעודה. התמונות נשלחות לפענוח בלבד ואינן נשמרות באפליקציה.</div><div class="rounded-xl bg-blue-50 border border-blue-200 p-2 text-[11px] font-black text-blue-800 mb-3"><i class="fa-solid fa-expand"></i> כל צילום נפתח בגודל גדול. סובב עד שהכותרת למעלה והכתב ישר, ואז אשר. ללא אישור התמונה לא תישלח.</div>' +
