@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v147 ליבה צפופה</title>
+    <title>הזמנות יטבתה - v148 מצלמה חיה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v147 ליבה צפופה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v148 מצלמה חיה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -183,6 +183,23 @@
     </div>
 
     <!-- אישור כיוון תמונת תעודה — האייפון עלול לשמור צילום על הצד -->
+    <!-- v148: מסך צילום חי — שכבת כיוון בלבד מעל הצינור הקיים -->
+    <div id="aiLiveCamModal" class="hidden fixed inset-0 bg-slate-950 z-[96] flex-col" role="dialog" aria-modal="true" aria-labelledby="aiLiveCamTitle">
+      <div class="p-3 pb-2 text-white flex items-start justify-between gap-2">
+        <div class="min-w-0">
+          <h3 id="aiLiveCamTitle" class="font-black text-xl">צילום חי</h3>
+          <p id="aiLiveCamStatus" class="text-xs font-bold text-slate-300 mt-0.5 truncate">מפעיל מצלמה…</p>
+        </div>
+        <button id="aiLiveCamClose" type="button" class="btn-tap h-11 shrink-0 rounded-xl bg-white/10 border border-white/15 text-white px-3 flex items-center justify-center gap-1.5 font-black text-sm"><i class="fa-solid fa-xmark"></i> סגור</button>
+      </div>
+      <div class="relative flex-1 min-h-0 mx-3 rounded-xl overflow-hidden bg-black">
+        <video id="aiLiveCamVideo" autoplay playsinline muted class="absolute inset-0 w-full h-full object-contain"></video>
+        <canvas id="aiLiveCamOverlay" class="absolute inset-0 w-full h-full pointer-events-none"></canvas>
+      </div>
+      <div class="p-3 pt-2">
+        <button id="aiLiveCamShoot" type="button" disabled class="btn-tap w-full py-4 rounded-xl bg-emerald-600 disabled:bg-slate-700 text-white font-black text-lg"><i class="fa-solid fa-camera ml-1"></i> צלם ברזולוציה מלאה</button>
+      </div>
+    </div>
     <div id="aiOrientationModal" class="hidden fixed inset-0 bg-slate-950 z-[95] flex-col" role="dialog" aria-modal="true" aria-labelledby="aiOrientationTitle">
       <div class="shrink-0 px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-3 bg-slate-900 text-white border-b border-white/10">
         <div class="flex items-center justify-between gap-3">
@@ -5609,7 +5626,7 @@ async function aiCompressInvoiceImage(file) {
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
   let cropRegion = null;
-  const cropInfo = { v: 147 }; // v147: דו"ח החיתוך שמוצג במסך אישור הכיוון
+  const cropInfo = { v: 148 }; // v148: דו"ח החיתוך שמוצג במסך אישור הכיוון
   try {
     const proxyScale = Math.min(1, 1500 / Math.max(sourceWidth, sourceHeight));
     const proxyWidth = Math.max(1, Math.round(sourceWidth * proxyScale));
@@ -5802,6 +5819,119 @@ async function aiAddInvoiceFiles(docIndex, files) {
     setTimeout(aiOpenNextUnconfirmedOrientation, 0);
   }
 }
+// ===== v148: מצלמה חיה — שלב 1, ירי ידני =====
+// המסך החי הוא שכבת כיוון בלבד: הזיהוי בזמן אמת מריץ את מנוע החיתוך
+// הקיים על פריים מוקטן ומצייר מסגרת, והירי — takePhoto ברזולוציה מלאה —
+// מזין את אותו צינור עיבוד שמקבל צילום ידני (חיתוך, השטחה, דו"ח). אין
+// ImageCapture (אייפון) → הכפתור אינו מוצג והמסלול הקיים נשאר יחיד.
+// כל כשל מוחזר בקול, והמצלמה נסגרת חזרה למסלול הרגיל.
+let aiLiveCamState = null;
+function aiLiveCameraSupported() {
+  return typeof window !== 'undefined' && 'ImageCapture' in window
+    && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+}
+function aiLiveCamSetStatus(text) { const el = $('aiLiveCamStatus'); if (el) el.textContent = text; }
+async function aiOpenLiveCamera(docIndex) {
+  if (!aiLiveCameraSupported() || aiScanBusy || aiLiveCamState) return;
+  const modal = $('aiLiveCamModal'); if (!modal) return;
+  modal.classList.remove('hidden'); modal.classList.add('flex');
+  aiLiveCamSetStatus('מפעיל מצלמה…');
+  const shoot = $('aiLiveCamShoot'); if (shoot) shoot.disabled = true;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 4096 }, height: { ideal: 4096 } }
+    });
+    const track = stream.getVideoTracks()[0];
+    const video = $('aiLiveCamVideo');
+    video.srcObject = stream;
+    aiLiveCamState = { stream, track, imageCapture: new ImageCapture(track), docIndex, timerId: null, probe: null, shooting: false };
+    await video.play().catch(() => {});
+    aiLiveCamSetStatus('כוון את התעודה לתוך הפריים');
+    if (shoot) shoot.disabled = false;
+    aiLiveCamState.timerId = setInterval(aiLiveCamAnalyzeFrame, 240);
+  } catch (error) {
+    aiCloseLiveCamera();
+    showToast('המצלמה לא נפתחה (' + ((error && error.name) || 'שגיאה') + ') — השתמש בצילום הרגיל', null, null, 3500);
+  }
+}
+function aiCloseLiveCamera() {
+  const state = aiLiveCamState; aiLiveCamState = null;
+  if (state) {
+    if (state.timerId) clearInterval(state.timerId);
+    try { if (state.stream) state.stream.getTracks().forEach((mediaTrack) => mediaTrack.stop()); } catch (stopError) {}
+  }
+  const video = $('aiLiveCamVideo'); if (video) video.srcObject = null;
+  const overlay = $('aiLiveCamOverlay');
+  if (overlay) { const ctx = overlay.getContext('2d'); if (ctx) ctx.clearRect(0, 0, overlay.width, overlay.height); }
+  const modal = $('aiLiveCamModal');
+  if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+}
+function aiLiveCamAnalyzeFrame() {
+  const state = aiLiveCamState; if (!state || state.shooting) return;
+  const video = $('aiLiveCamVideo'), overlay = $('aiLiveCamOverlay');
+  if (!video || !overlay || !video.videoWidth) return;
+  try {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const scale = Math.min(1, 640 / Math.max(vw, vh));
+    const pw = Math.max(1, Math.round(vw * scale)), ph = Math.max(1, Math.round(vh * scale));
+    if (!state.probe) state.probe = document.createElement('canvas');
+    state.probe.width = pw; state.probe.height = ph;
+    const ctx = state.probe.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(video, 0, 0, pw, ph);
+    const pixels = ctx.getImageData(0, 0, pw, ph);
+    const analysis = {};
+    aiFlattenIllumination(pixels.data, pw, ph, analysis);
+    const box = aiComputePaperCropBox(analysis, pw, ph);
+    const rel = box ? { x: box.x / pw, y: box.y / ph, w: box.width / pw, h: box.height / ph } : null;
+    aiLiveCamDrawOverlay(video, overlay, rel);
+    aiLiveCamSetStatus(rel ? 'תעודה זוהתה — ודא שכולה בפריים וצלם' : 'מחפש תעודה…');
+  } catch (frameError) { /* פריים בודד שנכשל — הלולאה ממשיכה */ }
+}
+function aiLiveCamDrawOverlay(video, overlay, rel) {
+  const dw = overlay.clientWidth, dh = overlay.clientHeight;
+  if (!dw || !dh) return;
+  if (overlay.width !== dw || overlay.height !== dh) { overlay.width = dw; overlay.height = dh; }
+  const ctx = overlay.getContext('2d');
+  ctx.clearRect(0, 0, dw, dh);
+  if (!rel || !video.videoWidth) return;
+  const s = Math.min(dw / video.videoWidth, dh / video.videoHeight);
+  const cw = video.videoWidth * s, ch = video.videoHeight * s;
+  const ox = (dw - cw) / 2, oy = (dh - ch) / 2;
+  ctx.strokeStyle = '#34d399';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(ox + rel.x * cw, oy + rel.y * ch, rel.w * cw, rel.h * ch);
+}
+async function aiLiveCamTakePhoto() {
+  const state = aiLiveCamState; if (!state || state.shooting) return;
+  state.shooting = true;
+  aiLiveCamSetStatus('מצלם ברזולוציה מלאה…');
+  const shoot = $('aiLiveCamShoot'); if (shoot) shoot.disabled = true;
+  let blob = null;
+  try {
+    let photoCapabilities = null;
+    try { photoCapabilities = await state.imageCapture.getPhotoCapabilities(); } catch (capsError) {}
+    const want = photoCapabilities && photoCapabilities.imageWidth
+      ? { imageWidth: photoCapabilities.imageWidth.max, imageHeight: photoCapabilities.imageHeight.max }
+      : undefined;
+    try { blob = await state.imageCapture.takePhoto(want); }
+    catch (firstError) { await new Promise((r) => setTimeout(r, 700)); blob = await state.imageCapture.takePhoto(); }
+  } catch (photoError) { blob = null; }
+  if (!blob) {
+    state.shooting = false;
+    if (shoot) shoot.disabled = false;
+    aiLiveCamSetStatus('הצילום נכשל — נסה שוב, או סגור וצלם רגיל');
+    return;
+  }
+  if (navigator.vibrate) { try { navigator.vibrate(40); } catch (vibrateError) {} }
+  const docIndex = state.docIndex;
+  aiCloseLiveCamera();
+  aiAddInvoiceFiles(docIndex, [blob]);
+}
+(() => {
+  const close = $('aiLiveCamClose'), shoot = $('aiLiveCamShoot');
+  if (close) close.addEventListener('click', aiCloseLiveCamera);
+  if (shoot) shoot.addEventListener('click', aiLiveCamTakePhoto);
+})();
 function aiRemoveInvoicePage(docIndex, pageIndex) {
   const doc = aiScanDocuments[docIndex]; if (!doc || aiScanBusy) return;
   doc.pages.splice(pageIndex, 1); aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; renderReconcile();
@@ -7546,7 +7676,8 @@ function aiInvoiceCaptureHtml() {
     return '<div class="rounded-2xl border-2 border-slate-200 p-3 mb-3"><div class="flex items-center justify-between gap-2"><div><div class="font-black text-slate-800">תעודה ' + (i + 1) + '</div><div class="text-[11px] font-bold text-slate-500">' + noteText + '</div></div><span class="text-xs font-black ' + (doc.pages.length ? 'text-emerald-700' : 'text-rose-600') + '">' + doc.pages.length + ' עמודים</span></div>' +
       (pages ? '<div class="flex gap-2 overflow-x-auto py-3">' + pages + '</div>' : '<div class="rounded-xl bg-amber-50 border border-amber-200 p-2 text-xs font-bold text-amber-800 my-3">צלם את כל דפי התעודה. צילום אחד ברור לכל דף.</div>') +
       '<input id="aiDocFile_' + i + '" data-role="ai-file" data-doc="' + i + '" type="file" accept="image/*" capture="environment" multiple class="hidden">' +
-      '<button data-role="ai-add-photo" data-doc="' + i + '" class="btn-tap w-full bg-slate-100 text-slate-700 rounded-xl py-2.5 font-black"><i class="fa-solid fa-camera"></i> ' + (doc.pages.length ? 'הוסף עמוד נוסף' : 'צלם תעודה') + '</button></div>';
+      '<button data-role="ai-add-photo" data-doc="' + i + '" class="btn-tap w-full bg-slate-100 text-slate-700 rounded-xl py-2.5 font-black"><i class="fa-solid fa-camera"></i> ' + (doc.pages.length ? 'הוסף עמוד נוסף' : 'צלם תעודה') + '</button>' +
+      (aiLiveCameraSupported() ? '<button data-role="ai-live-cam" data-doc="' + i + '" class="btn-tap w-full bg-violet-50 text-violet-700 border border-violet-200 rounded-xl py-2.5 font-black mt-2"><i class="fa-solid fa-video"></i> צילום חי — עם זיהוי תעודה</button>' : '') + '</div>';
   }).join('');
   const ready = aiAllPagesOrientationConfirmed();
   return '<div class="bg-white rounded-2xl border-2 border-violet-200 p-4 shadow-sm mb-24"><div class="font-black text-xl text-slate-800"><i class="fa-solid fa-camera-retro text-violet-600"></i> סריקה חכמה של התעודות</div><div class="text-xs text-slate-500 font-bold leading-relaxed mt-1 mb-2">הבלש הפשוט לא פתר את הפער. צלם פעם אחת כל עמוד מכל תעודה. התמונות נשלחות לפענוח בלבד ואינן נשמרות באפליקציה.</div><div class="rounded-xl bg-blue-50 border border-blue-200 p-2 text-[11px] font-black text-blue-800 mb-3"><i class="fa-solid fa-expand"></i> כל צילום נפתח בגודל גדול. סובב עד שהכותרת למעלה והכתב ישר, ואז אשר. ללא אישור התמונה לא תישלח.</div>' +
@@ -10843,6 +10974,7 @@ app.addEventListener('click', (e) => {
   const t = e.target.closest('[data-role]'); if (!t) return;
   const role = t.dataset.role, id = t.dataset.id;
   if (role === 'ai-add-photo') { const input = $('aiDocFile_' + (parseInt(t.dataset.doc, 10) || 0)); if (input) input.click(); return; }
+  if (role === 'ai-live-cam') { aiOpenLiveCamera(parseInt(t.dataset.doc, 10) || 0); return; }
   if (role === 'ai-review-page') { aiOpenOrientationReview(parseInt(t.dataset.doc, 10) || 0, parseInt(t.dataset.page, 10) || 0, true); if (currentView === 'reconcile') renderReconcile(); return; }
   if (role === 'ai-remove-page') { aiRemoveInvoicePage(parseInt(t.dataset.doc, 10) || 0, parseInt(t.dataset.page, 10) || 0); return; }
   if (role === 'ai-run') { aiRunInvoiceScan(); return; }
