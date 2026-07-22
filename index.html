@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v156 חיתוך על המקור</title>
+    <title>הזמנות יטבתה - v157 חיתוך בזרימה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v156 חיתוך על המקור</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v157 חיתוך בזרימה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -211,7 +211,7 @@
           <button id="aiOrientationCancel" type="button" class="btn-tap h-11 shrink-0 rounded-xl bg-rose-500/20 border border-rose-300/30 text-rose-100 px-3 flex items-center justify-center gap-1.5 font-black text-sm" aria-label="מחק את הצילום"><i class="fa-solid fa-trash-can"></i> מחק צילום</button>
         </div>
         <div class="mt-2 rounded-xl bg-amber-400/15 border border-amber-300/30 px-3 py-2 text-sm font-black text-amber-100">
-          <i class="fa-solid fa-mobile-screen-button ml-1"></i> ודא שהכותרת למעלה ושאפשר לקרוא את הטקסט ישר.
+          <i class="fa-solid fa-mobile-screen-button ml-1"></i> ודא שהכותרת למעלה ושהטקסט ישר. רוצה לחתוך? גרור את פינות המסגרת הירוקה — ואשר.
         </div>
       </div>
       <div class="relative flex-1 min-h-0 p-3 flex items-center justify-center overflow-hidden">
@@ -226,11 +226,6 @@
         <div id="aiOrientationRotateRow" class="grid grid-cols-2 gap-2 mb-2" dir="ltr">
           <button id="aiOrientationLeft" type="button" class="btn-tap py-3 rounded-xl bg-white/10 border border-white/15 text-white font-black"><i class="fa-solid fa-rotate-left ml-1"></i> סובב שמאלה</button>
           <button id="aiOrientationRight" type="button" class="btn-tap py-3 rounded-xl bg-white/10 border border-white/15 text-white font-black"><i class="fa-solid fa-rotate-right ml-1"></i> סובב ימינה</button>
-        </div>
-        <button id="aiOrientationCropStart" type="button" class="btn-tap w-full py-2.5 rounded-xl bg-white/10 border border-white/15 text-white font-black mb-2"><i class="fa-solid fa-crop-simple ml-1"></i> חיתוך ידני — גרור את הפינות</button>
-        <div id="aiCropActions" class="hidden grid grid-cols-2 gap-2 mb-2">
-          <button id="aiCropCancel" type="button" class="btn-tap py-3 rounded-xl bg-white/10 border border-white/15 text-white font-black"><i class="fa-solid fa-xmark ml-1"></i> בטל</button>
-          <button id="aiCropApply" type="button" class="btn-tap py-3 rounded-xl bg-emerald-600 text-white font-black"><i class="fa-solid fa-check ml-1"></i> אשר חיתוך</button>
         </div>
         <button id="aiOrientationConfirm" type="button" class="btn-tap w-full py-3.5 rounded-xl bg-emerald-600 text-white font-black text-lg"><i class="fa-solid fa-check ml-1"></i> התמונה ישרה — המשך</button>
         <p class="text-[11px] text-slate-400 font-bold text-center mt-2">התמונה לא תישלח ל-AI לפני האישור.</p>
@@ -5634,7 +5629,7 @@ async function aiCompressInvoiceImage(file) {
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
   let cropRegion = null;
-  const cropInfo = { v: 156 }; // v156: דו"ח החיתוך שמוצג במסך אישור הכיוון
+  const cropInfo = { v: 157 }; // v157: דו"ח החיתוך שמוצג במסך אישור הכיוון
   try {
     const proxyScale = Math.min(1, 1500 / Math.max(sourceWidth, sourceHeight));
     const proxyWidth = Math.max(1, Math.round(sourceWidth * proxyScale));
@@ -5702,18 +5697,42 @@ function aiSetOrientationBusy(busy) {
   aiOrientationBusy = !!busy;
   const overlay = $('aiOrientationBusy');
   if (overlay) { overlay.classList.toggle('hidden', !busy); overlay.classList.toggle('flex', !!busy); }
-  ['aiOrientationLeft', 'aiOrientationRight', 'aiOrientationConfirm', 'aiOrientationCancel', 'aiOrientationCropStart', 'aiCropApply', 'aiCropCancel'].forEach(id => {
+  ['aiOrientationLeft', 'aiOrientationRight', 'aiOrientationConfirm', 'aiOrientationCancel'].forEach(id => {
     const button = $(id); if (button) button.disabled = !!busy;
   });
 }
-// ===== v156: חיתוך ידני על המקור הגולמי =====
-// שני לקחי שטח: (1) שכבת החיתוך קרסה לגודל ברירת המחדל של קנבס — מעכשיו
-// הקופסה נמדדת מהמכל בכל ציור, בלי תלות במחלקות CSS. (2) מצב חיתוך מציג
-// את התמונה המקורית הגולמית (מסובבת לפי המשתמש) — רואים בדיוק על מה
-// גוזרים, והגזירה רצה על המקור דרך כל הצינור: סטטיסטיקה נקייה מהנייר
-// והדיו בלבד, 3000px מלאים, דור JPEG יחיד. עמוד ישן ללא מקור שמור —
-// חיתוך על התמונה המעובדת כבעבר.
+// ===== v157: מסגרת חיתוך בזרימה =====
+// לפי בקשת המשתמש: בלי מצב נפרד ובלי כפתורים נוספים. מסגרת החיתוך חיה
+// תמיד על מסך אישור הכיוון; מי שרוצה — גורר פינות, מי שלא — מאשר וזהו.
+// אם המסגרת הוזזה, האישור קודם מחיל את החיתוך מהמקור הגולמי דרך כל
+// הצינור (סטטיסטיקה נקייה, 3000px מלאים) ורק אז ממשיך. לא הוזזה —
+// האישור מתנהג בדיוק כמו תמיד, בלי עיבוד מיותר.
 let aiCropState = null;
+function aiCropResetOverlay() {
+  aiCropState = null;
+  const canvas = $('aiCropCanvas');
+  if (canvas) {
+    canvas.classList.add('hidden');
+    const ctx = canvas.getContext('2d');
+    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+}
+function aiCropInitFrame() {
+  if (!aiOrientationSession) { aiCropResetOverlay(); return; }
+  const img = $('aiOrientationImage');
+  if (!img || !img.naturalWidth || !img.naturalHeight) return;
+  const marginX = Math.round(img.naturalWidth * 0.03), marginY = Math.round(img.naturalHeight * 0.03);
+  aiCropState = {
+    w: img.naturalWidth,
+    h: img.naturalHeight,
+    rect: { x: marginX, y: marginY, w: img.naturalWidth - 2 * marginX, h: img.naturalHeight - 2 * marginY },
+    moved: false,
+    drag: null,
+  };
+  const canvas = $('aiCropCanvas');
+  if (canvas) canvas.classList.remove('hidden');
+  aiCropDraw();
+}
 function aiCropSyncCanvasBox() {
   const canvas = $('aiCropCanvas');
   if (!canvas || !canvas.parentElement) return null;
@@ -5733,92 +5752,17 @@ function aiCropContainRect(imageWidth, imageHeight, boxWidth, boxHeight) {
   const w = imageWidth * s, h = imageHeight * s;
   return { x: (boxWidth - w) / 2, y: (boxHeight - h) / 2, w, h, s };
 }
-async function aiBuildCropView(page) {
-  // בונה את תצוגת החיתוך: המקור הגולמי מסובב לפי המשתמש (עד 2200px),
-  // או — לעמוד ללא מקור — התמונה המעובדת המוצגת.
-  const turns = aiNormalizeQuarterTurns((Number(page.rotation) || 0) / 90);
-  if (page.sourceBlob) {
-    const raw = await aiReadFile(page.sourceBlob);
-    const img = await aiLoadImage(raw);
-    const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
-    const viewScale = Math.min(1, 2200 / Math.max(sourceWidth, sourceHeight));
-    const scaledWidth = Math.max(1, Math.round(sourceWidth * viewScale));
-    const scaledHeight = Math.max(1, Math.round(sourceHeight * viewScale));
-    const swap = turns % 2 === 1;
-    const view = document.createElement('canvas');
-    view.width = swap ? scaledHeight : scaledWidth;
-    view.height = swap ? scaledWidth : scaledHeight;
-    const ctx = view.getContext('2d', { alpha: false });
-    if (!ctx) throw new Error('canvas_failed');
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, view.width, view.height);
-    ctx.translate(view.width / 2, view.height / 2);
-    ctx.rotate(turns * Math.PI / 2);
-    ctx.drawImage(img, -scaledWidth / 2, -scaledHeight / 2, scaledWidth, scaledHeight);
-    return { view, viewScale, turns, fromSource: true };
-  }
-  const img = await aiLoadImage(page.dataUrl);
-  const view = document.createElement('canvas');
-  view.width = img.naturalWidth || img.width;
-  view.height = img.naturalHeight || img.height;
-  const ctx = view.getContext('2d', { alpha: false });
-  if (!ctx) throw new Error('canvas_failed');
-  ctx.drawImage(img, 0, 0);
-  return { view, viewScale: 1, turns, fromSource: false };
-}
-function aiEnterCropMode() {
-  if (aiCropState || aiOrientationBusy) return;
-  const location = aiOrientationSession && aiOrientationLocation(aiOrientationSession.page);
-  if (!location) return;
-  aiSetOrientationBusy(true);
-  aiBuildCropView(location.page).then((built) => {
-    aiSetOrientationBusy(false);
-    if (!aiOrientationSession || aiCropState) return;
-    const marginX = Math.round(built.view.width * 0.04), marginY = Math.round(built.view.height * 0.04);
-    aiCropState = {
-      view: built.view,
-      viewScale: built.viewScale,
-      turns: built.turns,
-      fromSource: built.fromSource,
-      rect: { x: marginX, y: marginY, w: built.view.width - 2 * marginX, h: built.view.height - 2 * marginY },
-      drag: null,
-    };
-    const canvas = $('aiCropCanvas'); if (canvas) canvas.classList.remove('hidden');
-    const rotateRow = $('aiOrientationRotateRow'); if (rotateRow) rotateRow.classList.add('hidden');
-    const start = $('aiOrientationCropStart'); if (start) start.classList.add('hidden');
-    const confirm = $('aiOrientationConfirm'); if (confirm) confirm.classList.add('hidden');
-    const actions = $('aiCropActions'); if (actions) actions.classList.remove('hidden');
-    aiCropDraw();
-  }).catch(() => {
-    aiSetOrientationBusy(false);
-    showToast('טעינת התמונה לחיתוך נכשלה', null, null, 2500);
-  });
-}
-function aiExitCropMode() {
-  aiCropState = null;
-  const canvas = $('aiCropCanvas');
-  if (canvas) {
-    canvas.classList.add('hidden');
-    const ctx = canvas.getContext('2d');
-    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
-  }
-  const rotateRow = $('aiOrientationRotateRow'); if (rotateRow) rotateRow.classList.remove('hidden');
-  const start = $('aiOrientationCropStart'); if (start) start.classList.remove('hidden');
-  const confirm = $('aiOrientationConfirm'); if (confirm) confirm.classList.remove('hidden');
-  const actions = $('aiCropActions'); if (actions) actions.classList.add('hidden');
-}
 function aiCropDraw() {
   const state = aiCropState; if (!state) return;
   const canvas = $('aiCropCanvas'); if (!canvas) return;
   const box = aiCropSyncCanvasBox(); if (!box) return;
   const ctx = canvas.getContext('2d');
-  const fit = aiCropContainRect(state.view.width, state.view.height, box.width, box.height);
+  const fit = aiCropContainRect(state.w, state.h, box.width, box.height);
   const r = state.rect;
   const dx = fit.x + r.x * fit.s, dy = fit.y + r.y * fit.s, dW = r.w * fit.s, dH = r.h * fit.s;
   ctx.clearRect(0, 0, box.width, box.height);
-  ctx.drawImage(state.view, fit.x, fit.y, fit.w, fit.h);
-  // עמעום מחוץ למסגרת בארבע רצועות — התמונה בתוך המסגרת נשארת נקייה.
-  ctx.fillStyle = 'rgba(2, 6, 23, 0.55)';
+  // עמעום מחוץ למסגרת בארבע רצועות — התמונה עצמה (מתחת לקנבס) נשארת נקייה.
+  ctx.fillStyle = 'rgba(2, 6, 23, 0.45)';
   ctx.fillRect(fit.x, fit.y, fit.w, Math.max(0, dy - fit.y));
   ctx.fillRect(fit.x, dy + dH, fit.w, Math.max(0, fit.y + fit.h - (dy + dH)));
   ctx.fillRect(fit.x, dy, Math.max(0, dx - fit.x), dH);
@@ -5839,7 +5783,7 @@ function aiCropPointerPosition(canvas, event) {
 function aiCropFit() {
   const state = aiCropState, canvas = $('aiCropCanvas');
   if (!state || !canvas) return null;
-  return aiCropContainRect(state.view.width, state.view.height, canvas.clientWidth, canvas.clientHeight);
+  return aiCropContainRect(state.w, state.h, canvas.clientWidth, canvas.clientHeight);
 }
 function aiCropHitTest(position) {
   const state = aiCropState; const fit = aiCropFit();
@@ -5856,7 +5800,7 @@ function aiCropHitTest(position) {
   return null;
 }
 function aiCropPointerDown(event) {
-  const state = aiCropState; if (!state) return;
+  const state = aiCropState; if (!state || aiOrientationBusy) return;
   const canvas = $('aiCropCanvas'); if (!canvas) return;
   const position = aiCropPointerPosition(canvas, event);
   const hit = aiCropHitTest(position);
@@ -5873,8 +5817,10 @@ function aiCropPointerMove(event) {
   const fit = aiCropFit();
   if (!fit || !fit.s) return;
   const deltaX = (position.x - state.drag.lastX) / fit.s, deltaY = (position.y - state.drag.lastY) / fit.s;
+  if (!deltaX && !deltaY) return;
   state.drag.lastX = position.x; state.drag.lastY = position.y;
-  const r = state.rect, iw = state.view.width, ih = state.view.height;
+  state.moved = true;
+  const r = state.rect, iw = state.w, ih = state.h;
   const minW = iw * 0.15, minH = ih * 0.15;
   if (state.drag.mode === 'move') {
     r.x = Math.min(Math.max(0, r.x + deltaX), iw - r.w);
@@ -5936,72 +5882,64 @@ async function aiReprocessFromSource(page, originalRect) {
   const encoded = aiCanvasToInvoiceJpeg(canvas, 0.92);
   return { encoded, region: { x, y, width: w, height: h }, scale: outScale };
 }
-async function aiApplyManualCrop() {
-  const state = aiCropState; if (!state || aiOrientationBusy) return;
-  const location = aiOrientationSession && aiOrientationLocation(aiOrientationSession.page);
-  if (!location) { aiExitCropMode(); return; }
-  const page = location.page;
-  aiSetOrientationBusy(true);
-  try {
-    const r = state.rect;
-    const removed = Math.round(100 * (1 - (r.w * r.h) / (state.view.width * state.view.height)));
-    if (state.fromSource && page.sourceBlob) {
-      // מסלול המקור: מהתצוגה המסובבת אל צירי המקור, ומשם דרך כל הצינור.
-      const swap = state.turns % 2 === 1;
-      const unrotatedWidth = swap ? state.view.height : state.view.width;
-      const unrotatedHeight = swap ? state.view.width : state.view.height;
-      const unrotated = aiUnrotateRect(r, state.turns, unrotatedWidth, unrotatedHeight);
-      const back = 1 / (state.viewScale || 1);
-      const originalRect = { x: unrotated.x * back, y: unrotated.y * back, w: unrotated.w * back, h: unrotated.h * back };
-      const result = await aiReprocessFromSource(page, originalRect);
-      const rendered = await aiRenderInvoiceRotation(result.encoded.dataUrl, state.turns);
-      page.baseDataUrl = result.encoded.dataUrl;
-      page.dataUrl = rendered.dataUrl;
-      page.rotation = state.turns * 90;
-      page.bytes = rendered.bytes;
-      page.sourceRegion = result.region;
-      page.processScale = result.scale;
-    } else {
-      // עמוד ללא מקור שמור — חיתוך על התמונה המעובדת המוצגת.
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.max(1, Math.round(r.w));
-      canvas.height = Math.max(1, Math.round(r.h));
-      const ctx = canvas.getContext('2d', { alpha: false });
-      if (!ctx) throw new Error('canvas_failed');
-      ctx.fillStyle = '#fff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(state.view, Math.round(r.x), Math.round(r.y), Math.round(r.w), Math.round(r.h), 0, 0, canvas.width, canvas.height);
-      const encoded = aiCanvasToInvoiceJpeg(canvas, 0.92);
-      page.baseDataUrl = encoded.dataUrl;
-      page.dataUrl = encoded.dataUrl;
-      page.rotation = 0;
-      page.bytes = encoded.bytes;
-    }
-    page.cropped = true;
-    page.cropInfo = { v: 156, reason: 'manual', value: removed };
-    page.orientationConfirmed = false;
-    aiScanResponse = null; aiScanEvaluation = null; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0;
-    aiExitCropMode();
-    aiPaintOrientationReview();
-    if (currentView === 'reconcile') renderReconcile();
-  } catch (cropError) {
-    aiExitCropMode();
-    showToast(cropError && cropError.message === 'image_too_large' ? 'החיתוך חורג ממגבלת הגודל — נסה מסגרת קטנה יותר' : 'החיתוך נכשל — התמונה נשארה כפי שהיא', null, null, 3200);
-  } finally {
-    aiSetOrientationBusy(false);
+// החלת המסגרת (רק אם הוזזה): מהתצוגה המסובבת אל צירי המקור, ומשם דרך
+// כל הצינור. לעמוד ללא מקור שמור — חיתוך על התמונה המעובדת המוצגת.
+async function aiApplyCropIfMoved(page) {
+  const state = aiCropState;
+  if (!state || !state.moved) return false;
+  const r = state.rect;
+  const removed = Math.round(100 * (1 - (r.w * r.h) / (state.w * state.h)));
+  const turns = aiNormalizeQuarterTurns((Number(page.rotation) || 0) / 90);
+  if (page.sourceBlob && page.sourceRegion && page.processScale) {
+    const swap = turns % 2 === 1;
+    const unrotatedWidth = swap ? state.h : state.w;
+    const unrotatedHeight = swap ? state.w : state.h;
+    const processedRect = aiUnrotateRect(r, turns, unrotatedWidth, unrotatedHeight);
+    const back = 1 / page.processScale;
+    const originalRect = {
+      x: page.sourceRegion.x + processedRect.x * back,
+      y: page.sourceRegion.y + processedRect.y * back,
+      w: processedRect.w * back,
+      h: processedRect.h * back,
+    };
+    const result = await aiReprocessFromSource(page, originalRect);
+    const rendered = await aiRenderInvoiceRotation(result.encoded.dataUrl, turns);
+    page.baseDataUrl = result.encoded.dataUrl;
+    page.dataUrl = rendered.dataUrl;
+    page.rotation = turns * 90;
+    page.bytes = rendered.bytes;
+    page.sourceRegion = result.region;
+    page.processScale = result.scale;
+  } else {
+    const img = await aiLoadImage(page.dataUrl);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(r.w));
+    canvas.height = Math.max(1, Math.round(r.h));
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) throw new Error('canvas_failed');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, Math.round(r.x), Math.round(r.y), Math.round(r.w), Math.round(r.h), 0, 0, canvas.width, canvas.height);
+    const encoded = aiCanvasToInvoiceJpeg(canvas, 0.92);
+    page.baseDataUrl = encoded.dataUrl;
+    page.dataUrl = encoded.dataUrl;
+    page.rotation = 0;
+    page.bytes = encoded.bytes;
   }
+  page.cropped = true;
+  page.cropInfo = { v: 157, reason: 'manual', value: removed };
+  return true;
 }
 (() => {
-  const start = $('aiOrientationCropStart'), apply = $('aiCropApply'), cancel = $('aiCropCancel'), canvas = $('aiCropCanvas');
-  if (start) start.addEventListener('click', aiEnterCropMode);
-  if (apply) apply.addEventListener('click', aiApplyManualCrop);
-  if (cancel) cancel.addEventListener('click', aiExitCropMode);
+  const canvas = $('aiCropCanvas');
   if (canvas) {
     canvas.addEventListener('pointerdown', aiCropPointerDown);
     canvas.addEventListener('pointermove', aiCropPointerMove);
     canvas.addEventListener('pointerup', aiCropPointerUp);
     canvas.addEventListener('pointercancel', aiCropPointerUp);
   }
+  const reviewImage = $('aiOrientationImage');
+  if (reviewImage) reviewImage.addEventListener('load', aiCropInitFrame);
   window.addEventListener('resize', () => { if (aiCropState) aiCropDraw(); });
 })();
 // v144: החיתוך מדווח על עצמו — גרסה, החלטה וסיבה — בשורת הכותרת של
@@ -6019,7 +5957,7 @@ function aiCropInfoText(page) {
   return version + ' · ללא חיתוך';
 }
 function aiPaintOrientationReview() {
-  if (aiCropState) aiExitCropMode();
+  aiCropResetOverlay();
   const location = aiOrientationSession && aiOrientationLocation(aiOrientationSession.page);
   if (!location) { aiCloseOrientationReview(); return false; }
   const reviewOnly = !!(aiOrientationSession && aiOrientationSession.reviewOnly);
@@ -6087,10 +6025,23 @@ async function aiRotateOrientationReview(deltaTurns) {
     if (label) label.textContent = error && error.message === 'image_too_large' ? 'לא ניתן לסובב בלי לחרוג ממגבלת הגודל' : 'הסיבוב נכשל — התמונה המקורית לא השתנתה';
   } finally { aiSetOrientationBusy(false); }
 }
-function aiConfirmOrientationReview() {
+async function aiConfirmOrientationReview() {
   const location = aiOrientationSession && aiOrientationLocation(aiOrientationSession.page);
   if (!location || aiOrientationBusy) return;
   if (aiOrientationSession.reviewOnly) { aiCloseOrientationReview(); return; }
+  // v157: אם מסגרת החיתוך הוזזה — קודם מחילים אותה מהמקור, ורק אז מאשרים.
+  if (aiCropState && aiCropState.moved) {
+    aiSetOrientationBusy(true);
+    try {
+      await aiApplyCropIfMoved(location.page);
+    } catch (cropError) {
+      if (aiCropState) aiCropState.moved = false;
+      aiSetOrientationBusy(false);
+      showToast(cropError && cropError.message === 'image_too_large' ? 'החיתוך חורג ממגבלת הגודל — התמונה נשארה; אפשר לאשר או לגרור מסגרת קטנה יותר' : 'החיתוך נכשל — התמונה נשארה כפי שהיא; אפשר לאשר או לגרור שוב', null, null, 3500);
+      return;
+    }
+    aiSetOrientationBusy(false);
+  }
   location.page.orientationConfirmed = true;
   aiCloseOrientationReview();
   aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0;
