@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v151 הדק משוחרר</title>
+    <title>הזמנות יטבתה - v152 טווח קרוב</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v151 הדק משוחרר</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v152 טווח קרוב</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5627,7 +5627,7 @@ async function aiCompressInvoiceImage(file) {
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
   let cropRegion = null;
-  const cropInfo = { v: 151 }; // v151: דו"ח החיתוך שמוצג במסך אישור הכיוון
+  const cropInfo = { v: 152 }; // v152: דו"ח החיתוך שמוצג במסך אישור הכיוון
   try {
     const proxyScale = Math.min(1, 1500 / Math.max(sourceWidth, sourceHeight));
     const proxyWidth = Math.max(1, Math.round(sourceWidth * proxyScale));
@@ -5850,7 +5850,7 @@ async function aiOpenLiveCamera(docIndex) {
     aiLiveCamState = {
       stream, track, imageCapture: new ImageCapture(track), docIndex,
       timerId: null, paintId: null, probe: null, shooting: false,
-      lastBox: null, history: [], sharpMax: 0, holdCount: 0, stableTicks: 0,
+      lastBox: null, history: [], sharpMax: 0, holdCount: 0, stableTicks: 0, sharpHist: [], fullFrameTicks: 0,
     };
     await video.play().catch(() => {});
     aiLiveCamSetStatus('כוון את התעודה לתוך הפריים');
@@ -5936,45 +5936,68 @@ function aiLiveCamAnalyzeFrame() {
     const rawData = new Uint8ClampedArray(pixels.data); // לחדות — לפני שההשטחה משנה
     const analysis = {};
     aiFlattenIllumination(pixels.data, pw, ph, analysis);
-    const box = aiComputePaperCropBox(analysis, pw, ph);
+    const cropReport = {};
+    let box = aiComputePaperCropBox(analysis, pw, ph, cropReport);
+    // v152: מקרוב הנייר ממלא את הפריים ומנוע החיתוך עונה "אין מה לחתוך"
+    // (box_97). לצורך ההדק זו תעודה מזוהה במלואה — בדיוק הצילום הצמוד
+    // שהסורק אוהב. מסנתזים מסגרת מלאה; היציבות נמדדת אז על החדות, כי
+    // הגיאומטריה קבועה ממילא, ויש תקרת זמן שמבטיחה ירייה גם בלי פוקוס.
+    let fullFrame = false;
+    if (!box && cropReport.reason === 'box_97') {
+      box = { x: 0, y: 0, width: pw, height: ph };
+      fullFrame = true;
+    }
     state.lastBox = box ? { x: box.x / pw, y: box.y / ph, w: box.width / pw, h: box.height / ph } : null;
     let status = 'מחפש תעודה… ודא שכולה בפריים';
     let conditionsMet = false;
     if (box) {
       const areaFraction = (box.width * box.height) / (pw * ph);
-      // v150: נגיעה בקצה אחד מותרת (הסורק מטפל בזה); רק גלישה משני צדדים
-      // נגדיים — תעודה גדולה מהפריים — חוסמת ירייה.
       const touchLeft = box.x <= 2, touchTop = box.y <= 2;
       const touchRight = box.x + box.width >= pw - 2, touchBottom = box.y + box.height >= ph - 2;
-      const overflow = (touchLeft && touchRight) || (touchTop && touchBottom);
+      const overflow = !fullFrame && ((touchLeft && touchRight) || (touchTop && touchBottom));
       const sharp = aiLiveCamSharpness(rawData, pw, ph, box);
       state.sharpMax = Math.max(state.sharpMax * 0.97, sharp);
+      state.sharpHist.push(sharp);
+      if (state.sharpHist.length > 4) state.sharpHist.shift();
       const entry = { cx: box.x + box.width / 2, cy: box.y + box.height / 2, w: box.width, h: box.height };
       state.history.push(entry);
       if (state.history.length > 4) state.history.shift();
-      let stable = state.history.length === 4;
-      if (stable) {
-        for (const past of state.history) {
-          if (Math.abs(past.cx - entry.cx) > pw * 0.025 || Math.abs(past.cy - entry.cy) > ph * 0.025
-            || Math.abs(past.w - entry.w) > pw * 0.035 || Math.abs(past.h - entry.h) > ph * 0.035) { stable = false; break; }
+      let stable;
+      if (fullFrame) {
+        state.fullFrameTicks++;
+        stable = state.sharpHist.length === 4;
+        if (stable) {
+          for (let i = 1; i < state.sharpHist.length; i++) {
+            const previous = state.sharpHist[i - 1], current = state.sharpHist[i];
+            if (Math.abs(previous - current) > Math.max(previous, current) * 0.15) { stable = false; break; }
+          }
+        }
+      } else {
+        state.fullFrameTicks = 0;
+        stable = state.history.length === 4;
+        if (stable) {
+          for (const past of state.history) {
+            if (Math.abs(past.cx - entry.cx) > pw * 0.025 || Math.abs(past.cy - entry.cy) > ph * 0.025
+              || Math.abs(past.w - entry.w) > pw * 0.035 || Math.abs(past.h - entry.h) > ph * 0.035) { stable = false; break; }
+          }
         }
       }
       const sharpOk = state.sharpMax > 0 && sharp >= state.sharpMax * 0.85;
-      // v151: גלישה מהפריים היא רמז בלבד — מסך האישור ודף הממצאים הם
-      // רשת הביטחון. יציבות ממושכת (~2ש) עוקפת גם את שער הפוקוס, כך
-      // שההדק לעולם אינו נתקע: תעודה יציבה = ירייה תוך שתי שניות לכל היותר.
-      if (areaFraction < 0.12) { status = 'קרב את המצלמה לתעודה'; state.stableTicks = 0; }
-      else if (!stable) {
-        status = overflow ? 'אם חסר חלק מהתעודה — התרחק מעט' : 'תעודה זוהתה — החזק יציב…';
+      const fullFrameTimeout = fullFrame && state.fullFrameTicks >= 12;
+      if (!fullFrame && areaFraction < 0.12) { status = 'קרב את המצלמה לתעודה'; state.stableTicks = 0; }
+      else if (!stable && !fullFrameTimeout) {
+        status = fullFrame ? 'קרוב וממלא — החזק יציב…' : (overflow ? 'אם חסר חלק מהתעודה — התרחק מעט' : 'תעודה זוהתה — החזק יציב…');
         state.stableTicks = 0;
       } else {
         state.stableTicks++;
-        if (sharpOk || state.stableTicks >= 8) conditionsMet = true;
+        if (sharpOk || state.stableTicks >= 8 || fullFrameTimeout) conditionsMet = true;
         else status = 'ממתין לפוקוס…';
       }
     } else {
       state.history.length = 0;
+      state.sharpHist.length = 0;
       state.stableTicks = 0;
+      state.fullFrameTicks = 0;
     }
     if (conditionsMet) {
       state.holdCount++;
@@ -5999,7 +6022,7 @@ function aiRotateBlobClockwise(bitmap) {
       ctx.translate(canvas.width, 0);
       ctx.rotate(Math.PI / 2);
       ctx.drawImage(bitmap, 0, 0);
-      canvas.toBlob((rotated) => resolve(rotated), 'image/jpeg', 0.92);
+      canvas.toBlob((rotated) => resolve(rotated), 'image/jpeg', 0.97); // v152: ביניים כמעט חסר-אובדן
     } catch (rotateError) { resolve(null); }
   });
 }
