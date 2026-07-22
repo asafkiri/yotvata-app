@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v150 הדק מכויל</title>
+    <title>הזמנות יטבתה - v151 הדק משוחרר</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v150 הדק מכויל</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v151 הדק משוחרר</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5627,7 +5627,7 @@ async function aiCompressInvoiceImage(file) {
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
   let cropRegion = null;
-  const cropInfo = { v: 150 }; // v150: דו"ח החיתוך שמוצג במסך אישור הכיוון
+  const cropInfo = { v: 151 }; // v151: דו"ח החיתוך שמוצג במסך אישור הכיוון
   try {
     const proxyScale = Math.min(1, 1500 / Math.max(sourceWidth, sourceHeight));
     const proxyWidth = Math.max(1, Math.round(sourceWidth * proxyScale));
@@ -5850,7 +5850,7 @@ async function aiOpenLiveCamera(docIndex) {
     aiLiveCamState = {
       stream, track, imageCapture: new ImageCapture(track), docIndex,
       timerId: null, paintId: null, probe: null, shooting: false,
-      lastBox: null, history: [], sharpMax: 0, holdCount: 0,
+      lastBox: null, history: [], sharpMax: 0, holdCount: 0, stableTicks: 0,
     };
     await video.play().catch(() => {});
     aiLiveCamSetStatus('כוון את התעודה לתוך הפריים');
@@ -5960,17 +5960,25 @@ function aiLiveCamAnalyzeFrame() {
         }
       }
       const sharpOk = state.sharpMax > 0 && sharp >= state.sharpMax * 0.85;
-      if (areaFraction < 0.12) status = 'קרב את המצלמה לתעודה';
-      else if (overflow) status = 'התרחק — התעודה גדולה מהפריים';
-      else if (!stable) status = 'תעודה זוהתה — החזק יציב…';
-      else if (!sharpOk) status = 'ממתין לפוקוס…';
-      else conditionsMet = true;
+      // v151: גלישה מהפריים היא רמז בלבד — מסך האישור ודף הממצאים הם
+      // רשת הביטחון. יציבות ממושכת (~2ש) עוקפת גם את שער הפוקוס, כך
+      // שההדק לעולם אינו נתקע: תעודה יציבה = ירייה תוך שתי שניות לכל היותר.
+      if (areaFraction < 0.12) { status = 'קרב את המצלמה לתעודה'; state.stableTicks = 0; }
+      else if (!stable) {
+        status = overflow ? 'אם חסר חלק מהתעודה — התרחק מעט' : 'תעודה זוהתה — החזק יציב…';
+        state.stableTicks = 0;
+      } else {
+        state.stableTicks++;
+        if (sharpOk || state.stableTicks >= 8) conditionsMet = true;
+        else status = 'ממתין לפוקוס…';
+      }
     } else {
       state.history.length = 0;
+      state.stableTicks = 0;
     }
     if (conditionsMet) {
       state.holdCount++;
-      if (state.holdCount >= 3) {
+      if (state.holdCount >= 2) {
         aiLiveCamSetStatus('יציב וחד — מצלם!');
         aiLiveCamTakePhoto();
         return;
