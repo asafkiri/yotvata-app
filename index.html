@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v158 חוסר יורד מיד</title>
+    <title>הזמנות יטבתה - v159 סריקה למבצע</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v158 חוסר יורד מיד</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v159 סריקה למבצע</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -3103,7 +3103,7 @@ function applyAutoZoom(stream) {
 }
 async function openScanner() {
   const m = $('scanModal'); m.classList.remove('hidden'); m.classList.add('flex');
-  const continuous = (scanPurpose === 'receiving' || scanPurpose === 'returns');
+  const continuous = (scanPurpose === 'receiving' || scanPurpose === 'returns' || scanPurpose === 'promo');
   const ov = $('scanOverlay'); if (ov) ov.classList.toggle('hidden', !continuous);
   const readyHint = continuous ? 'סרוק פריטים — לחץ ✕ לסיום' : 'כוון את הברקוד אל תוך המסגרת';
   setScanHint(continuous ? readyHint : 'מבקש גישה למצלמה...');
@@ -3187,7 +3187,7 @@ function onScanned(val) {
     closeScanner();
     return;
   }
-  if (scanPurpose === 'receiving' || scanPurpose === 'returns') {
+  if (scanPurpose === 'receiving' || scanPurpose === 'returns' || scanPurpose === 'promo') {
     const now = Date.now();
     if (val === lastScanCode && (now - lastScanTime) < 1400) {
       if (barcodeDetector && scanStream) scanTimer = setTimeout(scanTick, 250);
@@ -3195,7 +3195,7 @@ function onScanned(val) {
     }
     lastScanCode = val; lastScanTime = now;
     buzz(50);
-    if (scanPurpose === 'returns') handleReturnsScan(val); else handleReceivingScan(val);
+    if (scanPurpose === 'returns') handleReturnsScan(val); else if (scanPurpose === 'promo') handlePromoScan(val); else handleReceivingScan(val);
     if (barcodeDetector && scanStream) scanTimer = setTimeout(scanTick, 350);
     return;
   }
@@ -5629,7 +5629,7 @@ async function aiCompressInvoiceImage(file) {
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
   let cropRegion = null;
-  const cropInfo = { v: 158 }; // v158: דו"ח החיתוך שמוצג במסך אישור הכיוון
+  const cropInfo = { v: 159 }; // v159: דו"ח החיתוך שמוצג במסך אישור הכיוון
   try {
     const proxyScale = Math.min(1, 1500 / Math.max(sourceWidth, sourceHeight));
     const proxyWidth = Math.max(1, Math.round(sourceWidth * proxyScale));
@@ -11024,7 +11024,8 @@ function renderPromoEdit() {
     '</div>' +
     '<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm mb-24">' +
       '<div class="font-black text-slate-800 mb-2">מוצרי הסל <span id="peCount" class="text-rose-600">(' + ids.length + ')</span></div>' +
-      '<div class="relative mb-2"><i class="fa-solid fa-magnifying-glass absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i><input id="promoSearch" type="text" value="' + esc(promoSearch) + '" placeholder="חפש מוצר להוספה..." class="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 pr-8 pl-3 text-sm font-bold outline-none focus:border-rose-500"></div>' +
+      '<div class="flex gap-2 mb-2"><div class="relative flex-1"><i class="fa-solid fa-magnifying-glass absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i><input id="promoSearch" type="text" value="' + esc(promoSearch) + '" placeholder="חפש בשם או בספרות הברקוד..." class="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 pr-8 pl-3 text-sm font-bold outline-none focus:border-rose-500"></div>' +
+      '<button data-role="promo-scan" class="btn-tap shrink-0 w-11 rounded-xl font-black bg-rose-50 text-rose-700 border border-rose-200 flex items-center justify-center" title="סרוק ברקוד לסל המבצע"><i class="fa-solid fa-camera"></i></button></div>' +
       '<div id="promoProdList" class="space-y-1.5 max-h-72 overflow-y-auto"></div>' +
     '</div>' +
     '<div class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 p-3 flex gap-2 z-40">' +
@@ -11060,6 +11061,17 @@ function openPromoEdit(id) {
   promoEdit = { id: pr.id, name: pr.name || '', pct: pr.pct, start: pr.start || todayStr(), end: pr.end || '', minQty: pr.minQty || 1, minUnit: pr.minUnit || 'unit', cartonSize: pr.cartonSize || null, productIds: (pr.productIds || []).slice(), type: pr.type === 'monthEnd' ? 'monthEnd' : 'receipt' };
   promoSearch = '';
   setView('promoEdit');
+}
+// v159: סריקת ברקוד ישירות לסל המבצע — אותו סורק של הקליטה, במצב רציף:
+// סורקים מוצר אחר מוצר מהמדף, כל קריאה מוסיפה לסל, ו-✕ מסיים.
+function handlePromoScan(code) {
+  if (!promoEdit) { closeScanner(); return; }
+  const clean = (code || '').toString().trim();
+  const product = products.find(p => (p.barcode || '').trim() === clean);
+  if (!product) { showToast('❌ ברקוד לא נמצא במוצרים: ' + clean, null, null, 2200); return; }
+  if ((promoEdit.productIds || []).indexOf(product.id) !== -1) { showToast('כבר בסל: ' + (product.name || clean), null, null, 1600); return; }
+  togglePromoProduct(product.id);
+  showToast('➕ נוסף לסל: ' + (product.name || clean), null, null, 1600);
 }
 function togglePromoProduct(pid) {
   if (!promoEdit) return;
@@ -11730,6 +11742,7 @@ app.addEventListener('click', (e) => {
   else if (role === 'promo-open') openPromoEdit(id);
   else if (role === 'promo-info') openPromoPopup(id);
   else if (role === 'pe-toggle') togglePromoProduct(id);
+  else if (role === 'promo-scan') { scanPurpose = 'promo'; openScanner(); }
   else if (role === 'pe-unit-u') setPromoUnitMode('unit');
   else if (role === 'pe-unit-c') setPromoUnitMode('carton');
   else if (role === 'pe-type-receipt') setPromoType('receipt');
