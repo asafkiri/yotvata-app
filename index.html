@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v159 סריקה למבצע</title>
+    <title>הזמנות יטבתה - v160 צפצוף קופה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v159 סריקה למבצע</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v160 צפצוף קופה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -3057,6 +3057,39 @@ function showConfirm(title, msg, okText, cb) {
 }
 function hideConfirm() { const m = $('confirmModal'); m.classList.add('hidden'); m.classList.remove('flex'); confirmCb = null; }
 
+// ===== v160: צפצוף סריקה כמו בקופה =====
+// "טיט" קצר (2200Hz, ~90ms) שנוצר בקוד — בלי קובץ סאונד, עובד אופליין.
+// ה-AudioContext מתעורר בלחיצה שפותחת את הסורק (מדיניות הדפדפנים),
+// ומכאן כל קריאה מצפצפת. הרטט נשאר לצידו.
+let scanAudioCtx = null;
+function ensureScanAudio() {
+  try {
+    if (!scanAudioCtx) {
+      const AudioCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtor) return null;
+      scanAudioCtx = new AudioCtor();
+    }
+    if (scanAudioCtx.state === 'suspended') scanAudioCtx.resume().catch(() => {});
+    return scanAudioCtx;
+  } catch (audioError) { return null; }
+}
+function scanBeep() {
+  const ctx = ensureScanAudio();
+  if (!ctx) return;
+  try {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = 2200;
+    const now = ctx.currentTime;
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.5, now + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.1);
+  } catch (beepError) {}
+}
 // ===== סריקת ברקוד במצלמה =====
 let scanStream = null, scanTimer = null, barcodeDetector = null;
 let zxingReader = null, zxingActive = false;
@@ -3102,6 +3135,7 @@ function applyAutoZoom(stream) {
   } catch (e) {}
 }
 async function openScanner() {
+  ensureScanAudio();
   const m = $('scanModal'); m.classList.remove('hidden'); m.classList.add('flex');
   const continuous = (scanPurpose === 'receiving' || scanPurpose === 'returns' || scanPurpose === 'promo');
   const ov = $('scanOverlay'); if (ov) ov.classList.toggle('hidden', !continuous);
@@ -3179,9 +3213,9 @@ async function startZxing() {
 function onScanned(val) {
   val = (val || '').toString().trim();
   if (!val) { if (barcodeDetector && scanStream) scanTimer = setTimeout(scanTick, 250); return; }
-  if (scanPurpose === 'price') { buzz(40); handlePriceScan(val); return; }
+  if (scanPurpose === 'price') { scanBeep(); buzz(40); handlePriceScan(val); return; }
   if (scanPurpose === 'prodbarcode') {
-    buzz(40);
+    scanBeep(); buzz(40);
     const b = $('prod_barcode');
     if (b) { b.value = val; syncProductBarcodeDuplicate(true); }
     closeScanner();
@@ -3194,12 +3228,12 @@ function onScanned(val) {
       return;
     }
     lastScanCode = val; lastScanTime = now;
-    buzz(50);
+    scanBeep(); buzz(50);
     if (scanPurpose === 'returns') handleReturnsScan(val); else if (scanPurpose === 'promo') handlePromoScan(val); else handleReceivingScan(val);
     if (barcodeDetector && scanStream) scanTimer = setTimeout(scanTick, 350);
     return;
   }
-  buzz(40);
+  scanBeep(); buzz(40);
   const inp = $('promptInput'); if (inp) { inp.value = val; syncPromptBarcodeDuplicate(true); }
   closeScanner();
 }
@@ -5629,7 +5663,7 @@ async function aiCompressInvoiceImage(file) {
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
   let cropRegion = null;
-  const cropInfo = { v: 159 }; // v159: דו"ח החיתוך שמוצג במסך אישור הכיוון
+  const cropInfo = { v: 160 }; // v160: דו"ח החיתוך שמוצג במסך אישור הכיוון
   try {
     const proxyScale = Math.min(1, 1500 / Math.max(sourceWidth, sourceHeight));
     const proxyWidth = Math.max(1, Math.round(sourceWidth * proxyScale));
