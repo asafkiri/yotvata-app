@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v177 אבחון סריקה</title>
+    <title>הזמנות יטבתה - v178 סל שלם</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v177 אבחון סריקה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v178 סל שלם</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -524,6 +524,9 @@ let receiptNotes = [];           // פירוט סכומי תעודות הספק 
 let editingNotes = false;        // עריכת סכומי התעודות במסך פתוח
 let receiptOpened = false;       // האם נפתחה תעודה (שער לפני סריקה)
 let reconcileData = null;        // נתוני מסך השוואת תעודה
+// v178: האם באמת הוזנו נתוני נייר (הקלדה ידנית / החלת סריקת AI) על noteQty.
+// עד שזה קורה, noteQty הוא עותק של מה שנסרק — והכותרת חייבת לומר את זה.
+let reconcilePaperEntered = false;
 const AI_SCAN_WORKER_URL = 'https://yotvata-ai-scan-701905665767.europe-west1.run.app/scan';
 let aiScanDocuments = [];        // תמונות בזיכרון בלבד — אינן נשמרות בטיוטה או בענן
 let aiScanBusy = false;
@@ -4287,7 +4290,7 @@ function openReconcile() {
   receivingDepositLines().forEach(dep => {
     reconcileData.push({ productId: 'deposit-recv-' + dep.product.id, name: dep.name, barcode: '', received: dep.qty, noteQty: dep.qty, price: dep.unit, basePrice: dep.unit, promoPct: 0, promoOn: false, checked: true, isDeposit: true });
   });
-  detectiveOpen = false; noteCheckOpen = false; noteCheckAuto = false; noteCheckRows = []; noteCheckRes = null; reconcileCheckMode = false; noteCheckQtyMode = false; rcStep = null; noteCheckForceQty = false; ncPromoResult = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; manualSearchTerm = ''; manualAssigned = []; manualSearchOpen = false; manualPromoMarks = {};
+  detectiveOpen = false; noteCheckOpen = false; noteCheckAuto = false; noteCheckRows = []; noteCheckRes = null; reconcileCheckMode = false; noteCheckQtyMode = false; rcStep = null; noteCheckForceQty = false; ncPromoResult = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; manualSearchTerm = ''; manualAssigned = []; manualSearchOpen = false; manualPromoMarks = {}; reconcilePaperEntered = false;
   resetAiInvoiceScan();
   resetDetectiveQuestions();
   setView('reconcile');
@@ -7308,7 +7311,7 @@ function aiEvaluateInvoiceScan(payload) {
   const scan = payload && payload.scan;
   const errors = [], warnings = [], findings = [], promoCandidates = [], barcodeSuggestions = [], aggregates = new Map(), docSummaries = [], residuals = [], pendings = [], autoResolutions = [], depositRows = [];
   let unresolvedBarcodeRows = 0, unusableRows = 0;
-  if (!scan || !Array.isArray(scan.documents)) return { valid: false, totalVerified: false, unitsVerified: false, extractedTotal: 0, extractedUnits: 0, errors: ['השרת לא החזיר מסמכים תקינים'], warnings, findings, barcodeSuggestions, allRowsMapped: false, aggregates, docSummaries, residuals, autoResolutions, basketComplete: false };
+  if (!scan || !Array.isArray(scan.documents)) return { valid: false, totalVerified: false, unitsVerified: false, extractedTotal: 0, extractedUnits: 0, errors: ['השרת לא החזיר מסמכים תקינים'], warnings, findings, barcodeSuggestions, allRowsMapped: false, aggregates, docSummaries, residuals, autoResolutions, basketComplete: false, missingDocuments: 0 };
   if (!Number.isInteger(Number(payload.serviceVersion)) || Number(payload.serviceVersion) < AI_SCAN_MIN_SERVICE_VERSION) {
     errors.push('שירות הסריקה עדיין בגרסה ישנה שאינה מוכיחה את מקור הברקוד — יש להעלות קודם את server.js החדש');
   }
@@ -7319,9 +7322,27 @@ function aiEvaluateInvoiceScan(payload) {
     else returned.set(idx, doc);
   });
   let extractedTotalCents = 0, extractedUnits = 0, rowTotalCents = 0, verifiedDocumentDiscountCents = 0;
+  // v178: תעודה שלא חזר עבורה פענוח — או שחזרה בלי שורות מוצר — נספרת במפורש.
+  // בלי הספירה הזאת אין לה שורות "שלא שויכו" ואין לה שורות פגומות, ולכן
+  // basketComplete נשאר אמת והמערכת הכריזה "עודף" על כל מה שנסרק מהתעודה החסרה.
+  let missingDocuments = 0;
+  const documentFailureReason = index => {
+    const list = payload && Array.isArray(payload.perDocument) ? payload.perDocument : [];
+    const entry = list.find(item => item && Number(item.docIndex) === index && item.ok === false);
+    return entry && entry.error ? String(entry.error) : '';
+  };
   aiScanDocuments.forEach((inputDoc, index) => {
     const doc = returned.get(index);
-    if (!doc) { errors.push('לא התקבל פענוח עבור תעודה ' + (index + 1)); return; }
+    if (!doc) {
+      missingDocuments++;
+      const why = documentFailureReason(index);
+      errors.push('תעודה ' + (index + 1) + ': לא התקבל פענוח מה-AI' + (why ? ' — ' + why : '') + '. צלם את התעודה הזאת שוב — בלעדיה אי אפשר להשוות מול הנייר.');
+      return;
+    }
+    if (!Array.isArray(doc.rows) || !doc.rows.length) {
+      missingDocuments++;
+      errors.push('תעודה ' + (index + 1) + ': לא נקראה ממנה אף שורת מוצר — היא אינה משתתפת בהשוואה. צלם אותה שוב.');
+    }
     if (Number(doc.pageCount) !== inputDoc.pages.length) errors.push('תעודה ' + (index + 1) + ': מספר העמודים שפוענחו אינו זהה למספר התמונות שצולמו');
     const subtotalCents = aiMoneyCents(doc.subtotalExVat);
     const expectedCents = aiMoneyCents(inputDoc.amount);
@@ -7502,7 +7523,9 @@ function aiEvaluateInvoiceScan(payload) {
   // רק אז מותר להסיק "עודף" או "מבצע חסר", כי אלה מסקנות מהיעדר שורה.
   // "חוסר" (הנייר מבטיח יותר ממה שנסרק) הוא ראיה חיובית ומוצג גם על סל חלקי.
   const findingsReady = allRowsMapped && unusableRows === 0 && errors.length === 0;
-  const basketComplete = allRowsMapped && unusableRows === 0;
+  // v178: אין "סל שלם" בלי שכל התעודות חזרו עם שורות. "עודף" הוא מסקנה
+  // מהיעדר שורה בנייר — ותעודה שלא נקראה היא היעדר שורות שאינו ראיה לכלום.
+  const basketComplete = allRowsMapped && unusableRows === 0 && missingDocuments === 0 && returned.size === aiScanDocuments.length;
   if (aggregates.size > 0) {
     const day = todayStr();
     const paperBasketQty = pr => {
@@ -7564,7 +7587,7 @@ function aiEvaluateInvoiceScan(payload) {
   if (findingsReady && !closure.ok) errors.push(closure.reason || 'הממצאים אינם סוגרים את פער היחידות והסכום');
   const uniqueErrors = Array.from(new Set(errors));
   const uniqueWarnings = Array.from(new Set(warnings.concat(Array.isArray(scan.warnings) ? scan.warnings : [])));
-  return { valid: uniqueErrors.length === 0 && barcodeSuggestions.length === 0 && findingsReady && aggregates.size > 0 && totalVerified && unitsVerified && closure.ok, totalVerified, unitsVerified, closure, errors: uniqueErrors, warnings: uniqueWarnings, findings, barcodeSuggestions, allRowsMapped, findingsReady, basketComplete, residuals, autoResolutions, aggregates, docSummaries, extractedTotal: extractedTotalCents / 100, extractedUnits, rowTotal: rowTotalCents / 100, supplierDiscount, depositRows };
+  return { valid: uniqueErrors.length === 0 && barcodeSuggestions.length === 0 && findingsReady && aggregates.size > 0 && totalVerified && unitsVerified && closure.ok, totalVerified, unitsVerified, closure, errors: uniqueErrors, warnings: uniqueWarnings, findings, barcodeSuggestions, allRowsMapped, findingsReady, basketComplete, missingDocuments, residuals, autoResolutions, aggregates, docSummaries, extractedTotal: extractedTotalCents / 100, extractedUnits, rowTotal: rowTotalCents / 100, supplierDiscount, depositRows };
 }
 function aiRotationRetryDocumentIndexes(evaluation) {
   if (!evaluation || !Array.isArray(evaluation.docSummaries)) return [];
@@ -7861,7 +7884,7 @@ function aiScanDiagnosticsHtml(ev) {
   try {
     if (!ev) return '';
     const lines = [];
-    lines.push('אבחון v177 · סל שלם: ' + (ev.basketComplete ? 'כן' : 'לא') + ' · כל השורות שויכו: ' + (ev.allRowsMapped ? 'כן' : 'לא'));
+    lines.push('אבחון v178 · סל שלם: ' + (ev.basketComplete ? 'כן' : 'לא') + ' · כל השורות שויכו: ' + (ev.allRowsMapped ? 'כן' : 'לא') + ' · תעודות שלא נקראו: ' + (Number(ev.missingDocuments) || 0) + ' מתוך ' + aiScanDocuments.length);
     (Array.isArray(ev.docSummaries) ? ev.docSummaries : []).forEach(summary => lines.push('תעודה ' + (Number(summary.noteIndex) + 1) + ': שורות ' + summary.rows + ' · יח׳ ' + summary.units + ' · סכום שנקרא ₪' + fmtMoney(Number(summary.subtotal) || 0)));
     const paperProducts = ev.aggregates instanceof Map ? Array.from(ev.aggregates.values()) : [];
     lines.push('מוצרים שזוהו מהנייר: ' + paperProducts.length + ' · שורות במסך הקליטה: ' + ((reconcileData || []).length));
@@ -7885,7 +7908,7 @@ function aiActionableFindingsHtml(findings) {
     aiCompactFindingGroupHtml('surplus', 'עודפים', actionable) +
     aiCompactFindingGroupHtml('price', 'בעיות מחיר', actionable) +
     aiCompactFindingGroupHtml('promo_missing', 'מבצע קיים במערכת אך לא בתעודה', actionable) +
-  '</div></div>' + aiScanDiagnosticsHtml(aiScanEvaluation);
+  '</div></div>';
 }
 function aiInformationalFindingsHtml(findings) {
   const informational = (Array.isArray(findings) ? findings : []).filter(finding => !aiIsActionableFinding(finding));
@@ -8197,7 +8220,9 @@ function aiInvoiceCaptureHtml() {
         '<div class="mt-1 text-[10px] font-bold text-slate-500">תעודה ' + residual.docNumber + (residual.lineNumber != null ? ', שורה ' + residual.lineNumber : '') + ' · ' + htmlEscape(residual.reason || 'לא נקראה בוודאות') + ' · אינה נתבעת ואינה משתתפת בחישוב.</div>' +
         aiBarcodeSuggestionPreviewHtml(residual) + '</details>';
     }).join('');
-    const findingsHtml = (actionableFindings.length ? aiActionableFindingsHtml(actionableFindings) : '') + residualLines + unknownCards;
+    // v178: פאנל האבחון היה תלוי בקיום ממצא פעיל, ולכן נעלם בדיוק במצב
+    // שבו הוא הכי נחוץ (רק שאריות, או רק שגיאות). עכשיו הוא תמיד מוצג.
+    const findingsHtml = (actionableFindings.length ? aiActionableFindingsHtml(actionableFindings) : '') + residualLines + unknownCards + aiScanDiagnosticsHtml(ev);
     const allGood = ev.valid && !hasProblems;
     const statusHtml = allGood
       ? '<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-3 font-black text-emerald-800"><i class="fa-solid fa-circle-check ml-1"></i>הכול תואם — לא נמצאו חוסר, עודף או בעיית מחיר/מבצע.</div>'
@@ -8362,6 +8387,7 @@ function aiApplyInvoiceResult() {
   // v166: שורות פיקדון קודמות מוסרות — ייבנו מחדש מהפענוח הנוכחי.
   reconcileData = (reconcileData || []).filter(l => !l.isDeposit && String(l.productId || '').indexOf('deposit-') !== 0);
   reconcileData.forEach(l => { l.noteQty = 0; l.aiPaperPriceOnly = false; });
+  reconcilePaperEntered = true; // v178: מכאן noteQty באמת מגיע מהנייר
   ev.aggregates.forEach(a => {
     let line = (reconcileData || []).find(l => l.productId === a.product.id);
     const base = r2(Number(a.product.price) || 0), pr = promoForProduct(a.product.id), on = promoTriggered(pr, todayStr()), pct = on ? (Number(pr.pct) || 0) : 0;
@@ -8457,11 +8483,11 @@ function renderReconcile() {
     : '';
   const anchorsLine = receiptNoteUnits != null
     ? '<div class="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] font-bold text-slate-500 mt-1.5 pt-1.5 border-t border-slate-200/60">' +
-      '<span>יחידות מהנייר: ' + reconcileScannedUnits() + '/' + receiptNoteUnits + (uG ? ' <b class="text-rose-600">(' + (uG > 0 ? 'חסרות ' + uG : 'עודף ' + (-uG)) + ')</b>' : ' ✓') + '</span>' +
+      '<span>' + (reconcilePaperEntered ? 'יחידות מהנייר: ' : 'יחידות שנסרקו: ') + reconcileScannedUnits() + '/' + receiptNoteUnits + (uG ? ' <b class="text-rose-600">(' + (uG > 0 ? 'חסרות ' + uG : 'עודף ' + (-uG)) + ')</b>' : ' ✓') + '</span>' +
     '</div>' : '';
   const summary = '<div class="rounded-2xl p-4 shadow-sm mb-3 ' + (balanced ? (explained ? 'bg-amber-50 border border-amber-200' : 'bg-emerald-50 border border-emerald-200') : 'bg-amber-50 border border-amber-200') + '">' +
     '<div class="flex justify-between text-sm font-bold ' + (balanced && !explained ? 'text-emerald-900' : 'text-amber-900') + '"><span>תעודת הספק</span><span>₪' + fmtMoney(note || 0) + '</span></div>' +
-    '<div class="flex justify-between text-sm font-bold mt-1 ' + (balanced && !explained ? 'text-emerald-900' : 'text-amber-900') + '"><span>סכום הפריטים מהנייר</span><span>₪' + fmtMoney(reconcileNoteInc()) + '</span></div>' +
+    '<div class="flex justify-between text-sm font-bold mt-1 ' + (balanced && !explained ? 'text-emerald-900' : 'text-amber-900') + '"><span>' + (reconcilePaperEntered ? 'סכום הפריטים מהנייר' : 'סכום הפריטים שנסרקו') + '</span><span>₪' + fmtMoney(reconcileNoteInc()) + '</span></div>' +
     discountLine +
     '<div class="flex justify-between text-lg font-black mt-1.5 pt-1.5 border-t ' + (balanced ? (explained ? 'border-amber-200 text-amber-700' : 'border-emerald-200 text-emerald-700') : 'border-amber-200 text-rose-700') + '"><span>' + (balanced ? (explained ? 'הוסבר — הפרש פתוח' : 'מאוזן') : dir) + '</span><span>' + (balanced ? (explained ? '₪' + fmtMoney(r2(asgTop.sh - asgTop.ov > 0 ? asgTop.sh - asgTop.ov : asgTop.ov - asgTop.sh)) : '✓') : (hasMoneyGap ? '₪' + fmtMoney(absGap) : Math.abs(uG || 0) + ' יח׳')) + '</span></div>' +
     anchorsLine +
@@ -8772,6 +8798,7 @@ function ncPromoRowsHtml() {
   }).join('');
 }
 function applyNotePricesFromInputs() {
+  reconcilePaperEntered = true; // v178
   const box = $('ncRows');
   let changed = 0;
   ncPaperGroups().forEach((g, gi) => {
@@ -9294,6 +9321,7 @@ function refreshReconcileAddList(q) {
   box.innerHTML = list.map(p => addListRowHtml(p, 'rc-add-item', q)).join('') || '<div class="text-center text-slate-400 py-2 text-xs">לא נמצא</div>';
 }
 function reconcileAddItem(pid) {
+  reconcilePaperEntered = true; // v178
   if (!reconcileData || reconcileData.find(l => l.productId === pid)) return;
   const p = products.find(x => x.id === pid); if (!p) return;
   reconcileData.push({ productId: p.id, name: p.name, barcode: p.barcode || '', received: 0, noteQty: 1, price: r2(Number(p.price) || 0), checked: true });
@@ -9302,7 +9330,7 @@ function reconcileAddItem(pid) {
 function reconcileSetNoteLive(productId, val) {
   const l = (reconcileData || []).find(x => x.productId === productId); if (!l) return;
   let q = parseInt((val || '').toString().replace(/[^0-9]/g, ''), 10); if (isNaN(q) || q < 0) q = 0;
-  l.noteQty = q; refreshReconcileHeader();
+  l.noteQty = q; reconcilePaperEntered = true; refreshReconcileHeader();
 }
 function reconcileStepNote(productId, delta) {
   const l = (reconcileData || []).find(x => x.productId === productId); if (!l) return;
