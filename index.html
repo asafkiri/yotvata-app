@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v174 מומלץ ב-.90 תמיד</title>
+    <title>הזמנות יטבתה - v175 מונה יחידות</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v174 מומלץ ב-.90 תמיד</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v175 מונה יחידות</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -3737,17 +3737,17 @@ function receivingDepositRowsHtml() {
   if (!deposits.length) return '';
   return deposits.map(dep => '<div class="bg-indigo-50/70 border border-indigo-200 rounded-2xl px-4 py-2.5 flex items-center justify-between gap-2">' +
     '<div class="min-w-0"><div class="font-black text-indigo-900 text-sm truncate">' + htmlEscape(dep.name) + '</div>' +
-    '<div class="text-[11px] text-indigo-700/80 font-bold">' + dep.qty + ' × ₪' + fmtMoney(dep.unit) + ' · נגזר מהגדרת המוצר</div></div>' +
+    '<div class="text-[11px] text-indigo-700/80 font-bold">' + dep.qty + ' × ₪' + fmtMoney(dep.unit) + ' · נספר ביחידות ובסכום</div></div>' +
     '<div class="font-black text-indigo-900 whitespace-nowrap">₪' + fmtMoney(dep.total) + '</div>' +
   '</div>').join('');
 }
 function receiptTotals() {
   const day = todayStr();
-  let ex = 0;
-  receiptList.forEach(it => { const p = products.find(x => x.id === it.productId); ex += effectiveLineTotal(p, it.qty, day); });
-  receivingDepositLines().forEach(dep => { ex += dep.total; }); // v173
+  let ex = 0, productUnits = 0, depositUnits = 0;
+  receiptList.forEach(it => { const p = products.find(x => x.id === it.productId); ex += effectiveLineTotal(p, it.qty, day); productUnits += Number(it.qty) || 0; });
+  receivingDepositLines().forEach(dep => { ex += dep.total; depositUnits += dep.qty; }); // v173+v175
   ex = r2(ex);
-  return { ex, savings: receiptSavings() };
+  return { ex, savings: receiptSavings(), units: productUnits + depositUnits, depositUnits: depositUnits };
 }
 function returnTotals(r) {
   if (r && (r.totalIncVat != null || r.totalExVat != null)) {
@@ -4070,8 +4070,13 @@ function receiptTotalsHtml(t) {
       '<div class="flex justify-between font-bold text-slate-500 mt-0.5"><span>(צפי אחרי מרכזת)</span><span>(₪' + fmtMoney(r2(t.ex - meTotEx)) + ')</span></div>' +
     '</div>';
   }
+  // v175: מונה יחידות חי — כולל הפיקדון — מול העוגן שהוקלד מהנייר. ירוק
+  // כשסגור בדיוק; זו ההוכחה על המסך שהפיקדון נספר גם ביחידות.
+  const unitsMatched = receiptNoteUnits != null && t.units === receiptNoteUnits;
+  const unitsLine = '<div class="flex items-center justify-between text-xs font-black mt-1 ' + (receiptNoteUnits == null ? 'text-slate-500' : (unitsMatched ? 'text-emerald-700' : 'text-amber-600')) + '"><span>יחידות' + (t.depositUnits > 0 ? ' (כולל ' + t.depositUnits + ' פיקדון)' : '') + '</span><span>' + t.units + (receiptNoteUnits != null ? ' / ' + receiptNoteUnits : '') + ' יח׳' + (unitsMatched ? ' ✓' : '') + '</span></div>';
   return '<div id="rcTotals" class="mt-4 mb-24 bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">' +
     '<div class="flex items-center justify-between text-slate-900 font-black text-lg"><span>סה"כ (ללא מע"מ)</span><span id="rcEx">₪' + fmtMoney(t.ex) + '</span></div>' +
+    unitsLine +
     promoHtml +
     meHtml +
   '</div>';
@@ -5736,7 +5741,7 @@ async function aiCompressInvoiceImage(file) {
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
   let cropRegion = null;
-  const cropInfo = { v: 174 }; // v174: דו"ח החיתוך שמוצג במסך אישור הכיוון
+  const cropInfo = { v: 175 }; // v175: דו"ח החיתוך שמוצג במסך אישור הכיוון
   try {
     const proxyScale = Math.min(1, 1500 / Math.max(sourceWidth, sourceHeight));
     const proxyWidth = Math.max(1, Math.round(sourceWidth * proxyScale));
