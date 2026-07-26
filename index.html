@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v183 נטו הוא האמת</title>
+    <title>הזמנות יטבתה - v185 הכסף הוא השער</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v183 נטו הוא האמת</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v185 הכסף הוא השער</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -7067,7 +7067,11 @@ function aiResolveInvoiceBarcode(row) {
       }
       // מועמד יחיד שאינו עובר את הצלבת המחיר והכמות אינו "בחירה".
       // אין להציג כפתור אישור עוקף; יש לצלם מחדש או לעבור לבדיקה ידנית.
-      return { error: 'ההתאמה היחידה לפי השם לא עברה הצלבת מחיר, כמות וחשבון שורה — יש לצלם מחדש' };
+      // v184: הודעת מבוי סתום בלי סיבה הכריחה סבב אבחון שלם על כל שורה כזאת.
+      // הסיבה המדויקת מהוכחת השם/מחיר נכנסת להודעה ולשארית.
+      const proofReasonHe = { missing_candidate: 'לא נמצא מועמד', identity_not_unique: 'השם אינו מצביע על מוצר יחיד במאגר', weak_row: 'ביטחון הקריאה של השורה נמוך מדי, או שהכמות/מחיר הקטלוג חסרים', arithmetic_not_proven: 'חשבון השורה אינו נסגר מול הנתונים שנקראו', price_not_corroborated: 'המחיר שנקרא אינו מאשר את מחיר הקטלוג' };
+      const why = proofReasonHe[String(namePriceProof.reason || '')] || String(namePriceProof.reason || 'סיבה לא ידועה');
+      return { error: 'ההתאמה היחידה לפי השם לא אושרה — ' + why, proofReason: String(namePriceProof.reason || ''), proofDetail: namePriceProof };
     } else if (method === 'suggested_pattern') {
       if (!['full_pattern', 'suffix_pattern'].includes(readType)) return { error: 'סוג קריאת התבנית המוצעת אינו תקין' };
       const info = aiBarcodePatternInfo(observedPattern);
@@ -7563,11 +7567,47 @@ function aiEvaluateInvoiceScan(payload) {
     });
     pendingList = still;
   }
+  // ===== v185: רשת ביטחון — זהות באלימינציה, אחרי שהכסף כבר הוכח =====
+  // עד כאן כל בדיקה עבדה ברמת התא: מחיר מול ברוטו, ברוטו מול נטו, ברוטו מול
+  // קטלוג. מודל ראייה אינו מחזיר את אותו תא פעמיים באותה צורה, ולכן תנודה
+  // אחת בעמודה משנית חסמה משלוח שלם שהכסף בו מדויק. השער האמיתי הוא סגירת
+  // הכסף: כשסכומי כל המסמכים נסגרים לאגורה מול מה שהוקלד, הכסף של השורה
+  // שנותרה כבר יושב בתוך סיכום מאומת. אם קיימת בדיוק שורה אחת שנסרקה, עוד
+  // לא נתבעה על ידי שום שורת נייר, והכמות והסכום שלה זהים לאגורה — זו היא.
+  // זה אינו ניחוש: יחידוּת בכמות, יחידוּת בכסף, ואלימינציה מול כל השאר.
+  const netMoneyProven = (() => {
+    const expected = aiMoneyCents(receiptNoteTotal);
+    if (expected == null || extractedTotalCents !== expected) return false;
+    return (rowTotalCents - extractedTotalCents) === verifiedDocumentDiscountCents;
+  })();
+  if (netMoneyProven && pendingList.length) {
+    const stillOpen = [];
+    pendingList.forEach(pending => {
+      if (pending.qty == null || pending.cents == null || pending.arithmeticError) { stillOpen.push(pending); return; }
+      const options = (reconcileData || []).filter(line => {
+        if (!line || line.isDeposit || String(line.productId || '').indexOf('deposit-') === 0) return false;
+        if (aggregates.has(line.productId)) return false;
+        if ((Number(line.received) || 0) !== pending.qty) return false;
+        return aiMoneyCents(lineTotalFromUnit(line.price, Number(line.received) || 0)) === pending.cents;
+      });
+      const product = options.length === 1 ? products.find(candidate => String(candidate.id) === String(options[0].productId)) : null;
+      if (!product) { stillOpen.push(pending); return; }
+      const old = aggregates.get(product.id) || { product, qty: 0, totalCents: 0, rows: [], promotionTexts: [], priceVariants: new Set() };
+      old.qty += pending.qty; old.totalCents += pending.cents;
+      old.rows.push({ document: pending.docIndex + 1, page: pending.row.sourcePage, line: pending.row.lineNumber, confidence: pending.rowConfidence, barcodeObserved: 'לא נקרא', barcodeMatchMethod: 'net_proven_elimination', identityEvidence: { auto: true, reason: 'הכסף נסגר לאגורה; הכמות והסכום תואמים לשורה יחידה שלא נתבעה' } });
+      if (pending.qty > 0) old.priceVariants.add(r2(pending.cents / 100 / pending.qty));
+      if (pending.row.promotionText) old.promotionTexts.push(String(pending.row.promotionText));
+      aggregates.set(product.id, old);
+      autoResolutions.push({ documentIndex: pending.docIndex, rowIndex: pending.rowIndex, lineNumber: pending.rowNumber, sourcePage: Number(pending.row.sourcePage), productId: product.id, productName: String(product.name || '').slice(0, 160), barcode: normalizeBarcode(product.barcode || ''), method: 'net_proven_elimination', printedDescription: String(pending.row.description || '').slice(0, 160), observed: null, quantity: pending.qty, lineTotalExVat: r2(pending.cents / 100), rowConfidence: pending.rowConfidence });
+      warnings.push(product.name + ': שויך באלימינציה — סכומי התעודות נסגרו לאגורה, והכמות (' + pending.qty + ') והסכום (₪' + fmtMoney(pending.cents / 100) + ') תואמים לשורה יחידה אחת שלא נתבעה');
+    });
+    pendingList = stillOpen;
+  }
   pendingList.forEach(pending => {
     unresolvedBarcodeRows++;
     errors.push(pending.rowPrefix + (pending.resolution.error || 'הברקוד לא זוהה במאגר'));
     if (pending.qty != null && pending.cents != null && !pending.arithmeticError) {
-      residuals.push({ docNumber: pending.docIndex + 1, documentIndex: pending.docIndex, lineNumber: pending.rowNumber, sourcePage: Number(pending.row.sourcePage), rowRegion: pending.row.rowRegion || null, description: String(pending.row.description || '').trim(), qty: pending.qty, amount: pending.cents / 100, reason: pending.fallbackReason || pending.resolution.error || 'לא זוהה מוצר מתאים במאגר' });
+      residuals.push({ docNumber: pending.docIndex + 1, documentIndex: pending.docIndex, lineNumber: pending.rowNumber, sourcePage: Number(pending.row.sourcePage), rowRegion: pending.row.rowRegion || null, description: String(pending.row.description || '').trim(), qty: pending.qty, amount: pending.cents / 100, reason: pending.fallbackReason || pending.resolution.error || 'לא זוהה מוצר מתאים במאגר', raw: { unit: pending.row.unitPriceExVat, gross: pending.row.grossLineTotalExVat, discount: pending.row.lineDiscountExVat, total: pending.row.lineTotalExVat, conf: pending.row.confidence } });
     }
     const builtSuggestion = aiBuildPendingSuggestion(pending);
     if (builtSuggestion) barcodeSuggestions.push(builtSuggestion);
@@ -8019,7 +8059,7 @@ function aiScanDiagnosticsHtml(ev) {
   try {
     if (!ev) return '';
     const lines = [];
-    lines.push('אבחון v183 · סל שלם: ' + (ev.basketComplete ? 'כן' : 'לא') + ' · כל השורות שויכו: ' + (ev.allRowsMapped ? 'כן' : 'לא') + ' · תעודות שלא נקראו: ' + (Number(ev.missingDocuments) || 0) + ' מתוך ' + aiScanDocuments.length);
+    lines.push('אבחון v185 · סל שלם: ' + (ev.basketComplete ? 'כן' : 'לא') + ' · כל השורות שויכו: ' + (ev.allRowsMapped ? 'כן' : 'לא') + ' · תעודות שלא נקראו: ' + (Number(ev.missingDocuments) || 0) + ' מתוך ' + aiScanDocuments.length);
     (Array.isArray(ev.docSummaries) ? ev.docSummaries : []).forEach(summary => lines.push('תעודה ' + (Number(summary.noteIndex) + 1) + ': שורות ' + summary.rows + ' · יח׳ ' + summary.units + ' · סכום שנקרא ₪' + fmtMoney(Number(summary.subtotal) || 0) + ' · סכום השורות ₪' + fmtMoney(Number(summary.rowsSum) || 0)));
     // v180: המספרים הגולמיים כפי שה-AI קרא אותם, לכל שורה תקועה. בלי זה
     // כשל חשבון הוא ניחוש מרחוק; עם זה צילום מסך אחד מספיק כדי לראות איזה
@@ -8029,7 +8069,9 @@ function aiScanDiagnosticsHtml(ev) {
       const show = v => (v == null || v === '' ? '—' : String(v));
       lines.push('שורה תקועה · תעודה ' + r.docNumber + ' שורה ' + r.lineNumber + ' · יח ' + show(r.qty) +
         ' · מחיר ' + show(r.raw.unit) + ' · ברוטו ' + show(r.raw.gross) +
-        ' · הנחה ' + show(r.raw.discount) + ' · נטו ' + show(r.raw.total));
+        ' · הנחה ' + show(r.raw.discount) + ' · נטו ' + show(r.raw.total) +
+        (r.raw.conf == null ? '' : ' · ביטחון ' + show(r.raw.conf)) +
+        ' · ' + String(r.reason || '').slice(0, 70));
     });
     const paperProducts = ev.aggregates instanceof Map ? Array.from(ev.aggregates.values()) : [];
     lines.push('מוצרים שזוהו מהנייר: ' + paperProducts.length + ' · שורות במסך הקליטה: ' + ((reconcileData || []).length));
