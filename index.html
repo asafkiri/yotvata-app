@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v173 פיקדון בקליטה</title>
+    <title>הזמנות יטבתה - v174 מומלץ ב-.90 תמיד</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v173 פיקדון בקליטה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v174 מומלץ ב-.90 תמיד</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -4167,9 +4167,9 @@ function updateNprRecHint() {
   if (!c) { h.classList.add('hidden'); return; }
   const cost = parseFloat((($('npr_price') || {}).value || '').replace(',', '.'));
   if (!(cost > 0)) { h.textContent = 'קטגוריה: ' + c.name + ' (' + c.pct + '%) — הקלד עלות לקבלת מחיר מומלץ'; h.classList.remove('hidden'); return; }
-  const rec = recommendedPrice(cost, c.pct);
   const recDeposit = depositIncFor(p);
-  h.textContent = '💡 מומלץ למכירה: ₪' + formatRecommendedPrice(rec == null ? rec : r2(rec + recDeposit)) + (recDeposit ? ' (כולל ₪' + fmtMoney(recDeposit) + ' פיקדון)' : '') + ' (' + c.name + ' · ' + c.pct + '%)';
+  const rec = recommendedPrice(cost, c.pct, recDeposit);
+  h.textContent = '💡 מומלץ למכירה: ₪' + formatRecommendedPrice(rec) + (recDeposit ? ' (כולל ₪' + fmtMoney(recDeposit) + ' פיקדון)' : '') + ' (' + c.name + ' · ' + c.pct + '%)';
   h.classList.remove('hidden');
 }
 function hideNewProduct() {
@@ -5736,7 +5736,7 @@ async function aiCompressInvoiceImage(file) {
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
   let cropRegion = null;
-  const cropInfo = { v: 173 }; // v173: דו"ח החיתוך שמוצג במסך אישור הכיוון
+  const cropInfo = { v: 174 }; // v174: דו"ח החיתוך שמוצג במסך אישור הכיוון
   try {
     const proxyScale = Math.min(1, 1500 / Math.max(sourceWidth, sourceHeight));
     const proxyWidth = Math.max(1, Math.round(sourceWidth * proxyScale));
@@ -10237,9 +10237,12 @@ let pricingCatsTimer = null, pricingCatsOpen = false;
 // v168: פיקדון ליחידה כולל מע"מ — מתווסף מעל ההמלצה. המרווח מחושב על
 // המוצר בלבד: הפיקדון הוא כסף שעובר דרכנו (ללקוח ובחזרה), לא רווח.
 function depositIncFor(p) { const dep = Number(p && p.deposit) || 0; return dep > 0 ? r2(dep * 1.18) : 0; }
-function recommendedPrice(cost, pct) {
+function recommendedPrice(cost, pct, extraInc) {
+  // v174: extraInc (פיקדון כולל מע"מ) מצטרף לפני העיגול — כך ההמלצה
+  // הסופית תמיד מכבדת את מצב העיגול (.90) על המספר שהלקוח משלם,
+  // והמרווח עדיין מחושב על המוצר בלבד.
   if (!(cost > 0)) return null;
-  const raw = r2(cost * 1.18 * (1 + (Number(pct) || 0) / 100));
+  const raw = r2(cost * 1.18 * (1 + (Number(pct) || 0) / 100) + (Number(extraInc) || 0));
   const rawCents = Math.round(raw * 100);
   if (pricingRoundingMode === 'exact') {
     const wholeTenths = Math.floor(rawCents / 10);
@@ -10263,8 +10266,7 @@ function pricingCatOf(p) {
 function recForProduct(p) {
   const c = pricingCatOf(p);
   if (!c || (Number(c.pct) || 0) === 0 || p.price == null || p.price === '') return null;
-  const base = recommendedPrice(Number(p.price) || 0, c.pct);
-  return base == null ? null : r2(base + depositIncFor(p));
+  return recommendedPrice(Number(p.price) || 0, c.pct, depositIncFor(p));
 }
 function savePricingCats() {
   if (!db) return;
@@ -10373,10 +10375,10 @@ function updateProdRecHint() {
   if (!(cost > 0)) {
     out.textContent = 'הזן מחיר קנייה לקבלת מחיר מכירה מומלץ'; out.classList.remove('hidden'); return;
   }
-  const rec = recommendedPrice(cost, cat.pct);
   const depositRaw = parseFloat((($('prod_deposit') || {}).value || '').toString().replace(',', '.'));
   const editorDeposit = depositRaw > 0 ? r2(depositRaw * 1.18) : 0;
-  out.textContent = '💡 מומלץ למכירה: ₪' + formatRecommendedPrice(rec == null ? rec : r2(rec + editorDeposit)) + (editorDeposit ? ' (כולל ₪' + fmtMoney(editorDeposit) + ' פיקדון)' : '') + ' (' + cat.name + ' · ' + cat.pct + '%)';
+  const rec = recommendedPrice(cost, cat.pct, editorDeposit);
+  out.textContent = '💡 מומלץ למכירה: ₪' + formatRecommendedPrice(rec) + (editorDeposit ? ' (כולל ₪' + fmtMoney(editorDeposit) + ' פיקדון)' : '') + ' (' + cat.name + ' · ' + cat.pct + '%)';
   out.classList.remove('hidden');
 }
 function fillBillingPackOptions(selectedId, exceptId) {
@@ -10724,8 +10726,7 @@ function shelfRecommendedPrice(p) {
   if (!(cost > 0)) return null;
   const category = pricingCatOf(p);
   if (category) return recForProduct(p);
-  const base = recommendedPrice(cost, Number(signMarginPct) || 0);
-  return base == null ? null : r2(base + depositIncFor(p));
+  return recommendedPrice(cost, Number(signMarginPct) || 0, depositIncFor(p));
 }
 function signRecommend(s) {
   const pr = promos.find(p => p.id === s.promoId);
