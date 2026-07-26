@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v175 מונה יחידות</title>
+    <title>הזמנות יטבתה - v176 פיקדון בכסף בלבד</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v175 מונה יחידות</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v176 פיקדון בכסף בלבד</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -3722,7 +3722,7 @@ function receiptMonthEndStatuses() {
 }
 // v173: שורות פיקדון בקליטה — נגזרות מהגדרת המוצר, בכמות שנקלטה.
 // אין בקבוק פיקדון פיזי לסרוק: השורה נוצרת ומתעדכנת לבד לפי המוצרים
-// שברשימה, נספרת בסכום וביחידות (בנייר הפיקדון כלול בשניהם).
+// שברשימה, ונספרת בסכום בלבד — בתעודה סכום היחידות אינו כולל פיקדון.
 function receivingDepositLines() {
   const out = [];
   (receiptList || []).forEach(it => {
@@ -3737,7 +3737,7 @@ function receivingDepositRowsHtml() {
   if (!deposits.length) return '';
   return deposits.map(dep => '<div class="bg-indigo-50/70 border border-indigo-200 rounded-2xl px-4 py-2.5 flex items-center justify-between gap-2">' +
     '<div class="min-w-0"><div class="font-black text-indigo-900 text-sm truncate">' + htmlEscape(dep.name) + '</div>' +
-    '<div class="text-[11px] text-indigo-700/80 font-bold">' + dep.qty + ' × ₪' + fmtMoney(dep.unit) + ' · נספר ביחידות ובסכום</div></div>' +
+    '<div class="text-[11px] text-indigo-700/80 font-bold">' + dep.qty + ' × ₪' + fmtMoney(dep.unit) + ' · נספר בסכום בלבד, כמו בתעודה</div></div>' +
     '<div class="font-black text-indigo-900 whitespace-nowrap">₪' + fmtMoney(dep.total) + '</div>' +
   '</div>').join('');
 }
@@ -3747,7 +3747,8 @@ function receiptTotals() {
   receiptList.forEach(it => { const p = products.find(x => x.id === it.productId); ex += effectiveLineTotal(p, it.qty, day); productUnits += Number(it.qty) || 0; });
   receivingDepositLines().forEach(dep => { ex += dep.total; depositUnits += dep.qty; }); // v173+v175
   ex = r2(ex);
-  return { ex, savings: receiptSavings(), units: productUnits + depositUnits, depositUnits: depositUnits };
+  // v176: כמו בתעודה — הפיקדון בכסף, לא בספירת היחידות.
+  return { ex, savings: receiptSavings(), units: productUnits, depositUnits: depositUnits };
 }
 function returnTotals(r) {
   if (r && (r.totalIncVat != null || r.totalExVat != null)) {
@@ -4073,7 +4074,7 @@ function receiptTotalsHtml(t) {
   // v175: מונה יחידות חי — כולל הפיקדון — מול העוגן שהוקלד מהנייר. ירוק
   // כשסגור בדיוק; זו ההוכחה על המסך שהפיקדון נספר גם ביחידות.
   const unitsMatched = receiptNoteUnits != null && t.units === receiptNoteUnits;
-  const unitsLine = '<div class="flex items-center justify-between text-xs font-black mt-1 ' + (receiptNoteUnits == null ? 'text-slate-500' : (unitsMatched ? 'text-emerald-700' : 'text-amber-600')) + '"><span>יחידות' + (t.depositUnits > 0 ? ' (כולל ' + t.depositUnits + ' פיקדון)' : '') + '</span><span>' + t.units + (receiptNoteUnits != null ? ' / ' + receiptNoteUnits : '') + ' יח׳' + (unitsMatched ? ' ✓' : '') + '</span></div>';
+  const unitsLine = '<div class="flex items-center justify-between text-xs font-black mt-1 ' + (receiptNoteUnits == null ? 'text-slate-500' : (unitsMatched ? 'text-emerald-700' : 'text-amber-600')) + '"><span>יחידות' + (t.depositUnits > 0 ? ' (פיקדון בכסף בלבד, כמו בתעודה)' : '') + '</span><span>' + t.units + (receiptNoteUnits != null ? ' / ' + receiptNoteUnits : '') + ' יח׳' + (unitsMatched ? ' ✓' : '') + '</span></div>';
   return '<div id="rcTotals" class="mt-4 mb-24 bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">' +
     '<div class="flex items-center justify-between text-slate-900 font-black text-lg"><span>סה"כ (ללא מע"מ)</span><span id="rcEx">₪' + fmtMoney(t.ex) + '</span></div>' +
     unitsLine +
@@ -4225,7 +4226,7 @@ function finishReceipt() {
     lines.push({ productId: 'deposit-recv-' + dep.product.id, name: dep.name, barcode: '', qty: dep.qty, unitPrice: dep.unit, basePrice: dep.unit, lineTotal: dep.total, promoPct: 0, isDeposit: true });
   });
   const ex = r2(lines.reduce((a, l) => a + l.lineTotal, 0));
-  const scannedUnits = lines.reduce((a, l) => a + (Number(l.qty) || 0), 0);
+  const scannedUnits = lines.reduce((a, l) => a + (l.isDeposit ? 0 : (Number(l.qty) || 0)), 0); // v176: פיקדון בכסף בלבד
   if (!receiptDupConfirmed) {
     const dup = receipts.find(r => r.date === day && (Number(r.count) || 0) === lines.length && Math.abs((Number(r.totalExVat) || 0) - ex) <= 1);
     if (dup) { showConfirm('אולי כפילות', 'כבר קיימת תעודה מ-' + dDisp(day) + ' בסכום דומה (₪' + fmtMoney(ex) + ' · ' + lines.length + ' מוצרים). ייתכן שכבר קלטת אותה — לשמור בכל זאת?', 'כן, שמור בכל זאת', function () { receiptDupConfirmed = true; finishReceipt(); }); return; }
@@ -4293,7 +4294,7 @@ function openReconcile() {
 }
 function reconcileReceivedInc() { let ex = 0; (reconcileData || []).forEach(l => ex += lineTotalFromUnit(l.price, l.received)); return r2(ex); }
 function reconcileNoteInc() { let ex = 0; (reconcileData || []).forEach(l => ex += lineTotalFromUnit(l.price, l.noteQty)); return r2(ex); }
-function reconcileScannedUnits() { let u = 0; (reconcileData || []).forEach(l => u += (Number(l.noteQty) || 0)); return u; }
+function reconcileScannedUnits() { let u = 0; (reconcileData || []).forEach(l => { if (!l.isDeposit) u += (Number(l.noteQty) || 0); }); return u; } // v176: פיקדון בכסף בלבד
 function reconcileUnitsGap() { if (receiptNoteUnits == null) return null; return receiptNoteUnits - reconcileScannedUnits(); }
 function reconcileGap() { return r2((receiptNoteTotal || 0) + (Number(reconcileSupplierDiscount) || 0) - reconcileNoteInc()); }
 function reconcileUnitsBalanced() { const g = reconcileUnitsGap(); return g == null || g === 0; }
@@ -5741,7 +5742,7 @@ async function aiCompressInvoiceImage(file) {
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
   let cropRegion = null;
-  const cropInfo = { v: 175 }; // v175: דו"ח החיתוך שמוצג במסך אישור הכיוון
+  const cropInfo = { v: 176 }; // v176: דו"ח החיתוך שמוצג במסך אישור הכיוון
   try {
     const proxyScale = Math.min(1, 1500 / Math.max(sourceWidth, sourceHeight));
     const proxyWidth = Math.max(1, Math.round(sourceWidth * proxyScale));
@@ -7343,11 +7344,14 @@ function aiEvaluateInvoiceScan(payload) {
     (Array.isArray(doc.rows) ? doc.rows : []).forEach((row, rowIndex) => {
       const rowNumber = row.lineNumber || (rowIndex + 1);
       const rowPrefix = 'תעודה ' + (index + 1) + ', שורה ' + rowNumber + ': ';
+      // v176 (תיקון לפי התעודה האמיתית): שורת פיקדון נספרת בכסף בלבד —
+      // סכום היחידות המודפס בתחתית התעודה אינו כולל אותה.
+      const depositNameRow = /פ.?קדון/.test(String(row.description || ''));
       const qtyRaw = row.quantity == null || row.quantity === '' ? NaN : Number(row.quantity);
       const qty = isFinite(qtyRaw) && qtyRaw >= 0 && Math.abs(qtyRaw - Math.round(qtyRaw)) < 0.001 ? Math.round(qtyRaw) : null;
       let rowUnusableReason = '';
       if (qty == null) { errors.push(rowPrefix + 'הכמות לא נקראה בוודאות'); unusableRows++; rowUnusableReason = 'הכמות לא נקראה בוודאות'; }
-      else { docUnits += qty; extractedUnits += qty; }
+      else if (!depositNameRow) { docUnits += qty; extractedUnits += qty; }
       const total = aiLineTotal(row, qty);
       const cents = total == null || total < 0 ? null : aiMoneyCents(total);
       if (cents == null) { errors.push(rowPrefix + 'סכום השורה לא נקרא'); unusableRows++; if (!rowUnusableReason) rowUnusableReason = 'סכום השורה לא נקרא'; }
