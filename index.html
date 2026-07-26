@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v190 פיקדון בבלש</title>
+    <title>הזמנות יטבתה - v191 ניקוי הצריבה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v190 פיקדון בבלש</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v191 ניקוי הצריבה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -10305,7 +10305,12 @@ function receiptDiscrepancyInfo(rc, opts) {
   const assignedPaperUnits = paperUnits == null ? null : (rc.items || []).reduce((a, l) => a + (l.isDeposit || String(l.productId || '').indexOf('deposit-') === 0 ? 0 : (l.noteQty != null ? (Number(l.noteQty) || 0) : (Number(l.qty) || 0))), 0);
   const derivedUnitsGap = paperUnits == null ? 0 : paperUnits - assignedPaperUnits;
   const storedUnitsGap = Number(rc && rc.unresolvedUnitsGap) || 0;
-  const unresolvedUnitsGap = storedUnitsGap || derivedUnitsGap;
+  // v191: הבאג של v189 לא רק הוצג — הוא נשמר. "תקן הפרשים" כותב את
+  // di.unresolvedUnitsGap חזרה לתעודה, ולכן ה-12 המזויפות של הפיקדון
+  // נצרבו בשדה השמור, ו-storedUnitsGap || derivedUnitsGap נתן להן לעקוף
+  // את תיקון v190 לנצח. הסמנטיקה הנכונה: כשעוגן היחידות שלם, הנגזרת
+  // (המתוקנת) היא האמת; השדה השמור הוא גיבוי רק לתעודות בלי עוגן.
+  const unresolvedUnitsGap = paperUnits == null ? storedUnitsGap : derivedUnitsGap;
   const amountGapCents = Math.abs(Math.round(unresolvedAmountGap * 100));
   const amountToleranceCents = paperUnits != null && unresolvedUnitsGap === 0 ? RECEIPT_ROUNDING_TOLERANCE_CENTS : 0;
   const amountGapOpen = amountGapCents > amountToleranceCents;
