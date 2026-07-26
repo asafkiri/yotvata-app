@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v182 פיקדון נגזר</title>
+    <title>הזמנות יטבתה - v183 נטו הוא האמת</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v182 פיקדון נגזר</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v183 נטו הוא האמת</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -6543,10 +6543,26 @@ function aiRowArithmeticError(row, qty) {
   const unitPrintedInCents = unitRaw != null && isFinite(unitRaw) && Math.abs((unitRaw * 100) - Math.round(unitRaw * 100)) < 0.000001;
   const unitToleranceCents = unitPrintedInCents ? Math.max(1, Math.ceil(Math.abs(Number(qty) || 0) * 0.5 + 0.5)) : 1;
   // בודקים רק מספרים שה-AI טוען שקרא בפועל. ערך null אינו מושלם מהקטלוג.
-  if (unitQtyCents != null && gross != null && Math.abs(gross - unitQtyCents) > unitToleranceCents) return 'מחיר × כמות אינו תואם לסכום הברוטו בשורה';
+  // v183: אי-התאמה בין מחיר×כמות לברוטו היא סתירה בין שני תאים שנקראו,
+  // ואף אחד מהם אינו הכסף של השורה. כשסכום השורה נטו נקרא — הוא מקור האמת
+  // (כך כתוב גם בהנחיה לשרת), והשער הקשה נשאר ברמת המסמך: סכום כל השורות
+  // חייב לסגור לאגורה על סכום התעודה. בלי זה קריאה שגויה של ספרה אחת
+  // בעמודת הברוטו חסמה תעודה שלמה שהכסף בה נכון.
+  if (unitQtyCents != null && gross != null && Math.abs(gross - unitQtyCents) > unitToleranceCents && total == null) return 'מחיר × כמות אינו תואם לסכום הברוטו בשורה';
   if (gross != null && discount != null && total != null && Math.abs((gross - discount) - total) > 1) return 'סכום הברוטו פחות הנחת השורה אינו תואם לסכום השורה';
   if (gross == null && unitQtyCents != null && discount != null && total != null && Math.abs((unitQtyCents - discount) - total) > unitToleranceCents) return 'מחיר × כמות פחות ההנחה אינו תואם לסכום השורה';
   return '';
+}
+function aiRowGrossCrossCheckNote(row, qty) {
+  const unitRaw = row.unitPriceExVat == null || row.unitPriceExVat === '' ? null : Number(row.unitPriceExVat);
+  const unitQtyCents = unitRaw != null && isFinite(unitRaw) ? aiMoneyCents(unitRaw * qty) : null;
+  const gross = aiMoneyCents(row.grossLineTotalExVat);
+  const total = aiMoneyCents(row.lineTotalExVat);
+  if (unitQtyCents == null || gross == null || total == null) return '';
+  const unitPrintedInCents = Math.abs((unitRaw * 100) - Math.round(unitRaw * 100)) < 0.000001;
+  const tol = unitPrintedInCents ? Math.max(1, Math.ceil(Math.abs(Number(qty) || 0) * 0.5 + 0.5)) : 1;
+  if (Math.abs(gross - unitQtyCents) <= tol) return '';
+  return 'מחיר × כמות (₪' + fmtMoney(unitQtyCents / 100) + ') אינו תואם לברוטו שנקרא (₪' + fmtMoney(gross / 100) + ') — סכום השורה נטו ₪' + fmtMoney(total / 100) + ' שימש כמקור האמת, והסגירה נבדקה מול סיכום התעודה';
 }
 function aiRowHasArithmeticProof(row, qty) {
   if (qty == null || !isFinite(Number(qty))) return false;
@@ -6724,6 +6740,17 @@ function aiSingleNameCandidateId(row) {
   // ל-catalogHintId, אך חוסם רשימה עמומה שהצטמצמה עקב alias פסול/כפול.
   // לכן מערך מועמדים בצד הלקוח לעולם אינו נחשב לזהות יחידה.
   if (hintId && candidateIds.length === 0) return hintId;
+  // v183 (הכרעתו המפורשת): כשכל המועמדים חולקים מחיר זהה, הכסף יוצא זהה
+  // בכל בחירה — אין סיכון כספי בבחירה לפי השם — ולכן עדיף להכריע ולהמשיך
+  // מאשר להיתקע. אם המחירים שונים, המערכת ממשיכה לסרב לנחש.
+  if (hintId && candidateIds.length) {
+    const ids = Array.from(new Set([hintId].concat(candidateIds)));
+    const prices = ids.map(id => {
+      const product = (products || []).find(candidate => String(candidate.id) === id);
+      return product ? r2(Number(product.price) || 0) : null;
+    });
+    if (prices.length > 1 && prices.every(price => price != null && price > 0 && price === prices[0])) return hintId;
+  }
   return '';
 }
 function aiNamePriceMatchProof(row, product) {
@@ -6791,6 +6818,10 @@ function aiNamePriceMatchProof(row, product) {
   else if (grossMatchesBase) proofModel = 'base_gross';
   else if (baseNetWithDiscountConsistent) proofModel = unitMatchesBase ? 'base_unit_discount_net' : 'base_discount_net';
   else if (baseNetNoDiscountConsistent) proofModel = unitMatchesBase ? 'base_unit_net_no_discount' : 'base_net_no_discount';
+  // v183: מבצע מובלע כשגם הברוטו נקרא שגוי. מחיר היחידה זהה בדיוק למחיר
+  // הקטלוג — ראיית זהות חזקה — והנטו יושב בין אפס לברוטו הצפוי, כלומר הנחת
+  // שורה סבירה. הכסף עצמו מאומת ברמת המסמך.
+  if (!proofModel && unitMatchesBase && netCents != null && netCents > 0 && expectedGrossCents != null && netCents <= expectedGrossCents + catalogTotalToleranceCents) proofModel = 'base_unit_net_implied_discount';
   if (!proofModel) return {
     ok: false,
     reason: 'price_not_corroborated',
@@ -7410,6 +7441,8 @@ function aiEvaluateInvoiceScan(payload) {
       const cents = total == null || total < 0 ? null : aiMoneyCents(total);
       if (cents == null) { errors.push(rowPrefix + 'סכום השורה לא נקרא'); unusableRows++; if (!rowUnusableReason) rowUnusableReason = 'סכום השורה לא נקרא'; }
       else { docRowsCents += cents; rowTotalCents += cents; }
+      const crossCheckNote = qty == null ? '' : aiRowGrossCrossCheckNote(row, qty);
+      if (crossCheckNote) warnings.push(rowPrefix + crossCheckNote);
       const arithmeticError = qty == null ? '' : aiRowArithmeticError(row, qty);
       if (arithmeticError) { errors.push(rowPrefix + arithmeticError); unusableRows++; if (!rowUnusableReason) rowUnusableReason = arithmeticError; }
       if (rowUnusableReason) {
@@ -7450,6 +7483,9 @@ function aiEvaluateInvoiceScan(payload) {
       if (['unique_suffix', 'unique_full_pattern', 'unique_suffix_pattern'].includes(barcodeMatch.method)) warnings.push(product.name + ': הותאם בוודאות לפי הספרות שנקראו (' + barcodeMatch.observed + ')');
       if (['verified_suffix_name', 'verified_pattern_name', 'verified_one_digit_name'].includes(barcodeMatch.method)) warnings.push(product.name + ': הותאם אוטומטית לפי ראיית ברקוד יחידה ורמז שם תואם');
       if (barcodeMatch.method === 'verified_name_price') warnings.push(product.name + ': הותאם לפי שם יחיד והצלבת מחיר/חשבון מקומית');
+      // v183: מועמד הפיקדון נאסף לפני שער החשבון. ב-v182 שורת ה-ICE עצמה
+      // נתקעה, ולכן המוצר לא נרשם כמועמד והשלמת שורת הפיקדון לא יכלה לרוץ.
+      if (qty != null && qty > 0 && Number(product.deposit) > 0) docDepositCandidates.push({ product, qty, cents: Math.round(Number(product.deposit) * qty * 100) });
       if (qty == null || cents == null || arithmeticError) return;
       const old = aggregates.get(product.id) || { product, qty: 0, totalCents: 0, rows: [], promotionTexts: [], priceVariants: new Set() };
       old.qty += qty; old.totalCents += cents; old.rows.push({ document: index + 1, page: row.sourcePage, line: row.lineNumber, confidence: isFinite(rowConfidence) ? rowConfidence : 0, barcodeObserved: barcodeMatch.observed, barcodeMatchMethod: barcodeMatch.method, identityEvidence: barcodeMatch.identityEvidence || null });
@@ -7458,9 +7494,6 @@ function aiEvaluateInvoiceScan(payload) {
       if (qty > 0) old.priceVariants.add(r2(cents / 100 / qty));
       if (row.promotionText) old.promotionTexts.push(String(row.promotionText));
       aggregates.set(product.id, old);
-      // v182: מוצר שהוגדר לו פיקדון ונמצא בתעודה — מועמד להשלמת שורת פיקדון
-      // שהקריאה לא החזירה. נאסף כאן בלבד; לא נעשה בו שימוש אלא אם הפער סוגר.
-      if (qty > 0 && Number(product.deposit) > 0) docDepositCandidates.push({ product, qty, cents: Math.round(Number(product.deposit) * qty * 100) });
     });
     const printedUnits = doc.printedUnits == null || doc.printedUnits === '' ? null : Number(doc.printedUnits);
     if (printedUnits != null && isFinite(printedUnits) && Math.round(printedUnits) !== docUnits) warnings.push('תעודה ' + (index + 1) + ': שדה היחידות המודפס נקרא אחרת מסכום השורות — נבדק מול הכמות שהוקלדה');
@@ -7986,7 +8019,7 @@ function aiScanDiagnosticsHtml(ev) {
   try {
     if (!ev) return '';
     const lines = [];
-    lines.push('אבחון v182 · סל שלם: ' + (ev.basketComplete ? 'כן' : 'לא') + ' · כל השורות שויכו: ' + (ev.allRowsMapped ? 'כן' : 'לא') + ' · תעודות שלא נקראו: ' + (Number(ev.missingDocuments) || 0) + ' מתוך ' + aiScanDocuments.length);
+    lines.push('אבחון v183 · סל שלם: ' + (ev.basketComplete ? 'כן' : 'לא') + ' · כל השורות שויכו: ' + (ev.allRowsMapped ? 'כן' : 'לא') + ' · תעודות שלא נקראו: ' + (Number(ev.missingDocuments) || 0) + ' מתוך ' + aiScanDocuments.length);
     (Array.isArray(ev.docSummaries) ? ev.docSummaries : []).forEach(summary => lines.push('תעודה ' + (Number(summary.noteIndex) + 1) + ': שורות ' + summary.rows + ' · יח׳ ' + summary.units + ' · סכום שנקרא ₪' + fmtMoney(Number(summary.subtotal) || 0) + ' · סכום השורות ₪' + fmtMoney(Number(summary.rowsSum) || 0)));
     // v180: המספרים הגולמיים כפי שה-AI קרא אותם, לכל שורה תקועה. בלי זה
     // כשל חשבון הוא ניחוש מרחוק; עם זה צילום מסך אחד מספיק כדי לראות איזה
