@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v169 פיקדון מוגדר בלבד</title>
+    <title>הזמנות יטבתה - v171 פיקדון מדויק</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v169 פיקדון מוגדר בלבד</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v171 פיקדון מדויק</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -3902,20 +3902,22 @@ function promptQty(p, target) {
 }
 function qtyPackOfferInfo() {
   const p = qtyProduct;
-  if (!p || qtyTarget !== 'receipt' || !p.billingPackId) return null;
+  const forReturns = qtyTarget === 'returns'; // v170: המרה למארז חיוב — גם בחזרות
+  if (!p || (qtyTarget !== 'receipt' && !forReturns) || !p.billingPackId) return null;
   const size = parseInt(p.billingPackSize, 10) || 0; if (size < 2) return null;
   const pack = products.find(x => x.id === p.billingPackId); if (!pack) return null;
-  const inList = receiptList.find(it => it.productId === p.id);
+  const inList = (forReturns ? returnsList : receiptList).find(it => it.productId === p.id);
   const cur = parseInt((($('qtyVal') || {}).value || '').replace(/[^0-9]/g, ''), 10) || 0;
   const total = (inList ? (Number(inList.qty) || 0) : 0) + cur;
   if (!(total > 0) || total % size !== 0) return null;
-  return { pack: pack, size: size, total: total, n: total / size };
+  return { pack: pack, size: size, total: total, n: total / size, forReturns: forReturns };
 }
 function updateQtyPackOffer() {
   const box = $('qtyPackOffer'); if (!box) return;
   const info = qtyPackOfferInfo();
   if (!info) { box.innerHTML = ''; box.classList.add('hidden'); return; }
-  const priceTxt = Number(info.pack.price) > 0 ? ' · ₪' + fmtMoney(info.pack.price) + ' למארז' : '';
+  const packPrice = info.forReturns ? (Number(info.pack.creditPrice) > 0 ? Number(info.pack.creditPrice) : Number(info.pack.price)) : Number(info.pack.price);
+  const priceTxt = packPrice > 0 ? ' · ₪' + fmtMoney(packPrice) + ' למארז' : '';
   box.innerHTML = '<div class="bg-indigo-50 border-2 border-indigo-200 rounded-2xl p-3 mt-3 text-center">' +
     '<div class="text-[11px] font-black text-indigo-800">💡 ' + info.total + ' יח׳ = ' + info.n + ' × ' + (info.pack.name || 'מארז') + priceTxt + '</div>' +
     '<button data-role="qty-pack-convert" class="btn-tap mt-2 w-full py-2.5 rounded-xl font-black bg-indigo-600 text-white text-sm">המר ל-' + info.n + ' מארזים</button>' +
@@ -3926,6 +3928,18 @@ function convertQtyToPack() {
   const info = qtyPackOfferInfo(), p = qtyProduct;
   if (!info || !p) return;
   // ההמרה מחליפה את שורת הבודדים כולה בשורת המארז — עם השם, הברקוד והמחיר של המארז
+  if (info.forReturns) {
+    // v170: בחזרות — הבודדים יוצאים מרשימת החזרות, והמארז נכנס דרך אותו
+    // מסלול שכל חזרה עוברת בו (שמירה + רענון). הזיכוי ייספר במחיר המארז.
+    returnsList = returnsList.filter(it => it.productId !== p.id);
+    addQtyToTarget(info.pack, info.n, 'returns');
+    buzz(30);
+    showToast('הומר: ' + info.n + ' × ' + (info.pack.name || 'מארז'), null, null, 2600);
+    hideQty();
+    updateCart();
+    openReturnsScanner();
+    return;
+  }
   receiptList = receiptList.filter(it => it.productId !== p.id);
   addReceiptQtyToTop(info.pack, info.n);
   saveReceiptDraft();
@@ -5679,7 +5693,7 @@ async function aiCompressInvoiceImage(file) {
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
   let cropRegion = null;
-  const cropInfo = { v: 169 }; // v169: דו"ח החיתוך שמוצג במסך אישור הכיוון
+  const cropInfo = { v: 171 }; // v171: דו"ח החיתוך שמוצג במסך אישור הכיוון
   try {
     const proxyScale = Math.min(1, 1500 / Math.max(sourceWidth, sourceHeight));
     const proxyWidth = Math.max(1, Math.round(sourceWidth * proxyScale));
@@ -10430,7 +10444,10 @@ async function saveProd(again) {
   const rawDp = ($('prod_deposit').value || '').toString().replace(',', '.').trim();
   const numDp = parseFloat(rawDp);
   if (rawDp !== '' && !(numDp > 0)) { showToast('הפיקדון צריך להיות מספר חיובי או ריק', null, null, 2800); $('prod_deposit').focus(); return; }
-  const deposit = (rawDp === '') ? null : r2(numDp);
+  // v171: פיקדון נשמר בדיוק של 3 ספרות (0.254) — עיגול לשתי ספרות היה
+  // הופך אותו ל-0.25 ושובר את סגירת האגורות בזיכויי חזרות (12×0.25=3.00
+  // במקום 3.05). המחיר המומלץ ממילא מעגל רק את התוצאה הסופית.
+  const deposit = (rawDp === '') ? null : Math.round(numDp * 1000) / 1000;
   const billingPackId = ((($('prod_billingPack')) || {}).value || '') || null;
   const billingPackSizeRaw = parseInt(((($('prod_billingPackSize')) || {}).value || '').replace(/[^0-9]/g, ''), 10) || 0;
   if (billingPackId && billingPackSizeRaw < 2) { showToast('הזן כמה יחידות בודדות יש במארז החיוב (לפחות 2)', null, null, 3000); $('prod_billingPackSize').focus(); return; }
