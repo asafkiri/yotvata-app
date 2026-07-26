@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v181 מבצע מובלע</title>
+    <title>הזמנות יטבתה - v182 פיקדון נגזר</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v181 מבצע מובלע</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v182 פיקדון נגזר</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -7393,6 +7393,7 @@ function aiEvaluateInvoiceScan(payload) {
     if (!isFinite(docConfidence) || docConfidence < 0.55) warnings.push('תעודה ' + (index + 1) + ': ביטחון הקריאה של הכותרת נמוך — השורות יאושרו רק אם כל בדיקות הסכום והכמות נסגרות');
     else if (docConfidence < 0.78) warnings.push('תעודה ' + (index + 1) + ': ביטחון הקריאה בינוני — בדוק היטב לפני אישור');
     let docUnits = 0, docRowsCents = 0;
+    const docDepositCandidates = []; // v182
     (Array.isArray(doc.warnings) ? doc.warnings : []).forEach(w => warnings.push('תעודה ' + (index + 1) + ': ' + w));
     (Array.isArray(doc.rows) ? doc.rows : []).forEach((row, rowIndex) => {
       const rowNumber = row.lineNumber || (rowIndex + 1);
@@ -7457,12 +7458,33 @@ function aiEvaluateInvoiceScan(payload) {
       if (qty > 0) old.priceVariants.add(r2(cents / 100 / qty));
       if (row.promotionText) old.promotionTexts.push(String(row.promotionText));
       aggregates.set(product.id, old);
+      // v182: מוצר שהוגדר לו פיקדון ונמצא בתעודה — מועמד להשלמת שורת פיקדון
+      // שהקריאה לא החזירה. נאסף כאן בלבד; לא נעשה בו שימוש אלא אם הפער סוגר.
+      if (qty > 0 && Number(product.deposit) > 0) docDepositCandidates.push({ product, qty, cents: Math.round(Number(product.deposit) * qty * 100) });
     });
     const printedUnits = doc.printedUnits == null || doc.printedUnits === '' ? null : Number(doc.printedUnits);
     if (printedUnits != null && isFinite(printedUnits) && Math.round(printedUnits) !== docUnits) warnings.push('תעודה ' + (index + 1) + ': שדה היחידות המודפס נקרא אחרת מסכום השורות — נבדק מול הכמות שהוקלדה');
     const printedLines = doc.printedLines == null || doc.printedLines === '' ? null : Number(doc.printedLines);
     if (printedLines != null && isFinite(printedLines) && Math.round(printedLines) !== (Array.isArray(doc.rows) ? doc.rows.length : 0)) warnings.push('תעודה ' + (index + 1) + ': שדה מספר השורות המודפס אינו תואם לשורות שנקראו — סכום וכמות השורות נבדקו בנפרד');
     if (inputDoc.units != null && docUnits !== Number(inputDoc.units)) errors.push('תעודה ' + (index + 1) + ': נקראו ' + docUnits + ' יחידות במקום ' + inputDoc.units);
+    // v182: שורת הפיקדון אינה שורת מוצר, וההנחיה לשרת מורה לדלג על שורות
+    // שאינן מוצר — ולכן ה-AI פשוט אינו מחזיר אותה, והתעודה נחסמה על פער
+    // של ₪3.05. כשהפער נסגר לאגורה על הפיקדון שהוגדר במאגר למוצר שנמצא
+    // בתעודה, השורה נגזרת מההגדרה שלך — בדיוק כמו בקליטה הידנית (v173).
+    // אין כאן המצאת כסף: המחיר מההגדרה, הכמות מהנייר, והסגירה מדויקת.
+    if (subtotalCents != null && docRowsCents < subtotalCents && docDepositCandidates.length) {
+      const shortfallCents = subtotalCents - docRowsCents;
+      const exact = docDepositCandidates.filter(candidate => candidate.cents === shortfallCents);
+      const allCents = docDepositCandidates.reduce((sum, candidate) => sum + candidate.cents, 0);
+      const chosen = exact.length === 1 ? exact : (allCents === shortfallCents ? docDepositCandidates : []);
+      let recoveredCents = 0;
+      chosen.forEach(candidate => {
+        recoveredCents += candidate.cents;
+        depositRows.push({ document: index + 1, description: 'פיקדון', productName: String(candidate.product.name || ''), qty: candidate.qty, cents: candidate.cents });
+        warnings.push('תעודה ' + (index + 1) + ': שורת הפיקדון של ' + candidate.product.name + ' לא הוחזרה מהקריאה. הפער נסגר בדיוק על הפיקדון שהוגדר במאגר (' + candidate.qty + ' × ₪' + fmtMoney(candidate.cents / 100 / Math.max(1, candidate.qty)) + ' = ₪' + fmtMoney(candidate.cents / 100) + ') ולכן נוספה כשורת פיקדון');
+      });
+      if (recoveredCents > 0) { docRowsCents += recoveredCents; rowTotalCents += recoveredCents; }
+    }
     const printedDiscountCents = aiMoneyCents(doc.documentDiscountExVat);
     const impliedDiscountCents = subtotalCents == null ? null : docRowsCents - subtotalCents;
     if (impliedDiscountCents != null) {
@@ -7964,7 +7986,7 @@ function aiScanDiagnosticsHtml(ev) {
   try {
     if (!ev) return '';
     const lines = [];
-    lines.push('אבחון v181 · סל שלם: ' + (ev.basketComplete ? 'כן' : 'לא') + ' · כל השורות שויכו: ' + (ev.allRowsMapped ? 'כן' : 'לא') + ' · תעודות שלא נקראו: ' + (Number(ev.missingDocuments) || 0) + ' מתוך ' + aiScanDocuments.length);
+    lines.push('אבחון v182 · סל שלם: ' + (ev.basketComplete ? 'כן' : 'לא') + ' · כל השורות שויכו: ' + (ev.allRowsMapped ? 'כן' : 'לא') + ' · תעודות שלא נקראו: ' + (Number(ev.missingDocuments) || 0) + ' מתוך ' + aiScanDocuments.length);
     (Array.isArray(ev.docSummaries) ? ev.docSummaries : []).forEach(summary => lines.push('תעודה ' + (Number(summary.noteIndex) + 1) + ': שורות ' + summary.rows + ' · יח׳ ' + summary.units + ' · סכום שנקרא ₪' + fmtMoney(Number(summary.subtotal) || 0) + ' · סכום השורות ₪' + fmtMoney(Number(summary.rowsSum) || 0)));
     // v180: המספרים הגולמיים כפי שה-AI קרא אותם, לכל שורה תקועה. בלי זה
     // כשל חשבון הוא ניחוש מרחוק; עם זה צילום מסך אחד מספיק כדי לראות איזה
