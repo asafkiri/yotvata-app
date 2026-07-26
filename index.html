@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v172 פיצול מארזים בחזרות</title>
+    <title>הזמנות יטבתה - v173 פיקדון בקליטה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v172 פיצול מארזים בחזרות</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v173 פיקדון בקליטה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -3720,10 +3720,32 @@ function receiptMonthEndStatuses() {
   });
   return out;
 }
+// v173: שורות פיקדון בקליטה — נגזרות מהגדרת המוצר, בכמות שנקלטה.
+// אין בקבוק פיקדון פיזי לסרוק: השורה נוצרת ומתעדכנת לבד לפי המוצרים
+// שברשימה, נספרת בסכום וביחידות (בנייר הפיקדון כלול בשניהם).
+function receivingDepositLines() {
+  const out = [];
+  (receiptList || []).forEach(it => {
+    const p = products.find(x => x.id === it.productId);
+    const dep = Number(p && p.deposit) || 0;
+    if (dep > 0 && Number(it.qty) > 0) out.push({ product: p, name: 'פיקדון · ' + (p.name || ''), qty: Number(it.qty), unit: dep, total: lineTotalFromUnit(dep, it.qty) });
+  });
+  return out;
+}
+function receivingDepositRowsHtml() {
+  const deposits = receivingDepositLines();
+  if (!deposits.length) return '';
+  return deposits.map(dep => '<div class="bg-indigo-50/70 border border-indigo-200 rounded-2xl px-4 py-2.5 flex items-center justify-between gap-2">' +
+    '<div class="min-w-0"><div class="font-black text-indigo-900 text-sm truncate">' + htmlEscape(dep.name) + '</div>' +
+    '<div class="text-[11px] text-indigo-700/80 font-bold">' + dep.qty + ' × ₪' + fmtMoney(dep.unit) + ' · נגזר מהגדרת המוצר</div></div>' +
+    '<div class="font-black text-indigo-900 whitespace-nowrap">₪' + fmtMoney(dep.total) + '</div>' +
+  '</div>').join('');
+}
 function receiptTotals() {
   const day = todayStr();
   let ex = 0;
   receiptList.forEach(it => { const p = products.find(x => x.id === it.productId); ex += effectiveLineTotal(p, it.qty, day); });
+  receivingDepositLines().forEach(dep => { ex += dep.total; }); // v173
   ex = r2(ex);
   return { ex, savings: receiptSavings() };
 }
@@ -4024,7 +4046,7 @@ function renderReceiving() {
       '<div id="rcDigitsList" class="mt-2 space-y-1"></div>' +
     '</div>' +
     '<div class="flex items-center justify-between px-1 mb-2"><div class="font-black text-slate-800">פריטים בתעודה</div><div id="rcCount" class="text-xs text-slate-400">' + receiptList.length + ' מוצרים</div></div>' +
-    '<div id="rcListEl" class="space-y-2.5">' + (receiptList.length ? receiptList.map(buildReceiptRow).join('') : emptyReceiptHtml()) + '</div>' +
+    '<div id="rcListEl" class="space-y-2.5">' + (receiptList.length ? receiptList.map(buildReceiptRow).join('') + receivingDepositRowsHtml() : emptyReceiptHtml()) + '</div>' +
     receiptTotalsHtml(t);
 }
 function emptyReceiptHtml() {
@@ -4192,6 +4214,11 @@ function finishReceipt() {
     const applied = promoTriggered(pr, day);
     return { productId: it.productId, name: it.name || (p ? p.name : ''), barcode: it.barcode || (p ? p.barcode : '') || '', qty: it.qty, unitPrice: unit, basePrice: r2(Number(p && p.price) || 0), lineTotal: lineTotalFromUnit(unit, it.qty), promoPct: (applied ? (Number(pr.pct) || 0) : 0) };
   });
+  // v173: שורות הפיקדון הנגזרות נכנסות לתעודה — מסומנות isDeposit כדי
+  // שהחלת סריקת AI תחליף אותן בשורות שנקראו מהנייר עצמו.
+  receivingDepositLines().forEach(dep => {
+    lines.push({ productId: 'deposit-recv-' + dep.product.id, name: dep.name, barcode: '', qty: dep.qty, unitPrice: dep.unit, basePrice: dep.unit, lineTotal: dep.total, promoPct: 0, isDeposit: true });
+  });
   const ex = r2(lines.reduce((a, l) => a + l.lineTotal, 0));
   const scannedUnits = lines.reduce((a, l) => a + (Number(l.qty) || 0), 0);
   if (!receiptDupConfirmed) {
@@ -4249,6 +4276,11 @@ function openReconcile() {
   });
   // מיון חד-פעמי בפתיחה: שורות חריגות (חסר/עודף) למעלה — לא ממוין מחדש תוך כדי עבודה
   reconcileData.sort((a, b) => ((Number(a.noteQty) || 0) === (Number(a.received) || 0) ? 1 : 0) - ((Number(b.noteQty) || 0) === (Number(b.received) || 0) ? 1 : 0));
+  // v173: שורות פיקדון נגזרות — מאושרות מראש (אין מה לסרוק פיזית); אם
+  // תרוץ סריקת AI, ההחלה תחליף אותן בשורות מהנייר (מסומנות isDeposit).
+  receivingDepositLines().forEach(dep => {
+    reconcileData.push({ productId: 'deposit-recv-' + dep.product.id, name: dep.name, barcode: '', received: dep.qty, noteQty: dep.qty, price: dep.unit, basePrice: dep.unit, promoPct: 0, promoOn: false, checked: true, isDeposit: true });
+  });
   detectiveOpen = false; noteCheckOpen = false; noteCheckAuto = false; noteCheckRows = []; noteCheckRes = null; reconcileCheckMode = false; noteCheckQtyMode = false; rcStep = null; noteCheckForceQty = false; ncPromoResult = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; manualSearchTerm = ''; manualAssigned = []; manualSearchOpen = false; manualPromoMarks = {};
   resetAiInvoiceScan();
   resetDetectiveQuestions();
@@ -5704,7 +5736,7 @@ async function aiCompressInvoiceImage(file) {
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
   let cropRegion = null;
-  const cropInfo = { v: 172 }; // v172: דו"ח החיתוך שמוצג במסך אישור הכיוון
+  const cropInfo = { v: 173 }; // v173: דו"ח החיתוך שמוצג במסך אישור הכיוון
   try {
     const proxyScale = Math.min(1, 1500 / Math.max(sourceWidth, sourceHeight));
     const proxyWidth = Math.max(1, Math.round(sourceWidth * proxyScale));
@@ -8293,7 +8325,7 @@ function aiApplyInvoiceResult() {
     audit: reconcileAiAudit ? cloneSafe(reconcileAiAudit) : null
   };
   // v166: שורות פיקדון קודמות מוסרות — ייבנו מחדש מהפענוח הנוכחי.
-  reconcileData = (reconcileData || []).filter(l => !l.isDeposit);
+  reconcileData = (reconcileData || []).filter(l => !l.isDeposit && String(l.productId || '').indexOf('deposit-') !== 0);
   reconcileData.forEach(l => { l.noteQty = 0; l.aiPaperPriceOnly = false; });
   ev.aggregates.forEach(a => {
     let line = (reconcileData || []).find(l => l.productId === a.product.id);
