@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v166 פיקדון</title>
+    <title>הזמנות יטבתה - v169 פיקדון מוגדר בלבד</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v166 פיקדון</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v169 פיקדון מוגדר בלבד</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -367,6 +367,9 @@
               <div class="px-2.5 pb-2.5">
                 <label class="text-[11px] text-slate-500 font-bold block mb-1">מחיר זיכוי בחזרות — רק אם שונה ממחיר הקנייה</label>
                 <div class="flex items-center gap-2"><span class="text-slate-400 font-bold text-lg">₪</span><input id="prod_creditPrice" type="text" inputmode="decimal" class="flex-1 p-2.5 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-amber-500" placeholder="ריק = כמו מחיר הקנייה"></div>
+                <label class="text-[11px] text-slate-400 font-bold block mb-1 mt-3">פיקדון ליחידה (ללא מע״מ) — למוצרים בבקבוק</label>
+                <div class="flex items-center gap-2"><span class="text-slate-400 font-bold text-lg">₪</span><input id="prod_deposit" type="text" inputmode="decimal" class="flex-1 p-2.5 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-amber-500" placeholder="לרוב 0.254 (0.30 כולל מע״מ)"></div>
+                <div class="text-[10px] text-slate-400 font-bold mt-1">משמש בחזרות: כל בקבוק שמוחזר מקבל שורת פיקדון בזיכוי. בקליטה בסריקה אין צורך — שורת הפיקדון נקראת מהתעודה עצמה.</div>
                 <div class="mt-3 pt-3 border-t border-amber-100">
                   <label class="text-[11px] text-slate-500 font-bold block mb-1">מוצר חיוב חלופי (מארז) — כשהספק מספק בודדים אך מחייב במארזים</label>
                   <select id="prod_billingPack" class="w-full p-2.5 rounded-xl border-2 border-slate-200 outline-none font-bold bg-white focus:border-amber-500"></select>
@@ -2530,6 +2533,15 @@ function addManualReturn() {
 function openReturnsSend() {
   if (!returnsList.length) return;
   const items = returnsList.map(it => { const p = products.find(x => x.id === it.productId); const unit = r2(it.manual ? (Number(it.unitPrice) || 0) : (Number(p && (Number(p.creditPrice) > 0 ? p.creditPrice : p.price)) || 0)); return { name: it.name, barcode: it.barcode || '', qty: it.qty, unitPrice: unit, lineTotal: r2(unit * it.qty) }; }); // מחיר זיכוי גובר על מחיר קנייה בחזרות
+  // v167: מוצר עם פיקדון מוגדר — הבקבוקים חוזרים לספק, והפיקדון חוזר
+  // אלינו: שורת פיקדון נפרדת בזיכוי, כמו שהיא מופיעה בתעודות הספק.
+  returnsList.forEach(it => {
+    if (it.manual) return;
+    const p = products.find(x => x.id === it.productId);
+    const dep = Number(p && p.deposit) || 0;
+    if (!(dep > 0) || !(Number(it.qty) > 0)) return;
+    items.push({ name: 'פיקדון · ' + it.name, barcode: '', qty: it.qty, unitPrice: dep, lineTotal: r2(dep * it.qty), isDeposit: true });
+  });
   const ex = r2(items.reduce((a, l) => a + l.lineTotal, 0));
   sendCtx = { type: 'returns', items, resetCurrent: false, totalExVat: ex, totalIncVat: ex };
   renderSendModal(items, 'רשימת חזרות', 'returns');
@@ -4109,7 +4121,8 @@ function updateNprRecHint() {
   const cost = parseFloat((($('npr_price') || {}).value || '').replace(',', '.'));
   if (!(cost > 0)) { h.textContent = 'קטגוריה: ' + c.name + ' (' + c.pct + '%) — הקלד עלות לקבלת מחיר מומלץ'; h.classList.remove('hidden'); return; }
   const rec = recommendedPrice(cost, c.pct);
-  h.textContent = '💡 מומלץ למכירה: ₪' + formatRecommendedPrice(rec) + ' (' + c.name + ' · ' + c.pct + '%)';
+  const recDeposit = depositIncFor(p);
+  h.textContent = '💡 מומלץ למכירה: ₪' + formatRecommendedPrice(rec == null ? rec : r2(rec + recDeposit)) + (recDeposit ? ' (כולל ₪' + fmtMoney(recDeposit) + ' פיקדון)' : '') + ' (' + c.name + ' · ' + c.pct + '%)';
   h.classList.remove('hidden');
 }
 function hideNewProduct() {
@@ -5666,7 +5679,7 @@ async function aiCompressInvoiceImage(file) {
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
   let cropRegion = null;
-  const cropInfo = { v: 166 }; // v166: דו"ח החיתוך שמוצג במסך אישור הכיוון
+  const cropInfo = { v: 169 }; // v169: דו"ח החיתוך שמוצג במסך אישור הכיוון
   try {
     const proxyScale = Math.min(1, 1500 / Math.max(sourceWidth, sourceHeight));
     const proxyWidth = Math.max(1, Math.round(sourceWidth * proxyScale));
@@ -7288,13 +7301,20 @@ function aiEvaluateInvoiceScan(payload) {
 
       // הכמות וסכום השורה נספרים גם אם המוצר עדיין לא הותאם. כך הסיכומים
       // המודפסים נשארים גלויים ומדויקים, אך אין חישוב חוסר/עודף על סל חלקי.
-      // v166: שורת פיקדון — מזוהה לפי שמה המודפס. היא כבר נספרה בסכומי
-      // המסמך וביחידות (לעיל), אבל אסור לצבור אותה כמוצר: היא נושאת את
-      // הברקוד של המוצר עצמו, וצבירה הייתה מנפחת את כמות המוצר ויוצרת
-      // חוסר מדומה מול ספירת העובד. היא תצורף לתעודה כשורה נפרדת.
+      // v169 (הכרעת המשתמש): טיפול הפיקדון פועל אך ורק על מוצרים שהוגדר
+      // להם "פיקדון ליחידה" בעורך המוצר. שורת פיקדון של מוצר לא-מוגדר
+      // אינה נבלעת ואינה נצברת לכמות המוצר (זה היה יוצר חוסר מדומה) —
+      // היא נעצרת כשגיאה מפורשת עד שהמשתמש יגדיר את השדה.
       if (/פ.?קדון/.test(String(row.description || '')) && qty != null && cents != null && !arithmeticError) {
-        depositRows.push({ document: index + 1, description: String(row.description || '').trim() || 'פיקדון', qty, cents });
-        warnings.push(rowPrefix + 'זוהתה שורת פיקדון (' + qty + ' × ₪' + fmtMoney(cents / 100 / Math.max(1, qty)) + ' = ₪' + fmtMoney(cents / 100) + ') — תצורף לתעודה כשורה נפרדת');
+        const depositMatch = aiResolveInvoiceBarcode(row);
+        const depositProduct = depositMatch && depositMatch.product;
+        if (depositProduct && Number(depositProduct.deposit) > 0) {
+          depositRows.push({ document: index + 1, description: String(row.description || '').trim() || 'פיקדון', productName: String(depositProduct.name || ''), qty, cents });
+          warnings.push(rowPrefix + 'זוהתה שורת פיקדון של ' + depositProduct.name + ' (' + qty + ' × ₪' + fmtMoney(cents / 100 / Math.max(1, qty)) + ' = ₪' + fmtMoney(cents / 100) + ') — תצורף לתעודה כשורה נפרדת');
+        } else {
+          errors.push(rowPrefix + 'שורת פיקדון' + (depositProduct ? ' של ' + depositProduct.name : '') + ' — אך למוצר לא הוגדר פיקדון. הגדר "פיקדון ליחידה" בעורך המוצר (מחירים נוספים) וסרוק שוב');
+          residuals.push({ docNumber: index + 1, documentIndex: index, lineNumber: rowNumber, sourcePage: Number(row.sourcePage), rowRegion: row.rowRegion || null, description: String(row.description || '').trim(), qty, amount: cents / 100, reason: 'שורת פיקדון למוצר שלא הוגדר לו פיקדון' });
+        }
         return;
       }
       const barcodeMatch = aiResolveInvoiceBarcode(row);
@@ -8261,7 +8281,7 @@ function aiApplyInvoiceResult() {
   // (lineTotalFromUnit מעגל את המכפלה, לא את המחיר).
   (ev.depositRows || []).forEach((dep, depositIndex) => {
     const depositUnit = dep.qty > 0 ? dep.cents / 100 / dep.qty : dep.cents / 100;
-    const depositLabel = /^[\s*]*פ.?קדון[\s*]*$/.test(dep.description) ? 'פיקדון' : ('פיקדון · ' + dep.description);
+    const depositLabel = dep.productName ? ('פיקדון · ' + dep.productName) : (/^[\s*]*פ.?קדון[\s*]*$/.test(dep.description) ? 'פיקדון' : ('פיקדון · ' + dep.description));
     reconcileData.push({ productId: 'deposit-' + dep.document + '-' + depositIndex + '-' + Date.now(), name: depositLabel + (dep.document && aiScanDocuments.length > 1 ? ' (תעודה ' + dep.document + ')' : ''), barcode: '', received: dep.qty, noteQty: dep.qty, price: depositUnit, basePrice: depositUnit, promoPct: 0, promoOn: false, checked: true, isDeposit: true, aiPaperPriceOnly: true });
   });
   reconcileSupplierDiscount = r2(ev.supplierDiscount || 0);
@@ -10157,6 +10177,9 @@ function priceRowHtml(p) {
 let pricingCats = [], pricingCatsLoaded = false;
 let pricingRoundingMode = 'ninety'; // ברירת המחדל משאירה את המחיר המומלץ במצב סיומת .90
 let pricingCatsTimer = null, pricingCatsOpen = false;
+// v168: פיקדון ליחידה כולל מע"מ — מתווסף מעל ההמלצה. המרווח מחושב על
+// המוצר בלבד: הפיקדון הוא כסף שעובר דרכנו (ללקוח ובחזרה), לא רווח.
+function depositIncFor(p) { const dep = Number(p && p.deposit) || 0; return dep > 0 ? r2(dep * 1.18) : 0; }
 function recommendedPrice(cost, pct) {
   if (!(cost > 0)) return null;
   const raw = r2(cost * 1.18 * (1 + (Number(pct) || 0) / 100));
@@ -10183,7 +10206,8 @@ function pricingCatOf(p) {
 function recForProduct(p) {
   const c = pricingCatOf(p);
   if (!c || (Number(c.pct) || 0) === 0 || p.price == null || p.price === '') return null;
-  return recommendedPrice(Number(p.price) || 0, c.pct);
+  const base = recommendedPrice(Number(p.price) || 0, c.pct);
+  return base == null ? null : r2(base + depositIncFor(p));
 }
 function savePricingCats() {
   if (!db) return;
@@ -10293,7 +10317,9 @@ function updateProdRecHint() {
     out.textContent = 'הזן מחיר קנייה לקבלת מחיר מכירה מומלץ'; out.classList.remove('hidden'); return;
   }
   const rec = recommendedPrice(cost, cat.pct);
-  out.textContent = '💡 מומלץ למכירה: ₪' + formatRecommendedPrice(rec) + ' (' + cat.name + ' · ' + cat.pct + '%)';
+  const depositRaw = parseFloat((($('prod_deposit') || {}).value || '').toString().replace(',', '.'));
+  const editorDeposit = depositRaw > 0 ? r2(depositRaw * 1.18) : 0;
+  out.textContent = '💡 מומלץ למכירה: ₪' + formatRecommendedPrice(rec == null ? rec : r2(rec + editorDeposit)) + (editorDeposit ? ' (כולל ₪' + fmtMoney(editorDeposit) + ' פיקדון)' : '') + ' (' + cat.name + ' · ' + cat.pct + '%)';
   out.classList.remove('hidden');
 }
 function fillBillingPackOptions(selectedId, exceptId) {
@@ -10331,6 +10357,7 @@ function openProdModal(p, fromScan, presetCode, afterSaveTarget) {
   syncProductBarcodeDuplicate(false);
   $('prod_price').value = (p && p.price != null) ? p.price : '';
   $('prod_creditPrice').value = (p && Number(p.creditPrice) > 0) ? p.creditPrice : '';
+  $('prod_deposit').value = (p && Number(p.deposit) > 0) ? p.deposit : '';
   fillBillingPackOptions(p ? (p.billingPackId || '') : '', p ? p.id : null);
   $('prod_billingPackSize').value = (p && parseInt(p.billingPackSize, 10) >= 2) ? p.billingPackSize : '';
   const selectedCategory = p ? (p.category || '') : '';
@@ -10345,7 +10372,7 @@ function openProdModal(p, fromScan, presetCode, afterSaveTarget) {
   $('prod_cartonUnits').value = boxSize >= 2 ? String(boxSize) : '';
   $('prod_cartonResult').textContent = '';
   $('prod_cartonCalc').open = false;
-  $('prod_morePrices').open = !!(p && (Number(p.creditPrice) > 0 || p.billingPackId));
+  $('prod_morePrices').open = !!(p && (Number(p.creditPrice) > 0 || Number(p.deposit) > 0 || p.billingPackId));
   refreshProdWholeCartonUi();
   updateProdRecHint();
   $('prod_del').classList.toggle('hidden', !p);
@@ -10400,6 +10427,10 @@ async function saveProd(again) {
   const numCp = parseFloat(rawCp);
   if (rawCp !== '' && !(numCp > 0)) { showToast('מחיר הזיכוי צריך להיות מספר חיובי או ריק', null, null, 2800); $('prod_creditPrice').focus(); return; }
   const creditPrice = (rawCp === '') ? null : r2(numCp);
+  const rawDp = ($('prod_deposit').value || '').toString().replace(',', '.').trim();
+  const numDp = parseFloat(rawDp);
+  if (rawDp !== '' && !(numDp > 0)) { showToast('הפיקדון צריך להיות מספר חיובי או ריק', null, null, 2800); $('prod_deposit').focus(); return; }
+  const deposit = (rawDp === '') ? null : r2(numDp);
   const billingPackId = ((($('prod_billingPack')) || {}).value || '') || null;
   const billingPackSizeRaw = parseInt(((($('prod_billingPackSize')) || {}).value || '').replace(/[^0-9]/g, ''), 10) || 0;
   if (billingPackId && billingPackSizeRaw < 2) { showToast('הזן כמה יחידות בודדות יש במארז החיוב (לפחות 2)', null, null, 3000); $('prod_billingPackSize').focus(); return; }
@@ -10449,7 +10480,7 @@ async function saveProd(again) {
   const boxSize = wholeCarton ? parsedBoxSize : 0;
   const hidden = !$('prod_visible').checked;
   const unitUpdatedAt = Date.now();
-  const data = { name, barcode, price, creditPrice, billingPackId, billingPackSize, category, average, defaultUnit, defaultUnitUpdatedAt: unitUpdatedAt, boxSize, hidden };
+  const data = { name, barcode, price, creditPrice, deposit, billingPackId, billingPackSize, category, average, defaultUnit, defaultUnitUpdatedAt: unitUpdatedAt, boxSize, hidden };
   clearTimeout(priceTimers[docId]); clearTimeout(avgTimers[docId]); clearTimeout(boxTimers[docId]);
   let savedProduct = null;
   if (id) {
@@ -10633,7 +10664,8 @@ function shelfRecommendedPrice(p) {
   if (!(cost > 0)) return null;
   const category = pricingCatOf(p);
   if (category) return recForProduct(p);
-  return recommendedPrice(cost, Number(signMarginPct) || 0);
+  const base = recommendedPrice(cost, Number(signMarginPct) || 0);
+  return base == null ? null : r2(base + depositIncFor(p));
 }
 function signRecommend(s) {
   const pr = promos.find(p => p.id === s.promoId);
@@ -11243,6 +11275,7 @@ $('prod_wholeCarton').addEventListener('change', refreshProdWholeCartonUi);
 $('prod_category').addEventListener('change', updateProdRecHint);
 $('prod_billingPack').addEventListener('change', refreshBillingPackUi);
 $('prod_price').addEventListener('input', updateProdRecHint);
+$('prod_deposit').addEventListener('input', updateProdRecHint);
 $('prod_cartonPrice').addEventListener('input', calcCartonPrice);
 $('prod_cartonUnits').addEventListener('input', calcCartonPrice);
 $('scanClose').addEventListener('click', closeScanner);
