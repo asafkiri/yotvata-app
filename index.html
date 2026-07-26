@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v178 סל שלם</title>
+    <title>הזמנות יטבתה - v179 רשת עמידה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v178 סל שלם</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v179 רשת עמידה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -537,6 +537,13 @@ let aiScanError = '';
 let aiScanAutoRotationNote = '';
 let aiScanAttemptCount = 0;
 const AI_SCAN_MAX_AUTO_ROTATION_RETRIES = 2;
+// v179: כשל רשת ("Failed to fetch") הוא זמני כמעט תמיד. עד v178 הבהוב אחד
+// מחק תעודה שלמה מהסריקה בלי ניסיון נוסף. הטיימאאוט המקומי מעט מעל התקרה
+// של השרת (180 שניות מודל + 90 ניסיון ברקוד), כדי שבקשה תקועה תיפול אצלנו
+// מהר ותנוסה שוב, במקום להמתין עד שהרשת חותכת אותה בשקט.
+const AI_SCAN_NETWORK_RETRIES = 2;
+const AI_SCAN_FETCH_TIMEOUT_MS = 300000;
+const AI_SCAN_NETWORK_RETRY_DELAY_MS = 2500;
 const AI_SCAN_MIN_SERVICE_VERSION = 127;
 const AI_BARCODE_SUFFIX_DIGITS = 6;
 let aiOrientationSession = null;
@@ -7580,7 +7587,7 @@ function aiEvaluateInvoiceScan(payload) {
     const doc = returned.get(index); return doc && aiMoneyCents(doc.subtotalExVat) === aiMoneyCents(inputDoc.amount);
   });
   const unitsVerified = receiptNoteUnits != null && extractedUnits === Number(receiptNoteUnits) && aiScanDocuments.every((inputDoc, index) => {
-    const doc = returned.get(index); return doc && inputDoc.units != null && (Array.isArray(doc.rows) ? doc.rows.reduce((sum, row) => sum + (row.quantity == null ? 0 : Number(row.quantity) || 0), 0) : 0) === Number(inputDoc.units);
+    const doc = returned.get(index); return doc && inputDoc.units != null && aiDocRowUnits(doc) === Number(inputDoc.units); // v179: בלי פיקדון
   });
   const supplierDiscount = Math.max(0, verifiedDocumentDiscountCents / 100);
   const closure = aiFindingsClosure({ aggregates, findings, supplierDiscount }, findings);
@@ -7687,8 +7694,34 @@ async function aiRequestInvoiceScan(token, documents) {
 // תעודה אחת לבקשה = משימת קריאה קטנה וממוקדת למודל, כשל בתעודה אחת אינו
 // מפיל את השנייה, וניסיונות הסיבוב רצים רק על התעודה הבעייתית. חוזה ה-OCR
 // מול השרת לא השתנה; כל בקשה היא מסמך יחיד עם noteIndex=0 שממופה חזרה.
+async function aiFetchWithRetry(url, options) {
+  for (let attempt = 0; attempt <= AI_SCAN_NETWORK_RETRIES; attempt++) {
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), AI_SCAN_FETCH_TIMEOUT_MS) : null;
+    try {
+      const response = await fetch(url, controller ? Object.assign({}, options, { signal: controller.signal }) : options);
+      if (timer) clearTimeout(timer);
+      return response;
+    } catch (error) {
+      if (timer) clearTimeout(timer);
+      const aborted = !!(error && error.name === 'AbortError');
+      if (attempt < AI_SCAN_NETWORK_RETRIES) {
+        aiScanProgressText = (aiScanProgressText || '').split(' · ')[0] + ' · הרשת נפלה, ניסיון ' + (attempt + 2) + ' מתוך ' + (AI_SCAN_NETWORK_RETRIES + 1) + '…';
+        if (currentView === 'reconcile') renderReconcile();
+        await new Promise(resolve => setTimeout(resolve, AI_SCAN_NETWORK_RETRY_DELAY_MS * (attempt + 1)));
+        continue;
+      }
+      const finalError = new Error(aborted
+        ? 'הבקשה לא ענתה תוך ' + Math.round(AI_SCAN_FETCH_TIMEOUT_MS / 1000) + ' שניות, גם אחרי ' + (AI_SCAN_NETWORK_RETRIES + 1) + ' ניסיונות'
+        : 'הרשת נכשלה אחרי ' + (AI_SCAN_NETWORK_RETRIES + 1) + ' ניסיונות — ' + ((error && error.message) || 'Failed to fetch'));
+      finalError.networkFailure = true;
+      throw finalError;
+    }
+  }
+  throw new Error('הרשת נכשלה');
+}
 async function aiRequestSingleDocScan(token, pages) {
-  const response = await fetch(AI_SCAN_WORKER_URL, {
+  const response = await aiFetchWithRetry(AI_SCAN_WORKER_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
     body: JSON.stringify({
@@ -7713,9 +7746,20 @@ async function aiRequestSingleDocScan(token, pages) {
   }
   return payload;
 }
+// v179: סכימת יחידות של מסמך שחזר מה-AI — בלי שורות פיקדון. זה כלל v176
+// ("פיקדון נספר בכסף בלבד"), שתוקן בלולאה הראשית של המעריך אך פוספס כאן
+// וב-unitsVerified. התוצאה: תעודה עם שורת פיקדון לעולם לא יצאה "מושלמת"
+// (50 מודפס מול 62 מחושב), ולכן שרפה שלושה ניסיונות רשת מלאים בכל סריקה.
+function aiDocRowUnits(doc) {
+  const rows = doc && Array.isArray(doc.rows) ? doc.rows : [];
+  return rows.reduce((sum, row) => {
+    if (/פ.?קדון/.test(String(row && row.description || ''))) return sum;
+    return sum + (row && row.quantity != null ? (Number(row.quantity) || 0) : 0);
+  }, 0);
+}
 function aiSingleDocScore(returnedDoc, inputDoc) {
   const rows = returnedDoc && Array.isArray(returnedDoc.rows) ? returnedDoc.rows : [];
-  const units = rows.reduce((sum, row) => sum + (row.quantity == null ? 0 : Number(row.quantity) || 0), 0);
+  const units = aiDocRowUnits(returnedDoc);
   const subtotalCents = returnedDoc ? aiMoneyCents(returnedDoc.subtotalExVat) : null;
   const expectedCents = aiMoneyCents(inputDoc.amount);
   // עוגן שלא הוקלד נחשב מסופק — אחרת תעודה בלי עוגן הייתה נסרקת שלוש פעמים תמיד.
@@ -7792,17 +7836,28 @@ async function aiRunInvoiceScan() {
   if (!aiScanDocuments.length || aiScanDocuments.some(d => !d.pages.length)) { showToast('צלם לפחות עמוד אחד מכל תעודה', null, null, 3000); return; }
   if (!aiAllPagesOrientationConfirmed()) { showToast('אשר שכל התמונות ישרות לפני הפענוח', null, null, 3200); aiOpenNextUnconfirmedOrientation(); return; }
   if (!auth || !auth.currentUser) { showToast('עדיין אין חיבור מאובטח — המתן רגע ונסה שוב', null, null, 3000); return; }
-  aiScanBusy = true; aiScanProgressText = aiScanDocuments.length > 1 ? 'ה-AI קורא ' + aiScanDocuments.length + ' תעודות במקביל…' : 'ה-AI קורא את דפי התעודה…'; aiScanError = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; renderReconcile();
+  aiScanBusy = true; aiScanProgressText = aiScanDocuments.length > 1 ? 'ה-AI קורא ' + aiScanDocuments.length + ' תעודות, אחת אחרי השנייה…' : 'ה-AI קורא את דפי התעודה…'; aiScanError = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; renderReconcile();
   try {
     const token = await auth.currentUser.getIdToken();
     // v132: כל תעודה נסרקת בבקשה משלה, במקביל. כשל בתעודה אחת אינו מפיל
     // את השאר: התעודות שהצליחו נכנסות לפענוח, והכשל מדווח כשגיאה בדף.
-    const results = await Promise.all(aiScanDocuments.map((doc, docIndex) =>
-      aiScanSingleDocPipeline(token, docIndex).catch(error => {
+    // v179: התעודות נשארות סוכנים נפרדים — בקשה ומודל משלהם לכל תעודה —
+    // אבל נשלחות אחת אחרי השנייה. שלוש העלאות של מגה-בייטים בו-זמנית
+    // מטלפון, כששלושת החיבורים נשארים פתוחים בהמתנה למודל, הן בדיוק
+    // הפרופיל שהרשת מפילה. טורי = אותה איכות קריאה, בלי התחרות על הקו.
+    const results = [];
+    for (let docIndex = 0; docIndex < aiScanDocuments.length; docIndex++) {
+      aiScanProgressText = aiScanDocuments.length > 1
+        ? 'ה-AI קורא תעודה ' + (docIndex + 1) + ' מתוך ' + aiScanDocuments.length + '…'
+        : 'ה-AI קורא את דפי התעודה…';
+      if (currentView === 'reconcile') renderReconcile();
+      try {
+        results.push(await aiScanSingleDocPipeline(token, docIndex));
+      } catch (error) {
         if (error && error.fatal) throw error;
-        return { ok: false, docIndex, errorMessage: (error && error.message) || 'הסריקה נכשלה לתעודה זו' };
-      })
-    ));
+        results.push({ ok: false, docIndex, errorMessage: (error && error.message) || 'הסריקה נכשלה לתעודה זו' });
+      }
+    }
     const okResults = results.filter(result => result.ok);
     if (!okResults.length) {
       aiScanError = (results[0] && results[0].errorMessage) || 'הסריקה החכמה נכשלה. נסה שוב או עבור לבדיקה ידנית.';
@@ -7884,7 +7939,7 @@ function aiScanDiagnosticsHtml(ev) {
   try {
     if (!ev) return '';
     const lines = [];
-    lines.push('אבחון v178 · סל שלם: ' + (ev.basketComplete ? 'כן' : 'לא') + ' · כל השורות שויכו: ' + (ev.allRowsMapped ? 'כן' : 'לא') + ' · תעודות שלא נקראו: ' + (Number(ev.missingDocuments) || 0) + ' מתוך ' + aiScanDocuments.length);
+    lines.push('אבחון v179 · סל שלם: ' + (ev.basketComplete ? 'כן' : 'לא') + ' · כל השורות שויכו: ' + (ev.allRowsMapped ? 'כן' : 'לא') + ' · תעודות שלא נקראו: ' + (Number(ev.missingDocuments) || 0) + ' מתוך ' + aiScanDocuments.length);
     (Array.isArray(ev.docSummaries) ? ev.docSummaries : []).forEach(summary => lines.push('תעודה ' + (Number(summary.noteIndex) + 1) + ': שורות ' + summary.rows + ' · יח׳ ' + summary.units + ' · סכום שנקרא ₪' + fmtMoney(Number(summary.subtotal) || 0)));
     const paperProducts = ev.aggregates instanceof Map ? Array.from(ev.aggregates.values()) : [];
     lines.push('מוצרים שזוהו מהנייר: ' + paperProducts.length + ' · שורות במסך הקליטה: ' + ((reconcileData || []).length));
