@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v171 פיקדון מדויק</title>
+    <title>הזמנות יטבתה - v172 פיצול מארזים בחזרות</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v171 פיקדון מדויק</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v172 פיצול מארזים בחזרות</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -3909,8 +3909,17 @@ function qtyPackOfferInfo() {
   const inList = (forReturns ? returnsList : receiptList).find(it => it.productId === p.id);
   const cur = parseInt((($('qtyVal') || {}).value || '').replace(/[^0-9]/g, ''), 10) || 0;
   const total = (inList ? (Number(inList.qty) || 0) : 0) + cur;
-  if (!(total > 0) || total % size !== 0) return null;
-  return { pack: pack, size: size, total: total, n: total / size, forReturns: forReturns };
+  if (!(total > 0)) return null;
+  // v172: בקליטה — רק כפולות שלמות (הספק מחייב מארזים שלמים בלבד).
+  // בחזרות — הזיכוי מפוצל: מארזים שלמים במחיר מארז + שארית בודדים
+  // במחיר בודד, בדיוק כמו שהספק מזכה בפועל.
+  if (forReturns) {
+    const packs = Math.floor(total / size);
+    if (packs < 1) return null;
+    return { pack: pack, size: size, total: total, n: packs, remainder: total - packs * size, forReturns: true };
+  }
+  if (total % size !== 0) return null;
+  return { pack: pack, size: size, total: total, n: total / size, remainder: 0, forReturns: false };
 }
 function updateQtyPackOffer() {
   const box = $('qtyPackOffer'); if (!box) return;
@@ -3918,9 +3927,10 @@ function updateQtyPackOffer() {
   if (!info) { box.innerHTML = ''; box.classList.add('hidden'); return; }
   const packPrice = info.forReturns ? (Number(info.pack.creditPrice) > 0 ? Number(info.pack.creditPrice) : Number(info.pack.price)) : Number(info.pack.price);
   const priceTxt = packPrice > 0 ? ' · ₪' + fmtMoney(packPrice) + ' למארז' : '';
+  const remainderTxt = info.remainder > 0 ? ' + ' + info.remainder + ' בודדים' : '';
   box.innerHTML = '<div class="bg-indigo-50 border-2 border-indigo-200 rounded-2xl p-3 mt-3 text-center">' +
-    '<div class="text-[11px] font-black text-indigo-800">💡 ' + info.total + ' יח׳ = ' + info.n + ' × ' + (info.pack.name || 'מארז') + priceTxt + '</div>' +
-    '<button data-role="qty-pack-convert" class="btn-tap mt-2 w-full py-2.5 rounded-xl font-black bg-indigo-600 text-white text-sm">המר ל-' + info.n + ' מארזים</button>' +
+    '<div class="text-[11px] font-black text-indigo-800">💡 ' + info.total + ' יח׳ = ' + info.n + ' × ' + (info.pack.name || 'מארז') + remainderTxt + priceTxt + '</div>' +
+    '<button data-role="qty-pack-convert" class="btn-tap mt-2 w-full py-2.5 rounded-xl font-black bg-indigo-600 text-white text-sm">המר ל-' + info.n + ' מארזים' + remainderTxt + '</button>' +
   '</div>';
   box.classList.remove('hidden');
 }
@@ -3933,8 +3943,9 @@ function convertQtyToPack() {
     // מסלול שכל חזרה עוברת בו (שמירה + רענון). הזיכוי ייספר במחיר המארז.
     returnsList = returnsList.filter(it => it.productId !== p.id);
     addQtyToTarget(info.pack, info.n, 'returns');
+    if (info.remainder > 0) addQtyToTarget(p, info.remainder, 'returns');
     buzz(30);
-    showToast('הומר: ' + info.n + ' × ' + (info.pack.name || 'מארז'), null, null, 2600);
+    showToast('הומר: ' + info.n + ' × ' + (info.pack.name || 'מארז') + (info.remainder > 0 ? ' + ' + info.remainder + ' בודדים' : ''), null, null, 2600);
     hideQty();
     updateCart();
     openReturnsScanner();
@@ -5693,7 +5704,7 @@ async function aiCompressInvoiceImage(file) {
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
   let cropRegion = null;
-  const cropInfo = { v: 171 }; // v171: דו"ח החיתוך שמוצג במסך אישור הכיוון
+  const cropInfo = { v: 172 }; // v172: דו"ח החיתוך שמוצג במסך אישור הכיוון
   try {
     const proxyScale = Math.min(1, 1500 / Math.max(sourceWidth, sourceHeight));
     const proxyWidth = Math.max(1, Math.round(sourceWidth * proxyScale));
