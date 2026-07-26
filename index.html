@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v185 הכסף הוא השער</title>
+    <title>הזמנות יטבתה - v186 פיקדון בסגירה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v185 הכסף הוא השער</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v186 פיקדון בסגירה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -7326,7 +7326,11 @@ function aiFindingsClosure(evaluation, findings) {
   const rows = Array.isArray(findings) ? findings : (Array.isArray(evaluation && evaluation.findings) ? evaluation.findings : []);
   const receivedRows = Array.isArray(reconcileData) ? reconcileData : [];
   const expectedUnits = Number(receiptNoteUnits);
-  const receivedUnits = receivedRows.reduce((sum, line) => sum + (Number(line && line.received) || 0), 0);
+  // v186: המקום החמישי והאחרון שבו כלל v176 ("פיקדון = כסף בלבד, לא יחידות")
+  // פוספס. הסכימה כאן ספרה גם את שורת הפיקדון, ולכן היחידות שנקלטו יצאו 444
+  // במקום 432 — ופער היחידות הצפוי חושב כאפס בזמן שהממצאים האמיתיים הראו 12.
+  // כך ננעלה סגירה של תעודה שכל הממצאים בה נכונים.
+  const receivedUnits = receivedRows.reduce((sum, line) => sum + (line && line.isDeposit ? 0 : (Number(line && line.received) || 0)), 0);
   const expectedUnitsDelta = isFinite(expectedUnits) ? expectedUnits - receivedUnits : null;
   let actualUnitsDelta = 0;
   const quantityDeltaByProduct = new Map();
@@ -8059,7 +8063,7 @@ function aiScanDiagnosticsHtml(ev) {
   try {
     if (!ev) return '';
     const lines = [];
-    lines.push('אבחון v185 · סל שלם: ' + (ev.basketComplete ? 'כן' : 'לא') + ' · כל השורות שויכו: ' + (ev.allRowsMapped ? 'כן' : 'לא') + ' · תעודות שלא נקראו: ' + (Number(ev.missingDocuments) || 0) + ' מתוך ' + aiScanDocuments.length);
+    lines.push('אבחון v186 · סל שלם: ' + (ev.basketComplete ? 'כן' : 'לא') + ' · כל השורות שויכו: ' + (ev.allRowsMapped ? 'כן' : 'לא') + ' · תעודות שלא נקראו: ' + (Number(ev.missingDocuments) || 0) + ' מתוך ' + aiScanDocuments.length);
     (Array.isArray(ev.docSummaries) ? ev.docSummaries : []).forEach(summary => lines.push('תעודה ' + (Number(summary.noteIndex) + 1) + ': שורות ' + summary.rows + ' · יח׳ ' + summary.units + ' · סכום שנקרא ₪' + fmtMoney(Number(summary.subtotal) || 0) + ' · סכום השורות ₪' + fmtMoney(Number(summary.rowsSum) || 0)));
     // v180: המספרים הגולמיים כפי שה-AI קרא אותם, לכל שורה תקועה. בלי זה
     // כשל חשבון הוא ניחוש מרחוק; עם זה צילום מסך אחד מספיק כדי לראות איזה
