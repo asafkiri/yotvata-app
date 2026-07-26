@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v165 ברקוד חסין</title>
+    <title>הזמנות יטבתה - v166 פיקדון</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v165 ברקוד חסין</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v166 פיקדון</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5666,7 +5666,7 @@ async function aiCompressInvoiceImage(file) {
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
   let cropRegion = null;
-  const cropInfo = { v: 165 }; // v165: דו"ח החיתוך שמוצג במסך אישור הכיוון
+  const cropInfo = { v: 166 }; // v166: דו"ח החיתוך שמוצג במסך אישור הכיוון
   try {
     const proxyScale = Math.min(1, 1500 / Math.max(sourceWidth, sourceHeight));
     const proxyWidth = Math.max(1, Math.round(sourceWidth * proxyScale));
@@ -7230,7 +7230,7 @@ function aiFindingsClosure(evaluation, findings) {
 }
 function aiEvaluateInvoiceScan(payload) {
   const scan = payload && payload.scan;
-  const errors = [], warnings = [], findings = [], promoCandidates = [], barcodeSuggestions = [], aggregates = new Map(), docSummaries = [], residuals = [], pendings = [], autoResolutions = [];
+  const errors = [], warnings = [], findings = [], promoCandidates = [], barcodeSuggestions = [], aggregates = new Map(), docSummaries = [], residuals = [], pendings = [], autoResolutions = [], depositRows = [];
   let unresolvedBarcodeRows = 0, unusableRows = 0;
   if (!scan || !Array.isArray(scan.documents)) return { valid: false, totalVerified: false, unitsVerified: false, extractedTotal: 0, extractedUnits: 0, errors: ['השרת לא החזיר מסמכים תקינים'], warnings, findings, barcodeSuggestions, allRowsMapped: false, aggregates, docSummaries, residuals, autoResolutions, basketComplete: false };
   if (!Number.isInteger(Number(payload.serviceVersion)) || Number(payload.serviceVersion) < AI_SCAN_MIN_SERVICE_VERSION) {
@@ -7288,6 +7288,15 @@ function aiEvaluateInvoiceScan(payload) {
 
       // הכמות וסכום השורה נספרים גם אם המוצר עדיין לא הותאם. כך הסיכומים
       // המודפסים נשארים גלויים ומדויקים, אך אין חישוב חוסר/עודף על סל חלקי.
+      // v166: שורת פיקדון — מזוהה לפי שמה המודפס. היא כבר נספרה בסכומי
+      // המסמך וביחידות (לעיל), אבל אסור לצבור אותה כמוצר: היא נושאת את
+      // הברקוד של המוצר עצמו, וצבירה הייתה מנפחת את כמות המוצר ויוצרת
+      // חוסר מדומה מול ספירת העובד. היא תצורף לתעודה כשורה נפרדת.
+      if (/פ.?קדון/.test(String(row.description || '')) && qty != null && cents != null && !arithmeticError) {
+        depositRows.push({ document: index + 1, description: String(row.description || '').trim() || 'פיקדון', qty, cents });
+        warnings.push(rowPrefix + 'זוהתה שורת פיקדון (' + qty + ' × ₪' + fmtMoney(cents / 100 / Math.max(1, qty)) + ' = ₪' + fmtMoney(cents / 100) + ') — תצורף לתעודה כשורה נפרדת');
+        return;
+      }
       const barcodeMatch = aiResolveInvoiceBarcode(row);
       const barcode = barcodeMatch.barcode || '';
       const product = barcodeMatch.product || null;
@@ -7466,7 +7475,7 @@ function aiEvaluateInvoiceScan(payload) {
   if (findingsReady && !closure.ok) errors.push(closure.reason || 'הממצאים אינם סוגרים את פער היחידות והסכום');
   const uniqueErrors = Array.from(new Set(errors));
   const uniqueWarnings = Array.from(new Set(warnings.concat(Array.isArray(scan.warnings) ? scan.warnings : [])));
-  return { valid: uniqueErrors.length === 0 && barcodeSuggestions.length === 0 && findingsReady && aggregates.size > 0 && totalVerified && unitsVerified && closure.ok, totalVerified, unitsVerified, closure, errors: uniqueErrors, warnings: uniqueWarnings, findings, barcodeSuggestions, allRowsMapped, findingsReady, basketComplete, residuals, autoResolutions, aggregates, docSummaries, extractedTotal: extractedTotalCents / 100, extractedUnits, rowTotal: rowTotalCents / 100, supplierDiscount };
+  return { valid: uniqueErrors.length === 0 && barcodeSuggestions.length === 0 && findingsReady && aggregates.size > 0 && totalVerified && unitsVerified && closure.ok, totalVerified, unitsVerified, closure, errors: uniqueErrors, warnings: uniqueWarnings, findings, barcodeSuggestions, allRowsMapped, findingsReady, basketComplete, residuals, autoResolutions, aggregates, docSummaries, extractedTotal: extractedTotalCents / 100, extractedUnits, rowTotal: rowTotalCents / 100, supplierDiscount, depositRows };
 }
 function aiRotationRetryDocumentIndexes(evaluation) {
   if (!evaluation || !Array.isArray(evaluation.docSummaries)) return [];
@@ -8238,12 +8247,22 @@ function aiApplyInvoiceResult() {
     creditClaim: reconcileSupplierCreditClaim ? cloneSafe(reconcileSupplierCreditClaim) : null,
     audit: reconcileAiAudit ? cloneSafe(reconcileAiAudit) : null
   };
-  (reconcileData || []).forEach(l => { l.noteQty = 0; l.aiPaperPriceOnly = false; });
+  // v166: שורות פיקדון קודמות מוסרות — ייבנו מחדש מהפענוח הנוכחי.
+  reconcileData = (reconcileData || []).filter(l => !l.isDeposit);
+  reconcileData.forEach(l => { l.noteQty = 0; l.aiPaperPriceOnly = false; });
   ev.aggregates.forEach(a => {
     let line = (reconcileData || []).find(l => l.productId === a.product.id);
     const base = r2(Number(a.product.price) || 0), pr = promoForProduct(a.product.id), on = promoTriggered(pr, todayStr()), pct = on ? (Number(pr.pct) || 0) : 0;
     if (!line) { line = { productId: a.product.id, name: a.product.name, barcode: a.product.barcode || '', received: 0, noteQty: 0, price: a.paperUnitPrice, basePrice: base, promoPct: pct, promoOn: on, checked: true }; reconcileData.unshift(line); }
     line.noteQty = a.qty; line.price = a.paperUnitPrice; line.basePrice = base; line.promoPct = pct; line.promoOn = on; line.checked = true; line.aiPaperPriceOnly = true;
+  });
+  // v166: הפיקדון נכנס כשורה נפרדת בתעודה — כמות מאושרת מראש (אין מה
+  // לסרוק פיזית), מחיר יחידה לא מעוגל כדי שסכום השורה ייסגר באגורה
+  // (lineTotalFromUnit מעגל את המכפלה, לא את המחיר).
+  (ev.depositRows || []).forEach((dep, depositIndex) => {
+    const depositUnit = dep.qty > 0 ? dep.cents / 100 / dep.qty : dep.cents / 100;
+    const depositLabel = /^[\s*]*פ.?קדון[\s*]*$/.test(dep.description) ? 'פיקדון' : ('פיקדון · ' + dep.description);
+    reconcileData.push({ productId: 'deposit-' + dep.document + '-' + depositIndex + '-' + Date.now(), name: depositLabel + (dep.document && aiScanDocuments.length > 1 ? ' (תעודה ' + dep.document + ')' : ''), barcode: '', received: dep.qty, noteQty: dep.qty, price: depositUnit, basePrice: depositUnit, promoPct: 0, promoOn: false, checked: true, isDeposit: true, aiPaperPriceOnly: true });
   });
   reconcileSupplierDiscount = r2(ev.supplierDiscount || 0);
   reconcileSupplierPromoItems = [];
