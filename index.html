@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v179 רשת עמידה</title>
+    <title>הזמנות יטבתה - v180 סימן ההנחה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v179 רשת עמידה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v180 סימן ההנחה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -6505,10 +6505,18 @@ function aiMoneyCents(value) {
   const n = Number(value);
   return isFinite(n) ? Math.round(n * 100) : null;
 }
+// v180: הנחת שורה היא תמיד גודל, לעולם לא מספר שלילי. תעודה שיש בה
+// עמודת הנחה מדפיסה אותה עם מינוס ("8.98-"), וה-AI מחזיר בנאמנות מספר
+// שלילי — מה שהפך "ברוטו פחות הנחה" לחיבור ושבר את בדיקת החשבון בכל
+// שורת מבצע. הערך המוחלט נכון לשתי המוסכמות.
+function aiLineDiscountAbs(row) {
+  const n = Number(row && row.lineDiscountExVat);
+  return isFinite(n) ? Math.abs(n) : 0;
+}
 function aiLineTotal(row, qty) {
   if (aiMoneyCents(row.lineTotalExVat) != null) return r2(Number(row.lineTotalExVat));
-  if (aiMoneyCents(row.grossLineTotalExVat) != null) return r2(Number(row.grossLineTotalExVat) - (Number(row.lineDiscountExVat) || 0));
-  if (aiMoneyCents(row.unitPriceExVat) != null && qty != null) return r2(Number(row.unitPriceExVat) * qty - (Number(row.lineDiscountExVat) || 0));
+  if (aiMoneyCents(row.grossLineTotalExVat) != null) return r2(Number(row.grossLineTotalExVat) - aiLineDiscountAbs(row));
+  if (aiMoneyCents(row.unitPriceExVat) != null && qty != null) return r2(Number(row.unitPriceExVat) * qty - aiLineDiscountAbs(row));
   return null;
 }
 function aiRowArithmeticError(row, qty) {
@@ -6518,7 +6526,8 @@ function aiRowArithmeticError(row, qty) {
   const unitRaw = row.unitPriceExVat == null || row.unitPriceExVat === '' ? null : Number(row.unitPriceExVat);
   const unitQtyCents = unitRaw != null && isFinite(unitRaw) ? aiMoneyCents(unitRaw * qty) : null;
   const gross = aiMoneyCents(row.grossLineTotalExVat);
-  const discount = aiMoneyCents(row.lineDiscountExVat);
+  const discountRaw = aiMoneyCents(row.lineDiscountExVat);
+  const discount = discountRaw == null ? null : Math.abs(discountRaw); // v180
   const total = aiMoneyCents(row.lineTotalExVat);
   // מחיר יחידה שמודפס בדיוק באגורות הוא לעיתים תצוגה מעוגלת של מחיר פנימי
   // מדויק יותר. השגיאה האפשרית היא עד חצי אגורה לכל יחידה, ועוד חצי אגורה
@@ -6732,7 +6741,10 @@ function aiNamePriceMatchProof(row, product) {
   const unitCents = unitRaw != null && Number.isFinite(unitRaw) ? aiMoneyCents(unitRaw) : null;
   const baseCents = aiMoneyCents(basePrice);
   const grossCents = aiMoneyCents(row.grossLineTotalExVat);
-  const discountCents = aiMoneyCents(row.lineDiscountExVat);
+  // v180: גם סולם ההכרעה האוטומטית השווה ברוטו פחות הנחה. עם הנחה שלילית
+  // מהנייר הבדיקה נכשלה ושורת מבצע בלי ברקוד קריא לא הוכרעה לעולם.
+  const discountRawCents = aiMoneyCents(row.lineDiscountExVat);
+  const discountCents = discountRawCents == null ? null : Math.abs(discountRawCents);
   const netCents = aiMoneyCents(row.lineTotalExVat);
   const expectedGrossCents = aiMoneyCents(basePrice * qty);
   const lineToleranceCents = Math.min(RECEIPT_ROUNDING_TOLERANCE_CENTS, Math.max(1, Math.ceil(qty * 0.5 + 0.5)));
@@ -7387,7 +7399,7 @@ function aiEvaluateInvoiceScan(payload) {
       const arithmeticError = qty == null ? '' : aiRowArithmeticError(row, qty);
       if (arithmeticError) { errors.push(rowPrefix + arithmeticError); unusableRows++; if (!rowUnusableReason) rowUnusableReason = arithmeticError; }
       if (rowUnusableReason) {
-        residuals.push({ docNumber: index + 1, documentIndex: index, lineNumber: rowNumber, sourcePage: Number(row.sourcePage), rowRegion: row.rowRegion || null, description: String(row.description || '').trim(), qty, amount: cents == null ? null : cents / 100, reason: rowUnusableReason });
+        residuals.push({ docNumber: index + 1, documentIndex: index, lineNumber: rowNumber, sourcePage: Number(row.sourcePage), rowRegion: row.rowRegion || null, description: String(row.description || '').trim(), qty, amount: cents == null ? null : cents / 100, reason: rowUnusableReason, raw: { unit: row.unitPriceExVat, gross: row.grossLineTotalExVat, discount: row.lineDiscountExVat, total: row.lineTotalExVat } });
       }
       const rowConfidence = Number(row.confidence);
       if (!isFinite(rowConfidence) || rowConfidence < 0.55) warnings.push(rowPrefix + 'ביטחון הקריאה נמוך — השורה תאושר רק אם הברקוד, החשבון והסיכומים נסגרים');
@@ -7462,7 +7474,7 @@ function aiEvaluateInvoiceScan(payload) {
     if (printedUnits != null && isFinite(printedUnits) && Math.round(printedUnits) === docUnits && inputDoc.units != null && docUnits !== Number(inputDoc.units)) {
       warnings.push('תעודה ' + (index + 1) + ': היחידות שנקראו (' + docUnits + ') תואמות לשדה המודפס בתעודה — ייתכן שהיחידות שהוקלדו (' + inputDoc.units + ') שגויות.');
     }
-    docSummaries.push({ noteIndex: index, invoiceNumber: doc.invoiceNumber || '', subtotal: subtotalCents == null ? null : subtotalCents / 100, units: docUnits, rows: Array.isArray(doc.rows) ? doc.rows.length : 0, documentDiscount: printedDiscountCents == null ? null : printedDiscountCents / 100, confidence: isFinite(docConfidence) ? docConfidence : 0 });
+    docSummaries.push({ noteIndex: index, invoiceNumber: doc.invoiceNumber || '', subtotal: subtotalCents == null ? null : subtotalCents / 100, rowsSum: docRowsCents / 100, units: docUnits, rows: Array.isArray(doc.rows) ? doc.rows.length : 0, documentDiscount: printedDiscountCents == null ? null : printedDiscountCents / 100, confidence: isFinite(docConfidence) ? docConfidence : 0 });
   });
   // ===== v132: הכרעה אוטומטית של השורות שנותרו, בשני מעברים =====
   // מעבר שני נחוץ כי הצלבת "כמות שנותרה בספירה" משתנה אחרי כל הכרעה.
@@ -7939,8 +7951,18 @@ function aiScanDiagnosticsHtml(ev) {
   try {
     if (!ev) return '';
     const lines = [];
-    lines.push('אבחון v179 · סל שלם: ' + (ev.basketComplete ? 'כן' : 'לא') + ' · כל השורות שויכו: ' + (ev.allRowsMapped ? 'כן' : 'לא') + ' · תעודות שלא נקראו: ' + (Number(ev.missingDocuments) || 0) + ' מתוך ' + aiScanDocuments.length);
-    (Array.isArray(ev.docSummaries) ? ev.docSummaries : []).forEach(summary => lines.push('תעודה ' + (Number(summary.noteIndex) + 1) + ': שורות ' + summary.rows + ' · יח׳ ' + summary.units + ' · סכום שנקרא ₪' + fmtMoney(Number(summary.subtotal) || 0)));
+    lines.push('אבחון v180 · סל שלם: ' + (ev.basketComplete ? 'כן' : 'לא') + ' · כל השורות שויכו: ' + (ev.allRowsMapped ? 'כן' : 'לא') + ' · תעודות שלא נקראו: ' + (Number(ev.missingDocuments) || 0) + ' מתוך ' + aiScanDocuments.length);
+    (Array.isArray(ev.docSummaries) ? ev.docSummaries : []).forEach(summary => lines.push('תעודה ' + (Number(summary.noteIndex) + 1) + ': שורות ' + summary.rows + ' · יח׳ ' + summary.units + ' · סכום שנקרא ₪' + fmtMoney(Number(summary.subtotal) || 0) + ' · סכום השורות ₪' + fmtMoney(Number(summary.rowsSum) || 0)));
+    // v180: המספרים הגולמיים כפי שה-AI קרא אותם, לכל שורה תקועה. בלי זה
+    // כשל חשבון הוא ניחוש מרחוק; עם זה צילום מסך אחד מספיק כדי לראות איזה
+    // תא נקרא לא נכון (ומה הסימן שלו).
+    (Array.isArray(ev.residuals) ? ev.residuals : []).slice(0, 6).forEach(r => {
+      if (!r || !r.raw) return;
+      const show = v => (v == null || v === '' ? '—' : String(v));
+      lines.push('שורה תקועה · תעודה ' + r.docNumber + ' שורה ' + r.lineNumber + ' · יח ' + show(r.qty) +
+        ' · מחיר ' + show(r.raw.unit) + ' · ברוטו ' + show(r.raw.gross) +
+        ' · הנחה ' + show(r.raw.discount) + ' · נטו ' + show(r.raw.total));
+    });
     const paperProducts = ev.aggregates instanceof Map ? Array.from(ev.aggregates.values()) : [];
     lines.push('מוצרים שזוהו מהנייר: ' + paperProducts.length + ' · שורות במסך הקליטה: ' + ((reconcileData || []).length));
     paperProducts.slice(0, 8).forEach(a => {
@@ -7951,7 +7973,7 @@ function aiScanDiagnosticsHtml(ev) {
       const inPaper = ev.aggregates instanceof Map && ev.aggregates.has(f.productId);
       lines.push('עודף: ' + String(f.name || '').slice(0, 24) + ' ×' + f.qty + ' · בנייר: ' + (inPaper ? ('כן, ×' + ev.aggregates.get(f.productId).qty) : 'לא נמצא'));
     });
-    (Array.isArray(ev.errors) ? ev.errors : []).slice(0, 5).forEach(e => lines.push('שגיאה: ' + String(e).slice(0, 90)));
+    (Array.isArray(ev.errors) ? ev.errors : []).slice(0, 8).forEach(e => lines.push('שגיאה: ' + String(e).slice(0, 90)));
     return '<details class="mt-3 bg-slate-50 border border-slate-200 rounded-xl"><summary class="p-2.5 text-[11px] font-black text-slate-500"><i class="fa-solid fa-microscope"></i> נתוני אבחון — צלם מסך כשמשהו נראה מוזר</summary><div class="px-3 pb-3 text-[10px] text-slate-600 leading-relaxed" style="font-family: monospace">' + lines.map(htmlEscape).join('<br>') + '</div></details>';
   } catch (diagError) { return ''; }
 }
