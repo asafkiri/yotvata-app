@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v176 פיקדון בכסף בלבד</title>
+    <title>הזמנות יטבתה - v177 אבחון סריקה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v176 פיקדון בכסף בלבד</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v177 אבחון סריקה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5742,7 +5742,7 @@ async function aiCompressInvoiceImage(file) {
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
   let cropRegion = null;
-  const cropInfo = { v: 176 }; // v176: דו"ח החיתוך שמוצג במסך אישור הכיוון
+  const cropInfo = { v: 177 }; // v177: דו"ח החיתוך שמוצג במסך אישור הכיוון
   try {
     const proxyScale = Math.min(1, 1500 / Math.max(sourceWidth, sourceHeight));
     const proxyWidth = Math.max(1, Math.round(sourceWidth * proxyScale));
@@ -7546,6 +7546,9 @@ function aiEvaluateInvoiceScan(payload) {
       findings.push(...promoCandidates);
     }
     if (basketComplete) (reconcileData || []).forEach(line => {
+      // v177: שורת פיקדון נגזרת אינה מוצר שנסרק — הפיקדון שבנייר מטופל
+      // בנפרד (depositRows) ולכן אסור שהשורה הנגזרת תסומן "עודף".
+      if (line.isDeposit || String(line.productId || '').indexOf('deposit-') === 0) return;
       if ((Number(line.received) || 0) > 0 && !aggregates.has(line.productId)) findings.push({ type: 'surplus', productId: line.productId, name: line.name, qty: Number(line.received) || 0, expectedPrice: Number(line.price) || 0, text: 'עודף ' + (Number(line.received) || 0) + ' × ' + line.name + ' — לא מופיע בתעודה' });
     });
     if (documentDiscountCents > 2) findings.push({ type: 'document_discount', amount: documentDiscountCents / 100, text: 'הנחת מסמך כללית: ₪' + fmtMoney(documentDiscountCents / 100) });
@@ -7851,6 +7854,29 @@ function aiCompactFindingGroupHtml(type, title, findings, extraRowsHtml, extraCo
     '<div class="flex items-center justify-between gap-2 mb-1 ' + style.head + '"><div class="font-black"><i class="fa-solid ' + style.icon + ' ml-1"></i>' + title + '</div><span class="rounded-full px-2 py-0.5 text-[10px] font-black ' + style.badge + '">' + (rows.length + extras) + '</span></div>' +
     '<div>' + compactRows + extraHtml + '</div></div>';
 }
+// v177: נתוני אבחון — מוצגים מקופלים במסך התוצאות כשיש בעיות, כדי
+// שתקלה חריגה (כמו "הכול עודף") תיפתר מצילום מסך אחד: מה נקרא מכל
+// תעודה, כמה מוצרים זוהו מהנייר, וההשוואה המדויקת שורה-מול-שורה.
+function aiScanDiagnosticsHtml(ev) {
+  try {
+    if (!ev) return '';
+    const lines = [];
+    lines.push('אבחון v177 · סל שלם: ' + (ev.basketComplete ? 'כן' : 'לא') + ' · כל השורות שויכו: ' + (ev.allRowsMapped ? 'כן' : 'לא'));
+    (Array.isArray(ev.docSummaries) ? ev.docSummaries : []).forEach(summary => lines.push('תעודה ' + (Number(summary.noteIndex) + 1) + ': שורות ' + summary.rows + ' · יח׳ ' + summary.units + ' · סכום שנקרא ₪' + fmtMoney(Number(summary.subtotal) || 0)));
+    const paperProducts = ev.aggregates instanceof Map ? Array.from(ev.aggregates.values()) : [];
+    lines.push('מוצרים שזוהו מהנייר: ' + paperProducts.length + ' · שורות במסך הקליטה: ' + ((reconcileData || []).length));
+    paperProducts.slice(0, 8).forEach(a => {
+      const line = (reconcileData || []).find(l => l.productId === a.product.id);
+      lines.push('נייר: ' + String(a.product.name || '').slice(0, 24) + ' ×' + a.qty + ' ↔ נקלט: ' + (line ? (Number(line.received) || 0) : 'אין שורה תואמת'));
+    });
+    (Array.isArray(ev.findings) ? ev.findings : []).filter(f => f.type === 'surplus').slice(0, 6).forEach(f => {
+      const inPaper = ev.aggregates instanceof Map && ev.aggregates.has(f.productId);
+      lines.push('עודף: ' + String(f.name || '').slice(0, 24) + ' ×' + f.qty + ' · בנייר: ' + (inPaper ? ('כן, ×' + ev.aggregates.get(f.productId).qty) : 'לא נמצא'));
+    });
+    (Array.isArray(ev.errors) ? ev.errors : []).slice(0, 5).forEach(e => lines.push('שגיאה: ' + String(e).slice(0, 90)));
+    return '<details class="mt-3 bg-slate-50 border border-slate-200 rounded-xl"><summary class="p-2.5 text-[11px] font-black text-slate-500"><i class="fa-solid fa-microscope"></i> נתוני אבחון — צלם מסך כשמשהו נראה מוזר</summary><div class="px-3 pb-3 text-[10px] text-slate-600 leading-relaxed" style="font-family: monospace">' + lines.map(htmlEscape).join('<br>') + '</div></details>';
+  } catch (diagError) { return ''; }
+}
 function aiActionableFindingsHtml(findings) {
   const actionable = (Array.isArray(findings) ? findings : []).filter(aiIsActionableFinding);
   if (!actionable.length) return '';
@@ -7859,7 +7885,7 @@ function aiActionableFindingsHtml(findings) {
     aiCompactFindingGroupHtml('surplus', 'עודפים', actionable) +
     aiCompactFindingGroupHtml('price', 'בעיות מחיר', actionable) +
     aiCompactFindingGroupHtml('promo_missing', 'מבצע קיים במערכת אך לא בתעודה', actionable) +
-  '</div></div>';
+  '</div></div>' + aiScanDiagnosticsHtml(aiScanEvaluation);
 }
 function aiInformationalFindingsHtml(findings) {
   const informational = (Array.isArray(findings) ? findings : []).filter(finding => !aiIsActionableFinding(finding));
