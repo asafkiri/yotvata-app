@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v160 צפצוף קופה</title>
+    <title>הזמנות יטבתה - v162 סיום וביטול</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v160 צפצוף קופה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v162 סיום וביטול</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -297,10 +297,9 @@
             <button id="qty_plus" class="btn-tap w-14 h-14 rounded-2xl bg-slate-100 text-slate-700 flex items-center justify-center text-2xl"><i class="fa-solid fa-plus"></i></button>
           </div>
         </div>
-        <div class="px-4 pb-2"><button id="qty_again" class="btn-tap w-full py-3.5 rounded-xl font-black bg-blue-600 text-white flex items-center justify-center gap-2 text-base"><i class="fa-solid fa-barcode"></i> אישור וסרוק הבא</button></div>
         <div class="flex gap-2 p-4 pt-2">
           <button id="qty_cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-500">ביטול</button>
-          <button id="qty_done" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-800 text-white">סיום</button>
+          <button id="qty_done" class="btn-tap flex-1 py-3 rounded-xl font-black bg-blue-600 text-white">סיום</button>
         </div>
       </div>
     </div>
@@ -3083,11 +3082,12 @@ function scanBeep() {
     osc.frequency.value = 2200;
     const now = ctx.currentTime;
     gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.5, now + 0.008);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
+    gain.gain.exponentialRampToValueAtTime(0.85, now + 0.008); // v161: כמעט מקסימום
+    gain.gain.setValueAtTime(0.85, now + 0.06);                // החזקה בשיא — חזק ונוכח יותר
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
     osc.connect(gain).connect(ctx.destination);
     osc.start(now);
-    osc.stop(now + 0.1);
+    osc.stop(now + 0.13);
   } catch (beepError) {}
 }
 // ===== סריקת ברקוד במצלמה =====
@@ -5663,7 +5663,7 @@ async function aiCompressInvoiceImage(file) {
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
   let cropRegion = null;
-  const cropInfo = { v: 160 }; // v160: דו"ח החיתוך שמוצג במסך אישור הכיוון
+  const cropInfo = { v: 162 }; // v162: דו"ח החיתוך שמוצג במסך אישור הכיוון
   try {
     const proxyScale = Math.min(1, 1500 / Math.max(sourceWidth, sourceHeight));
     const proxyWidth = Math.max(1, Math.round(sourceWidth * proxyScale));
@@ -11198,14 +11198,13 @@ $('rs_cancel').addEventListener('click', hideReceiptSummary);
 $('rs_ok').addEventListener('click', confirmReceipt);
 $('qty_minus').addEventListener('click', () => qtyStep(-1));
 $('qty_plus').addEventListener('click', () => qtyStep(1));
-$('qty_again').addEventListener('click', () => commitQty(true));
 $('qty_done').addEventListener('click', () => commitQty(false));
 $('qty_cancel').addEventListener('click', hideQty);
 $('mr_cancel').addEventListener('click', closeManualReturn);
 $('mr_add').addEventListener('click', addManualReturn);
 $('mr_price').addEventListener('input', updateManualReturnTotal);
 $('mr_qty').addEventListener('input', updateManualReturnTotal);
-$('qtyVal').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commitQty(true); } });
+$('qtyVal').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commitQty(false); } });
 $('qtyVal').addEventListener('input', updateQtyPackOffer);
 $('qtyPackOffer').addEventListener('click', (e) => { if (e.target.closest('[data-role="qty-pack-convert"]')) convertQtyToPack(); });
 $('prod_cancel').addEventListener('click', hideProdModal);
