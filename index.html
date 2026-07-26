@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v180 סימן ההנחה</title>
+    <title>הזמנות יטבתה - v181 מבצע מובלע</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v180 סימן ההנחה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v181 מבצע מובלע</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -6513,11 +6513,19 @@ function aiLineDiscountAbs(row) {
   const n = Number(row && row.lineDiscountExVat);
   return isFinite(n) ? Math.abs(n) : 0;
 }
+// v181: שורת הפיקדון מדפיסה 0 בעמודת הברוטו והכסף מופיע רק בנטו. כשה-AI
+// מחזיר 0 כסכום השורה, אפס נחשב "נקרא" והשורה נספרה כאפס — כך נפל בדיוק
+// ₪3.05 מסכום התעודה. אפס אינו סכום שורה תקף כשמחיר יחידה × כמות חיובי.
 function aiLineTotal(row, qty) {
-  if (aiMoneyCents(row.lineTotalExVat) != null) return r2(Number(row.lineTotalExVat));
-  if (aiMoneyCents(row.grossLineTotalExVat) != null) return r2(Number(row.grossLineTotalExVat) - aiLineDiscountAbs(row));
-  if (aiMoneyCents(row.unitPriceExVat) != null && qty != null) return r2(Number(row.unitPriceExVat) * qty - aiLineDiscountAbs(row));
-  return null;
+  const fromUnit = (aiMoneyCents(row.unitPriceExVat) != null && qty != null)
+    ? r2(Number(row.unitPriceExVat) * qty - aiLineDiscountAbs(row)) : null;
+  const zeroIsMisread = value => value === 0 && fromUnit != null && fromUnit > 0;
+  const stated = aiMoneyCents(row.lineTotalExVat) != null ? r2(Number(row.lineTotalExVat)) : null;
+  if (stated != null && !zeroIsMisread(stated)) return stated;
+  const fromGross = aiMoneyCents(row.grossLineTotalExVat) != null
+    ? r2(Number(row.grossLineTotalExVat) - aiLineDiscountAbs(row)) : null;
+  if (fromGross != null && !zeroIsMisread(fromGross)) return fromGross;
+  return fromUnit;
 }
 function aiRowArithmeticError(row, qty) {
   // מחיר יחידה עשוי להכיל יותר משתי ספרות אחרי הנקודה. מכפילים אותו בכמות
@@ -6753,9 +6761,14 @@ function aiNamePriceMatchProof(row, product) {
   // למחיר הקטלוג. בלי עוגן כזה סכום ברוטו/נטו חייב להתאים עד אגורה אחת.
   const catalogTotalToleranceCents = unitMatchesBase ? lineToleranceCents : 1;
   const grossMatchesBase = grossCents != null && expectedGrossCents != null && Math.abs(grossCents - expectedGrossCents) <= catalogTotalToleranceCents;
+  // v181: בתעודה בלי עמודת הנחה המבצע מודפס כברוטו→נטו בלבד. נטו נמוך
+  // מברוטו הוא הנחת שורה מובלעת ולגיטימית, לא סתירה. רק נטו הגבוה מהברוטו
+  // הוא באמת קריאה שגויה. בלי זה כל שורת מבצע בפורמט הזה נפסלה בהכרעה.
   const grossNetConsistent = grossCents == null || netCents == null
     ? true
-    : (discountCents != null ? Math.abs((grossCents - discountCents) - netCents) <= 1 : Math.abs(grossCents - netCents) <= 1);
+    : (discountCents != null
+      ? Math.abs((grossCents - discountCents) - netCents) <= 1
+      : netCents <= grossCents + 1);
   const unitNetConsistent = unitCents == null || grossCents != null || netCents == null || discountCents == null
     ? true
     : Math.abs((aiMoneyCents(unitRaw * qty) - discountCents) - netCents) <= lineToleranceCents;
@@ -6765,7 +6778,7 @@ function aiNamePriceMatchProof(row, product) {
     && Math.abs((expectedGrossCents - discountCents) - netCents) <= catalogTotalToleranceCents;
   const unitNetNoDiscountConsistent = unitCents == null || netCents == null || discountCents != null
     ? true
-    : Math.abs(aiMoneyCents(unitRaw * qty) - netCents) <= lineToleranceCents;
+    : netCents <= aiMoneyCents(unitRaw * qty) + lineToleranceCents; // v181: מבצע מובלע
   const hasNegativeMoney = [unitCents, grossCents, discountCents, netCents].some(value => value != null && value < 0);
   if (hasNegativeMoney || aiRowArithmeticError(row, qty) || !grossNetConsistent || !unitNetConsistent || !unitNetNoDiscountConsistent) {
     return { ok: false, reason: 'arithmetic_not_proven' };
@@ -7951,7 +7964,7 @@ function aiScanDiagnosticsHtml(ev) {
   try {
     if (!ev) return '';
     const lines = [];
-    lines.push('אבחון v180 · סל שלם: ' + (ev.basketComplete ? 'כן' : 'לא') + ' · כל השורות שויכו: ' + (ev.allRowsMapped ? 'כן' : 'לא') + ' · תעודות שלא נקראו: ' + (Number(ev.missingDocuments) || 0) + ' מתוך ' + aiScanDocuments.length);
+    lines.push('אבחון v181 · סל שלם: ' + (ev.basketComplete ? 'כן' : 'לא') + ' · כל השורות שויכו: ' + (ev.allRowsMapped ? 'כן' : 'לא') + ' · תעודות שלא נקראו: ' + (Number(ev.missingDocuments) || 0) + ' מתוך ' + aiScanDocuments.length);
     (Array.isArray(ev.docSummaries) ? ev.docSummaries : []).forEach(summary => lines.push('תעודה ' + (Number(summary.noteIndex) + 1) + ': שורות ' + summary.rows + ' · יח׳ ' + summary.units + ' · סכום שנקרא ₪' + fmtMoney(Number(summary.subtotal) || 0) + ' · סכום השורות ₪' + fmtMoney(Number(summary.rowsSum) || 0)));
     // v180: המספרים הגולמיים כפי שה-AI קרא אותם, לכל שורה תקועה. בלי זה
     // כשל חשבון הוא ניחוש מרחוק; עם זה צילום מסך אחד מספיק כדי לראות איזה
