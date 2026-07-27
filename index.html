@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v191 ניקוי הצריבה</title>
+    <title>הזמנות יטבתה - v192 המלצה במבצע</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v191 ניקוי הצריבה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v192 המלצה במבצע</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -11272,13 +11272,19 @@ function signRecommend(s) {
     const pct = pr ? r2(Number(pr.pct) || 0) : 0;
     return pct > 0 ? { type: 'pct', value: pct } : null;
   }
-  const cost = signMaxCost(s.promoId);
-  if (!(cost > 0)) return null;
-  if (s.kind === 'unit') return { type: 'price', value: roundNine(cost * (1 + VAT) * signMarginFactor()), cost: cost };
+  const fullCost = signMaxCost(s.promoId);
+  if (!(fullCost > 0)) return null;
+  // v192: העלות להמלצה היא העלות בפועל בתקופת המבצע — אחרי אחוז ההנחה
+  // מהספק. קודם תומחר ממחיר המאגר המלא, ולכן 25% הרווח שהוצגו היו בפועל
+  // גבוהים בהרבה, והשלט יצא יקר מהמתוכנן. השלט ממילא תקף רק עד סוף
+  // המבצע, כך שהעלות המוזלת היא הנכונה לתקופה שלו.
+  const promoPct = pr ? r2(Number(pr.pct) || 0) : 0;
+  const cost = promoPct > 0 ? r2(fullCost * (1 - promoPct / 100)) : fullCost;
+  if (s.kind === 'unit') return { type: 'price', value: roundNine(cost * (1 + VAT) * signMarginFactor()), cost: cost, fullCost: fullCost, promoPct: promoPct };
   if (s.kind === 'bundle') {
     const q = parseInt(s.qty, 10);
     if (!(q > 0)) return null;
-    return { type: 'price', value: roundNine(cost * (1 + VAT) * q * signMarginFactor()), cost: cost };
+    return { type: 'price', value: roundNine(cost * (1 + VAT) * q * signMarginFactor()), cost: cost, fullCost: fullCost, promoPct: promoPct };
   }
   return null;
 }
@@ -11287,7 +11293,7 @@ function signRecInnerHtml(s, idx) {
   if (!rec) return '';
   const label = rec.type === 'pct'
     ? 'המלצה: <b>' + rec.value + '%</b> <span class="opacity-70">(ההנחה שקיבלת מהספק)</span>'
-    : 'המלצת מחיר: <b>₪' + formatRecommendedPrice(rec.value) + '</b> <span class="opacity-70">(עלות מקס׳ ₪' + fmtMoney(rec.cost) + ' + מע״מ + ' + r2(Number(signMarginPct) || 0) + '% רווח)</span>';
+    : 'המלצת מחיר: <b>₪' + formatRecommendedPrice(rec.value) + '</b> <span class="opacity-70">(' + (rec.promoPct > 0 ? 'עלות במבצע ₪' + fmtMoney(rec.cost) + ' — ' + r2(rec.promoPct) + '% הנחה ממחיר ₪' + fmtMoney(rec.fullCost) : 'עלות מקס׳ ₪' + fmtMoney(rec.cost)) + ' + מע״מ + ' + r2(Number(signMarginPct) || 0) + '% רווח)</span>';
   return '<div class="flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">' +
     '<span class="text-[11px] font-bold text-amber-900 leading-tight"><i class="fa-solid fa-lightbulb"></i> ' + label + '</span>' +
     '<button data-role="sign-apply-rec" data-id="' + idx + '" class="btn-tap shrink-0 text-[11px] font-black text-amber-900 bg-amber-200 px-2.5 py-1.5 rounded-md">השתמש</button>' +
