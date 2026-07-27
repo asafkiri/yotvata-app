@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v193 ייבוא מבצעים</title>
+    <title>הזמנות יטבתה - v194 ייבוא גם מ-PDF</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v193 ייבוא מבצעים</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v194 ייבוא גם מ-PDF</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -11228,13 +11228,24 @@ async function promoImportStart(files) {
   promoImport = { stage: 'reading', sheet: null, missing: [], error: '' };
   renderPromos();
   try {
-    const pages = [];
-    for (const file of Array.from(files).slice(0, 4)) pages.push(await promoImportFileToDataUrl(file));
+    // v194: אם נבחר PDF — הוא נשלח כמו שהוא (הדף מגיע מהספק כ-PDF).
+    // אחרת: עד 4 תמונות, מוקטנות כרגיל.
+    const list = Array.from(files);
+    const pdfFile = list.find(f => f.type === 'application/pdf' || /\.pdf$/i.test(f.name || ''));
+    let requestBody;
+    if (pdfFile) {
+      if (pdfFile.size > 15 * 1024 * 1024) throw new Error('קובץ ה-PDF גדול מדי (מעל 15MB) — צלם את העמודים כתמונות במקום');
+      requestBody = { mode: 'promoSheet', pdf: await promoImportFileRaw(pdfFile) };
+    } else {
+      const pages = [];
+      for (const file of list.slice(0, 4)) pages.push(await promoImportFileToDataUrl(file));
+      requestBody = { mode: 'promoSheet', pages: pages };
+    }
     const token = await auth.currentUser.getIdToken();
     const response = await aiFetchWithRetry(AI_SCAN_WORKER_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-      body: JSON.stringify({ mode: 'promoSheet', pages: pages })
+      body: JSON.stringify(requestBody)
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || !payload.ok || !payload.sheet) {
@@ -11251,6 +11262,14 @@ async function promoImportStart(files) {
     promoImport = { stage: 'error', sheet: null, missing: [], error: (error && error.message) || 'הייבוא נכשל' };
   }
   if (currentView === 'promos') renderPromos();
+}
+function promoImportFileRaw(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('קריאת הקובץ נכשלה'));
+    reader.onload = () => resolve(reader.result);
+    reader.readAsDataURL(file);
+  });
 }
 function promoImportFileToDataUrl(file) {
   // הקטנה ל-2200px ו-JPEG — דף מודפס נשאר קריא לחלוטין, והבקשה קלה.
@@ -11372,7 +11391,7 @@ function promoImportHtml() {
 function promoImportPick() {
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = 'image/*';
+  input.accept = 'image/*,application/pdf';
   input.multiple = true;
   input.onchange = () => promoImportStart(input.files);
   input.click();
