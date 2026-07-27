@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v194 ייבוא גם מ-PDF</title>
+    <title>הזמנות יטבתה - v195 חיפוש אמיתי בייבוא</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v194 ייבוא גם מ-PDF</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v195 חיפוש אמיתי בייבוא</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -11191,9 +11191,12 @@ function promoImportMatch(sheet) {
     group.productIds = [];
     group.missingCount = 0;
     (group.products || []).forEach(item => {
-      const productId = barcodeProductId(item.barcode);
-      item.productId = productId || null;
-      if (productId) { group.productIds.push(productId); return; }
+      // v195: barcodeProductId הוא מחולל מזהים, לא חיפוש — הוא "מצא" כל
+      // ברקוד גם כשהמוצר אינו קיים, ולכן האשף לא נפתח מעולם והמבצעים היו
+      // נקשרים למזהים רפאים. החיפוש האמיתי: findProductByBarcode מול המאגר.
+      const match = findProductByBarcode(item.barcode, null);
+      item.productId = match ? match.id : null;
+      if (match) { group.productIds.push(match.id); return; }
       group.missingCount++;
       const key = normalizeBarcode(item.barcode);
       if (seen.has(key)) return;
