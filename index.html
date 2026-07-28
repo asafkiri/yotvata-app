@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v198 ביטול אימות זיכוי</title>
+    <title>הזמנות יטבתה - v199 עריכת פריטים בזיכוי</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v198 ביטול אימות זיכוי</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v199 עריכת פריטים בזיכוי</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -551,6 +551,7 @@ let aiOrientationBusy = false;
 let reconcileAiAudit = null;     // מטא-נתונים בלבד, ללא תמונות
 let receiptFix = null;           // תיקון תעודה פתוחה מההיסטוריה
 let returnVerify = null;          // אימות תעודת זיכוי (חזרות)
+let returnEdit = null;            // v199: עריכת פריטים בתעודת חזרות/זיכוי שכבר נשלחה
 let rvOrigin = 'returnsHistory';  // מאיזה מסך נפתח אימות הזיכוי (לחזרה אליו)
 let signMaker = null;             // הכנת שלטי מבצע (בחירה + עריכה + תצוגה)
 let receiptDupConfirmed = false; // אישור שמירה למרות חשד לכפילות
@@ -1065,6 +1066,7 @@ function renderView() {
   else if (currentView === 'reconcile') renderReconcile();
   else if (currentView === 'receiptFix') renderReceiptFix();
   else if (currentView === 'returnReconcile') renderReturnReconcile();
+  else if (currentView === 'returnItemsEdit') renderReturnItemsEdit();
   else if (currentView === 'notes') renderNotes();
   else if (currentView === 'trash') renderTrash();
   else if (currentView === 'health') renderHealth();
@@ -1716,6 +1718,7 @@ function actionTitleFromCloud(actionName, task) {
     'save receipt before clearing draft': ['receipt', 'קליטת תעודה'],
     'save receipt fix': ['receipt', 'תיקון תעודה'],
     'save return verification': ['returns', 'אימות תעודת זיכוי'],
+    'edit return items': ['returns', 'עריכת פריטים בתעודת חזרות'],
     'add product': ['product', 'הוספת מוצר'],
     'create product': ['product', 'הוספת מוצר'],
     'save product': ['product', 'עריכת מוצר'],
@@ -2615,14 +2618,14 @@ function renderReturnsHistory() {
           '<div class="flex gap-2 items-stretch mb-2">' +
             '<div class="flex-1 flex items-center gap-1 border-2 border-slate-200 rounded-xl px-2 focus-within:border-blue-500"><span class="text-slate-400 font-black">₪</span><input id="rvNote_' + r.id + '" type="text" inputmode="decimal" placeholder="סכום זיכוי ללא מע״מ" class="w-full h-11 text-center text-base font-black outline-none bg-transparent"></div>' +
             '<button data-role="rv-verify-inline" data-id="' + r.id + '" class="btn-tap px-4 rounded-xl font-black bg-green-600 text-white flex items-center gap-1"><i class="fa-solid fa-check-double"></i> בדוק</button>' +
-          '</div>'
+          '</div>' + '<button data-role="ret-edit-items" data-id="' + r.id + '" class="btn-tap w-full mt-2 bg-white border border-indigo-200 text-indigo-700 rounded-xl py-2 font-black text-[11px]"><i class="fa-solid fa-pen-to-square"></i> ערוך פריטים בתעודה</button>'
         : breakdown +
           creditPartsInfoHtml(r) +
           (openGap ? creditAddNoteHtml(r) : '') +
           '<div class="flex gap-2">' +
             '<button data-role="rv-open" data-id="' + r.id + '" class="btn-tap flex-1 font-black py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 ' + (openGap ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700') + '"><i class="fa-solid ' + (openGap ? 'fa-wrench' : 'fa-pen') + '"></i> ' + (openGap ? 'תקן פער' : 'ערוך אימות') + '</button>' +
             '<button data-role="uncredit" data-id="' + r.id + '" class="btn-tap px-3 font-bold py-2.5 rounded-xl text-sm bg-slate-100 text-slate-500"><i class="fa-solid fa-rotate-left"></i></button>' +
-          '</div>';
+          '</div>' + '<button data-role="ret-edit-items" data-id="' + r.id + '" class="btn-tap w-full mt-2 bg-white border border-indigo-200 text-indigo-700 rounded-xl py-2 font-black text-[11px]"><i class="fa-solid fa-pen-to-square"></i> ערוך פריטים בתעודה</button>';
       return '<div class="bg-white rounded-2xl shadow-sm border ' + (credited ? (openGap ? 'border-rose-300' : 'border-green-300') : 'border-amber-300') + ' overflow-hidden mb-4">' +
         statusBar +
         '<div class="p-4 border-b border-slate-100 flex justify-between items-center">' +
@@ -2836,6 +2839,228 @@ async function saveReturnVerify(opts) {
   returnVerify = null;
   setView(rvOrigin);
   showToast(open ? 'נשמר — נותר פער בזיכוי' : 'הזיכוי אומת ✓', null, null, 2000);
+}
+// ===== v199: עריכת פריטים בתעודת חזרות/זיכוי =====
+// התעודה נשלחה כבר, אבל הרישום אצלנו יכול להיות שגוי מול מה שהספק זיכה בפועל
+// (למשל 22 בודדים אצלנו מול 2 מארזים + 6 בודדים בנייר). כאן מתקנים את השורות
+// עצמן — כמות, מחיר, מוצר, פיצול למארזים — והסכום הצפוי מתעדכן מיד.
+function retEditEsc(s) { return (s == null ? '' : String(s)).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function retEditProductFor(l) {
+  if (!l) return null;
+  if (l.productId) { const p = products.find(x => x.id === l.productId); if (p) return p; }
+  if (l.barcode) { const p = findProductByBarcode(l.barcode, null); if (p) return p; }
+  return products.find(x => x.name === l.name) || null;
+}
+function retCreditUnit(p) { return r2(Number(p && (Number(p.creditPrice) > 0 ? p.creditPrice : p.price)) || 0); }
+function openReturnItemsEdit(id) {
+  const r = returns.find(x => x.id === id); if (!r) return;
+  returnEdit = {
+    id: r.id,
+    origin: (currentView === 'receiptsHistory') ? 'receiptsHistory' : 'returnsHistory',
+    baseEx: returnTotals(r).ex,
+    noteTotal: (r.creditNoteTotal != null ? Number(r.creditNoteTotal) : null),
+    wasCredited: !!r.credited,
+    addQuery: '',
+    replaceIdx: -1,
+    items: (r.items || []).map((l, i) => ({
+      key: 'l' + i,
+      productId: l.productId || '',
+      name: l.name || '',
+      barcode: l.barcode || '',
+      qty: Number(l.qty) || 0,
+      unitPrice: r2(Number(l.unitPrice) || 0),
+      isDeposit: !!l.isDeposit,
+      noteQty: (l.noteQty != null ? Number(l.noteQty) : null),
+      origQty: Number(l.qty) || 0
+    }))
+  };
+  setView('returnItemsEdit');
+}
+function retEditEx() { let ex = 0; ((returnEdit && returnEdit.items) || []).forEach(l => ex += (Number(l.unitPrice) || 0) * (Number(l.qty) || 0)); return r2(ex); }
+function retEditGap() { const n = (returnEdit && returnEdit.noteTotal); return n == null ? null : r2(retEditEx() - Number(n)); }
+function refreshRetEditHeader() {
+  const ex = retEditEx();
+  const e = $('reEx'); if (e) e.textContent = '₪' + fmtMoney(ex);
+  const g = retEditGap();
+  const gp = $('reGap');
+  if (gp && g != null) {
+    gp.textContent = (Math.abs(g) <= 1 ? 'סוגר ✓' : (g > 0 ? 'הספק זיכה פחות ₪' + fmtMoney(g) : 'הספק זיכה יותר ₪' + fmtMoney(-g)));
+    gp.className = 'font-black ' + (Math.abs(g) <= 1 ? 'text-emerald-700' : 'text-rose-700');
+  }
+  ((returnEdit && returnEdit.items) || []).forEach((l, i) => {
+    const t = $('reTot_' + i);
+    if (t) t.textContent = '₪' + fmtMoney(r2((Number(l.unitPrice) || 0) * (Number(l.qty) || 0)));
+  });
+}
+// פיצול מארזים — אותו כלל כמו v172 בחזרות: מארזים שלמים במחיר מארז + שארית בודדים
+function retEditPackInfo(idx) {
+  const l = ((returnEdit && returnEdit.items) || [])[idx]; if (!l || l.isDeposit) return null;
+  const p = retEditProductFor(l); if (!p || !p.billingPackId) return null;
+  const size = parseInt(p.billingPackSize, 10) || 0; if (size < 2) return null;
+  const pack = products.find(x => x.id === p.billingPackId); if (!pack) return null;
+  const total = Number(l.qty) || 0;
+  const packs = Math.floor(total / size); if (packs < 1) return null;
+  return { pack: pack, single: p, size: size, total: total, n: packs, remainder: total - packs * size };
+}
+function retEditConvertPack(idx) {
+  const info = retEditPackInfo(idx); if (!info || !returnEdit) return;
+  const l = returnEdit.items[idx]; if (!l) return;
+  const out = [{ key: 'p' + Date.now(), productId: info.pack.id, name: info.pack.name, barcode: info.pack.barcode || '', qty: info.n, unitPrice: (retCreditUnit(info.pack) || r2((Number(l.unitPrice) || 0) * info.size)), isDeposit: false, noteQty: null, origQty: 0 }];
+  if (info.remainder > 0) out.push({ key: 's' + Date.now(), productId: info.single.id, name: info.single.name, barcode: info.single.barcode || '', qty: info.remainder, unitPrice: (retCreditUnit(info.single) || r2(Number(l.unitPrice) || 0)), isDeposit: false, noteQty: null, origQty: 0 });
+  returnEdit.items.splice(idx, 1);
+  out.forEach((x, k) => returnEdit.items.splice(idx + k, 0, x));
+  buzz(30);
+  showToast('הומר: ' + info.n + ' × ' + (info.pack.name || 'מארז') + (info.remainder > 0 ? ' + ' + info.remainder + ' בודדים' : ''), null, null, 2800);
+  renderReturnItemsEdit();
+}
+function retEditStepQty(idx, d) { const l = ((returnEdit && returnEdit.items) || [])[idx]; if (!l) return; l.qty = Math.max(0, (Number(l.qty) || 0) + d); renderReturnItemsEdit(); }
+function retEditSetQtyLive(idx, v) { const l = ((returnEdit && returnEdit.items) || [])[idx]; if (!l) return; let q = parseInt((v || '').toString().replace(/[^0-9]/g, ''), 10); if (isNaN(q) || q < 0) q = 0; l.qty = q; refreshRetEditHeader(); }
+function retEditSetPriceLive(idx, v) { const l = ((returnEdit && returnEdit.items) || [])[idx]; if (!l) return; const n = parseFloat((v || '').toString().replace(',', '.').replace(/[^0-9.]/g, '')); l.unitPrice = (isFinite(n) && n >= 0) ? r2(n) : 0; refreshRetEditHeader(); }
+function retEditSetNameLive(idx, v) { const l = ((returnEdit && returnEdit.items) || [])[idx]; if (!l) return; l.name = v; }
+function retEditRemove(idx) { if (!returnEdit) return; returnEdit.items.splice(idx, 1); if (returnEdit.replaceIdx === idx) returnEdit.replaceIdx = -1; buzz(10); renderReturnItemsEdit(); }
+function retEditReplaceStart(idx) { if (!returnEdit) return; returnEdit.replaceIdx = idx; returnEdit.addQuery = ''; renderReturnItemsEdit(); setTimeout(() => { const i = $('reAddSearch'); if (i) i.focus(); }, 80); }
+function retEditReplacePick(pid) {
+  if (!returnEdit) return;
+  const l = returnEdit.items[returnEdit.replaceIdx]; const p = products.find(x => x.id === pid);
+  if (!l || !p) return;
+  l.productId = p.id; l.name = p.name; l.barcode = p.barcode || '';
+  const u = retCreditUnit(p); if (u > 0) l.unitPrice = u;
+  l.noteQty = null; l.isDeposit = false;
+  returnEdit.replaceIdx = -1; returnEdit.addQuery = '';
+  buzz(18);
+  showToast('הוחלף ל: ' + p.name, null, null, 2200);
+  renderReturnItemsEdit();
+}
+function retEditAddItem(pid) {
+  if (!returnEdit) return;
+  const p = products.find(x => x.id === pid); if (!p) return;
+  returnEdit.items.push({ key: 'n' + Date.now(), productId: p.id, name: p.name, barcode: p.barcode || '', qty: 1, unitPrice: retCreditUnit(p), isDeposit: false, noteQty: null, origQty: 0 });
+  returnEdit.addQuery = '';
+  buzz(18);
+  renderReturnItemsEdit();
+}
+function retEditAddManual() {
+  if (!returnEdit) return;
+  returnEdit.items.push({ key: 'm' + Date.now(), productId: '', name: '', barcode: '', qty: 1, unitPrice: 0, isDeposit: false, noteQty: null, origQty: 0 });
+  returnEdit.addQuery = '';
+  renderReturnItemsEdit();
+}
+function refreshRetEditAddList(q) {
+  const box = $('reAddList'); if (!box) return;
+  q = (q || '').trim();
+  if (!q) { box.innerHTML = ''; return; }
+  const replacing = !!(returnEdit && returnEdit.replaceIdx >= 0);
+  const list = addListFilter(q, {}).slice(0, 8);
+  box.innerHTML = list.map(p => addListRowHtml(p, replacing ? 're-replace-pick' : 're-add-item', q)).join('') || '<div class="text-center text-slate-400 py-2 text-xs">לא נמצא</div>';
+}
+function retEditRowHtml(l, idx) {
+  const qty = Number(l.qty) || 0, unit = Number(l.unitPrice) || 0;
+  const resolved = retEditProductFor(l);
+  const replacing = returnEdit.replaceIdx === idx;
+  const pack = retEditPackInfo(idx);
+  const border = replacing ? 'border-blue-400 ring-2 ring-blue-200' : (l.isDeposit ? 'border-indigo-200' : (qty === 0 ? 'border-rose-200' : 'border-slate-200'));
+  const nameHtml = resolved
+    ? '<div class="font-black text-slate-800 text-sm truncate">' + l.name + '</div>'
+    : '<input data-role="re-name" data-id="' + idx + '" type="text" value="' + retEditEsc(l.name) + '" placeholder="שם הפריט" class="w-full font-black text-slate-800 text-sm border-2 border-slate-200 rounded-lg px-2 py-1 outline-none focus:border-blue-500">';
+  const tag = l.isDeposit
+    ? '<span class="shrink-0 text-[10px] font-black bg-indigo-100 text-indigo-700 rounded-full px-2 py-0.5">פיקדון</span>'
+    : (l.noteQty != null && l.noteQty !== qty ? '<span class="shrink-0 text-[10px] font-black bg-rose-100 text-rose-700 rounded-full px-2 py-0.5">בתעודה ' + l.noteQty + '</span>' : '');
+  return '<div data-recard="' + idx + '" class="bg-white rounded-2xl border-2 ' + border + ' p-3 shadow-sm">' +
+    '<div class="flex items-start justify-between gap-2 mb-2">' +
+      '<div class="min-w-0 flex-1">' + nameHtml +
+        '<div class="text-[10px] text-slate-400 mt-0.5" dir="ltr">' + (l.barcode || '—') + '</div>' +
+      '</div>' + tag +
+      '<div class="text-left shrink-0"><div class="text-[10px] text-slate-400">סה״כ שורה</div><div id="reTot_' + idx + '" class="font-black text-emerald-700">₪' + fmtMoney(r2(unit * qty)) + '</div></div>' +
+    '</div>' +
+    (replacing ? '<div class="bg-blue-50 border border-blue-200 rounded-xl p-2 mb-2 text-[11px] font-black text-blue-800"><i class="fa-solid fa-arrow-down"></i> בחר למטה את המוצר שיחליף את השורה הזאת (הכמות תישמר)</div>' : '') +
+    '<div class="flex items-center justify-between gap-2">' +
+      '<div class="flex items-center gap-1.5">' +
+        '<button data-role="re-qty-minus" data-id="' + idx + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-minus text-xs"></i></button>' +
+        '<input data-role="re-qty" data-id="' + idx + '" type="text" inputmode="numeric" value="' + qty + '" class="w-12 h-8 text-center font-black border-2 ' + (qty === 0 ? 'border-rose-300' : 'border-slate-200') + ' rounded-lg outline-none focus:border-blue-500">' +
+        '<button data-role="re-qty-plus" data-id="' + idx + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-plus text-xs"></i></button>' +
+        '<span class="text-[11px] text-slate-400 font-bold">יח׳</span>' +
+      '</div>' +
+      '<div class="flex items-center gap-1 text-[11px] text-slate-500 font-bold">₪<input data-role="re-price" data-id="' + idx + '" type="text" inputmode="decimal" value="' + (l.unitPrice != null ? l.unitPrice : '') + '" class="w-16 h-8 text-center font-black border-2 border-slate-200 rounded-lg outline-none focus:border-blue-500"> ליח׳</div>' +
+    '</div>' +
+    (pack ? '<div class="bg-indigo-50 border border-indigo-200 rounded-xl p-2 mt-2 text-center">' +
+      '<div class="text-[11px] font-black text-indigo-800">💡 ' + pack.total + ' יח׳ = ' + pack.n + ' × ' + (pack.pack.name || 'מארז') + (pack.remainder > 0 ? ' + ' + pack.remainder + ' בודדים' : '') + (retCreditUnit(pack.pack) > 0 ? ' · ₪' + fmtMoney(retCreditUnit(pack.pack)) + ' למארז' : '') + '</div>' +
+      '<button data-role="re-pack" data-id="' + idx + '" class="btn-tap mt-1.5 w-full py-2 rounded-xl font-black bg-indigo-600 text-white text-xs">פצל ל-' + pack.n + ' מארזים' + (pack.remainder > 0 ? ' + ' + pack.remainder + ' בודדים' : '') + '</button>' +
+    '</div>' : '') +
+    '<div class="flex gap-2 mt-2">' +
+      (replacing
+        ? '<button data-role="re-replace-cancel" class="btn-tap flex-1 py-2 rounded-xl font-black bg-slate-100 text-slate-600 text-[11px]">בטל החלפה</button>'
+        : '<button data-role="re-replace" data-id="' + idx + '" class="btn-tap flex-1 py-2 rounded-xl font-black bg-white border border-blue-200 text-blue-700 text-[11px]"><i class="fa-solid fa-right-left"></i> החלף מוצר</button>') +
+      '<button data-role="re-remove" data-id="' + idx + '" class="btn-tap px-3 py-2 rounded-xl font-black bg-white border border-rose-200 text-rose-600 text-[11px]"><i class="fa-solid fa-trash-can"></i></button>' +
+    '</div>' +
+  '</div>';
+}
+function renderReturnItemsEdit() {
+  if (!returnEdit) { setView('returnsHistory'); return; }
+  const items = returnEdit.items || [];
+  const ex = retEditEx(), gap = retEditGap();
+  const hasDeposit = items.some(l => l.isDeposit);
+  const replacing = returnEdit.replaceIdx >= 0;
+  const replName = replacing ? ((items[returnEdit.replaceIdx] || {}).name || '') : '';
+  app.innerHTML =
+    '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">עריכת פריטים בתעודה</h2><div class="text-xs text-slate-400 mt-0.5">תקן כמות, מחיר או מוצר — הסכום הצפוי מתעדכן מיד</div></div>' +
+    '<div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-sm mb-3">' +
+      '<div class="flex justify-between text-sm font-bold text-amber-900"><span>לפני העריכה</span><span>₪' + fmtMoney(returnEdit.baseEx) + '</span></div>' +
+      (returnEdit.noteTotal != null ? '<div class="flex justify-between text-sm font-bold text-amber-900 mt-1"><span>תעודת הזיכוי מהספק</span><span>₪' + fmtMoney(returnEdit.noteTotal) + '</span></div>' : '') +
+      '<div class="flex justify-between text-lg font-black text-amber-900 mt-1.5 pt-1.5 border-t border-amber-200"><span>סכום מעודכן (ללא מע״מ)</span><span id="reEx">₪' + fmtMoney(ex) + '</span></div>' +
+      (gap != null ? '<div class="flex justify-between text-sm mt-1 font-bold text-amber-900"><span>מול תעודת הזיכוי</span><span id="reGap" class="font-black ' + (Math.abs(gap) <= 1 ? 'text-emerald-700' : 'text-rose-700') + '">' + (Math.abs(gap) <= 1 ? 'סוגר ✓' : (gap > 0 ? 'הספק זיכה פחות ₪' + fmtMoney(gap) : 'הספק זיכה יותר ₪' + fmtMoney(-gap))) + '</span></div>' : '') +
+    '</div>' +
+    (hasDeposit ? '<div class="bg-indigo-50 border border-indigo-200 rounded-xl p-2.5 mb-3 text-[11px] font-bold text-indigo-800"><i class="fa-solid fa-circle-info"></i> יש בתעודה שורות פיקדון — אם שינית כמות של מוצר עם פיקדון, עדכן גם את שורת הפיקדון שלו.</div>' : '') +
+    '<div class="space-y-2 mb-3">' + items.map(retEditRowHtml).join('') + '</div>' +
+    '<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm mb-28">' +
+      '<div class="font-black text-slate-700 text-sm mb-2">' + (replacing ? '<i class="fa-solid fa-right-left text-blue-600"></i> בחר מוצר במקום: ' + replName : '<i class="fa-solid fa-plus text-blue-600"></i> הוסף פריט לתעודה') + '</div>' +
+      '<input id="reAddSearch" type="text" value="' + retEditEsc(returnEdit.addQuery || '') + '" placeholder="חפש בשם או בספרות הברקוד" class="w-full p-2.5 rounded-xl border-2 border-slate-200 outline-none text-sm font-bold focus:border-blue-500 mb-2">' +
+      '<div id="reAddList" class="space-y-1.5"></div>' +
+      (replacing
+        ? '<button data-role="re-replace-cancel" class="btn-tap w-full mt-2 py-2 rounded-xl font-black bg-slate-100 text-slate-600 text-xs">בטל החלפה</button>'
+        : '<button data-role="re-add-manual" class="btn-tap w-full mt-2 py-2 rounded-xl font-black bg-white border border-slate-200 text-slate-600 text-xs"><i class="fa-solid fa-pen"></i> שורה ידנית (שם ומחיר חופשיים)</button>') +
+    '</div>' +
+    '<div class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 p-3 flex gap-2 z-40">' +
+      '<button data-role="re-cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">ביטול</button>' +
+      '<button data-role="re-save" class="btn-tap flex-1 py-3 rounded-xl font-black bg-blue-600 text-white">שמור פריטים</button>' +
+    '</div>';
+  refreshRetEditAddList(returnEdit.addQuery || '');
+}
+async function saveReturnItemsEdit(opts) {
+  opts = opts || {};
+  if (!returnEdit) return;
+  const src = (returnEdit.items || []);
+  const dropped = src.filter(l => !((Number(l.qty) || 0) > 0 && (l.name || '').trim())).length;
+  const items = src.filter(l => (Number(l.qty) || 0) > 0 && (l.name || '').trim());
+  if (!items.length) { showToast('חייב להישאר לפחות פריט אחד עם שם וכמות', null, null, 2600); return; }
+  if (dropped > 0 && !opts.skipDropped) {
+    showConfirm('שורות ריקות', dropped + ' שורות ללא שם או בכמות 0 יימחקו מהתעודה. להמשיך?', 'המשך', function () { saveReturnItemsEdit({ skipDropped: true }); });
+    return;
+  }
+  const outItems = items.map(l => {
+    const qty = Number(l.qty) || 0, unit = r2(Number(l.unitPrice) || 0);
+    const line = { name: (l.name || '').trim(), barcode: l.barcode || '', qty: qty, unitPrice: unit, lineTotal: r2(unit * qty) };
+    if (l.productId) line.productId = l.productId;
+    if (l.isDeposit) line.isDeposit = true;
+    // noteQty (מה שהספק זיכה בשורה) נשמר רק אם השורה עצמה לא נגעה — אחרת הוא כבר לא מתאר את אותה שורה
+    if (l.noteQty != null && qty === l.origQty && l.noteQty !== qty) line.noteQty = l.noteQty;
+    return line;
+  });
+  const ex = r2(outItems.reduce((a, l) => a + (Number(l.lineTotal) || 0), 0));
+  const r = returns.find(x => x.id === returnEdit.id);
+  const noteTotal = (r && r.creditNoteTotal != null) ? Number(r.creditNoteTotal) : null;
+  const lineGap = outItems.some(l => l.noteQty != null && l.noteQty !== l.qty);
+  const moneyGap = (noteTotal != null) && Math.abs(ex - noteTotal) > 1;
+  const updateData = { items: outItems, totalExVat: ex, totalIncVat: ex };
+  if (r && r.credited) updateData.creditStatus = (lineGap || moneyGap) ? 'open' : 'ok';
+  const opId = makeOperationId('return_items_edit');
+  const saved = await runCloudTask('edit return items', { op: 'update', path: dataPath('returns', returnEdit.id), data: updateData, operationId: opId });
+  if (!saved) return;
+  if (r) Object.assign(r, updateData);
+  const origin = returnEdit.origin;
+  returnEdit = null;
+  buzz(18);
+  setView(origin);
+  showToast((r && r.credited && noteTotal != null && !moneyGap && !lineGap) ? 'הפריטים עודכנו — הזיכוי סוגר בדיוק ✓' : 'הפריטים עודכנו ✓', null, null, 2800);
 }
 async function pruneCollection(name, keep) {
   if (!db) return;
@@ -10182,13 +10407,13 @@ function returnCardInReceipts(r) {
       '<div class="flex gap-2 items-stretch">' +
         '<div class="flex-1 flex items-center gap-1 border-2 border-slate-200 rounded-xl px-2 focus-within:border-blue-500"><span class="text-slate-400 font-black">₪</span><input id="rvNote_' + r.id + '" type="text" inputmode="decimal" placeholder="סכום זיכוי ללא מע״מ" class="w-full h-11 text-center text-base font-black outline-none bg-transparent"></div>' +
         '<button data-role="rv-verify-inline" data-id="' + r.id + '" class="btn-tap px-4 rounded-xl font-black bg-green-600 text-white flex items-center gap-1"><i class="fa-solid fa-check-double"></i> בדוק</button>' +
-      '</div>'
+      '</div>' + '<button data-role="ret-edit-items" data-id="' + r.id + '" class="btn-tap w-full mt-2 bg-white border border-indigo-200 text-indigo-700 rounded-xl py-2 font-black text-[11px]"><i class="fa-solid fa-pen-to-square"></i> ערוך פריטים בתעודה</button>'
     : '<div class="mt-2">' + creditPartsInfoHtml(r) + (openGap ? creditAddNoteHtml(r) : '') +
       '<button data-role="uncredit" data-id="' + r.id + '" class="btn-tap w-full bg-white border border-slate-300 text-slate-500 rounded-xl py-2 font-black text-[11px] mt-2"><i class="fa-solid fa-rotate-left"></i> בטל אימות — פתח מחדש לתיקון</button></div>' +
       '<div class="flex gap-2">' +
         '<button data-role="rv-open" data-id="' + r.id + '" class="btn-tap flex-1 font-black py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 ' + (openGap ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700') + '"><i class="fa-solid ' + (openGap ? 'fa-wrench' : 'fa-pen') + '"></i> ' + (openGap ? 'תקן פער' : 'ערוך אימות') + '</button>' +
         '<button data-role="uncredit" data-id="' + r.id + '" class="btn-tap px-3 font-bold py-2.5 rounded-xl text-sm bg-slate-100 text-slate-500" title="בטל אימות"><i class="fa-solid fa-rotate-left"></i></button>' +
-      '</div>';
+      '</div>' + '<button data-role="ret-edit-items" data-id="' + r.id + '" class="btn-tap w-full mt-2 bg-white border border-indigo-200 text-indigo-700 rounded-xl py-2 font-black text-[11px]"><i class="fa-solid fa-pen-to-square"></i> ערוך פריטים בתעודה</button>';
   return '<details class="bg-white rounded-2xl border-2 ' + borderCls + ' shadow-sm overflow-hidden">' +
     '<summary class="cursor-pointer">' +
       '<div class="' + barCls + ' px-4 py-2 flex items-center justify-between gap-2 font-black text-[13px]">' +
@@ -12256,6 +12481,10 @@ app.addEventListener('input', (e) => {
   if (role === 'rc-fix-price') { receiptFixSetPriceLive(t.dataset.id, t.value); return; }
   if (role === 'rv-note') { rvSetNoteLive(parseInt(t.dataset.id, 10), t.value); return; }
   if (role === 'rv-price') { rvSetPriceLive(parseInt(t.dataset.id, 10), t.value); return; }
+  if (role === 're-qty') { retEditSetQtyLive(parseInt(t.dataset.id, 10), t.value); return; }
+  if (role === 're-price') { retEditSetPriceLive(parseInt(t.dataset.id, 10), t.value); return; }
+  if (role === 're-name') { retEditSetNameLive(parseInt(t.dataset.id, 10), t.value); return; }
+  if (t.id === 'reAddSearch') { if (returnEdit) returnEdit.addQuery = t.value; refreshRetEditAddList(t.value); return; }
   if (role === 'sign-f') { if (signMaker) { const si = parseInt(t.dataset.id, 10); const s = signMaker.signs[si]; if (s) { s[t.dataset.f] = t.value; drawSignCanvas(); const rc = $('signRec_' + si); if (rc) rc.innerHTML = signRecInnerHtml(s, si); } } return; }
   if (role === 'price-set') { savePrice(t.dataset.id, t.value); return; }
   if (role === 'pcat-name') { const i = parseInt(t.dataset.i, 10); if (pricingCats[i]) { pricingCats[i].name = t.value; savePricingCats(); } return; }
@@ -12420,6 +12649,18 @@ app.addEventListener('click', (e) => {
   else if (role === 'rv-plus') rvStepNote(parseInt(id, 10), 1);
   else if (role === 'rv-cancel') { returnVerify = null; setView(rvOrigin); }
   else if (role === 'rv-save') saveReturnVerify();
+  else if (role === 'ret-edit-items') openReturnItemsEdit(id);
+  else if (role === 're-qty-minus') retEditStepQty(parseInt(id, 10), -1);
+  else if (role === 're-qty-plus') retEditStepQty(parseInt(id, 10), 1);
+  else if (role === 're-pack') retEditConvertPack(parseInt(id, 10));
+  else if (role === 're-replace') retEditReplaceStart(parseInt(id, 10));
+  else if (role === 're-replace-cancel') { if (returnEdit) { returnEdit.replaceIdx = -1; returnEdit.addQuery = ''; renderReturnItemsEdit(); } }
+  else if (role === 're-replace-pick') retEditReplacePick(id);
+  else if (role === 're-add-item') retEditAddItem(id);
+  else if (role === 're-add-manual') retEditAddManual();
+  else if (role === 're-remove') { const rl = (returnEdit && returnEdit.items) ? returnEdit.items[parseInt(id, 10)] : null; showConfirm('מחיקת שורה', 'למחוק את "' + ((rl && rl.name) || 'הפריט') + '" מהתעודה?', 'מחק', () => retEditRemove(parseInt(id, 10))); }
+  else if (role === 're-cancel') { const o = returnEdit ? returnEdit.origin : 'returnsHistory'; returnEdit = null; setView(o); }
+  else if (role === 're-save') saveReturnItemsEdit();
   else if (role === 'uncredit') showConfirm('ביטול אימות', 'לפתוח מחדש את התעודה לאימות? הסכום שהוקלד יימחק ותוכל להזין נכון.', 'בטל אימות', () => clearReturnVerification(id));
   else if (role === 'clear-history') showConfirm('ניקוי היסטוריה', 'למחוק את כל היסטוריית ההזמנות? יישמר גיבוי בסל מחזור.', 'מחק הכל', () => clearAllDocs('history'));
   else if (role === 'clear-returns-history') showConfirm('ניקוי היסטוריה', 'למחוק את כל היסטוריית החזרות? יישמר גיבוי בסל מחזור.', 'מחק הכל', () => clearAllDocs('returns'));
