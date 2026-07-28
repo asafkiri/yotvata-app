@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v202 חותמת מבצע בתעודה</title>
+    <title>הזמנות יטבתה - v203 זיכוי סוגר חוסר</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v202 חותמת מבצע בתעודה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v203 זיכוי סוגר חוסר</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -132,6 +132,19 @@
     </div>
 
     <!-- חלון אישור -->
+    <div id="shortCreditModal" class="hidden fixed inset-0 bg-black/50 z-[70] items-center justify-center p-6">
+      <div class="bg-white rounded-2xl p-5 w-full max-w-sm shadow-2xl">
+        <div class="font-black text-lg text-slate-800 mb-1">התקבל זיכוי מהספק</div>
+        <div class="text-sm text-slate-500 font-bold mb-3">חוב פתוח על החוסר: <span id="shortCreditRemaining" class="text-rose-700 font-black"></span></div>
+        <label class="text-[11px] font-bold text-slate-400 block mb-1">סכום הזיכוי (ללא מע"מ)</label>
+        <input id="shortCreditAmount" type="text" inputmode="decimal" class="w-full h-12 text-center text-xl font-black border-2 border-slate-200 rounded-xl outline-none focus:border-emerald-500 mb-1" dir="ltr">
+        <div class="text-[11px] text-slate-400 font-bold mb-3">אפשר גם זיכוי חלקי — היתרה תישאר חוב פתוח, וזיכויים מצטברים.</div>
+        <div class="flex gap-2">
+          <button data-role="short-credit-cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">ביטול</button>
+          <button data-role="short-credit-ok" class="btn-tap flex-1 py-3 rounded-xl font-black bg-emerald-600 text-white">רשום זיכוי</button>
+        </div>
+      </div>
+    </div>
     <div id="confirmModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm items-center justify-center p-4 z-50">
       <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden">
         <div class="p-6 text-center">
@@ -552,6 +565,7 @@ let reconcileAiAudit = null;     // מטא-נתונים בלבד, ללא תמו�
 let receiptFix = null;           // תיקון תעודה פתוחה מההיסטוריה
 let returnVerify = null;          // אימות תעודת זיכוי (חזרות)
 let returnEdit = null;            // v199: עריכת פריטים בתעודת חזרות/זיכוי שכבר נשלחה
+let shortCreditTarget = null;     // v203: התעודה שעליה נרשם זיכוי סוגר חוסר
 let rvOrigin = 'returnsHistory';  // מאיזה מסך נפתח אימות הזיכוי (לחזרה אליו)
 let signMaker = null;             // הכנת שלטי מבצע (בחירה + עריכה + תצוגה)
 let receiptDupConfirmed = false; // אישור שמירה למרות חשד לכפילות
@@ -1720,6 +1734,7 @@ function actionTitleFromCloud(actionName, task) {
     'save receipt fix': ['receipt', 'תיקון תעודה'],
     'save return verification': ['returns', 'אימות תעודת זיכוי'],
     'edit return items': ['returns', 'עריכת פריטים בתעודת חזרות'],
+    'close shortage by supplier credit': ['receipts', 'סגירת חוסר בזיכוי מהספק'],
     'add product': ['product', 'הוספת מוצר'],
     'create product': ['product', 'הוספת מוצר'],
     'save product': ['product', 'עריכת מוצר'],
@@ -10620,6 +10635,15 @@ function receiptDiscrepancyInfo(rc, opts) {
   const amountGapOpen = amountGapCents > amountToleranceCents;
   if (amountGapOpen && Math.round(unresolvedAmountGap * 100) > 0) shortVal += unresolvedAmountGap;
   else if (amountGapOpen && Math.round(unresolvedAmountGap * 100) < 0) overVal += -unresolvedAmountGap;
+  // v203: חוסר יכול להיסגר גם בזיכוי כספי מהספק, לא רק בהשלמת סחורה.
+  // הזיכויים נערמים (30 ואחר כך 17.40 = 47.40); שורות החוסר המקוריות
+  // לעולם לא נמחקות — רק שכבת כסף שיושבת מעליהן. כל עוד לא התקבל מלוא
+  // הסכום, היתרה נשארת חוב פתוח.
+  const shortCreditNotes = (Array.isArray(rc && rc.shortCreditNotes) ? rc.shortCreditNotes : []).filter(x => x && (Number(x.amount) || 0) > 0);
+  const shortCreditEx = r2(shortCreditNotes.reduce((a, x) => a + (Number(x.amount) || 0), 0));
+  const shortValRaw = r2(shortVal);
+  const shortFullyCredited = shortCreditEx > 0 && shortValRaw > 0 && r2(shortValRaw - shortCreditEx) <= 0.01;
+  if (shortCreditEx > 0) shortVal = Math.max(0, r2(shortVal - shortCreditEx));
   const creditOpen = supplierCreditClaimOpen(rc) || supplierCreditClaimDeferred(rc);
   // ממצאי כמות של ה-AI נשמרים בהיסטוריה, אבל אינם משאירים תעודה אדומה אחרי
   // שהחוסר והעודף עצמם נסגרו בקיזוז. ממצא מחיר/מבצע עדיין מחייב טיפול.
@@ -10629,7 +10653,11 @@ function receiptDiscrepancyInfo(rc, opts) {
   const aiAuditDay = (rc && rc.date) || todayStr();
   const aiHasNonQuantityFinding = aiFindings.some(f => f && (f.type === 'price' || f.type === 'promo_missing') && !aiPriceFindingPromoMatch(f, aiAuditDay));
   const aiAuditOpen = !!(rc && rc.aiAudit && rc.aiAudit.hasDiscrepancy && (aiHasNonQuantityFinding || (!aiFindings.length && !(priceOffsets.length && !finalShort.length && !finalOver.length))));
-  return { open: !!(finalShort.length || finalOver.length || amountGapOpen || unresolvedUnitsGap !== 0 || aiAuditOpen || creditOpen), shortItems: finalShort, overItems: finalOver, priceOffsets, externalOffsets, shortVal: r2(shortVal), overVal: r2(overVal), unresolvedAmountGap, unresolvedUnitsGap, amountGapOpen, amountToleranceCents, aiAuditOpen };
+  // חוסר שנסגר במלואו בזיכוי אינו פותח את התעודה; פער סכום חיובי (בכיוון
+  // חוסר) נבלע גם הוא בזיכוי. עודף, פער יחידות וממצאי AI אינם נסגרים בכסף.
+  const shortSideOpen = (finalShort.length > 0 || (amountGapOpen && Math.round(unresolvedAmountGap * 100) > 0)) && !shortFullyCredited;
+  const overSideOpen = finalOver.length > 0 || (amountGapOpen && Math.round(unresolvedAmountGap * 100) < 0);
+  return { open: !!(shortSideOpen || overSideOpen || unresolvedUnitsGap !== 0 || aiAuditOpen || creditOpen), shortItems: finalShort, overItems: finalOver, priceOffsets, externalOffsets, shortVal: r2(shortVal), overVal: r2(overVal), shortValRaw, shortCreditEx, shortCreditNotes, shortFullyCredited, unresolvedAmountGap, unresolvedUnitsGap, amountGapOpen, amountToleranceCents, aiAuditOpen };
 }
 function receiptsBalance() {
   let bal = 0, n = 0;
@@ -10645,7 +10673,9 @@ function receiptOffsets(rc) {
   // productId נשמר כדי שקיזוז בין תעודות ימשיך להיות מדויק לפי אותו מוצר.
   const out = [];
   const di = receiptDiscrepancyInfo(rc);
-  (di.shortItems || []).forEach(l => out.push({ productId: l.productId, name: l.name, d: Number(l.n) || 0, price: Number(l.price) || 0 }));
+  // v203: חוסר שנסגר בזיכוי כספי יצא מהמשחק — הצעת קיזוז עליו הייתה סוגרת
+  // אותו פעמיים (פעם בכסף ופעם בסחורה).
+  if (!di.shortFullyCredited) (di.shortItems || []).forEach(l => out.push({ productId: l.productId, name: l.name, d: Number(l.n) || 0, price: Number(l.price) || 0 }));
   (di.overItems || []).forEach(l => out.push({ productId: l.productId, name: l.name, d: -(Number(l.n) || 0), price: Number(l.price) || 0 }));
   return out;
 }
@@ -10728,6 +10758,37 @@ async function migrateLegacyReceiptOffsets() {
     } finally { legacyOffsetMigrationBusy.delete(pairKey); }
   }
 }
+// v203: רישום זיכוי כספי מהספק כנגד חוסר פתוח. הזיכוי מצטבר, לא דורס.
+function openShortCreditPrompt(rcId) {
+  const rc = receipts.find(x => x.id === rcId); if (!rc) return;
+  const di = receiptDiscrepancyInfo(rc);
+  const remaining = Math.max(0, r2((Number(di.shortValRaw) || 0) - (Number(di.shortCreditEx) || 0)));
+  if (!(remaining > 0)) { showToast('אין חוסר פתוח לזיכוי בתעודה הזאת', null, null, 2600); return; }
+  shortCreditTarget = rcId;
+  $('shortCreditRemaining').textContent = '₪' + fmtMoney(remaining);
+  const inp = $('shortCreditAmount');
+  inp.value = priceFieldVal(remaining);
+  const m = $('shortCreditModal'); m.classList.remove('hidden'); m.classList.add('flex');
+  setTimeout(() => { try { inp.focus(); inp.select(); } catch (e) {} }, 80);
+}
+function hideShortCreditPrompt() { const m = $('shortCreditModal'); m.classList.add('hidden'); m.classList.remove('flex'); shortCreditTarget = null; }
+async function confirmShortCredit() {
+  const rc = receipts.find(x => x.id === shortCreditTarget); if (!rc) { hideShortCreditPrompt(); return; }
+  const di = receiptDiscrepancyInfo(rc);
+  const remaining = Math.max(0, r2((Number(di.shortValRaw) || 0) - (Number(di.shortCreditEx) || 0)));
+  const amount = r2(parseFloat(($('shortCreditAmount').value || '').toString().replace(',', '.')) || 0);
+  if (!(amount > 0)) { showToast('הזן סכום זיכוי גדול מאפס', null, null, 2600); return; }
+  if (amount > r2(remaining + 0.01)) { showToast('הזיכוי (₪' + fmtMoney(amount) + ') גדול מהחוב הפתוח (₪' + fmtMoney(remaining) + ')', null, null, 3200); return; }
+  const notes = (Array.isArray(rc.shortCreditNotes) ? rc.shortCreditNotes : []).concat([{ amount: amount, at: Date.now() }]);
+  const saved = await runCloudTask('close shortage by supplier credit', { op: 'update', path: dataPath('receipts', rc.id), data: { shortCreditNotes: cloneSafe(notes) }, operationId: makeOperationId('short_credit') });
+  if (!saved) return;
+  rc.shortCreditNotes = notes;
+  hideShortCreditPrompt();
+  buzz(18);
+  const after = receiptDiscrepancyInfo(rc);
+  showToast(after.shortFullyCredited ? 'החוסר נסגר בזיכוי מהספק ✓' : 'נרשם זיכוי ₪' + fmtMoney(amount) + ' — נותר חוב ₪' + fmtMoney(Math.max(0, r2(after.shortValRaw - after.shortCreditEx))), null, null, 3200);
+  if (currentView === 'receiptsHistory') renderReceiptsHistory();
+}
 async function applyOffset(rcId, otherId, productId) {
   const rc = receipts.find(x => x.id === rcId);
   const other = receipts.find(x => x.id === otherId);
@@ -10799,6 +10860,9 @@ function renderReceiptsHistory() {
     } else if (hasInternalOffset) {
       statusTxt = '<i class="fa-solid fa-circle-check"></i> אומתה · קיזוז פנימי';
       metaStatus = ' · <span class="text-emerald-700 font-black">קיזוז פנימי</span>';
+    } else if (di.shortFullyCredited) {
+      statusTxt = '<i class="fa-solid fa-circle-check"></i> אומתה · החוסר נסגר בזיכוי';
+      metaStatus = ' · <span class="text-emerald-700 font-black">נסגר בזיכוי</span>';
     } else if ((Number(rc.supplierDiscount) || 0) > 0) {
       statusTxt = '<i class="fa-solid fa-circle-check"></i> אומתה · מבצע ספק';
       metaStatus = ' · <span class="text-emerald-700 font-black">מבצע ספק</span>';
@@ -10838,6 +10902,15 @@ function renderReceiptsHistory() {
         ((di.priceOffsets && di.priceOffsets.length) ? '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800"><div class="font-black mb-1"><i class="fa-solid fa-scale-balanced"></i> קיזוז פנימי לפי מחיר זהה</div>' + di.priceOffsets.map(o => '<div class="font-bold">' + receiptSideText(o.shortItems) + ' ⇄ ' + receiptSideText(o.overItems) + ' · ₪' + fmtMoney(o.price) + '</div>').join('') + '</div>' : '') +
         ((Number(rc.supplierDiscount) || 0) > 0 ? '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800"><div class="font-black mb-1"><i class="fa-solid fa-percent"></i> אומתה עם מבצע / הנחת ספק</div><div class="font-bold">הנחה: −₪' + fmtMoney(rc.supplierDiscount) + ((rc.grossExVat != null) ? ' · לפני מבצע: ₪' + fmtMoney(rc.grossExVat) : '') + '</div>' + ((rc.supplierPromoItems || []).length ? '<div class="text-[11px] mt-1">כוכבית: ' + (rc.supplierPromoItems || []).map(x => x.name).join(' · ') + '</div>' : '') + '</div>' : '') +
         ((Number(rc.roundingAdjustment) || 0) !== 0 ? '<div class="mt-2 bg-blue-50 border border-blue-200 rounded-xl p-2.5 text-xs text-blue-800"><div class="font-black"><i class="fa-solid fa-calculator"></i> התאמת עיגול תעודה: ' + (Number(rc.roundingAdjustment) > 0 ? '+' : '−') + '₪' + fmtMoney(Math.abs(Number(rc.roundingAdjustment))) + '</div></div>' : '') +
+        ((di.shortCreditNotes || []).length ? (function () {
+          const rem = Math.max(0, r2((Number(di.shortValRaw) || 0) - (Number(di.shortCreditEx) || 0)));
+          return '<div class="mt-2 ' + (di.shortFullyCredited ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200') + ' border rounded-xl p-2.5 text-xs">' +
+            '<div class="font-black mb-1 ' + (di.shortFullyCredited ? 'text-emerald-800' : 'text-amber-800') + '"><i class="fa-solid fa-file-invoice-dollar"></i> ' + (di.shortFullyCredited ? 'החוסר נסגר בזיכוי מהספק ✓' : 'זיכוי חלקי מהספק — נותר חוב ₪' + fmtMoney(rem)) + '</div>' +
+            di.shortCreditNotes.map(x => '<div class="flex justify-between ' + (di.shortFullyCredited ? 'text-emerald-700' : 'text-amber-700') + '"><span>זיכוי ' + new Date(Number(x.at) || 0).toLocaleDateString('he-IL') + '</span><span>₪' + fmtMoney(x.amount) + '</span></div>').join('') +
+            '<div class="mt-1 pt-1 border-t ' + (di.shortFullyCredited ? 'border-emerald-200 text-emerald-700/80' : 'border-amber-200 text-amber-700/80') + '">החוסר המקורי (₪' + fmtMoney(di.shortValRaw) + ') נשמר למעלה בהיסטוריה; הוא נסגר בכסף, לא בהשלמת סחורה, ולא יקוזז מול תעודה עתידית.</div>' +
+          '</div>';
+        })() : '') +
+        ((di.shortItems || []).length && !di.shortFullyCredited ? '<button data-role="rc-short-credit" data-id="' + rc.id + '" class="btn-tap mt-2 w-full bg-white border-2 border-emerald-300 text-emerald-700 rounded-xl py-2.5 font-black text-sm"><i class="fa-solid fa-file-invoice-dollar"></i> התקבל זיכוי מהספק' + ((di.shortCreditEx || 0) > 0 ? ' (נותר ₪' + fmtMoney(Math.max(0, r2(di.shortValRaw - di.shortCreditEx))) + ')' : ' (₪' + fmtMoney(Math.max(0, r2(di.shortValRaw - di.shortCreditEx))) + ')') + '</button>' : '') +
         supplierCreditClaimCardHtml(rc) +
         (((rc.supplierPromoMismatchItems || []).length) ? '<div class="mt-2 bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-xs text-amber-800"><div class="font-black mb-1"><i class="fa-solid fa-triangle-exclamation"></i> מבצע מוגדר במערכת אך לא הופיע אצל הספק</div><div class="font-bold">' + (rc.supplierPromoMismatchItems || []).map(x => x.name).join(' · ') + '</div></div>' : '') +
         ((di.externalOffsets || []).length ? '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800"><div class="font-black mb-1"><i class="fa-solid fa-scale-balanced"></i> קיזוזים שאושרו מול תעודה אחרת</div>' + (di.externalOffsets || []).map(o => '<div class="font-bold">' + (Number(o.qty) || 0) + ' × ' + (o.name || '') + ' — קוזז</div>').join('') + (effectiveOpen ? '<div class="mt-1 pt-1 border-t border-emerald-200 text-rose-700 font-black"><i class="fa-solid fa-triangle-exclamation"></i> נשארו הפרשים נוספים — התעודה עדיין פתוחה</div>' : '<div class="mt-1 font-black">כל ההפרשים בתעודה הזאת טופלו ✓</div>') + '</div>' : '') +
@@ -11973,21 +12046,41 @@ function renderSignMaker() {
 }
 function renderSignPick() {
   const day = todayStr();
+  // v203: אותה חלוקה כמו במסך המבצעים — פעילים (ירוק) ראשונים, עתידיים (כחול)
+  // אחריהם, כל קבוצה ממוינת לפי התאריך הקרוב. מבצעים שהסתיימו לא מוצגים כלל.
+  // שינוי תצוגה בלבד: הבחירה, מגבלת 4 השלטים והשלטים עצמם לא נגעו.
   const selectable = promos.slice().filter(pr => !(pr.end && pr.end < day)); // פעילים + עתידיים
-  const rows = selectable.map(pr => {
+  const withState = selectable.map(pr => ({ pr: pr, state: promoActive(pr, day) ? 0 : 1 }));
+  withState.sort((a, b) => {
+    if (a.state !== b.state) return a.state - b.state;
+    if (a.state === 0) return (a.pr.end || '').localeCompare(b.pr.end || '');     // פעילים: הנגמר הקרוב קודם
+    return (a.pr.start || '').localeCompare(b.pr.start || '');                    // עתידיים: המתחיל הקרוב קודם
+  });
+  const pickGroupLabels = ['פעילים עכשיו — להדפסה כעת', 'עתידיים — לחודש הבא'];
+  const pickGroupHead = ['text-emerald-600', 'text-blue-600'];
+  const pickGroupIcon = ['fa-circle-check', 'fa-clock'];
+  let rows = '', lastState = -1;
+  withState.forEach(o => {
+    const pr = o.pr;
+    if (o.state !== lastState) {
+      rows += '<div class="flex items-center gap-1.5 px-1 mt-3 mb-1.5 text-xs font-black ' + pickGroupHead[o.state] + '"><i class="fa-solid ' + pickGroupIcon[o.state] + '"></i> ' + pickGroupLabels[o.state] + '</div>';
+      lastState = o.state;
+    }
     const sel = signMaker.signs.some(s => s.promoId === pr.id);
     const cnt = (pr.productIds || []).length;
-    return '<button data-role="sign-pick" data-id="' + pr.id + '" class="btn-tap block w-full bg-white rounded-2xl border-2 ' + (sel ? 'border-rose-500' : 'border-slate-200') + ' p-3.5 text-right mb-2">' +
+    const idleBorder = o.state === 0 ? 'border-emerald-200' : 'border-blue-200';
+    const chip = o.state === 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700';
+    rows += '<button data-role="sign-pick" data-id="' + pr.id + '" class="btn-tap block w-full bg-white rounded-2xl border-2 ' + (sel ? 'border-rose-500' : idleBorder) + ' p-3.5 text-right mb-2">' +
       '<div class="flex items-center justify-between gap-2">' +
         '<div class="min-w-0 flex items-center gap-2">' +
           '<span class="w-6 h-6 rounded-full flex items-center justify-center shrink-0 ' + (sel ? 'bg-rose-500 text-white' : 'border-2 border-slate-300 text-transparent') + '"><i class="fa-solid fa-check text-xs"></i></span>' +
           '<div class="min-w-0"><div class="font-black text-slate-800 truncate">' + (pr.name || ('מבצע ' + pr.pct + '%')) + '</div>' +
-          '<div class="text-xs text-slate-400">' + cnt + ' מוצרים · ' + (pr.start || '?') + ' ← ' + (pr.end || '?') + '</div></div>' +
+          '<div class="text-xs text-slate-400">' + cnt + ' מוצרים · ' + (pr.start || '?') + ' ← ' + (pr.end || '?') + (o.state === 1 ? ' · <span class="text-blue-600 font-black">מתחיל ' + (pr.start || '') + '</span>' : '') + '</div></div>' +
         '</div>' +
-        '<div class="bg-rose-100 text-rose-700 font-black px-2 py-0.5 rounded-full text-xs shrink-0">' + pr.pct + '%</div>' +
+        '<div class="' + chip + ' font-black px-2 py-0.5 rounded-full text-xs shrink-0">' + pr.pct + '%</div>' +
       '</div>' +
     '</button>';
-  }).join('');
+  });
   app.innerHTML =
     '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">הכנת שלט</h2><div class="text-xs text-slate-400 mt-0.5">בחר עד ' + SIGN_MAX + ' מבצעים לדף אחד — השלט מושך את מוצרי המבצע אוטומטית</div></div>' +
     (selectable.length ? rows : '<div class="text-center text-slate-400 py-10 font-bold">אין מבצעים פעילים או עתידיים</div>') +
@@ -12746,6 +12839,9 @@ app.addEventListener('click', (e) => {
   else if (role === 'rv-plus') rvStepNote(parseInt(id, 10), 1);
   else if (role === 'rv-cancel') { returnVerify = null; setView(rvOrigin); }
   else if (role === 'rv-save') saveReturnVerify();
+  else if (role === 'rc-short-credit') openShortCreditPrompt(id);
+  else if (role === 'short-credit-cancel') hideShortCreditPrompt();
+  else if (role === 'short-credit-ok') confirmShortCredit();
   else if (role === 'ret-edit-items') openReturnItemsEdit(id);
   else if (role === 're-qty-minus') retEditStepQty(parseInt(id, 10), -1);
   else if (role === 're-qty-plus') retEditStepQty(parseInt(id, 10), 1);
