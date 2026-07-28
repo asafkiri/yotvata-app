@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v207 כוונון הבלש</title>
+    <title>הזמנות יטבתה - v208 בודד קודם לצירופים</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v207 כוונון הבלש</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v208 בודד קודם לצירופים</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5051,7 +5051,7 @@ function detectivePairDeltas(aPrice, bPrice, targetUnits, targetMoney, tol) {
   }
   return out;
 }
-function detectiveSolveTier(groups, gap, gapCents, unitGap, toleranceCents, searchStage) {
+function detectiveSolveTier(groups, gap, gapCents, unitGap, toleranceCents, searchStage, singlesOnly) {
   searchStage = searchStage || DETECTIVE_SEARCH_MIXED;
   // 1) שינוי אחד — היחידות קובעות את הכמות בדיוק.
   if (unitGap !== 0 && detectiveStageAllowsDelta(unitGap, searchStage)) {
@@ -5064,6 +5064,7 @@ function detectiveSolveTier(groups, gap, gapCents, unitGap, toleranceCents, sear
     });
     if (singles.length) return detectiveFinishStage(singles, gap, unitGap, 1, toleranceCents, true, searchStage);
   }
+  if (singlesOnly) return null;
 
   // 2) שני מחירים — פותר בו-זמנית כסף ויחידות; תומך גם בחוסר+עודף ובחוסר מלא+חלקי.
   const pairs = [], pairSigs = new Set();
@@ -5148,6 +5149,18 @@ function detectiveSolutions() {
   // קודם בודקים הסבר טהור לפי כיוון ההפרש; חוסר+עודף יחד הוא גיבוי בלבד.
   // שומרים על כלל הבטיחות הישן: פתרון מדויק תמיד קודם לפתרון מקורב,
   // גם אם ההסבר המקורב הוא "טהור" יותר.
+  // v208: על קטלוג מלא (70+ קבוצות מחיר), סבב הסבילות-אפס נכנס לזוגות
+  // ולשלשות, מרחב השלשות חורג מהתקציב ומחזיר תוצאת הצפה ריקה — שעוצרת את
+  // הסולם לפני שסבב חצי-האגורה מגיע לפתרון הבודד האמיתי (מחיר מבצע נושא
+  // עיגול-שורה של עד חצי אגורה). לכן קודם כל: מוצר בודד בלבד, על סבילויות
+  // תת-אגורה. פתרון של מוצר אחד עם עיגול-שורה תמיד עדיף על צירוף "מדויק".
+  for (const toleranceCents of DETECTIVE_TOLERANCE_STEPS) {
+    if (toleranceCents > 50) break;
+    for (const searchStage of detectivePreferredStages(gapCents, unitGap)) {
+      const result = detectiveSolveTier(groups, gap, gapCents, unitGap, toleranceCents, searchStage, true);
+      if (result) return result;
+    }
+  }
   for (const toleranceCents of DETECTIVE_TOLERANCE_STEPS) {
     for (const searchStage of detectivePreferredStages(gapCents, unitGap)) {
       const result = detectiveSolveTier(groups, gap, gapCents, unitGap, toleranceCents, searchStage);
