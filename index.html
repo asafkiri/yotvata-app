@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v199 עריכת פריטים בזיכוי</title>
+    <title>הזמנות יטבתה - v200 מבצע פעיל גובר</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v199 עריכת פריטים בזיכוי</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v200 מבצע פעיל גובר</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -2762,7 +2762,7 @@ function rvRowHtml(l, idx) {
   const checkBtn = '<button data-role="rv-check" data-id="' + idx + '" class="btn-tap shrink-0 w-7 h-7 rounded-full flex items-center justify-center ' + (l.checked ? 'bg-emerald-500 text-white' : 'border-2 border-slate-300 text-transparent') + '"><i class="fa-solid fa-check text-xs"></i></button>';
   return '<div data-rvcard="' + idx + '" class="' + (l.checked ? 'bg-emerald-50' : 'bg-white') + ' rounded-2xl border ' + (diff !== 0 ? 'border-rose-200' : 'border-slate-200') + ' p-3 shadow-sm">' +
     '<div class="flex items-center justify-between gap-2 mb-2"><div class="flex items-center gap-2 min-w-0">' + checkBtn + '<div class="min-w-0"><div class="font-black text-slate-800 text-sm truncate">' + l.name + '</div>' +
-      '<div class="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">₪<input data-role="rv-price" data-id="' + idx + '" type="text" inputmode="decimal" value="' + (l.unitPrice != null ? l.unitPrice : '') + '" class="w-14 text-center border border-slate-200 rounded px-1 py-0.5 outline-none focus:border-blue-500"> ליח׳</div>' +
+      '<div class="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">₪<input data-role="rv-price" data-id="' + idx + '" type="text" inputmode="decimal" value="' + priceFieldVal(l.unitPrice) + '" class="w-14 text-center border border-slate-200 rounded px-1 py-0.5 outline-none focus:border-blue-500"> ליח׳</div>' +
     '</div></div>' + tag + '</div>' +
     '<div class="flex items-center justify-between gap-2">' +
       '<div class="text-sm text-slate-500 font-bold">הוחזר: <span class="text-slate-800 font-black">' + sent + '</span></div>' +
@@ -2980,7 +2980,7 @@ function retEditRowHtml(l, idx) {
         '<button data-role="re-qty-plus" data-id="' + idx + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-plus text-xs"></i></button>' +
         '<span class="text-[11px] text-slate-400 font-bold">יח׳</span>' +
       '</div>' +
-      '<div class="flex items-center gap-1 text-[11px] text-slate-500 font-bold">₪<input data-role="re-price" data-id="' + idx + '" type="text" inputmode="decimal" value="' + (l.unitPrice != null ? l.unitPrice : '') + '" class="w-16 h-8 text-center font-black border-2 border-slate-200 rounded-lg outline-none focus:border-blue-500"> ליח׳</div>' +
+      '<div class="flex items-center gap-1 text-[11px] text-slate-500 font-bold">₪<input data-role="re-price" data-id="' + idx + '" type="text" inputmode="decimal" value="' + priceFieldVal(l.unitPrice) + '" class="w-16 h-8 text-center font-black border-2 border-slate-200 rounded-lg outline-none focus:border-blue-500"> ליח׳</div>' +
     '</div>' +
     (pack ? '<div class="bg-indigo-50 border border-indigo-200 rounded-xl p-2 mt-2 text-center">' +
       '<div class="text-[11px] font-black text-indigo-800">💡 ' + pack.total + ' יח׳ = ' + pack.n + ' × ' + (pack.pack.name || 'מארז') + (pack.remainder > 0 ? ' + ' + pack.remainder + ' בודדים' : '') + (retCreditUnit(pack.pack) > 0 ? ' · ₪' + fmtMoney(retCreditUnit(pack.pack)) + ' למארז' : '') + '</div>' +
@@ -3837,6 +3837,16 @@ async function hardDeleteSnapshotDocsWithBackup(name, docs, reason) {
 function todayStr() { return new Date().toLocaleDateString('en-CA'); }
 function r2(n) { return Math.round((Number(n) || 0) * 100) / 100; }
 function fmtMoney(n) { return r2(n).toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+// v200: מחיר שנגזר משורת נייר נשמר בכוונה בלי עיגול (43.04/24 = 1.7933333...),
+// אבל הודבק גולמי לתוך שדה הקלט הצר — ובמסך נראה רק הזנב "...33333332".
+// כאן מנקים את התצוגה בלבד: עד 4 ספרות אחרי הנקודה, בלי אפסים מיותרים.
+// הערך שבזיכרון נשאר מלא כל עוד לא נגעו בשדה.
+function priceFieldVal(n) {
+  if (n == null || n === '') return '';
+  const v = Number(n);
+  if (!isFinite(v)) return '';
+  return String(Math.round(v * 10000) / 10000);
+}
 function fmtUnitPrice(n, precise) {
   const v = Number(n) || 0;
   return precise ? v.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 5 }) : fmtMoney(v);
@@ -3857,21 +3867,34 @@ function discountedUnitPrice(base, pct) {
 function lineTotalFromUnit(unitPrice, qty) {
   return r2((Number(unitPrice) || 0) * (Number(qty) || 0));
 }
-function isPromoActive(p, dateStr) { return promoActive(promoForProduct(p && p.id), dateStr); }
-function promoMinUnits(p) { return promoMinUnitsP(promoForProduct(p && p.id)); }
-function promoMinLabel(p) { return promoMinLabelP(promoForProduct(p && p.id)); }
+function isPromoActive(p, dateStr) { return promoActive(promoForProduct(p && p.id, dateStr), dateStr); }
+function promoMinUnits(p, dateStr) { return promoMinUnitsP(promoForProduct(p && p.id, dateStr)); }
+function promoMinLabel(p, dateStr) { return promoMinLabelP(promoForProduct(p && p.id, dateStr)); }
 function effectivePrice(p, qty, dateStr) {
   if (!p) return 0;
   const base = Number(p.price) || 0;
-  const pr = promoForProduct(p.id);
+  const pr = promoForProduct(p.id, dateStr);
   if (promoTriggered(pr, dateStr)) return discountedUnitPrice(base, Number(pr.pct) || 0);
   return base;
 }
 function effectiveLineTotal(p, qty, dateStr) { return lineTotalFromUnit(effectivePrice(p, qty, dateStr), qty); }
 // ===== מבצעי סל (ישויות נפרדות באוסף promos) =====
-function promoForProduct(pid) {
+function promoForProduct(pid, dateStr) {
   if (!pid) return null;
-  return promos.find(pr => (pr.type !== 'monthEnd') && Array.isArray(pr.productIds) && pr.productIds.indexOf(pid) !== -1) || null;
+  // v200: מוצר יכול לשבת ביותר ממבצע אחד — למשל מבצע החודש הנוכחי לצד מבצע
+  // החודש הבא שכבר הוגדר מראש. promos נטען ללא מיון, כלומר לפי מזהה מסמך,
+  // ולכן find() החזיר לפעמים דווקא את המבצע שאינו פעיל והמחיר יצא מלא —
+  // מה שגם ניפח את סכום הסריקה והסתיר חוסרים אמיתיים.
+  // מעכשיו: מבצע שפעיל לתאריך הנבדק גובר תמיד; רק אם אין פעיל אחד
+  // חוזרים לראשון (כדי לשמור על ההתנהגות הקיימת של תצוגת מבצע עתידי).
+  let first = null;
+  for (let i = 0; i < promos.length; i++) {
+    const pr = promos[i];
+    if (!pr || pr.type === 'monthEnd' || !Array.isArray(pr.productIds) || pr.productIds.indexOf(pid) === -1) continue;
+    if (promoActive(pr, dateStr)) return pr;
+    if (!first) first = pr;
+  }
+  return first;
 }
 function promoActive(pr, dateStr) {
   if (!pr) return false;
@@ -3926,7 +3949,7 @@ function receiptSavings() {
 function receiptPromoStatuses() {
   const day = todayStr(); const seen = {}; const out = [];
   receiptList.forEach(it => {
-    const pr = promoForProduct(it.productId);
+    const pr = promoForProduct(it.productId, day);
     if (pr && promoActive(pr, day) && !seen[pr.id]) {
       seen[pr.id] = 1;
       const bq = basketQty(pr), need = promoMinUnitsP(pr), triggered = bq >= need;
@@ -3935,7 +3958,7 @@ function receiptPromoStatuses() {
   });
   return out;
 }
-function productActivePromo(p, dateStr) { const pr = promoForProduct(p && p.id); return promoActive(pr, dateStr) ? pr : null; }
+function productActivePromo(p, dateStr) { const pr = promoForProduct(p && p.id, dateStr); return promoActive(pr, dateStr) ? pr : null; }
 // ===== מבצעי מרכזת (סוף חודש) — לא בתעודה, מחושב בדוח החודשי =====
 function monthEndPromoForProduct(pid, dateStr) {
   if (!pid) return null;
@@ -4328,7 +4351,7 @@ function buildReceiptRow(it) {
   const unit = p ? effectivePrice(p, it.qty, day) : 0;
   const shelfRec = shelfRecommendedPrice(p);
   const shelfRecTag = shelfRec != null ? '<span class="font-bold text-emerald-700">· מומלץ: ₪' + fmtMoney(shelfRec) + '</span>' : '';
-  const pr = p ? promoForProduct(p.id) : null;
+  const pr = p ? promoForProduct(p.id, day) : null;
   const active = promoActive(pr, day);
   const triggered = promoTriggered(pr, day);
   const lineTotal = lineTotalFromUnit(unit, it.qty);
@@ -4451,7 +4474,7 @@ function finishReceipt() {
   const lines = receiptList.map(it => {
     const p = products.find(x => x.id === it.productId);
     const unit = effectivePrice(p, it.qty, day);
-    const pr = promoForProduct(it.productId);
+    const pr = promoForProduct(it.productId, day);
     const applied = promoTriggered(pr, day);
     return { productId: it.productId, name: it.name || (p ? p.name : ''), barcode: it.barcode || (p ? p.barcode : '') || '', qty: it.qty, unitPrice: unit, basePrice: r2(Number(p && p.price) || 0), lineTotal: lineTotalFromUnit(unit, it.qty), promoPct: (applied ? (Number(pr.pct) || 0) : 0) };
   });
@@ -4510,7 +4533,7 @@ function openReconcile() {
   reconcileData = receiptList.map(it => {
     const p = products.find(x => x.id === it.productId);
     const base = r2(Number(p && p.price) || 0);
-    const pr = promoForProduct(it.productId);
+    const pr = promoForProduct(it.productId, day);
     const on = promoTriggered(pr, day);
     const pct = on ? (Number(pr.pct) || 0) : 0;
     return { productId: it.productId, name: it.name || (p ? p.name : ''), barcode: it.barcode || (p ? p.barcode : '') || '', received: Number(it.qty) || 0, noteQty: Number(it.qty) || 0, price: (on ? discountedUnitPrice(base, pct) : base), basePrice: base, promoPct: pct, promoOn: on, checked: false };
@@ -4691,7 +4714,7 @@ const DETECTIVE_QUESTION_POOL_LIMIT = 96; // שואלים רק כשכל סט ה�
 function detectiveEffectiveProductPrice(p) {
   if (!p) return { price: 0, promoOn: false, promoPct: 0 };
   const base = r2(Number(p.price) || 0);
-  const pr = promoForProduct(p.id);
+  const pr = promoForProduct(p.id, todayStr());
   const on = !!(pr && promoTriggered(pr, todayStr()));
   const pct = on ? (Number(pr.pct) || 0) : 0;
   return { price: on ? r2(base * (1 - pct / 100)) : base, promoOn: on, promoPct: pct };
@@ -5086,7 +5109,7 @@ function detectivePromoConflict() {
   let total = 0; const items = [];
   (reconcileData || []).forEach(l => {
     if (l.promoOn) return; // המבצע כבר משוקלל במחיר השורה — אין כפל
-    const pr = promoForProduct(l.productId);
+    const pr = promoForProduct(l.productId, day);
     if (!pr || !promoActive(pr, day)) return;
     const pct = Number(pr.pct) || 0; if (pct <= 0) return;
     const qty = Number(l.noteQty) || 0; if (qty <= 0) return;
@@ -5115,7 +5138,7 @@ function ensureReconcileLine(pid) {
   const p = products.find(x => x.id === pid); if (!p) return null;
   const day = todayStr();
   const base = r2(Number(p.price) || 0);
-  const pr = promoForProduct(p.id);
+  const pr = promoForProduct(p.id, day);
   const on = promoTriggered(pr, day);
   const pct = on ? (Number(pr.pct) || 0) : 0;
   l = { productId: p.id, name: p.name, barcode: p.barcode || '', received: 0, noteQty: 0, price: (on ? discountedUnitPrice(base, pct) : base), basePrice: base, promoPct: pct, promoOn: on, checked: false };
@@ -5432,7 +5455,7 @@ function manualPromoChoiceModal(l, base, disc, qty) {
 }
 // אחרי "טעות שלנו" — הצעה לכבות את המבצע לכל המערכת, בהגנת PIN מנהל
 function manualOfferDisablePromo(pid) {
-  const pr = promoForProduct(pid);
+  const pr = promoForProduct(pid, todayStr());
   if (!pr || !pr.id || !promoActive(pr, todayStr())) return;
   showConfirm(
     'לכבות את המבצע לכל המערכת?',
@@ -5476,13 +5499,23 @@ function refreshReconcileHeader() {
   const rv = $('rcRecvInc'); if (rv) rv.textContent = '₪' + fmtMoney(reconcileReceivedInc());
   const as = $('rcAssigned'); if (as) as.innerHTML = reconcileAssignedHtml();
 }
+function promoToggleConfirmText(name, pct, qty, oldUnit, newUnit) {
+  const delta = r2((Number(newUnit) || 0) * (Number(qty) || 0) - (Number(oldUnit) || 0) * (Number(qty) || 0));
+  return 'המחיר של "' + (name || 'הפריט') + '" ישתנה מ-₪' + fmtMoney(oldUnit) + ' ל-₪' + fmtMoney(newUnit) + ' ליחידה' +
+    ((Number(qty) || 0) > 0 ? ', כלומר ' + (delta >= 0 ? '+' : '−') + '₪' + fmtMoney(Math.abs(delta)) + ' בסכום התעודה' : '') + '.';
+}
 function reconcileTogglePromo(pid) {
   const l = (reconcileData || []).find(x => x.productId === pid);
   if (!l || !(Number(l.promoPct) || 0)) return;
-  l.promoOn = !l.promoOn;
+  const pct = Number(l.promoPct) || 0;
   const base = r2(Number(l.basePrice) || 0);
-  l.price = l.promoOn ? discountedUnitPrice(base, Number(l.promoPct) || 0) : base;
-  renderReconcile();
+  const next = !l.promoOn;
+  const newPrice = next ? discountedUnitPrice(base, pct) : base;
+  // v200: לחיצה אחת כאן משנה כסף בתעודה. לחיצה בטעות עלתה בפער שגוי, לכן מאשרים.
+  showConfirm(next ? 'להחיל את המבצע?' : 'לחשב בלי המבצע?',
+    promoToggleConfirmText(l.name, pct, (Number(l.received) || 0), l.price, newPrice),
+    next ? 'החל מבצע' : 'בטל מבצע',
+    function () { l.promoOn = next; l.price = newPrice; renderReconcile(); });
 }
 function reconcileSaveable() { return (reconcileData || []).filter(l => (Number(l.received) || 0) > 0 || (Number(l.noteQty) || 0) > 0); }
 function reconcileProgressHtml() {
@@ -5513,7 +5546,7 @@ function reconcileRowHtml(l) {
   const checkBtn = reconcileCheckMode ? '<button data-role="rc-recon-check" data-id="' + l.productId + '" class="btn-tap shrink-0 w-8 h-8 rounded-full flex items-center justify-center ' + (l.checked ? 'bg-emerald-500 text-white' : 'border-2 border-slate-300 text-transparent') + '"><i class="fa-solid fa-check text-sm"></i></button>' : '';
   return '<div data-rcard="' + l.productId + '" class="' + (l.checked ? 'bg-emerald-50' : 'bg-white') + ' rounded-2xl border ' + (diff !== 0 ? 'border-rose-200' : 'border-slate-200') + ' p-3 shadow-sm" data-id="' + l.productId + '">' +
     '<div class="flex items-center justify-between gap-2 mb-2"><div class="flex items-center gap-2 min-w-0">' + checkBtn + '<div class="min-w-0"><div class="font-black text-slate-800 text-sm truncate">' + l.name + '</div>' +
-      '<div class="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">₪<input data-role="rc-recon-price" data-id="' + l.productId + '" type="text" inputmode="decimal" value="' + (l.price != null ? l.price : '') + '" class="w-14 text-center border border-slate-200 rounded px-1 py-0.5 outline-none focus:border-blue-500"> ליח׳</div>' + promoUi +
+      '<div class="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">₪<input data-role="rc-recon-price" data-id="' + l.productId + '" type="text" inputmode="decimal" value="' + priceFieldVal(l.price) + '" class="w-14 text-center border border-slate-200 rounded px-1 py-0.5 outline-none focus:border-blue-500"> ליח׳</div>' + promoUi +
     '</div></div>' + tag + '</div>' +
     '<div class="flex items-center justify-between gap-2">' +
       '<span class="text-slate-500 font-bold text-xs">התקבל (בפועל):</span>' +
@@ -7352,7 +7385,7 @@ function aiPriceCorroborates(row, qty, cents, product) {
   const effective = aiRowEffectiveUnitCents(row, qty, cents);
   if (effective == null) return false;
   const options = [aiMoneyCents(base)];
-  const pr = promoForProduct(product.id);
+  const pr = promoForProduct(product.id, todayStr());
   if (promoActive(pr, todayStr())) options.push(aiMoneyCents(discountedUnitPrice(base, Number(pr.pct) || 0)));
   return options.some(option => option != null && Math.abs(option - effective) <= 2);
 }
@@ -7898,7 +7931,7 @@ function aiEvaluateInvoiceScan(payload) {
     a.paperUnitPrice = a.qty > 0 ? (a.totalCents / 100 / a.qty) : 0;
     const line = (reconcileData || []).find(l => l.productId === a.product.id);
     const received = Number(line && line.received) || 0;
-    const productPromo = promoForProduct(a.product.id);
+    const productPromo = promoForProduct(a.product.id, day);
     const expected = paperPromoTriggered(productPromo)
       ? discountedUnitPrice(Number(a.product.price) || 0, Number(productPromo.pct) || 0)
       : r2(Number(a.product.price) || 0);
@@ -9091,7 +9124,7 @@ function aiApplyInvoiceResult() {
   reconcilePaperEntered = true; // v178: מכאן noteQty באמת מגיע מהנייר
   ev.aggregates.forEach(a => {
     let line = (reconcileData || []).find(l => l.productId === a.product.id);
-    const base = r2(Number(a.product.price) || 0), pr = promoForProduct(a.product.id), on = promoTriggered(pr, todayStr()), pct = on ? (Number(pr.pct) || 0) : 0;
+    const base = r2(Number(a.product.price) || 0), pr = promoForProduct(a.product.id, todayStr()), on = promoTriggered(pr, todayStr()), pct = on ? (Number(pr.pct) || 0) : 0;
     if (!line) { line = { productId: a.product.id, name: a.product.name, barcode: a.product.barcode || '', received: 0, noteQty: 0, price: a.paperUnitPrice, basePrice: base, promoPct: pct, promoOn: on, checked: true }; reconcileData.unshift(line); }
     line.noteQty = a.qty; line.price = a.paperUnitPrice; line.basePrice = base; line.promoPct = pct; line.promoOn = on; line.checked = true; line.aiPaperPriceOnly = true;
   });
@@ -9144,7 +9177,7 @@ function aiApplyInvoiceResult() {
 // המסלולים הידניים הישנים נשארים כגיבוי בלבד אם הסריקה החכמה אינה זמינה.
 let rcStep = null;
 function reconcilePriceEditHtml(l) {
-  return '<span class="text-[11px] text-slate-400">₪<input data-role="rc-recon-price" data-id="' + l.productId + '" type="text" inputmode="decimal" value="' + (l.price != null ? l.price : '') + '" class="w-14 text-center border border-slate-200 rounded px-1 py-0.5 outline-none focus:border-blue-500"> ליח׳</span>';
+  return '<span class="text-[11px] text-slate-400">₪<input data-role="rc-recon-price" data-id="' + l.productId + '" type="text" inputmode="decimal" value="' + priceFieldVal(l.price) + '" class="w-14 text-center border border-slate-200 rounded px-1 py-0.5 outline-none focus:border-blue-500"> ליח׳</span>';
 }
 function renderReconcile() {
   if (!reconcileData) { setView('receiving'); return; }
@@ -9526,7 +9559,7 @@ function applyNotePricesFromInputs() {
 function configuredDiscountForMarked(marked) {
   const groups = {}; const day = todayStr();
   marked.forEach(row => {
-    const pr = promoForProduct(row.pid);
+    const pr = promoForProduct(row.pid, day);
     if (!pr || !promoActive(pr, day)) return;
     const id = pr.id || ('promo_' + (Number(pr.pct) || 0));
     groups[id] = groups[id] || { promo: pr, rows: [] };
@@ -9578,7 +9611,7 @@ function supplierPromoItemsFromRows(rows) {
 function configuredDiscountForRows(rows) {
   const groups = {}; const day = todayStr();
   (rows || []).forEach(row => {
-    const pr = promoForProduct(row.pid);
+    const pr = promoForProduct(row.pid, day);
     if (!pr || !promoActive(pr, day)) return;
     const id = pr.id || ('promo_' + (Number(pr.pct) || 0));
     groups[id] = groups[id] || { promo: pr, rows: [] };
@@ -9597,7 +9630,7 @@ function configuredDiscountForRows(rows) {
 function configuredPromoRowsInPaper() {
   const day = todayStr();
   return ncPaperRows().filter(row => {
-    const pr = promoForProduct(row.pid);
+    const pr = promoForProduct(row.pid, day);
     return !!(pr && promoActive(pr, day) && (Number(pr.pct) || 0) > 0);
   });
 }
@@ -10221,7 +10254,7 @@ function receiptFixRowHtml(l) {
   '</div>') : '';
   return '<div class="bg-white rounded-2xl border ' + (d !== 0 ? 'border-rose-200' : 'border-slate-200') + ' p-3 shadow-sm" data-id="' + l.productId + '">' +
     '<div class="flex items-center justify-between gap-2 mb-2"><div class="min-w-0"><div class="font-black text-slate-800 text-sm truncate">' + l.name + '</div>' +
-      '<div class="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">₪<input data-role="rc-fix-price" data-id="' + l.productId + '" type="text" inputmode="decimal" value="' + (l.unitPrice != null ? l.unitPrice : '') + '" class="w-14 text-center border border-slate-200 rounded px-1 py-0.5 outline-none focus:border-blue-500"> ליח׳</div>' + promoUi +
+      '<div class="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">₪<input data-role="rc-fix-price" data-id="' + l.productId + '" type="text" inputmode="decimal" value="' + priceFieldVal(l.unitPrice) + '" class="w-14 text-center border border-slate-200 rounded px-1 py-0.5 outline-none focus:border-blue-500"> ליח׳</div>' + promoUi +
     '</div>' + tag + '</div>' +
     '<div class="flex items-center justify-between gap-2">' +
       '<span class="text-slate-500 font-bold text-xs">התקבל (בפועל):</span>' +
@@ -10316,10 +10349,15 @@ function receiptFixSetPriceLive(productId, val) {
 }
 function receiptFixTogglePromo(productId) {
   const l = (receiptFix.items || []).find(x => x.productId === productId); if (!l || !(Number(l.promoPct) || 0)) return;
-  l.promoOn = !l.promoOn;
+  const pct = Number(l.promoPct) || 0;
   const base = r2(Number(l.basePrice) || 0);
-  l.unitPrice = l.promoOn ? discountedUnitPrice(base, Number(l.promoPct) || 0) : base;
-  renderReceiptFix();
+  const next = !l.promoOn;
+  const newPrice = next ? discountedUnitPrice(base, pct) : base;
+  // v200: אותו שיקול כמו במסך ההתאמה — שינוי כסף לא קורה בלחיצה אחת.
+  showConfirm(next ? 'להחיל את המבצע?' : 'לחשב בלי המבצע?',
+    promoToggleConfirmText(l.name, pct, (Number(l.qty) || 0), l.unitPrice, newPrice),
+    next ? 'החל מבצע' : 'בטל מבצע',
+    function () { l.promoOn = next; l.unitPrice = newPrice; renderReceiptFix(); });
 }
 async function saveReceiptFix() {
   if (!receiptFix) return;
@@ -10970,7 +11008,7 @@ function calcReceiptRange() {
 
 // --- מוצרים ומחירים ---
 function priceRowHtml(p) {
-  const op = promoForProduct(p.id);
+  const op = promoForProduct(p.id, todayStr());
   const onNow = promoActive(op, todayStr());
   const mop = promos.find(pr => pr.type === 'monthEnd' && Array.isArray(pr.productIds) && pr.productIds.indexOf(p.id) !== -1) || null;
   const mOn = promoActive(mop, todayStr());
@@ -12734,7 +12772,7 @@ app.addEventListener('click', (e) => {
       else {
         const p = products.find(x => x.id === pid); if (!p) return;
         const base = r2(Number(p.price) || 0);
-        const pr = promoForProduct(p.id); const on = promoTriggered(pr, day); const pct = on ? (Number(pr.pct) || 0) : 0;
+        const pr = promoForProduct(p.id, day); const on = promoTriggered(pr, day); const pct = on ? (Number(pr.pct) || 0) : 0;
         reconcileData.unshift({ productId: p.id, name: p.name, barcode: p.barcode || '', received: 0, noteQty: sol.missing[pid], price: (on ? discountedUnitPrice(base, pct) : base), basePrice: base, promoPct: pct, promoOn: on, checked: false });
       }
     });
@@ -12769,7 +12807,7 @@ app.addEventListener('click', (e) => {
     res.missing.forEach(p => {
       if (!(reconcileData || []).find(l => l.productId === p.id)) {
         const day = todayStr(); const base = r2(Number(p.price) || 0);
-        const pr = promoForProduct(p.id); const on = promoTriggered(pr, day); const pct = on ? (Number(pr.pct) || 0) : 0;
+        const pr = promoForProduct(p.id, day); const on = promoTriggered(pr, day); const pct = on ? (Number(pr.pct) || 0) : 0;
         reconcileData.unshift({ productId: p.id, name: p.name, barcode: p.barcode || '', received: 0, noteQty: 0, price: (on ? discountedUnitPrice(base, pct) : base), basePrice: base, promoPct: pct, promoOn: on, checked: false });
       }
     });
@@ -12789,7 +12827,7 @@ app.addEventListener('click', (e) => {
         // כל הופעות הנייר של אותו מוצר מתחברות לשורה מצטברת אחת.
         const p = products.find(x => x.id === pid); if (!p) return;
         const base = r2(Number(p.price) || 0);
-        const pr = promoForProduct(p.id); const on = promoTriggered(pr, day); const pct = on ? (Number(pr.pct) || 0) : 0;
+        const pr = promoForProduct(p.id, day); const on = promoTriggered(pr, day); const pct = on ? (Number(pr.pct) || 0) : 0;
         reconcileData.unshift({ productId: p.id, name: p.name, barcode: p.barcode || '', received: 0, noteQty: q, price: (on ? discountedUnitPrice(base, pct) : base), basePrice: base, promoPct: pct, promoOn: on, checked: false });
       }
     });
@@ -12863,7 +12901,7 @@ app.addEventListener('click', (e) => {
     if (p && !(reconcileData || []).find(l => l.productId === id)) {
       const day = todayStr();
       const base = r2(Number(p.price) || 0);
-      const pr = promoForProduct(p.id);
+      const pr = promoForProduct(p.id, day);
       const on = promoTriggered(pr, day);
       const pct = on ? (Number(pr.pct) || 0) : 0;
       const price = on ? discountedUnitPrice(base, pct) : base;
