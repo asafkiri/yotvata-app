@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v208 בודד קודם לצירופים</title>
+    <title>הזמנות יטבתה - v209 משפחה בלי ארגז</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v208 בודד קודם לצירופים</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v209 משפחה בלי ארגז</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5302,8 +5302,13 @@ function detectiveIsSimpleSafeResult(result) {
   if (!result || !result.complete || result.overflow || result.level !== 1 || result.toleranceCents > 50) return false;
   if (!Array.isArray(result.solutions) || !result.solutions.length || result.solutions.length > 4) return false;
   if ([DETECTIVE_SEARCH_PURE_SHORT_COMPLETE, DETECTIVE_SEARCH_PURE_SHORT, DETECTIVE_SEARCH_PURE_SURPLUS].indexOf(result.searchStage) === -1) return false;
+  // v209: בקבוצת מחיר עם כמה טעמים בלי ארגז (אקטימל), לצד ההצעות הנקיות
+  // נשמרים גם פיצולים (רגיל 1 + פטל 2) — אותו כסף בדיוק, רק חלוקה אחרת.
+  // הדרישה שכל ההצעות יהיו של מוצר בודד זרקה את כל המשפחות האלה ל-AI
+  // מאז ומעולם; שוקו והכוסות עברו רק כי הארגזים שלהם חסמו פיצולים.
+  // מספיק שקיימת הצעה נקייה אחת של מוצר בודד — הפיצולים נשארים כחלופות.
   return result.solutions.every(sol => Array.isArray(sol.components) && sol.components.length === 1 &&
-    sol.components[0].allocations.every(a => Array.isArray(a.moves) && a.moves.length === 1));
+    sol.components[0].allocations.some(a => Array.isArray(a.moves) && a.moves.length === 1));
 }
 function detectiveStepForResult(result) {
   return detectiveIsSimpleSafeResult(result) ? 'detective' : 'ai';
