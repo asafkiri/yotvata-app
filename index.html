@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v205 קיזוז ליתרה בלבד</title>
+    <title>הזמנות יטבתה - v207 כוונון הבלש</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v205 קיזוז ליתרה בלבד</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v207 כוונון הבלש</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -4751,16 +4751,26 @@ function noteCheckHtml(gap) {
     ncResultsHtml() +
   '</div>';
 }
-const DETECTIVE_MONEY_TOL_CENTS = 100; // הגבול האחרון בלבד; החיפוש עצמו מתקדם 0 → 5 → 100 אגורות
-const DETECTIVE_TOLERANCE_STEPS = [0, 5, 100];
+// v206: מחירי מבצע נושאים שברי אגורה (5.47 פחות 18% = 4.4854), ועיגול המחיר
+// לאגורות שלמות לפני הכפל צבר שגיאה (449×10=4,490 מול פער אמיתי 4,485) —
+// הפתרון היחיד האמיתי נפסל בסיבוב המדויק, מרחב הזוגות "המדויקים" הוצף
+// בצירופים אקראיים, והבלש ויתר ושלח לסריקה. לכן כל חשבון הבלש עבר
+// למאיות אגורה: מחיר × 10,000, והסבילויות בהתאם.
+const DETECTIVE_MONEY_TOL_CENTS = 10000; // הגבול האחרון בלבד (₪1); החיפוש עצמו מתקדם חצי אגורה → 5 אגורות → ₪1
+const DETECTIVE_TOLERANCE_STEPS = [0, 50, 500, 10000]; // מאיות אגורה: קודם מדויק לחלוטין, אז חצי אגורה (עיגול-שורה של מחיר מבצע), אז 5 אגורות, אז ₪1
 const DETECTIVE_QUESTION_POOL_LIMIT = 96; // שואלים רק כשכל סט האפשרויות נאסף; מעבר לכך עוברים לברקודים
 function detectiveEffectiveProductPrice(p) {
   if (!p) return { price: 0, promoOn: false, promoPct: 0 };
   const base = r2(Number(p.price) || 0);
   const pr = promoForProduct(p.id, todayStr());
-  const on = !!(pr && promoTriggered(pr, todayStr()));
+  // v206: מועמד של הבלש הוא מוצר שחסר — לא נסרק — ולכן הסל החי לעולם לא
+  // יעמוד במינימום המבצע שלו (promoTriggered נכשל בהגדרה על שורה שנמחקה).
+  // המחיר שקובע הוא מחיר הנייר, והנייר כלל את היחידות החסרות; לכן די בכך
+  // שהמבצע פעיל לתאריך. והמחיר נשאר בדיוק מלא: 4.4854 נשאר 4.4854, לא 4.49.
+  const on = !!(pr && promoActive(pr, todayStr()));
   const pct = on ? (Number(pr.pct) || 0) : 0;
-  return { price: on ? r2(base * (1 - pct / 100)) : base, promoOn: on, promoPct: pct };
+  // v207: גם מינימום המבצע מדווח — מועמד חסר במחיר מבצע חייב לעמוד בו בעצמו
+  return { price: on ? discountedUnitPrice(base, pct) : base, promoOn: on, promoPct: pct, promoMin: on ? promoMinUnitsP(pr) : 0 };
 }
 function detectiveHistoryCounts() {
   const out = {};
@@ -4773,16 +4783,16 @@ function detectiveBuildPriceGroups() {
   const byPrice = new Map();
   const add = (actor) => {
     if (!(actor.price > 0)) return;
-    actor.priceCents = Math.round(actor.price * 100);
+    actor.priceCents = Math.round(actor.price * 10000); // v206: מאיות אגורה — מחיר מבצע נשמר מדויק
     let g = byPrice.get(actor.priceCents);
-    if (!g) { g = { priceCents: actor.priceCents, price: actor.priceCents / 100, actors: [], allocCache: new Map() }; byPrice.set(actor.priceCents, g); }
+    if (!g) { g = { priceCents: actor.priceCents, price: actor.priceCents / 10000, actors: [], allocCache: new Map() }; byPrice.set(actor.priceCents, g); }
     g.actors.push(actor);
   };
   (reconcileData || []).forEach(l => {
     inRec[l.productId] = 1;
     if (detectiveScope && !detectiveScope.paperIds.has(l.productId) && !detectiveScope.extraIds.has(l.productId)) return;
     const p = products.find(x => x.id === l.productId);
-    add({ productId: l.productId, name: l.name || (p && p.name) || '', price: r2(Number(l.price) || 0), inRec: true, ext: false,
+    add({ productId: l.productId, name: l.name || (p && p.name) || '', price: Number(l.price) || 0, inRec: true, ext: false,
       noteQty: Number(l.noteQty) || 0, received: Number(l.received) || 0, hidden: !!(p && p.hidden), bs: Math.max(0, parseInt(p && p.boxSize, 10) || 0),
       average: Math.max(0, parseInt(p && p.average, 10) || 0), promoOn: !!l.promoOn, history: history[l.productId] || 0,
       paperKnown: !!(detectiveScope && detectiveScope.paperIds.has(l.productId)), wholeExtra: !!(detectiveScope && detectiveScope.extraIds.has(l.productId)) });
@@ -4794,7 +4804,7 @@ function detectiveBuildPriceGroups() {
     } else if (p.hidden) return; // מוצר מוסתר שלא נסרק אינו מועמד חדש
     const ep = detectiveEffectiveProductPrice(p);
     add({ productId: p.id, name: p.name || '', price: ep.price, inRec: false, ext: true, noteQty: 0, received: 0, hidden: !!p.hidden,
-      bs: Math.max(0, parseInt(p.boxSize, 10) || 0), average: Math.max(0, parseInt(p.average, 10) || 0), promoOn: ep.promoOn, history: history[p.id] || 0,
+      bs: Math.max(0, parseInt(p.boxSize, 10) || 0), average: Math.max(0, parseInt(p.average, 10) || 0), promoOn: ep.promoOn, promoMin: Number(ep.promoMin) || 0, history: history[p.id] || 0,
       paperKnown: !!detectiveScope, wholeExtra: false });
   });
   return Array.from(byPrice.values()).sort((a, b) => a.priceCents - b.priceCents);
@@ -4802,6 +4812,10 @@ function detectiveBuildPriceGroups() {
 function detectiveActorCanMove(a, delta) {
   if (!a || !Number.isInteger(delta) || delta === 0) return false;
   if (a.bs > 0 && Math.abs(delta) % a.bs !== 0) return false; // כפולת ארגז היא עובדה, לא רמז
+  // v207: מועמד חסר שמתומחר במבצע חייב לעמוד במינימום המבצע בעצמו — מבצע
+  // "מ-6 יח׳" לא יכול להסביר חוסר של יחידה אחת במחיר המבצע. (החוסר עדיין
+  // ניתן לפתרון ידני/AI במחיר מלא; הבלש פשוט לא יציע מחיר שגוי.)
+  if (delta > 0 && !a.inRec && (Number(a.promoMin) || 0) > 1 && delta < a.promoMin) return false;
   if (detectiveScope) {
     if (a.wholeExtra) return delta === -(Number(a.noteQty) || 0); // לא מופיע בנייר: כל הכמות שנסרקה היא עודף
     if (!a.paperKnown) return false;
@@ -5013,7 +5027,7 @@ function detectiveMakeSolution(parts, residualCents, stage) {
   components.sort((a, b) => (a.priceCents - b.priceCents) || (a.delta - b.delta));
   const signature = components.map(c => c.delta + '@' + c.priceCents).join('|');
   const likelihood = components.reduce((a, c) => a + Math.max(...c.allocations.map(x => x.score)), 0);
-  return { signature, components, residualCents: Math.abs(residualCents), score: likelihood - components.length * 18 - Math.abs(residualCents) * 2, searchStage: stage };
+  return { signature, components, residualCents: Math.abs(residualCents), score: likelihood - components.length * 18 - Math.round(Math.abs(residualCents) / 100) * 2, searchStage: stage };
 }
 function detectiveFinishStage(found, gap, unitGap, level, toleranceCents, complete, searchStage) {
   const bySig = new Map();
@@ -5113,7 +5127,7 @@ function detectiveSolveTier(groups, gap, gapCents, unitGap, toleranceCents, sear
   return triples.length ? detectiveFinishStage(triples, gap, unitGap, 3, toleranceCents, true, searchStage) : null;
 }
 function detectiveSolutions() {
-  const gap = reconcileGap(), gapCents = Math.round(gap * 100), unitGap = reconcileUnitsGap();
+  const gap = reconcileGap(), gapCents = Math.round(gap * 10000), unitGap = reconcileUnitsGap();
   if (reconcileIsBalanced()) return null;
   if (!detectiveScope) detectiveEnsureQuestionState();
   const groups = detectiveBuildPriceGroups();
@@ -5124,12 +5138,12 @@ function detectiveSolutions() {
     groups.forEach(g => {
       const center = gapCents / g.priceCents;
       for (let d = Math.floor(center) - 1; d <= Math.ceil(center) + 1; d++) {
-        if (!d || Math.abs(g.priceCents * d - gapCents) > 5) continue;
+        if (!d || Math.abs(g.priceCents * d - gapCents) > 500) continue;
         const s = detectiveMakeSolution([{ group: g, delta: d }], g.priceCents * d - gapCents, DETECTIVE_SEARCH_MIXED);
         if (s) found.push(s);
       }
     });
-    return found.length ? detectiveFinishStage(found, gap, null, 1, 5, true, DETECTIVE_SEARCH_MIXED) : null;
+    return found.length ? detectiveFinishStage(found, gap, null, 1, 500, true, DETECTIVE_SEARCH_MIXED) : null;
   }
   // קודם בודקים הסבר טהור לפי כיוון ההפרש; חוסר+עודף יחד הוא גיבוי בלבד.
   // שומרים על כלל הבטיחות הישן: פתרון מדויק תמיד קודם לפתרון מקורב,
@@ -5267,10 +5281,12 @@ function detectiveQuestionHtml(result, question) {
     '<button data-role="rc-goto-barcodes" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">לא בטוח — עבור לברקודים</button>' +
   '</div>';
 }
-// הבלש המקומי סוגר רק מקרה פשוט ובטוח: מוצר אחד, התאמה מדויקת באגורות,
-// חוסר טהור או עודף טהור. כל חוסר+עודף, מחיר, מבצע או צירוף עובר ל-AI.
+// הבלש המקומי סוגר רק מקרה פשוט ובטוח: מוצר אחד, חוסר טהור או עודף טהור,
+// והתאמה מדויקת — כולל עד חצי אגורה, שהיא עיגול-השורה של מחיר מבצע ולא
+// אי-ודאות אמיתית. v207: השער דרש בדיוק 0 בזמן שהסולם כבר התחיל ב-50,
+// כך שכל פתרון — גם עם שארית אפס — נפסל ונשלח לסריקת AI בתשלום.
 function detectiveIsSimpleSafeResult(result) {
-  if (!result || !result.complete || result.overflow || result.level !== 1 || result.toleranceCents !== 0) return false;
+  if (!result || !result.complete || result.overflow || result.level !== 1 || result.toleranceCents > 50) return false;
   if (!Array.isArray(result.solutions) || !result.solutions.length || result.solutions.length > 4) return false;
   if ([DETECTIVE_SEARCH_PURE_SHORT_COMPLETE, DETECTIVE_SEARCH_PURE_SHORT, DETECTIVE_SEARCH_PURE_SURPLUS].indexOf(result.searchStage) === -1) return false;
   return result.solutions.every(sol => Array.isArray(sol.components) && sol.components.length === 1 &&
@@ -5313,7 +5329,7 @@ function detectiveSolutionsHtml(result, opts) {
         '<div class="text-xs font-black ' + (c.delta > 0 ? 'text-rose-700' : 'text-amber-700') + '">' + dir + ' ' + Math.abs(c.delta) + ' יח׳ במחיר ₪' + fmtMoney(c.price) + boxTag + '</div>' + optionUi +
       '</div>';
     }).join('');
-    const residual = sol.residualCents ? '<span class="text-[10px] font-bold text-slate-400"> · סטיית עיגול ₪' + fmtMoney(sol.residualCents / 100) + '</span>' : '';
+    const residual = sol.residualCents >= 100 ? '<span class="text-[10px] font-bold text-slate-400"> · סטיית עיגול ₪' + fmtMoney(sol.residualCents / 10000) + '</span>' : '';
     return '<div class="rounded-2xl border-2 ' + (si === 0 ? 'border-indigo-300 bg-indigo-50/30' : 'border-slate-200 bg-white') + ' p-3 mt-2">' +
       '<div class="font-black text-slate-800 text-sm">אפשרות ' + (si + 1) + (si === 0 ? ' <span class="text-[10px] text-white bg-indigo-600 px-1.5 py-0.5 rounded">הכי סבירה</span>' : '') + residual + '</div>' +
       comps +
@@ -9449,9 +9465,9 @@ function solveMissingCertain() {
   const r = noteCheckRes; if (!r || !r.missing.length || receiptNoteUnits == null || r.missing.length > 3) return null;
   const extras = (r.extra || []).map(l => ({ productId: l.productId, name: l.name, qty: Number(l.noteQty) || 0, price: r2(Number(l.price) || 0) })).filter(x => x.qty > 0);
   const targetUnits = (reconcileUnitsGap() || 0) + extras.reduce((a, x) => a + x.qty, 0);
-  const targetMoney = Math.round(reconcileGap() * 100) + extras.reduce((a, x) => a + Math.round(x.price * 100) * x.qty, 0);
+  const targetMoney = Math.round(reconcileGap() * 10000) + extras.reduce((a, x) => a + Math.round(x.price * 10000) * x.qty, 0);
   if (!(targetUnits >= r.missing.length)) return null;
-  const rows = r.missing.map(p => { const ep = detectiveEffectiveProductPrice(p); return { p, price: ep.price, cents: Math.round(ep.price * 100), step: Math.max(1, parseInt(p.boxSize, 10) || 1) }; });
+  const rows = r.missing.map(p => { const ep = detectiveEffectiveProductPrice(p); return { p, price: ep.price, cents: Math.round(ep.price * 10000), step: Math.max(1, parseInt(p.boxSize, 10) || 1) }; });
   if (rows.some(x => x.cents <= 0)) return null;
   const found = [], cur = {};
   function dfs(i, unitsLeft, money) {
@@ -9527,7 +9543,7 @@ function ncPaperGroups() {
     g.qty = explicit.length ? explicit.reduce((a, r) => a + (Number(r.q) || 0), 0) : (l && l.noteQty != null ? Number(l.noteQty) : '');
     const priced = g.rows.find(r => r.price != null && r.price !== '');
     const p = products.find(x => x.id === g.pid);
-    g.price = priced ? priced.price : (l && l.price != null ? r2(Number(l.price) || 0) : r2(Number(p && p.price) || 0));
+    g.price = priced ? priced.price : (l && l.price != null ? (Number(l.price) || 0) : r2(Number(p && p.price) || 0)); // v207: מחיר שורה קיימת (כולל מבצע 4.4854) לא מעוגל
   });
   return out;
 }
