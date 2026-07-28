@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v200 מבצע פעיל גובר</title>
+    <title>הזמנות יטבתה - v202 חותמת מבצע בתעודה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v200 מבצע פעיל גובר</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v202 חותמת מבצע בתעודה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -985,6 +985,7 @@ function startListeners() {
     receipts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     if (currentView === 'receiptsHistory' || currentView === 'receiving' || currentView === 'health') rerender();
     setTimeout(migrateLegacyReceiptOffsets, 0);
+    setTimeout(stampResolvedAiPriceFindings, 0); // v202
   }, console.error);
 
   const prmRef = collection(db, 'artifacts', appId, 'public', 'data', 'promos');
@@ -3959,6 +3960,33 @@ function receiptPromoStatuses() {
   return out;
 }
 function productActivePromo(p, dateStr) { const pr = promoForProduct(p && p.id, dateStr); return promoActive(pr, dateStr) ? pr : null; }
+// v201: ממצא "מחיר שונה" נשמר בתוך התעודה כטקסט קפוא ברגע הסריקה, יחד עם
+// המספרים שמאחוריו. עד v200 מבצע פעיל יכול היה לא להיתפס, והמחיר ה"צפוי"
+// שנשמר היה המחיר המלא — כלומר הממצא האשים את הספק במחיר שהיה נכון לגמרי.
+// כאן בודקים את הממצא השמור מחדש: אם המחיר הצפוי בניכוי מבצע שפעיל בתאריך
+// התעודה שווה בדיוק למחיר שהודפס בנייר — לא היה הפרש מחיר, ומחזירים את
+// המבצע שמסביר אותו. שום נתון שמור לא משתנה; רק ההצגה והסטטוס נגזרים מחדש.
+function aiPriceFindingPromoMatch(f, dateStr) {
+  if (!f || f.type !== 'price') return null;
+  // v202: אם הממצא כבר נבדק ונחתם — המסקנה שמורה בתוך התעודה עצמה, ואינה
+  // תלויה עוד בכך שהמבצע ימשיך להתקיים. מבצע יולי ייעלם אוטומטית בספטמבר
+  // (promoAutoCleanup מוחק כל מבצע שהסתיים לפני ה-1 בחודש הקודם), ובלי
+  // החותמת ההאשמה השגויה הייתה חוזרת ונועלת את התעודה מחדש.
+  if (f.promoResolved && (Number(f.promoResolved.pct) || 0) > 0) {
+    return { id: f.promoResolved.promoId || null, name: f.promoResolved.promoName || '', pct: Number(f.promoResolved.pct) || 0, stamped: true };
+  }
+  if (!f.productId) return null;
+  const base = Number(f.expectedPrice) || 0;
+  const paper = Number(f.paperPrice);
+  if (!(base > 0) || !isFinite(paper) || !(paper > 0)) return null;
+  const pr = promoForProduct(f.productId, dateStr);
+  if (!pr || !promoActive(pr, dateStr)) return null;
+  const pct = Number(pr.pct) || 0;
+  if (!(pct > 0)) return null;
+  // אותה סבילות שבה נולד הממצא מלכתחילה (0.02), כדי שהבדיקה תהיה סימטרית.
+  if (Math.abs(discountedUnitPrice(base, pct) - paper) > 0.02) return null;
+  return pr;
+}
 // ===== מבצעי מרכזת (סוף חודש) — לא בתעודה, מחושב בדוח החודשי =====
 function monthEndPromoForProduct(pid, dateStr) {
   if (!pid) return null;
@@ -10596,7 +10624,10 @@ function receiptDiscrepancyInfo(rc, opts) {
   // ממצאי כמות של ה-AI נשמרים בהיסטוריה, אבל אינם משאירים תעודה אדומה אחרי
   // שהחוסר והעודף עצמם נסגרו בקיזוז. ממצא מחיר/מבצע עדיין מחייב טיפול.
   const aiFindings = rc && rc.aiAudit && Array.isArray(rc.aiAudit.findings) ? rc.aiAudit.findings : [];
-  const aiHasNonQuantityFinding = aiFindings.some(f => f && (f.type === 'price' || f.type === 'promo_missing'));
+  // v201: ממצא מחיר שהבדיקה מוכיחה שנבע ממבצע שלא נתפס אינו "טיפול נדרש"
+  // ואינו משאיר את התעודה אדומה לנצח.
+  const aiAuditDay = (rc && rc.date) || todayStr();
+  const aiHasNonQuantityFinding = aiFindings.some(f => f && (f.type === 'price' || f.type === 'promo_missing') && !aiPriceFindingPromoMatch(f, aiAuditDay));
   const aiAuditOpen = !!(rc && rc.aiAudit && rc.aiAudit.hasDiscrepancy && (aiHasNonQuantityFinding || (!aiFindings.length && !(priceOffsets.length && !finalShort.length && !finalOver.length))));
   return { open: !!(finalShort.length || finalOver.length || amountGapOpen || unresolvedUnitsGap !== 0 || aiAuditOpen || creditOpen), shortItems: finalShort, overItems: finalOver, priceOffsets, externalOffsets, shortVal: r2(shortVal), overVal: r2(overVal), unresolvedAmountGap, unresolvedUnitsGap, amountGapOpen, amountToleranceCents, aiAuditOpen };
 }
@@ -10748,7 +10779,11 @@ function renderReceiptsHistory() {
       : [];
     const aiHistoryHtml = rc.aiAudit
       ? '<div class="mt-2 bg-violet-50 border border-violet-200 rounded-xl p-2.5 text-xs"><div class="font-black text-violet-900 mb-1"><i class="fa-solid fa-shield-halved"></i> פוענח ואושר בסריקת AI</div><div class="text-[11px] font-bold text-violet-700 mb-1">סכום התעודות והיחידות אומתו בדיוק; התמונות לא נשמרו.</div>' +
-        (aiHistoryFindings.map(f => '<div class="font-black mt-1 ' + (f.type === 'shortage' ? 'text-rose-700' : (f.type === 'surplus' ? 'text-amber-700' : 'text-orange-800')) + '">• ' + htmlEscape(f.text || '') + '</div>').join('') || '<div class="font-black text-emerald-700">לא נמצא פער נוסף.</div>') + '</div>'
+        (aiHistoryFindings.map(f => {
+          const okPromo = aiPriceFindingPromoMatch(f, rc.date || todayStr());
+          if (okPromo) return '<div class="font-black mt-1 text-emerald-700">• ' + htmlEscape(f.name || '') + ' — מבצע ' + (Number(okPromo.pct) || 0) + '%: המחיר בנייר תואם למבצע ✓</div>';
+          return '<div class="font-black mt-1 ' + (f.type === 'shortage' ? 'text-rose-700' : (f.type === 'surplus' ? 'text-amber-700' : 'text-orange-800')) + '">• ' + htmlEscape(f.text || '') + '</div>';
+        }).join('') || '<div class="font-black text-emerald-700">לא נמצא פער נוסף.</div>') + '</div>'
       : '';
     const hasInternalOffset = !effectiveOpen && !!(di.priceOffsets && di.priceOffsets.length);
     let barCls = 'bg-emerald-500 text-white', borderCls = 'border-emerald-300', statusTxt = '<i class="fa-solid fa-circle-check"></i> אומתה';
@@ -11680,9 +11715,33 @@ function promoImportPick() {
 // המחזור (לא נמחק לצמיתות). פעילים, עתידיים, החודש הנוכחי והקודם — לעולם
 // לא נגועים; מבצעי מרכזת של החודש שעבר נשארים זמינים לדוח סוף החודש.
 let promoCleanupRan = false;
+// v202: מסקנת הבדיקה נחתמת פנימה לתוך התעודה, פעם אחת, כדי שתשרוד את
+// מחיקת המבצע. הטקסט המקורי של הממצא לא נגוע — רק נוסף לו שדה promoResolved.
+let aiPriceStampRan = false;
+function stampResolvedAiPriceFindings() {
+  if (aiPriceStampRan || !db || !promos.length || !receipts.length) return;
+  aiPriceStampRan = true;
+  receipts.forEach(rc => {
+    if (!rc || !rc.aiAudit || !Array.isArray(rc.aiAudit.findings)) return;
+    const day = rc.date || todayStr();
+    let changed = false;
+    const findings = rc.aiAudit.findings.map(f => {
+      if (!f || f.type !== 'price' || f.promoResolved) return f;
+      if (!f.productId) return f;
+      const pr = aiPriceFindingPromoMatch(f, day);
+      if (!pr || pr.stamped) return f;
+      changed = true;
+      return { ...f, promoResolved: { promoId: pr.id || null, promoName: pr.name || '', pct: Number(pr.pct) || 0, at: Date.now() } };
+    });
+    if (!changed) return;
+    rc.aiAudit = { ...rc.aiAudit, findings: findings };
+    runCloudTaskSilent('stamp resolved price finding', { op: 'update', path: dataPath('receipts', rc.id), data: { aiAudit: cloneSafe(rc.aiAudit) }, operationId: makeOperationId('ai_price_resolved') });
+  });
+}
 async function promoAutoCleanup() {
   if (promoCleanupRan) return; // פעם אחת בכל טעינת אפליקציה
   promoCleanupRan = true;
+  stampResolvedAiPriceFindings(); // תמיד לפני מחיקה — אחרת הראיה נעלמת עם המבצע
   const now = new Date();
   const prevMonthFirst = new Date(now.getFullYear(), now.getMonth() - 1, 1).toLocaleDateString('en-CA');
   const stale = promos.filter(pr => pr && pr.end && pr.end < prevMonthFirst);
