@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v209 משפחה בלי ארגז</title>
+    <title>הזמנות יטבתה - v211 תצוגת פיקדון</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v209 משפחה בלי ארגז</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v211 תצוגת פיקדון</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -4789,10 +4789,16 @@ function detectiveBuildPriceGroups() {
     g.actors.push(actor);
   };
   (reconcileData || []).forEach(l => {
+    // v210: שורת פיקדון אינה שחקן — הכסף שלה חי בתוך מחיר המוצר (למטה),
+    // והיחידות שלה ממילא לא נספרות. להשאיר אותה כשחקן היה סופר כפול.
+    if (l.isDeposit || String(l.productId || '').indexOf('deposit-') === 0) return;
     inRec[l.productId] = 1;
     if (detectiveScope && !detectiveScope.paperIds.has(l.productId) && !detectiveScope.extraIds.has(l.productId)) return;
     const p = products.find(x => x.id === l.productId);
-    add({ productId: l.productId, name: l.name || (p && p.name) || '', price: Number(l.price) || 0, inRec: true, ext: false,
+    // v210: הפיקדון הנגזר עוקב אחרי הכמות הסרוקה, ולכן כל יחידה חסרה/עודפת
+    // מזיזה מחיר + פיקדון (12 פחיות = 12 × (4.539 + 0.254) = 57.52, לא 54.47).
+    add({ productId: l.productId, name: l.name || (p && p.name) || '', price: (Number(l.price) || 0) + (Number(p && p.deposit) || 0), inRec: true, ext: false,
+      dep: Number(p && p.deposit) || 0,
       noteQty: Number(l.noteQty) || 0, received: Number(l.received) || 0, hidden: !!(p && p.hidden), bs: Math.max(0, parseInt(p && p.boxSize, 10) || 0),
       average: Math.max(0, parseInt(p && p.average, 10) || 0), promoOn: !!l.promoOn, history: history[l.productId] || 0,
       paperKnown: !!(detectiveScope && detectiveScope.paperIds.has(l.productId)), wholeExtra: !!(detectiveScope && detectiveScope.extraIds.has(l.productId)) });
@@ -4801,9 +4807,13 @@ function detectiveBuildPriceGroups() {
     if (inRec[p.id]) return;
     if (detectiveScope) {
       if (!detectiveScope.paperIds.has(p.id)) return; // אחרי הברקודים — רק מוצר שאומת על הנייר רשאי להיכנס
-    } else if (p.hidden) return; // מוצר מוסתר שלא נסרק אינו מועמד חדש
+    }
+    // v210: מוצר מוסתר ("אזל במלאי") כן מועמד לחוסר — משלוח הוא בדיוק הרגע
+    // שבו מוצר שאזל חוזר, וחוסר בו הוא תרחיש אמיתי (12 פחיות נמס, 29.7).
+    // ההתאמה הקשיחה (כסף + יחידות + כפולת ארגז) מסננת רעש; הניקוד ממילא
+    // מעדיף מוצר גלוי (+3).
     const ep = detectiveEffectiveProductPrice(p);
-    add({ productId: p.id, name: p.name || '', price: ep.price, inRec: false, ext: true, noteQty: 0, received: 0, hidden: !!p.hidden,
+    add({ productId: p.id, name: p.name || '', price: ep.price + (Number(p.deposit) || 0), dep: Number(p.deposit) || 0, inRec: false, ext: true, noteQty: 0, received: 0, hidden: !!p.hidden,
       bs: Math.max(0, parseInt(p.boxSize, 10) || 0), average: Math.max(0, parseInt(p.average, 10) || 0), promoOn: ep.promoOn, promoMin: Number(ep.promoMin) || 0, history: history[p.id] || 0,
       paperKnown: !!detectiveScope, wholeExtra: false });
   });
@@ -4824,7 +4834,8 @@ function detectiveActorCanMove(a, delta) {
     return true;
   }
   if (delta < 0) return !!a.inRec && (-delta) <= (Number(a.noteQty) || 0);
-  if (!a.inRec && a.hidden) return false;
+  // v210: מוצר מוסתר ("אזל במלאי") כן רשאי לזוז כחוסר — ראה ההערה בבניית
+  // המועמדים. שני השערים (מועמדות + תנועה) שוחררו יחד.
   if (receiptNoteUnits != null && (Number(a.noteQty) || 0) + delta > receiptNoteUnits) return false;
   return true;
 }
@@ -4905,7 +4916,7 @@ function detectiveAllocations(group, delta, maxMoves, stage) {
   if (group.allocCache.has(cacheKey)) return group.allocCache.get(cacheKey);
   if (!detectiveDeltaGloballyPossible(delta) || !detectiveStageAllowsDelta(delta, stage)) { group.allocCache.set(cacheKey, []); return []; }
   const singles = group.actors.filter(a => detectiveActorFitsStage(a, delta, stage) && detectiveActorCanMove(a, delta)).map(a => ({
-    moves: [{ productId: a.productId, name: a.name, delta, bs: a.bs, ext: a.ext, promoOn: a.promoOn }],
+    moves: [{ productId: a.productId, name: a.name, delta, bs: a.bs, ext: a.ext, promoOn: a.promoOn, dep: Number(a.dep) || 0 }],
     score: detectiveActorScore(a, delta)
   }));
   if (maxMoves < 2) {
@@ -4936,7 +4947,7 @@ function detectiveAllocations(group, delta, maxMoves, stage) {
       for (let q = step; q <= cap; q += step) {
         const d = sign * q;
         if (!detectiveActorFitsStage(a, d, stage) || !detectiveActorCanMove(a, d)) continue;
-        moves.push({ productId: a.productId, name: a.name, delta: d, bs: a.bs, ext: a.ext, promoOn: a.promoOn });
+        moves.push({ productId: a.productId, name: a.name, delta: d, bs: a.bs, ext: a.ext, promoOn: a.promoOn, dep: Number(a.dep) || 0 });
         dfs(i + 1, left - q, moves, score + detectiveActorScore(a, d));
         moves.pop();
         if (out.length >= 60) break;
@@ -5328,6 +5339,15 @@ function postBarcodeSolutions() {
   try { return detectiveSolutions(); }
   finally { detectiveScope = previousScope; }
 }
+// v211: המחיר בקבוצה כולל פיקדון (כך הכסף נסגר), אבל לעובד מציגים אותו
+// מפורק: "₪4.54 + פיקדון" במקום ₪4.79 — רק כשכל המהלכים חולקים אותו פיקדון.
+function detectiveComponentPriceLabel(c) {
+  const deps = [];
+  (c.allocations || []).forEach(a => (a.moves || []).forEach(m => deps.push(Number(m.dep) || 0)));
+  const dep = deps.length && deps.every(d => d === deps[0]) ? deps[0] : 0;
+  if (dep > 0) return '₪' + fmtMoney((Number(c.price) || 0) - dep) + ' + פיקדון';
+  return '₪' + fmtMoney(c.price);
+}
 function detectiveSolutionsHtml(result, opts) {
   if (!result || result.overflow || !result.solutions.length) return '';
   opts = opts || {};
@@ -5344,7 +5364,7 @@ function detectiveSolutionsHtml(result, opts) {
           c.allocations.map((a, ai) => '<option value="' + ai + '">' + detectiveAllocationLabel(a) + '</option>').join('') + '</select>';
       const boxTag = c.allocations.every(a => a.moves.every(m => m.bs > 0)) ? ' · 📦 כפולות ארגז' : '';
       return '<div class="rounded-xl bg-indigo-50/70 border border-indigo-100 p-2.5 mt-1.5">' +
-        '<div class="text-xs font-black ' + (c.delta > 0 ? 'text-rose-700' : 'text-amber-700') + '">' + dir + ' ' + Math.abs(c.delta) + ' יח׳ במחיר ₪' + fmtMoney(c.price) + boxTag + '</div>' + optionUi +
+        '<div class="text-xs font-black ' + (c.delta > 0 ? 'text-rose-700' : 'text-amber-700') + '">' + dir + ' ' + Math.abs(c.delta) + ' יח׳ במחיר ' + detectiveComponentPriceLabel(c) + boxTag + '</div>' + optionUi +
       '</div>';
     }).join('');
     const residual = sol.residualCents >= 100 ? '<span class="text-[10px] font-bold text-slate-400"> · סטיית עיגול ₪' + fmtMoney(sol.residualCents / 10000) + '</span>' : '';
