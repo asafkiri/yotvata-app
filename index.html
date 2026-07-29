@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v217 שתי מדרגות</title>
+    <title>הזמנות יטבתה - v218 אישור במחיר הבלש</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v217 שתי מדרגות</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v218 אישור במחיר הבלש</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -4923,7 +4923,7 @@ function detectiveAllocations(group, delta, maxMoves, stage) {
   if (group.allocCache.has(cacheKey)) return group.allocCache.get(cacheKey);
   if (!detectiveDeltaGloballyPossible(delta) || !detectiveStageAllowsDelta(delta, stage)) { group.allocCache.set(cacheKey, []); return []; }
   const singles = group.actors.filter(a => detectiveActorFitsStage(a, delta, stage) && detectiveActorCanMove(a, delta)).map(a => ({
-    moves: [{ productId: a.productId, name: a.name, delta, bs: a.bs, ext: a.ext, promoOn: a.promoOn, dep: Number(a.dep) || 0 }],
+    moves: [{ productId: a.productId, name: a.name, delta, bs: a.bs, ext: a.ext, promoOn: a.promoOn, dep: Number(a.dep) || 0, unit: Number(group.price) || 0 }],
     score: detectiveActorScore(a, delta)
   }));
   if (maxMoves < 2) {
@@ -4954,7 +4954,7 @@ function detectiveAllocations(group, delta, maxMoves, stage) {
       for (let q = step; q <= cap; q += step) {
         const d = sign * q;
         if (!detectiveActorFitsStage(a, d, stage) || !detectiveActorCanMove(a, d)) continue;
-        moves.push({ productId: a.productId, name: a.name, delta: d, bs: a.bs, ext: a.ext, promoOn: a.promoOn, dep: Number(a.dep) || 0 });
+        moves.push({ productId: a.productId, name: a.name, delta: d, bs: a.bs, ext: a.ext, promoOn: a.promoOn, dep: Number(a.dep) || 0, unit: Number(group.price) || 0 });
         dfs(i + 1, left - q, moves, score + detectiveActorScore(a, d));
         moves.pop();
         if (out.length >= 60) break;
@@ -5476,21 +5476,55 @@ function detectiveSolutionsHtml(result, opts) {
 }
 function detectiveApplyResolvedResult(result, i, selectPrefix) {
   if (!result || result.overflow || !result.solutions[i]) return;
-  const sol = result.solutions[i], chosen = [], totals = new Map();
+  const sol = result.solutions[i], chosen = [], totals = new Map(), moveInfo = new Map();
   sol.components.forEach((c, ci) => {
     const sel = $(selectPrefix + i + '_' + ci);
     const ai = sel ? Math.max(0, parseInt(sel.value, 10) || 0) : 0;
     const alloc = c.allocations[ai] || c.allocations[0];
-    if (alloc) alloc.moves.forEach(m => { chosen.push(m); totals.set(m.productId, (totals.get(m.productId) || 0) + m.delta); });
+    if (alloc) alloc.moves.forEach(m => {
+      chosen.push(m);
+      totals.set(m.productId, (totals.get(m.productId) || 0) + m.delta);
+      // v218: המחיר שהבלש מצא נוסע עם המהלך — האישור חייב להשתמש בדיוק בו
+      moveInfo.set(m.productId, { unit: Number(m.unit) || Number(c.price) || 0, dep: Number(m.dep) || 0 });
+    });
   });
   if (!chosen.length) return;
   for (const [pid, delta] of totals.entries()) {
     const existing = (reconcileData || []).find(x => x.productId === pid);
     const cur = Number(existing && existing.noteQty) || 0;
     const p = products.find(x => x.id === pid), bs = Math.max(0, parseInt(p && p.boxSize, 10) || 0);
-    if (cur + delta < 0 || (bs > 0 && Math.abs(delta) % bs !== 0)) { showToast('הפתרון השתנה — הבלש מחשב מחדש', null, null, 2400); refreshReconcile(); return; }
+    // v218: כלל הארגז החכם (v213) גם באישור — שורת הנייר המשוחזרת נבדקת,
+    // לא הדלתא: 11 נסרקו + 1 חסרה = 12 = ארגז שלם ✓ (הכלל הישן דחה את זה)
+    if (cur + delta < 0) { showToast('הפתרון השתנה — הבלש מחשב מחדש', null, null, 2400); refreshReconcile(); return; }
+    if (bs > 0 && (delta > 0 ? ((cur + delta) % bs !== 0) : (Math.abs(delta) % bs !== 0))) { showToast('הפתרון השתנה — הבלש מחשב מחדש', null, null, 2400); refreshReconcile(); return; }
   }
-  totals.forEach((delta, pid) => { const l = ensureReconcileLine(pid); if (l) l.noteQty = (Number(l.noteQty) || 0) + delta; });
+  totals.forEach((delta, pid) => {
+    const l = ensureReconcileLine(pid); if (!l) return;
+    l.noteQty = (Number(l.noteQty) || 0) + delta;
+    const p = products.find(x => x.id === pid);
+    const info = moveInfo.get(pid);
+    if (p && info && info.unit > 0) {
+      // v218: מחיר השורה = מחיר הבלש (בדיוק מלא, בלי הפיקדון שמנוהל בשורה
+      // נפרדת). דורסים רק מחיר אוטומטי (בסיס או מבצע) — מחיר שהוקלד ידנית נשמר.
+      const base = r2(Number(p.price) || 0);
+      const unitEx = info.unit - info.dep;
+      const pr = promoForProduct(p.id, todayStr());
+      const activePct = (pr && promoActive(pr, todayStr())) ? (Number(pr.pct) || 0) : 0;
+      const autoPriced = Math.abs((Number(l.price) || 0) - base) < 0.005 ||
+        (activePct > 0 && Math.abs((Number(l.price) || 0) - discountedUnitPrice(base, activePct)) < 0.005);
+      if (autoPriced && Math.abs((Number(l.price) || 0) - unitEx) > 0.0005) {
+        l.price = unitEx; l.basePrice = base;
+        l.promoOn = unitEx < base - 0.0005; l.promoPct = l.promoOn ? activePct : 0;
+      }
+      // v218: סנכרון שורת הפיקדון הנגזרת — הפיקדון עוקב אחרי כמות הנייר
+      if ((Number(p.deposit) || 0) > 0) {
+        const depId = 'deposit-recv-' + pid;
+        let dl = (reconcileData || []).find(x => x.productId === depId);
+        if (dl) dl.noteQty = Number(l.noteQty) || 0;
+        else if ((Number(l.noteQty) || 0) > 0) reconcileData.push({ productId: depId, name: 'פיקדון · ' + (p.name || ''), barcode: '', received: 0, noteQty: Number(l.noteQty) || 0, price: Number(p.deposit) || 0, basePrice: Number(p.deposit) || 0, promoPct: 0, promoOn: false, checked: true, isDeposit: true });
+      }
+    }
+  });
   return chosen;
 }
 function detectiveApplySolution(i) {
