@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v214 מבצע על הסף</title>
+    <title>הזמנות יטבתה - v215 עיגול לפי שורות</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v214 מבצע על הסף</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v215 עיגול לפי שורות</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -4757,7 +4757,7 @@ function noteCheckHtml(gap) {
 // בצירופים אקראיים, והבלש ויתר ושלח לסריקה. לכן כל חשבון הבלש עבר
 // למאיות אגורה: מחיר × 10,000, והסבילויות בהתאם.
 const DETECTIVE_MONEY_TOL_CENTS = 10000; // הגבול האחרון בלבד (₪1); החיפוש עצמו מתקדם חצי אגורה → 5 אגורות → ₪1
-const DETECTIVE_TOLERANCE_STEPS = [0, 50, 500, 10000]; // מאיות אגורה: קודם מדויק לחלוטין, אז חצי אגורה (עיגול-שורה של מחיר מבצע), אז 5 אגורות, אז ₪1
+const DETECTIVE_TOLERANCE_STEPS = [0, 50, 100, 500, 10000]; // מאיות אגורה: מדויק → חצי אגורה (עיגול שורה אחת) → אגורה (חוסר שמתפזר על שתי שורות, כל אחת r2 משלה: כרוב 6.61 + חציל 6.61 = 13.22 מול 13.226) → 5 אגורות → ₪1
 const DETECTIVE_QUESTION_POOL_LIMIT = 96; // שואלים רק כשכל סט האפשרויות נאסף; מעבר לכך עוברים לברקודים
 function detectiveEffectiveProductPrice(p) {
   if (!p) return { price: 0, promoOn: false, promoPct: 0 };
@@ -5241,7 +5241,7 @@ function detectiveSolutions() {
   // עיגול-שורה של עד חצי אגורה). לכן קודם כל: מוצר בודד בלבד, על סבילויות
   // תת-אגורה. פתרון של מוצר אחד עם עיגול-שורה תמיד עדיף על צירוף "מדויק".
   for (const toleranceCents of DETECTIVE_TOLERANCE_STEPS) {
-    if (toleranceCents > 50) break;
+    if (toleranceCents > 100) break; // v215: תקציב עיגול של עד שתי שורות
     for (const searchStage of detectivePreferredStages(gapCents, unitGap)) {
       const result = detectiveSolveTier(groups, gap, gapCents, unitGap, toleranceCents, searchStage, true);
       if (result) return result;
@@ -5386,7 +5386,8 @@ function detectiveQuestionHtml(result, question) {
 // כך שכל פתרון — גם עם שארית אפס — נפסל ונשלח לסריקת AI בתשלום.
 function detectiveIsSimpleSafeResult(result) {
   // v214: תוצאת "מבצע על הסף" עברה תמחור-מחדש של שורות — תקציב עיגול גדול יותר.
-  const tolCap = (result && result.promoFlip) ? 150 : 50;
+  // v215: הסף הרגיל עלה לאגורה — חוסר לגיטימי מתפזר גם על שתי שורות r2.
+  const tolCap = (result && result.promoFlip) ? 150 : 100;
   if (!result || !result.complete || result.overflow || result.level !== 1 || result.toleranceCents > tolCap) return false;
   if (!Array.isArray(result.solutions) || !result.solutions.length || result.solutions.length > 4) return false;
   if ([DETECTIVE_SEARCH_PURE_SHORT_COMPLETE, DETECTIVE_SEARCH_PURE_SHORT, DETECTIVE_SEARCH_PURE_SURPLUS].indexOf(result.searchStage) === -1) return false;
