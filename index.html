@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v216 הסף לא נעצר</title>
+    <title>הזמנות יטבתה - v217 שתי מדרגות</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v216 הסף לא נעצר</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v217 שתי מדרגות</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -4897,19 +4897,19 @@ function detectivePreferredStages(gapCents, unitGap) {
 }
 function detectiveStageMeta(stage, gapCents, unitGap) {
   if (stage === DETECTIVE_SEARCH_PURE_SURPLUS) {
-    return { step: 'שלב 1 מתוך 3 · עודף בלבד', text: 'הבלש בדק קודם רק מוצרים שנסרקו בפועל — בלי לחפש בכלל במאגר המלא.' };
+    return { step: 'שלב 1 מתוך 2 · עודף בלבד', text: 'הבלש בדק קודם רק מוצרים שנסרקו בפועל — בלי לחפש בכלל במאגר המלא.' };
   }
   if (stage === DETECTIVE_SEARCH_PURE_SHORT_COMPLETE) {
-    return { step: 'שלב 1 מתוך 3 · חוסר של מוצר שלם', text: 'הבלש בדק קודם רק מוצרים שלא נסרקו כלל, כי זה סוג החוסר הנפוץ אצלך.' };
+    return { step: 'שלב 1 מתוך 2 · חוסר של מוצר שלם', text: 'הבלש בדק קודם רק מוצרים שלא נסרקו כלל, כי זה סוג החוסר הנפוץ אצלך.' };
   }
   if (stage === DETECTIVE_SEARCH_PURE_SHORT) {
-    return { step: 'שלב 1 מתוך 3 · חוסר בלבד', text: 'לא נמצא מוצר שלם שחסר, לכן הבלש בדק חוסר בלבד — כולל כמות חלקית של מוצר שנסרק.' };
+    return { step: 'שלב 1 מתוך 2 · חוסר בלבד', text: 'לא נמצא מוצר שלם שחסר, לכן הבלש בדק חוסר בלבד — כולל כמות חלקית של מוצר שנסרק.' };
   }
   const hasPureDirection = unitGap != null && unitGap !== 0 && Math.sign(gapCents) !== 0 && Math.sign(gapCents) === Math.sign(unitGap);
   if (!hasPureDirection) {
-    return { step: 'שלב 1 מתוך 3 · חוסר ועודף יחד', text: 'הסכום והיחידות לא מצביעים על כיוון טהור אחד, לכן הבלש בדק חוסר ועודף יחד.' };
+    return { step: 'שלב 1 מתוך 2 · חוסר ועודף יחד', text: 'הסכום והיחידות לא מצביעים על כיוון טהור אחד, לכן הבלש בדק חוסר ועודף יחד.' };
   }
-  return { step: 'שלב 2 מתוך 3 · חוסר ועודף יחד', text: 'לא נמצא פתרון טהור, לכן רק עכשיו הבלש בדק אפשרות של חוסר ועודף יחד.' };
+  return { step: 'שלב 1 מתוך 2 · חוסר ועודף יחד', text: 'לא נמצא פתרון טהור, לכן רק עכשיו הבלש בדק אפשרות של חוסר ועודף יחד.' };
 }
 function detectiveAllocationKey(a) {
   return a.moves.map(m => m.productId + ':' + m.delta).sort().join('|');
@@ -5384,7 +5384,7 @@ function detectiveQuestionHtml(result, question) {
     '<div class="font-black text-lg text-slate-800"><i class="fa-solid fa-wand-magic-sparkles text-indigo-500"></i> הבלש מצא ' + result.solutions.length + ' אפשרויות</div>' +
     '<div class="text-xs text-slate-500 font-bold mt-1 mb-3">תשובה אחת יכולה לצמצם את האפשרויות בלי להקליד את כל התעודה.</div>' +
     questionUi +
-    '<button data-role="rc-goto-barcodes" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">לא בטוח — עבור לברקודים</button>' +
+    '<button data-role="ai-rescan" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">לא בטוח — סרוק את התעודות</button>' +
   '</div>';
 }
 // הבלש המקומי סוגר רק מקרה פשוט ובטוח: מוצר אחד, חוסר טהור או עודף טהור,
@@ -5471,7 +5471,7 @@ function detectiveSolutionsHtml(result, opts) {
     rows +
     (opts.postBarcode
       ? '<button data-role="nc-force-qty" class="btn-tap w-full bg-white border-2 border-slate-200 text-slate-600 rounded-xl py-2.5 font-black text-sm mt-3">אף אחת — המשך להזנת כמויות</button>'
-      : '<button data-role="rc-goto-barcodes" class="btn-tap w-full bg-white border-2 border-slate-200 text-slate-600 rounded-xl py-2.5 font-black text-sm mt-3">אף אחת — בדוק לפי הברקודים</button>') +
+      : '<button data-role="ai-rescan" class="btn-tap w-full bg-white border-2 border-slate-200 text-slate-600 rounded-xl py-2.5 font-black text-sm mt-3">אף אחת — סרוק את התעודות</button>') +
   '</div>';
 }
 function detectiveApplyResolvedResult(result, i, selectPrefix) {
@@ -9194,7 +9194,7 @@ function aiInvoiceCaptureHtml() {
   return '<div class="bg-white rounded-2xl border-2 border-violet-200 p-4 shadow-sm mb-24"><div class="font-black text-xl text-slate-800"><i class="fa-solid fa-camera-retro text-violet-600"></i> סריקה חכמה של התעודות</div><div class="text-xs text-slate-500 font-bold leading-relaxed mt-1 mb-2">הבלש הפשוט לא פתר את הפער. צלם פעם אחת כל עמוד מכל תעודה. התמונות נשלחות לפענוח בלבד ואינן נשמרות באפליקציה.</div><div class="rounded-xl bg-blue-50 border border-blue-200 p-2 text-[11px] font-black text-blue-800 mb-3"><i class="fa-solid fa-expand"></i> כל צילום נפתח בגודל גדול. סובב עד שהכותרת למעלה והכתב ישר, ואז אשר. ללא אישור התמונה לא תישלח.</div>' +
     (aiScanError ? '<div class="rounded-xl bg-rose-50 border border-rose-300 p-2.5 text-xs font-black text-rose-700 mb-3">' + htmlEscape(aiScanError) + '</div>' : '') + docCards +
     '<button data-role="ai-run" ' + (ready ? '' : 'disabled') + ' class="btn-tap w-full rounded-xl py-3.5 font-black ' + (ready ? 'bg-violet-600 text-white' : 'bg-slate-200 text-slate-400') + '"><i class="fa-solid fa-wand-magic-sparkles"></i> פענח את כל התעודות ב-AI</button>' +
-    '<div class="text-[10px] text-slate-400 font-bold text-center mt-2">בדרך כלל מתבצעת קריאת AI אחת. אם הקריאה חסרה או אינה נסגרת מול הסכום והיחידות, המערכת עשויה לנסות עד שתי זוויות נוספות.</div><button data-role="rc-goto-manual" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">המשך בלי AI — בדיקה ידנית</button></div>';
+    '<div class="text-[10px] text-slate-400 font-bold text-center mt-2">בדרך כלל מתבצעת קריאת AI אחת. אם הקריאה חסרה או אינה נסגרת מול הסכום והיחידות, המערכת עשויה לנסות עד שתי זוויות נוספות.</div><button data-role="rc-goto-manual" class="btn-tap w-full bg-white border border-slate-200 text-slate-500 rounded-xl py-2 font-bold text-xs mt-2">או: בדיקה ידנית בלי סריקה</button><button data-role="rc-goto-manual" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">המשך בלי AI — בדיקה ידנית</button></div>';
 }
 function aiAutomaticNamePriceMappingsAudit() {
   const documents = aiScanResponse && aiScanResponse.scan && Array.isArray(aiScanResponse.scan.documents)
@@ -9474,12 +9474,12 @@ function renderReconcile() {
   else if (rcStep === 'choose') {
     // הבלש לא הצליח לזהות — העובד בוחר איך לבדוק
     body = '<div class="bg-white rounded-2xl border-2 border-slate-200 p-4 shadow-sm mb-24">' +
-      '<div class="text-xs font-black text-slate-400 mb-1">שלב 1 מתוך 3 · איך לבדוק?</div>' +
+      '<div class="text-xs font-black text-slate-400 mb-1">איך לבדוק?</div>' +
       '<div class="font-black text-lg text-slate-800 mb-1">הבלש לא הצליח לזהות לבד</div>' +
       '<div class="text-xs text-slate-500 font-bold mb-3 leading-relaxed">לא נמצא פתרון שסוגר יחד את הסכום ואת סך היחידות. ודא שהקלדת את שני הנתונים נכון, או בחר איך למצוא את מקור ההפרש:</div>' +
       detectivePromoCardHtml() +
-      '<button data-role="rc-goto-manual" class="btn-tap w-full bg-indigo-600 text-white rounded-xl py-3.5 font-black mb-2 text-right px-4"><div><i class="fa-solid fa-hand-pointer"></i> בדיקה ידנית</div><div class="text-[11px] font-bold opacity-80 mt-0.5">מצא בנייר את המוצר שחסר / עודף ושייך אותו מרשימה</div></button>' +
-      '<button data-role="rc-goto-barcodes" class="btn-tap w-full bg-white border-2 border-slate-200 text-slate-700 rounded-xl py-3.5 font-black text-right px-4"><div><i class="fa-solid fa-barcode"></i> מילוי ברקודים</div><div class="text-[11px] font-bold text-slate-400 mt-0.5">הזן ספרות אחרונות מכל שורה בנייר — בדיקה מלאה</div></button>' +
+      '<button data-role="ai-rescan" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-3.5 font-black mb-2 text-right px-4"><div><i class="fa-solid fa-camera-retro"></i> סרוק את התעודות</div><div class="text-[11px] font-bold opacity-80 mt-0.5">הבלש החכם קורא את הנייר ומוצא לבד את מקור ההפרש</div></button>' +
+      '<button data-role="rc-goto-manual" class="btn-tap w-full bg-white border-2 border-slate-200 text-slate-700 rounded-xl py-3.5 font-black text-right px-4"><div><i class="fa-solid fa-hand-pointer"></i> בדיקה ידנית בלי סריקה</div><div class="text-[11px] font-bold text-slate-400 mt-0.5">שייך חוסר/עודף בעצמך ותקן מחירים</div></button>' +
     '</div>';
   }
   else if (rcStep === 'manual') {
@@ -9493,7 +9493,7 @@ function renderReconcile() {
         '</div>'
       : '';
     body = '<div class="bg-white rounded-2xl border-2 border-indigo-200 p-4 shadow-sm mb-24">' +
-      '<div class="text-xs font-black text-slate-400 mb-1">שלב 1 מתוך 3 · בדיקה ידנית</div>' +
+      '<div class="text-xs font-black text-slate-400 mb-1">בדיקה ידנית · בלי סריקה</div>' +
       '<div class="font-black text-lg text-slate-800 mb-2">' + (!balanced ? (hasMoneyGap ? dir + ' של ₪' + fmtMoney(absGap) : dir + ' של ' + Math.abs(uG || 0) + ' יח׳') + ' — בדוק לבד מה המקור' : 'התעודה מאוזנת — אפשר לעבור על הפרטים') + '</div>' +
       '<button data-role="manual-toggle-search" class="btn-tap w-full flex items-center justify-between px-3 py-3 rounded-xl border-2 ' + (manualSearchOpen ? 'border-indigo-300 bg-indigo-50' : 'border-slate-200 bg-white') + ' font-black text-sm text-slate-700"><span><i class="fa-solid fa-plus text-indigo-600"></i> חוסר / עודף של מוצר — חפש ושייך</span><i class="fa-solid fa-chevron-' + (manualSearchOpen ? 'up' : 'down') + ' text-slate-400"></i></button>' +
       addSection +
@@ -9501,7 +9501,7 @@ function renderReconcile() {
       '<div class="text-[11px] text-slate-400 font-bold mb-2">טעות מחיר? עדכן בשדה והמחיר מתעדכן גם במאגר. בעיה במבצע שבמחיר השורה? לחץ על הכפתור ובחר: דרישת זיכוי מהספק או תיקון טעות שלנו.</div>' +
       '<div class="space-y-1.5">' + manualScannedRowsHtml() + '</div>' +
       (marksTotal > 0 ? '<div class="mt-2 rounded-xl bg-amber-50 border border-amber-300 p-2.5 text-xs font-black text-amber-800"><i class="fa-solid fa-hand-holding-dollar"></i> דרישת זיכוי מסומנת: ₪' + fmtMoney(marksTotal) + ' — תירשם לתעודה בסיום ותישאר מודגשת עד אימות</div>' : '') +
-      '<button data-role="rc-goto-barcodes" class="btn-tap w-full bg-white border-2 border-slate-200 text-slate-600 rounded-xl py-2.5 font-black text-sm mt-3">בדיקה מלאה לפי הברקודים</button>' +
+      '<button data-role="ai-rescan" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-2.5 font-black text-sm mt-3"><i class="fa-solid fa-camera-retro"></i> סרוק את התעודות</button>' +
     '</div>';
   }
   else if (rcStep === 'barcodes') {
