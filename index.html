@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v211 תצוגת פיקדון</title>
+    <title>הזמנות יטבתה - v212 כל הקבוצה באפשרויות</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v211 תצוגת פיקדון</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v212 כל הקבוצה באפשרויות</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -4994,7 +4994,15 @@ function detectiveMakeSolution(parts, residualCents, stage) {
   const minMoves = [], raw = [];
   parts.forEach(part => {
     const maxForPart = 4 - parts.length;
-    const allocs = detectiveAllocations(part.group, part.delta, maxForPart, stage);
+    let allocs = detectiveAllocations(part.group, part.delta, maxForPart, stage);
+    // v212: בשלב "חוסר של מוצר שלם" קיום הפתרון עדיין מותנה במוצר שלא נסרק
+    // כלל — אבל החלופות בבורר מציגות את כל קבוצת המחיר, כולל שורות שנסרקו:
+    // כספית אי אפשר להבדיל, והיחידה החסרה יכולה להיות כל אחד מבני הקבוצה.
+    // המיון לפי ניקוד משאיר את המוצר שלא נסרק ראשון (+80 מול +30).
+    if (allocs.length && stage === DETECTIVE_SEARCH_PURE_SHORT_COMPLETE && part.delta > 0) {
+      const wide = detectiveAllocations(part.group, part.delta, maxForPart, DETECTIVE_SEARCH_PURE_SHORT);
+      if (wide.length > allocs.length) allocs = wide;
+    }
     raw.push(allocs); minMoves.push(allocs.length ? Math.min(...allocs.map(a => a.moves.length)) : 99);
   });
   const baseMoves = minMoves.reduce((a, n) => a + n, 0);
