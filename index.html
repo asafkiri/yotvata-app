@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v213 ארגז חכם</title>
+    <title>הזמנות יטבתה - v214 מבצע על הסף</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v213 ארגז חכם</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v214 מבצע על הסף</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -4777,7 +4777,7 @@ function detectiveHistoryCounts() {
   (receipts || []).forEach(rc => (rc.items || []).forEach(l => { if (l.productId) out[l.productId] = (out[l.productId] || 0) + 1; }));
   return out;
 }
-function detectiveBuildPriceGroups() {
+function detectiveBuildPriceGroups(priceOverride) {
   const history = detectiveHistoryCounts();
   const inRec = {};
   const byPrice = new Map();
@@ -4797,7 +4797,8 @@ function detectiveBuildPriceGroups() {
     const p = products.find(x => x.id === l.productId);
     // v210: הפיקדון הנגזר עוקב אחרי הכמות הסרוקה, ולכן כל יחידה חסרה/עודפת
     // מזיזה מחיר + פיקדון (12 פחיות = 12 × (4.539 + 0.254) = 57.52, לא 54.47).
-    add({ productId: l.productId, name: l.name || (p && p.name) || '', price: (Number(l.price) || 0) + (Number(p && p.deposit) || 0), inRec: true, ext: false,
+    const linePrice = (priceOverride && priceOverride[l.productId] != null) ? priceOverride[l.productId] : (Number(l.price) || 0);
+    add({ productId: l.productId, name: l.name || (p && p.name) || '', price: linePrice + (Number(p && p.deposit) || 0), inRec: true, ext: false,
       dep: Number(p && p.deposit) || 0,
       noteQty: Number(l.noteQty) || 0, received: Number(l.received) || 0, hidden: !!(p && p.hidden), bs: Math.max(0, parseInt(p && p.boxSize, 10) || 0),
       average: Math.max(0, parseInt(p && p.average, 10) || 0), promoOn: !!l.promoOn, history: history[l.productId] || 0,
@@ -5152,12 +5153,72 @@ function detectiveSolveTier(groups, gap, gapCents, unitGap, toleranceCents, sear
   if (incomplete) return detectiveFinishStage(triples, gap, unitGap, 3, toleranceCents, false, searchStage);
   return triples.length ? detectiveFinishStage(triples, gap, unitGap, 3, toleranceCents, true, searchStage) : null;
 }
+function detectivePromoFlipSolve(gap, unitGap) {
+  const day = todayStr();
+  for (const pr of promos) {
+    if (!pr || pr.type === 'monthEnd' || !promoActive(pr, day)) continue;
+    const ids = pr.productIds || [];
+    if (!ids.length) continue;
+    const basket = basketQty(pr);
+    const need = promoMinUnitsP(pr) - basket;
+    if (!(basket > 0) || !(need >= 1) || need > unitGap) continue;
+    // השורות שנסרקו ממוצרי המבצע — כרגע במחיר מלא; מתמחרים אותן מחדש במבצע
+    const pct = Number(pr.pct) || 0;
+    const override = {}; let repriceDelta = 0; let any = false;
+    (reconcileData || []).forEach(l => {
+      if (l.isDeposit || String(l.productId || '').indexOf('deposit-') === 0) return;
+      if (ids.indexOf(l.productId) === -1) return;
+      const p = products.find(x => x.id === l.productId);
+      const base = r2(Number(p && p.price) || 0);
+      const dp = discountedUnitPrice(base, pct);
+      if (Math.abs((Number(l.price) || 0) - base) > 0.005) return; // כבר במבצע/מחיר אחר — לא נוגעים
+      override[l.productId] = dp;
+      repriceDelta += r2((Number(l.received) || 0) * dp) - r2((Number(l.received) || 0) * (Number(l.price) || 0));
+      any = true;
+    });
+    if (!any) continue;
+    const adjGap = r2(gap - repriceDelta);           // gap = נייר − נסרק; הנסרק יורד → הפער עולה
+    if (!(adjGap > 0)) continue;
+    const adjGapCents = Math.round(adjGap * 10000);
+    const hGroups = detectiveBuildPriceGroups(override);
+    if (!hGroups.length) continue;
+    let result = null;
+    outer:
+    // סולם ייעודי: תמחור-מחדש של שורה מכניס עוד עיגול-r2, ולכן התקרה 1.5
+    // אגורות (150 מאיות) — שלב שאינו קיים בסולם הרגיל.
+    for (const tol of [0, 50, 150]) {
+      for (const st of detectivePreferredStages(adjGapCents, unitGap)) {
+        const r = detectiveSolveTier(hGroups, adjGap, adjGapCents, unitGap, tol, st, true);
+        if (r) { result = r; break outer; }
+      }
+    }
+    if (!result || !result.solutions.length) continue;
+    // אימות: הפתרון באמת משלים את המינימום ממוצרי המבצע הזה
+    const moved = result.solutions[0].components.reduce((a, c) =>
+      a + c.allocations[0].moves.reduce((b, m) => b + (ids.indexOf(m.productId) !== -1 && m.delta > 0 ? m.delta : 0), 0), 0);
+    if (moved < need) continue;
+    result.promoFlip = { promoId: pr.id, promoName: pr.name || '', pct: pct };
+    return result;
+  }
+  return null;
+}
 function detectiveSolutions() {
   const gap = reconcileGap(), gapCents = Math.round(gap * 10000), unitGap = reconcileUnitsGap();
   if (reconcileIsBalanced()) return null;
   if (!detectiveScope) detectiveEnsureQuestionState();
   const groups = detectiveBuildPriceGroups();
   if (!groups.length) return null;
+  // v214: מבצע על הסף. כשמבצע פעיל-לתאריך לא מופעל רק כי הסל חסר את
+  // היחידות האבודות עצמן (הנייר תמחר אותו!), שורות שנסרקו מתייקרות למחיר
+  // מלא — וחוסר של יחידה מתחפש לעודף כסף (10-1 כוסות: חסר 1, "עודף" 4.38).
+  // המודל הלינארי לא מסוגל לייצג יחידה במחיר שלילי, ולכן בודקים השערה:
+  // אילו היחידות החסרות היו משלימות את המינימום, השורות היו במחיר מבצע —
+  // מתקנים את הפער בהתאם ומריצים את המנוע הרגיל. פתרון מתקבל רק אם הוא
+  // אכן מזיז מספיק יחידות ממוצרי אותו מבצע.
+  if (!detectiveScope && unitGap != null && unitGap > 0) {
+    const flip = detectivePromoFlipSolve(gap, unitGap);
+    if (flip) return flip;
+  }
   // תעודות ישנות ללא עוגן יחידות: שומרים את התנהגות המוצר הבודד, בלי לנחש צירופים.
   if (unitGap == null) {
     const found = [];
@@ -5324,7 +5385,9 @@ function detectiveQuestionHtml(result, question) {
 // אי-ודאות אמיתית. v207: השער דרש בדיוק 0 בזמן שהסולם כבר התחיל ב-50,
 // כך שכל פתרון — גם עם שארית אפס — נפסל ונשלח לסריקת AI בתשלום.
 function detectiveIsSimpleSafeResult(result) {
-  if (!result || !result.complete || result.overflow || result.level !== 1 || result.toleranceCents > 50) return false;
+  // v214: תוצאת "מבצע על הסף" עברה תמחור-מחדש של שורות — תקציב עיגול גדול יותר.
+  const tolCap = (result && result.promoFlip) ? 150 : 50;
+  if (!result || !result.complete || result.overflow || result.level !== 1 || result.toleranceCents > tolCap) return false;
   if (!Array.isArray(result.solutions) || !result.solutions.length || result.solutions.length > 4) return false;
   if ([DETECTIVE_SEARCH_PURE_SHORT_COMPLETE, DETECTIVE_SEARCH_PURE_SHORT, DETECTIVE_SEARCH_PURE_SURPLUS].indexOf(result.searchStage) === -1) return false;
   // v209: בקבוצת מחיר עם כמה טעמים בלי ארגז (אקטימל), לצד ההצעות הנקיות
@@ -5355,6 +5418,10 @@ function postBarcodeSolutions() {
 }
 // v211: המחיר בקבוצה כולל פיקדון (כך הכסף נסגר), אבל לעובד מציגים אותו
 // מפורק: "₪4.54 + פיקדון" במקום ₪4.79 — רק כשכל המהלכים חולקים אותו פיקדון.
+function detectivePromoFlipNoteHtml(result) {
+  if (!result || !result.promoFlip) return '';
+  return '<div class="bg-amber-50 border border-amber-200 rounded-xl p-2.5 mb-2 text-[11px] font-black text-amber-800"><i class="fa-solid fa-percent"></i> היחידה החסרה משלימה את מינימום "' + htmlEscape(result.promoFlip.promoName) + '" — ולכן המבצע חוזר לפעול על כל השורה. זה למה הפער הוצג כעודף.</div>';
+}
 function detectiveComponentPriceLabel(c) {
   const deps = [];
   (c.allocations || []).forEach(a => (a.moves || []).forEach(m => deps.push(Number(m.dep) || 0)));
@@ -5363,7 +5430,7 @@ function detectiveComponentPriceLabel(c) {
   return '₪' + fmtMoney(c.price);
 }
 function detectiveSolutionsHtml(result, opts) {
-  if (!result || result.overflow || !result.solutions.length) return '';
+  if (!result || result.overflow || !result.solutions.length) return detectivePromoFlipNoteHtml(result) + '';
   opts = opts || {};
   const selectPrefix = opts.postBarcode ? 'postDetOpt_' : 'detOpt_';
   const buttonRole = opts.postBarcode ? 'post-detective-solution' : 'detective-solution';
