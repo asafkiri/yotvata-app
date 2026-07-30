@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v219 מסך דולק</title>
+    <title>הזמנות יטבתה - v220 קיזוז בסיכום</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v219 מסך דולק</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v220 קיזוז בסיכום</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -11191,7 +11191,15 @@ function receiptRangeData(from, to) {
   // השלמה או לקיזוז. הגנה מניכוי כפול: כשהזיכוי מגיע ומסומן קיזוז מול
   // התעודה, ההפרש נסגר ויוצא מ-openShortEx באותו רגע שהזיכוי עצמו נכנס
   // לשורת החזרות — ניכוי אחד בלבד, תמיד.
-  const netBeforeSupplierCredits = r2(recEx - retEx - meEx - openShortEx);
+  // v220 קיזוז בסיכום (הכרעת המשתמש 30.7): ברמת הפריטים חוסר ועודף נשארים
+  // פתוחים כל אחד בנפרד — כך קיזוז מול תעודות עתידיות ממשיך לעבוד. אבל
+  // בשורת הכסף של הדוח הם מתקזזים תמיד ("זה לא שאלה בכלל"): אין היגיון
+  // לנכות חוסר מהתשלום כשבמקביל מוחזקת סחורה עודפת שלא שולמה. הניכוי
+  // בפועל = החוסר שמעבר לעודף; עודף נטו לעולם אינו מוסיף לתשלום (v158).
+  const shortOffsetByOverEx = r2(Math.min(openShortEx, openOverEx));
+  const openShortNetEx = r2(Math.max(0, openShortEx - openOverEx));
+  const openOverNetEx = r2(Math.max(0, openOverEx - openShortEx));
+  const netBeforeSupplierCredits = r2(recEx - retEx - meEx - openShortNetEx);
   // זיכויי מבצע שמגיעים לנו כן נכנסים לחישוב התשלום לפי המערכת,
   // אבל אם הם עדיין פתוחים/נדחו — הם מודגשים כחובה לבדיקה מול מרכזת הספק.
   const netEx = r2(netBeforeSupplierCredits - verifiedSupplierCreditEx - pendingSupplierCreditEx);
@@ -11204,7 +11212,7 @@ function receiptRangeData(from, to) {
   const netSafeEx = r2(netBeforeSupplierCredits - verifiedSupplierCreditEx);
   const netSafeVat = r2(netSafeEx * VAT);
   const netSafeInc = r2(netSafeEx + netSafeVat);
-  return { from, to, fromT, toT, recs, rets, recEx, recInc, retEx, retInc, meMap, meList: Object.values(meMap), meEx, openCnt, openShortEx, openOverEx, openSupplierCredits, openSupplierCreditEx, deferredDueCredits, deferredSupplierCreditEx, pendingSupplierCreditEx, pendingSupplierCreditInc, verifiedSupplierCredits, verifiedSupplierCreditEx, verifiedSupplierCreditInc, netBeforeSupplierCredits, netSafeEx, netSafeVat, netSafeInc, netEx, vatAmount, netInc };
+  return { from, to, fromT, toT, recs, rets, recEx, recInc, retEx, retInc, meMap, meList: Object.values(meMap), meEx, openCnt, shortOffsetByOverEx, openShortNetEx, openOverNetEx, openShortEx, openOverEx, openSupplierCredits, openSupplierCreditEx, deferredDueCredits, deferredSupplierCreditEx, pendingSupplierCreditEx, pendingSupplierCreditInc, verifiedSupplierCredits, verifiedSupplierCreditEx, verifiedSupplierCreditInc, netBeforeSupplierCredits, netSafeEx, netSafeVat, netSafeInc, netEx, vatAmount, netInc };
 }
 function moneyRow(label, amount, cls, prefix) {
   prefix = prefix || '';
@@ -11244,7 +11252,8 @@ function supplierCalculationStepsHtml(d) {
     '<div class="text-[11px] text-slate-500 font-bold mb-2">הפירוט הפנימי כאן ללא מע״מ. הסכום לתשלום הסופי מוצג גם כולל מע״מ.</div>' +
     moneyRow('קליטות / תעודות ספק', d.recEx, 'text-slate-800', '') +
     moneyRow('פחות חזרות / זיכויים רגילים', d.retEx, 'text-emerald-700', '− ') +
-    (d.openShortEx > 0 ? moneyRow('פחות חוסרים פתוחים — סחורה שלא הגיעה', d.openShortEx, 'text-rose-700', '− ') : '') +
+    (d.openShortNetEx > 0 ? moneyRow('פחות חוסרים פתוחים — מעבר לעודפים', d.openShortNetEx, 'text-rose-700', '− ') : '') +
+    (d.shortOffsetByOverEx > 0 ? '<div class="text-[11px] text-emerald-700 font-bold pr-1">· קיזוז בסיכום: חוסרים ₪' + fmtMoney(d.shortOffsetByOverEx) + ' התקזזו מול עודפים שבידינו — לא נוכו מהתשלום</div>' : '') +
     (d.meEx > 0
       ? moneyRow('פחות הנחות מרכזת סוף חודש (צפי)', d.meEx, 'text-rose-700', '− ') +
         d.meList.map(s => '<div class="flex items-center justify-between text-[11px] text-rose-600/80 font-bold pr-3"><span>· ' + s.name + ' ' + s.pct + '%</span><span>− ₪' + fmtMoney(r2(s.ex)) + '</span></div>').join('')
@@ -11320,7 +11329,11 @@ function calcReceiptRange() {
     supplierPaymentModeCardsHtml(d) +
     supplierCalculationStepsHtml(d) +
     (d.meEx > 0 ? '<div class="text-[11px] text-rose-700/80 font-bold mt-2 bg-rose-50 rounded-lg p-2"><i class="fa-solid fa-triangle-exclamation"></i> הנחות מרכזת הן צפי — ודא שהספק זיכה אותן בחשבון החודשי</div>' : '') +
-    (d.openCnt ? '<div class="text-[11px] text-rose-700/80 font-bold mt-2 bg-rose-50 rounded-lg p-2"><i class="fa-solid fa-clipboard-question"></i> ' + d.openCnt + ' תעודות עם הפרש פתוח' + (d.openShortEx > 0 ? '<br>· חוסר ₪' + fmtMoney(d.openShortEx) + ' — <b>נוכה מהתשלום</b>. כשיגיע זיכוי רשמי, סמן קיזוז מול התעודה כדי שלא ינוכה פעמיים' : '') + (d.openOverEx > 0 ? '<br>· עודף ₪' + fmtMoney(d.openOverEx) + ' — חוב שלנו לספק; לא נוסף לתשלום, ממתין לתעודת השלמה או קיזוז' : '') + '</div>' : '') +
+    (d.openCnt ? '<div class="text-[11px] text-rose-700/80 font-bold mt-2 bg-rose-50 rounded-lg p-2"><i class="fa-solid fa-clipboard-question"></i> ' + d.openCnt + ' תעודות עם הפרש פתוח' +
+      (d.shortOffsetByOverEx > 0 ? '<br>· חוסרים ₪' + fmtMoney(d.shortOffsetByOverEx) + ' התקזזו בסיכום מול עודפים שבידינו — לא נוכו' : '') +
+      (d.openShortNetEx > 0 ? '<br>· חוסר נטו ₪' + fmtMoney(d.openShortNetEx) + ' — <b>נוכה מהתשלום</b>. כשיגיע זיכוי רשמי, סמן קיזוז מול התעודה כדי שלא ינוכה פעמיים' : '') +
+      (d.openOverNetEx > 0 ? '<br>· עודף נטו ₪' + fmtMoney(d.openOverNetEx) + ' — סחורה שקיבלנו מעבר לחיוב; לא נוסף לתשלום, ממתין לתעודת השלמה או קיזוז' : '') +
+      '</div>' : '') +
     supplierStatementVerifyHtml(d);
   out.classList.remove('hidden');
 }
