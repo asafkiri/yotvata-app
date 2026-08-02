@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v224 סיכום נקי</title>
+    <title>הזמנות יטבתה - v225 קיזוז לפי מחיר</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v224 סיכום נקי</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v225 קיזוז לפי מחיר</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -10902,19 +10902,45 @@ function receiptOffsets(rc) {
   (di.overItems || []).forEach(l => out.push({ productId: l.productId, name: l.name, d: -(Number(l.n) || 0), price: Number(l.price) || 0 }));
   return out;
 }
-function findOffsetMatch(rc, preferredOtherId, preferredProductId) {
+function findOffsetMatch(rc, preferredOtherId, preferredProductId, preferredOtherProductId) {
   if (!rc) return null;
   const mine = receiptOffsets(rc);
   if (!mine.length) return null;
-  // מחפשים תעודה פתוחה אחרת שבה אותו מוצר בכמות הפוכה מדויקת
+  // מעבר 1: אותו מוצר בדיוק, בכמות הפוכה מדויקת (ההתאמה החזקה ביותר)
   for (const other of receipts) {
     if (other.id === rc.id || (preferredOtherId && other.id !== preferredOtherId)) continue;
     const theirs = receiptOffsets(other);
     for (const a of mine) {
       if (preferredProductId && a.productId !== preferredProductId) continue;
       for (const b of theirs) {
+        if (preferredOtherProductId && b.productId !== preferredOtherProductId) continue;
         if (a.productId === b.productId && a.d === -b.d && a.d !== 0) {
-          return { other: other, productId: a.productId, name: a.name, qty: Math.abs(a.d),
+          return { other: other, productId: a.productId, name: a.name,
+                   otherProductId: b.productId, otherName: b.name, byPrice: false,
+                   price: Number(a.price) || 0, qty: Math.abs(a.d),
+                   myDir: a.d > 0 ? 'short' : 'over' };
+        }
+      }
+    }
+  }
+  // v225 מעבר 2: קבוצת מחיר — אותו מחיר יחידה בדיוק, אותה כמות, מוצרים שונים.
+  // אותו עיקרון כמו הקיזוז הפנימי בתוך תעודה וכמו קבוצות המחיר של הבלש:
+  // כשהמחיר זהה, הכסף לא מבחין בין בני הקבוצה. בלי זה, הקיזוז הפנימי שבוחר
+  // שרירותית אילו בני-4.86 לצרוך משאיר בתעודות שמות שונים (ללא-סוכר מול
+  // וניל) והראי בין החודשים לא נסגר לעולם.
+  for (const other of receipts) {
+    if (other.id === rc.id || (preferredOtherId && other.id !== preferredOtherId)) continue;
+    const theirs = receiptOffsets(other);
+    for (const a of mine) {
+      if (preferredProductId && a.productId !== preferredProductId) continue;
+      const aCents = Math.round((Number(a.price) || 0) * 100);
+      if (aCents <= 0) continue;
+      for (const b of theirs) {
+        if (preferredOtherProductId && b.productId !== preferredOtherProductId) continue;
+        if (Math.round((Number(b.price) || 0) * 100) === aCents && a.d === -b.d && a.d !== 0) {
+          return { other: other, productId: a.productId, name: a.name,
+                   otherProductId: b.productId, otherName: b.name, byPrice: true,
+                   price: Number(a.price) || 0, qty: Math.abs(a.d),
                    myDir: a.d > 0 ? 'short' : 'over' };
         }
       }
@@ -10922,8 +10948,11 @@ function findOffsetMatch(rc, preferredOtherId, preferredProductId) {
   }
   return null;
 }
-function crossOffsetId(aId, bId, productId) {
-  return 'xo2|' + [aId, bId].sort().join('|') + '|' + productId;
+function crossOffsetId(aId, bId, productId, otherProductId) {
+  const pids = otherProductId && otherProductId !== productId
+    ? [productId, otherProductId].sort().join('~')
+    : productId;
+  return 'xo2|' + [aId, bId].sort().join('|') + '|' + pids;
 }
 function exactLegacyOffsetMatches(a, b) {
   const ad = receiptDiscrepancyInfo(a, { skipExternal: true });
@@ -11012,16 +11041,17 @@ async function confirmShortCredit() {
   showToast(after.shortFullyCredited ? 'החוסר נסגר בזיכוי מהספק ✓' : 'נרשם זיכוי ₪' + fmtMoney(amount) + ' — נותר חוב ₪' + fmtMoney(Math.max(0, r2(after.shortValRaw - after.shortCreditEx))), null, null, 3200);
   if (currentView === 'receiptsHistory') renderReceiptsHistory();
 }
-async function applyOffset(rcId, otherId, productId) {
+async function applyOffset(rcId, otherId, productId, otherProductId) {
   const rc = receipts.find(x => x.id === rcId);
   const other = receipts.find(x => x.id === otherId);
   if (!rc || !other) return;
-  const m = findOffsetMatch(rc, otherId, productId);
+  const m = findOffsetMatch(rc, otherId, productId, otherProductId);
   if (!m || m.other.id !== otherId) { showToast('הקיזוז כבר אינו תואם — רענן ובדוק שוב', null, null, 2800); return; }
   const stamp = Date.now();
-  const oid = crossOffsetId(rcId, otherId, m.productId);
+  // v225: בקיזוז קבוצת-מחיר כל צד נצרך לפי המוצר שלו — המזהה משותף לשני הצדדים
+  const oid = crossOffsetId(rcId, otherId, m.productId, m.otherProductId);
   const mine = { id: oid, otherId, productId: m.productId, name: m.name, qty: m.qty, dir: m.myDir, at: stamp, source: 'manual' };
-  const theirs = { id: oid, otherId: rcId, productId: m.productId, name: m.name, qty: m.qty, dir: m.myDir === 'short' ? 'over' : 'short', at: stamp, source: 'manual' };
+  const theirs = { id: oid, otherId: rcId, productId: m.otherProductId || m.productId, name: m.otherName || m.name, qty: m.qty, dir: m.myDir === 'short' ? 'over' : 'short', at: stamp, source: 'manual' };
   const rcOffsets = mergeReceiptExternalOffsets(rc.externalOffsets, [mine]);
   const otherOffsets = mergeReceiptExternalOffsets(other.externalOffsets, [theirs]);
   if (db) {
@@ -11160,8 +11190,10 @@ function renderReceiptsHistory() {
         (legacyRecovering ? '' : (function () { const m = findOffsetMatch(rc); if (!m) return ''; const od = new Date(m.other.timestamp).toLocaleDateString('he-IL');
             return '<div class="mt-2 bg-indigo-50 border-2 border-indigo-200 rounded-xl p-3">' +
               '<div class="text-xs font-black text-indigo-900 mb-1.5"><i class="fa-solid fa-lightbulb"></i> קיזוז מזוהה</div>' +
-              '<div class="text-xs font-bold text-slate-700 mb-2">' + m.qty + ' × ' + m.name + ' ' + (m.myDir === 'over' ? 'שקיבלת בעודף' : 'שחסרו') + ' כאן מתקזזים בדיוק מול תעודת ' + od + '</div>' +
-              '<button data-role="rc-offset" data-id="' + rc.id + '" data-other="' + m.other.id + '" data-product="' + m.productId + '" class="btn-tap w-full bg-indigo-600 text-white rounded-xl py-2 font-black text-sm"><i class="fa-solid fa-check"></i> אשר קיזוז לפריט הזה</button>' +
+              (m.byPrice
+                ? '<div class="text-xs font-bold text-slate-700 mb-2">' + m.qty + ' × ' + m.name + ' ' + (m.myDir === 'over' ? 'שבעודף' : 'שחסרו') + ' כאן מתקזזים מול ' + m.qty + ' × ' + m.otherName + ' בתעודת ' + od + ' — אותו מחיר ₪' + fmtMoney(m.price) + ' (החלפת וריאנט)</div>'
+                : '<div class="text-xs font-bold text-slate-700 mb-2">' + m.qty + ' × ' + m.name + ' ' + (m.myDir === 'over' ? 'שקיבלת בעודף' : 'שחסרו') + ' כאן מתקזזים בדיוק מול תעודת ' + od + '</div>') +
+              '<button data-role="rc-offset" data-id="' + rc.id + '" data-other="' + m.other.id + '" data-product="' + m.productId + '" data-other-product="' + (m.otherProductId || m.productId) + '" class="btn-tap w-full bg-indigo-600 text-white rounded-xl py-2 font-black text-sm"><i class="fa-solid fa-check"></i> אשר קיזוז לפריט הזה</button>' +
             '</div>'; })()) +
         (legacyRecovering ? '<button disabled class="mt-2 w-full font-black py-2.5 rounded-xl text-sm bg-slate-100 text-slate-400"><i class="fa-solid fa-spinner fa-spin"></i> ממתין לשחזור הקיזוז</button>' : '<button data-role="rc-fix-open" data-id="' + rc.id + '" class="btn-tap mt-2 w-full font-black py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 ' + (effectiveOpen ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700') + '"><i class="fa-solid ' + (effectiveOpen ? 'fa-wrench' : 'fa-pen') + '"></i> ' + (effectiveOpen ? 'תקן הפרשים' : 'ערוך תעודה') + '</button>') +
         '<button data-role="del-receipt" data-id="' + rc.id + '" class="btn-tap mt-2 w-full bg-red-50 text-red-600 font-bold py-2 rounded-xl text-sm flex items-center justify-center gap-2"><i class="fa-solid fa-trash-can"></i> מחק תעודה</button>' +
@@ -13363,7 +13395,7 @@ app.addEventListener('click', (e) => {
   else if (role === 'rc-recon-cancel') { resetAiInvoiceScan(); reconcileData = null; setView('receiving'); }
   else if (role === 'rc-recon-save') saveReconciledReceipt();
   else if (role === 'rc-fix-open') openReceiptFix(id);
-  else if (role === 'rc-offset') { const otherId = t.dataset.other, productId = t.dataset.product; const rc = receipts.find(x => x.id === id); const other = receipts.find(x => x.id === otherId); const m = rc ? findOffsetMatch(rc, otherId, productId) : null; if (m && other) showConfirm('אישור קיזוז לפריט', m.qty + ' × ' + m.name + ' מתקזזים מול תעודת ' + new Date(other.timestamp).toLocaleDateString('he-IL') + '. הקיזוז יחול רק על הפריט הזה; כל חוסר או עודף אחר יישאר פתוח לטיפול.', 'אשר קיזוז לפריט', () => applyOffset(id, otherId, productId)); }
+  else if (role === 'rc-offset') { const otherId = t.dataset.other, productId = t.dataset.product, otherProductId = t.dataset.otherProduct || productId; const rc = receipts.find(x => x.id === id); const other = receipts.find(x => x.id === otherId); const m = rc ? findOffsetMatch(rc, otherId, productId, otherProductId) : null; if (m && other) showConfirm('אישור קיזוז לפריט', (m.byPrice ? m.qty + ' × ' + m.name + ' מתקזזים מול ' + m.qty + ' × ' + m.otherName + ' (אותו מחיר ₪' + fmtMoney(m.price) + ') בתעודת ' : m.qty + ' × ' + m.name + ' מתקזזים מול תעודת ') + new Date(other.timestamp).toLocaleDateString('he-IL') + '. הקיזוז יחול רק על הפריט הזה; כל חוסר או עודף אחר יישאר פתוח לטיפול.', 'אשר קיזוז לפריט', () => applyOffset(id, otherId, productId, otherProductId)); }
   else if (role === 'rc-credit-verify') setReceiptSupplierCreditStatus(id, 'verified');
   else if (role === 'rc-credit-defer') showConfirm('העברת זיכוי לחודש הבא', 'הספק אמר שהזיכוי לא יופיע החודש אלא בחודש הבא? הדרישה לא תיעלם — היא תופיע באימות מרכזת של חודש היעד.', 'העבר לחודש הבא', () => setReceiptSupplierCreditStatus(id, 'deferred'));
   else if (role === 'rc-credit-cancel') setReceiptSupplierCreditStatus(id, 'cancelled');
