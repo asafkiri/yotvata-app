@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v222 שלט מתכווץ</title>
+    <title>הזמנות יטבתה - v223 מאזן בתעודה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v222 שלט מתכווץ</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v223 מאזן בתעודה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -11133,7 +11133,26 @@ function renderReceiptsHistory() {
             '<div class="mt-1 pt-1 border-t ' + (di.shortFullyCredited ? 'border-emerald-200 text-emerald-700/80' : 'border-amber-200 text-amber-700/80') + '">החוסר המקורי (₪' + fmtMoney(di.shortValRaw) + ') נשמר למעלה בהיסטוריה; הוא נסגר בכסף, לא בהשלמת סחורה, ולא יקוזז מול תעודה עתידית.</div>' +
           '</div>';
         })() : '') +
-        ((di.shortItems || []).length && !di.shortFullyCredited ? '<button data-role="rc-short-credit" data-id="' + rc.id + '" class="btn-tap mt-2 w-full bg-white border-2 border-emerald-300 text-emerald-700 rounded-xl py-2.5 font-black text-sm"><i class="fa-solid fa-file-invoice-dollar"></i> התקבל זיכוי מהספק' + ((di.shortCreditEx || 0) > 0 ? ' (נותר ₪' + fmtMoney(Math.max(0, r2(di.shortValRaw - di.shortCreditEx))) + ')' : ' (₪' + fmtMoney(Math.max(0, r2(di.shortValRaw - di.shortCreditEx))) + ')') + '</button>' : '') +
+        // v223 מאזן בתעודה: כשעודף פתוח מכסה את החוסר, המאזן לטובת הספק —
+        // מציגים את השורה התחתונה נטו, וכפתור הזיכוי הופך לקישור צנוע עם
+        // אזהרה (לא מבקשים זיכוי כשמחזיקים סחורה עודפת ששווה יותר). הפריטים
+        // עצמם נשארים פתוחים בנפרד, לפי הכלל: הקיזוז האמיתי — בין תעודות.
+        (() => {
+          const openShortNow = Math.max(0, r2((Number(di.shortValRaw) || 0) - (Number(di.shortCreditEx) || 0)));
+          const openOverNow = Math.max(0, r2(Number(di.overVal) || 0));
+          if (!(di.shortItems || []).length || di.shortFullyCredited) return '';
+          const netForSupplier = r2(openOverNow - openShortNow);
+          const balanceLine = openOverNow > 0
+            ? '<div class="mt-2 bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs font-black text-slate-700"><i class="fa-solid fa-scale-balanced"></i> מאזן התעודה: חוסר ₪' + fmtMoney(openShortNow) + ' מול עודף ₪' + fmtMoney(openOverNow) + ' — ' +
+              (netForSupplier > 0 ? 'נטו <b>₪' + fmtMoney(netForSupplier) + ' לטובת הספק</b> (סחורה שקיבלנו מעבר לחיוב)' :
+               netForSupplier < 0 ? 'נטו <b>₪' + fmtMoney(-netForSupplier) + ' לטובתנו</b>' : 'מאוזן') + '</div>'
+            : '';
+          const creditLabel = 'התקבל זיכוי מהספק' + ((di.shortCreditEx || 0) > 0 ? ' (נותר ₪' + fmtMoney(openShortNow) + ')' : ' (₪' + fmtMoney(openShortNow) + ')');
+          const creditBtn = netForSupplier >= 0 && openOverNow > 0
+            ? '<button data-role="rc-short-credit" data-id="' + rc.id + '" class="btn-tap mt-1.5 w-full bg-white border border-slate-200 text-slate-500 rounded-xl py-2 font-bold text-xs">' + creditLabel + ' — רק אם הספק שלח זיכוי מיוזמתו; המאזן כבר לטובתו</button>'
+            : '<button data-role="rc-short-credit" data-id="' + rc.id + '" class="btn-tap mt-2 w-full bg-white border-2 border-emerald-300 text-emerald-700 rounded-xl py-2.5 font-black text-sm"><i class="fa-solid fa-file-invoice-dollar"></i> ' + creditLabel + '</button>';
+          return balanceLine + creditBtn;
+        })() +
         supplierCreditClaimCardHtml(rc) +
         (((rc.supplierPromoMismatchItems || []).length) ? '<div class="mt-2 bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-xs text-amber-800"><div class="font-black mb-1"><i class="fa-solid fa-triangle-exclamation"></i> מבצע מוגדר במערכת אך לא הופיע אצל הספק</div><div class="font-bold">' + (rc.supplierPromoMismatchItems || []).map(x => x.name).join(' · ') + '</div></div>' : '') +
         ((di.externalOffsets || []).length ? '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800"><div class="font-black mb-1"><i class="fa-solid fa-scale-balanced"></i> קיזוזים שאושרו מול תעודה אחרת</div>' + (di.externalOffsets || []).map(o => '<div class="font-bold">' + (Number(o.qty) || 0) + ' × ' + (o.name || '') + ' — קוזז</div>').join('') + (effectiveOpen ? '<div class="mt-1 pt-1 border-t border-emerald-200 text-rose-700 font-black"><i class="fa-solid fa-triangle-exclamation"></i> נשארו הפרשים נוספים — התעודה עדיין פתוחה</div>' : '<div class="mt-1 font-black">כל ההפרשים בתעודה הזאת טופלו ✓</div>') + '</div>' : '') +
