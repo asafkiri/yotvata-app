@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v221 עוגן לסריקה</title>
+    <title>הזמנות יטבתה - v222 שלט מתכווץ</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v221 עוגן לסריקה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v222 שלט מתכווץ</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -12371,7 +12371,21 @@ function renderSignPreview() {
   drawSignCanvas();
 }
 function signWrapText(ctx, text, maxW) {
-  const words = (text || '').split(/\s+/).filter(Boolean);
+  // v222: "מילה" ארוכה מרוחב השלט (למשל כותרת עם סוגריים ופסיקים בלי רווחים —
+  // אחלה(חריף,צנובר,טחינה,זעתר)) נשברת לפי תווים. בלי זה השורה נמרחת מעבר
+  // למסגרת ונחתכת משני הצדדים בפריסות הגדולות.
+  const rawWords = (text || '').split(/\s+/).filter(Boolean);
+  const words = [];
+  rawWords.forEach(w => {
+    if (ctx.measureText(w).width <= maxW) { words.push(w); return; }
+    let chunk = '';
+    for (const ch of w) {
+      const t = chunk + ch;
+      if (ctx.measureText(t).width <= maxW || !chunk) chunk = t;
+      else { words.push(chunk); chunk = ch; }
+    }
+    if (chunk) words.push(chunk);
+  });
   const lines = []; let cur = '';
   words.forEach(w => {
     const t = cur ? cur + ' ' + w : w;
@@ -12446,7 +12460,10 @@ function drawSignCanvas() {
       for (;;) {
         ctx.font = '900 ' + m.title + 'px Heebo, Arial';
         tl = signWrapText(ctx, s.title || '', widthAvail);
-        if (tl.length <= 3 || m.title <= 26) break;
+        // v222: תנאי ההתאמה בודק גם רוחב, לא רק מספר שורות — בפריסות
+        // הגדולות הפונט מתחיל ענק והשורות חרגו מהמסגרת בלי שאיש הקטין
+        const widest = tl.reduce((a, ln) => Math.max(a, ctx.measureText(ln).width), 0);
+        if ((tl.length <= 3 && widest <= widthAvail) || m.title <= 26) break;
         m.title = Math.max(26, Math.round(m.title * 0.88));
         m.titleLH = Math.round(m.title * 1.07);
       }
