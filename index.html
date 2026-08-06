@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v227 קיזוז באישור</title>
+    <title>הזמנות יטבתה - v229 פיקדון בהתקדמות</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v227 קיזוז באישור</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v229 פיקדון בהתקדמות</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -4442,10 +4442,9 @@ function setReceiptQty(productId, val) {
   let q = parseInt((val || '').toString().replace(/[^0-9]/g, ''), 10);
   if (!(q > 0)) { return; }
   it.qty = q;
-  saveReceiptDraft(); updateCart(); refreshReceiptTotals();
-  const lt = app.querySelector('[data-linetotal="' + productId + '"]');
-  const p = products.find(x => x.id === productId);
-  if (lt && p) lt.textContent = '₪' + fmtMoney(effectiveLineTotal(p, q));
+  // v229: רינדור מלא מעדכן יחד את שורת המוצר, שורות הפיקדון, הסכום
+  // בכרטיס ההתקדמות והסכום התחתון. היחידות נשארות יחידות מוצר בלבד.
+  saveReceiptDraft(); updateCart(); refreshReceipt();
 }
 function removeReceiptLine(productId) {
   const idx = receiptList.findIndex(x => x.productId === productId); if (idx < 0) return;
@@ -7837,9 +7836,14 @@ function aiFindingsClosure(evaluation, findings) {
   });
   const unitsOk = expectedUnitsDelta != null && Math.abs(actualUnitsDelta - expectedUnitsDelta) < 0.001;
 
-  const receivedAmount = reconcileReceivedInc();
+  // v228: אם מסך הבדיקה נפתח בלי שורות הפיקדון הנגזרות, אין להפוך את
+  // הפיקדון שכבר מחושב בקליטה לפער מוצר. מוסיפים אותו כאן רק כשאין אף
+  // שורת פיקדון קיימת, כדי שלא לספור אותו פעמיים.
+  const hasReceivedDepositRows = receivedRows.some(line => line && (line.isDeposit || String(line.productId || '').indexOf('deposit-') === 0));
+  const derivedDepositFallback = hasReceivedDepositRows ? 0 : r2(receivingDepositLines().reduce((sum, dep) => sum + (Number(dep.total) || 0), 0));
+  const receivedAmount = r2(reconcileReceivedInc() + derivedDepositFallback);
   const expectedAmountDelta = r2((Number(receiptNoteTotal) || 0) - receivedAmount);
-  let adjustedAmount = 0;
+  let adjustedAmount = derivedDepositFallback;
   const seen = new Set();
   receivedRows.forEach(line => {
     const id = String(line && line.productId != null ? line.productId : '');
@@ -8461,6 +8465,14 @@ async function aiScanSingleDocPipeline(token, docIndex) {
 }
 async function aiRunInvoiceScan() {
   if (aiScanBusy) return;
+  // v228: תעודה שכבר נסגרת בסכום וביחידות אינה צריכה להישלח ל-AI.
+  // הפיקדון הוא כסף בלבד וכבר משתתף ב-reconcileMoneyBalanced().
+  if (reconcileIsBalanced()) {
+    rcStep = 'balanced';
+    showToast('הסכום והיחידות כבר תואמים — אין צורך בסריקת AI', null, null, 3200);
+    renderReconcile();
+    return;
+  }
   if (aiScanDocuments.length > 4) { showToast('ניתן לפענח עד 4 תעודות בפעולה אחת', null, null, 3200); return; }
   if (aiTotalPages() > 8) { showToast('ניתן לפענח עד 8 עמודים בפעולה אחת', null, null, 3200); return; }
   if (!aiScanDocuments.length || aiScanDocuments.some(d => !d.pages.length)) { showToast('צלם לפחות עמוד אחד מכל תעודה', null, null, 3000); return; }
@@ -9374,9 +9386,15 @@ function aiApplyInvoiceResult() {
     creditClaim: reconcileSupplierCreditClaim ? cloneSafe(reconcileSupplierCreditClaim) : null,
     audit: reconcileAiAudit ? cloneSafe(reconcileAiAudit) : null
   };
-  // v166: שורות פיקדון קודמות מוסרות — ייבנו מחדש מהפענוח הנוכחי.
-  reconcileData = (reconcileData || []).filter(l => !l.isDeposit && String(l.productId || '').indexOf('deposit-') !== 0);
-  reconcileData.forEach(l => { l.noteQty = 0; l.aiPaperPriceOnly = false; });
+  // v228: מחליפים את הפיקדונות רק אם ה-AI באמת קרא שורות פיקדון מהנייר.
+  // אם לא זוהתה אף שורה, משאירים את הפיקדונות הנגזרים שכבר היו מאוזנים.
+  const aiHasDepositRows = Array.isArray(ev.depositRows) && ev.depositRows.length > 0;
+  if (aiHasDepositRows) reconcileData = (reconcileData || []).filter(l => !l.isDeposit && String(l.productId || '').indexOf('deposit-') !== 0);
+  reconcileData.forEach(l => {
+    const isDepositLine = l && (l.isDeposit || String(l.productId || '').indexOf('deposit-') === 0);
+    if (isDepositLine && !aiHasDepositRows) return;
+    l.noteQty = 0; l.aiPaperPriceOnly = false;
+  });
   reconcilePaperEntered = true; // v178: מכאן noteQty באמת מגיע מהנייר
   ev.aggregates.forEach(a => {
     let line = (reconcileData || []).find(l => l.productId === a.product.id);
@@ -9387,7 +9405,7 @@ function aiApplyInvoiceResult() {
   // v166: הפיקדון נכנס כשורה נפרדת בתעודה — כמות מאושרת מראש (אין מה
   // לסרוק פיזית), מחיר יחידה לא מעוגל כדי שסכום השורה ייסגר באגורה
   // (lineTotalFromUnit מעגל את המכפלה, לא את המחיר).
-  (ev.depositRows || []).forEach((dep, depositIndex) => {
+  (aiHasDepositRows ? ev.depositRows : []).forEach((dep, depositIndex) => {
     const depositUnit = dep.qty > 0 ? dep.cents / 100 / dep.qty : dep.cents / 100;
     const depositLabel = dep.productName ? ('פיקדון · ' + dep.productName) : (/^[\s*]*פ.?קדון[\s*]*$/.test(dep.description) ? 'פיקדון' : ('פיקדון · ' + dep.description));
     reconcileData.push({ productId: 'deposit-' + dep.document + '-' + depositIndex + '-' + Date.now(), name: depositLabel + (dep.document && aiScanDocuments.length > 1 ? ' (תעודה ' + dep.document + ')' : ''), barcode: '', received: dep.qty, noteQty: dep.qty, price: depositUnit, basePrice: depositUnit, promoPct: 0, promoOn: false, checked: true, isDeposit: true, aiPaperPriceOnly: true });
