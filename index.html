@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v230 פיקדון בהתקדמות</title>
+    <title>הזמנות יטבתה - v231 תיקון התקדמות בלבד</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v230 פיקדון בהתקדמות</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v231 תיקון התקדמות בלבד</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -4055,13 +4055,12 @@ function receiptTotals() {
   // v176: כמו בתעודה — הפיקדון בכסף, לא בספירת היחידות.
   return { ex, savings: receiptSavings(), units: productUnits, depositUnits: depositUnits };
 }
-// סכום התעודות שהמשתמש מקליד אינו כולל את שורות הפיקדון האוטומטיות.
-// הפיקדון מצטרף ליעד הכספי בלבד; הוא לעולם אינו מצטרף ליעד היחידות.
-function receivingDepositTotal() {
-  return r2(receivingDepositLines().reduce((sum, dep) => sum + (Number(dep.total) || 0), 0));
-}
-function receiptMoneyTarget() {
-  return receiptNoteTotal == null ? null : r2(Number(receiptNoteTotal) + receivingDepositTotal());
+// יעד ההתקדמות הכספי כולל את הפיקדון האוטומטי שכבר נמצא ב-receiptTotals().ex.
+// יעד היחידות נשאר ללא פיקדון.
+function receiptProgressMoneyTarget() {
+  if (receiptNoteTotal == null) return null;
+  const depositTotal = receivingDepositLines().reduce((sum, dep) => sum + (Number(dep.total) || 0), 0);
+  return r2(Number(receiptNoteTotal) + depositTotal);
 }
 function returnTotals(r) {
   if (r && (r.totalIncVat != null || r.totalExVat != null)) {
@@ -4353,11 +4352,9 @@ function renderReceiving() {
         '<div class="flex items-center gap-2 min-w-0"><i class="fa-solid fa-file-invoice text-blue-600"></i><div class="min-w-0"><div class="text-[11px] text-slate-400 font-bold">סכום התעודה (ללא מע״מ)' + (receiptNotes.length > 1 ? ' · ' + receiptNotes.length + ' תעודות' : '') + (receiptNoteUnits != null ? ' · ' + receiptNoteUnits + ' יח׳' : '') + '</div><div class="font-black text-slate-800">' + (receiptNoteTotal != null ? '₪' + fmtMoney(receiptNoteTotal) : 'ללא אימות') + '</div></div></div>' +
         '<div class="flex items-center gap-1.5 shrink-0"><button data-role="rc-notes-edit" class="btn-tap text-xs font-bold text-blue-600 bg-blue-50 px-2.5 py-2 rounded-lg"><i class="fa-solid fa-pen"></i> ערוך</button><button data-role="rc-cancel" class="btn-tap text-xs font-bold text-red-500 bg-red-50 px-2.5 py-2 rounded-lg"><i class="fa-solid fa-xmark"></i></button></div>' +
       '</div>';
-  const moneyTarget = receiptMoneyTarget();
-  const depositTotal = receivingDepositTotal();
-  const amountGap = moneyTarget != null ? r2(moneyTarget - t.ex) : null;
-  const depositLabel = depositTotal > 0 ? '<div class="text-[10px] font-bold text-slate-300">יעד כולל פיקדון ₪' + fmtMoney(depositTotal) + ' · הפיקדון בכסף בלבד</div>' : '';
-  const progress = '<div class="sticky top-[7.5rem] z-20 bg-slate-900 text-white rounded-2xl p-3 shadow-xl mb-3"><div class="flex items-center justify-between gap-2"><div><div class="text-xs text-slate-300 font-bold">שלב 2 · סריקת מוצרים</div><div class="font-black text-lg">₪' + fmtMoney(t.ex) + (moneyTarget != null ? ' / ₪' + fmtMoney(moneyTarget) : '') + '</div>' + depositLabel + '</div><div class="text-left"><div class="font-black">' + t.units + (receiptNoteUnits != null ? '/' + receiptNoteUnits : '') + ' יח׳</div><div class="text-xs font-bold ' + (amountGap == null || Math.abs(amountGap) <= 0.02 ? 'text-emerald-300' : 'text-amber-300') + '">' + (amountGap == null ? 'ללא יעד סכום' : (Math.abs(amountGap) <= 0.02 ? 'הסכום תואם ✓' : 'פער ₪' + fmtMoney(Math.abs(amountGap)))) + '</div></div></div></div>';
+  const progressMoneyTarget = receiptProgressMoneyTarget();
+  const amountGap = progressMoneyTarget != null ? r2(progressMoneyTarget - t.ex) : null;
+  const progress = '<div class="sticky top-[7.5rem] z-20 bg-slate-900 text-white rounded-2xl p-3 shadow-xl mb-3"><div class="flex items-center justify-between gap-2"><div><div class="text-xs text-slate-300 font-bold">שלב 2 · סריקת מוצרים</div><div class="font-black text-lg">₪' + fmtMoney(t.ex) + (progressMoneyTarget != null ? ' / ₪' + fmtMoney(progressMoneyTarget) : '') + '</div></div><div class="text-left"><div class="font-black">' + t.units + (receiptNoteUnits != null ? '/' + receiptNoteUnits : '') + ' יח׳</div><div class="text-xs font-bold ' + (amountGap == null || Math.abs(amountGap) <= 0.02 ? 'text-emerald-300' : 'text-amber-300') + '">' + (amountGap == null ? 'ללא יעד סכום' : (Math.abs(amountGap) <= 0.02 ? 'הסכום תואם ✓' : 'פער ₪' + fmtMoney(Math.abs(amountGap)))) + '</div></div></div></div>';
   app.innerHTML = banner + topButtons + noteBar + progress +
     '<button data-role="rc-scan" class="btn-tap w-full bg-blue-600 text-white rounded-2xl py-4 font-black text-lg flex items-center justify-center gap-3 shadow-lg mb-2"><i class="fa-solid fa-barcode text-2xl"></i> סרוק פריט לתעודה</button>' +
     '<details class="bg-white rounded-2xl border border-slate-200 shadow-sm mb-4"><summary class="cursor-pointer p-3 font-black text-sm text-slate-600"><i class="fa-solid fa-circle-question text-slate-400"></i> לא מצליח לסרוק?</summary><div class="px-3 pb-3">' +
@@ -4453,8 +4450,10 @@ function setReceiptQty(productId, val) {
   let q = parseInt((val || '').toString().replace(/[^0-9]/g, ''), 10);
   if (!(q > 0)) { return; }
   it.qty = q;
-  // רינדור מלא שומר את הסכום, הפיקדון וכרטיס ההתקדמות מסונכרנים.
-  saveReceiptDraft(); updateCart(); refreshReceipt();
+  saveReceiptDraft(); updateCart(); refreshReceiptTotals();
+  const lt = app.querySelector('[data-linetotal="' + productId + '"]');
+  const p = products.find(x => x.id === productId);
+  if (lt && p) lt.textContent = '₪' + fmtMoney(effectiveLineTotal(p, q));
 }
 function removeReceiptLine(productId) {
   const idx = receiptList.findIndex(x => x.productId === productId); if (idx < 0) return;
@@ -4544,7 +4543,7 @@ function finishReceipt() {
   });
   const ex = r2(lines.reduce((a, l) => a + l.lineTotal, 0));
   const scannedUnits = lines.reduce((a, l) => a + (l.isDeposit ? 0 : (Number(l.qty) || 0)), 0); // v176: פיקדון בכסף בלבד
-  const moneyTarget = receiptMoneyTarget();
+  const progressMoneyTarget = receiptProgressMoneyTarget();
   if (!receiptDupConfirmed) {
     const dup = receipts.find(r => r.date === day && (Number(r.count) || 0) === lines.length && Math.abs((Number(r.totalExVat) || 0) - ex) <= 1);
     if (dup) { showConfirm('אולי כפילות', 'כבר קיימת תעודה מ-' + dDisp(day) + ' בסכום דומה (₪' + fmtMoney(ex) + ' · ' + lines.length + ' מוצרים). ייתכן שכבר קלטת אותה — לשמור בכל זאת?', 'כן, שמור בכל זאת', function () { receiptDupConfirmed = true; finishReceipt(); }); return; }
@@ -4552,15 +4551,15 @@ function finishReceipt() {
   const unitsMismatch = receiptNoteUnits != null && scannedUnits !== receiptNoteUnits;
   // אחרי חישוב מדויק ועיגול כל שורה בסופה, נשארת רשת ביטחון של עד שתי אגורות
   // רק כשהיחידות תואמות בדיוק. פער יחידות לעולם אינו נסגר באמצעות סיבולת כספית.
-  const moneyMismatch = moneyTarget != null && !receiptMoneyMatches(ex, moneyTarget, !unitsMismatch);
+  const moneyMismatch = progressMoneyTarget != null && !receiptMoneyMatches(ex, progressMoneyTarget, !unitsMismatch);
   if (moneyMismatch || unitsMismatch) {
-    const big = Math.max(ex, moneyTarget), small = Math.min(ex, moneyTarget);
-    if (moneyMismatch && big >= 50 && big >= small * 2) { showConfirm('הפרש חריג', 'יעד התעודה כולל הפיקדון הוא ₪' + fmtMoney(moneyTarget) + ', אבל מהסריקה שוחזר ₪' + fmtMoney(ex) + '. הפרש גדול במיוחד — ייתכן שסכום התעודה הוקלד לא נכון (או שבאמת חסר הרבה). להמשיך לבדיקת ההפרשים?', 'המשך לבדיקה', openReconcile); return; }
+    const big = Math.max(ex, progressMoneyTarget), small = Math.min(ex, progressMoneyTarget);
+    if (moneyMismatch && big >= 50 && big >= small * 2) { showConfirm('הפרש חריג', 'יעד התעודה כולל הפיקדון הוא ₪' + fmtMoney(progressMoneyTarget) + ', אבל מהסריקה שוחזר ₪' + fmtMoney(ex) + '. הפרש גדול במיוחד — ייתכן שסכום התעודה הוקלד לא נכון (או שבאמת חסר הרבה). להמשיך לבדיקת ההפרשים?', 'המשך לבדיקה', openReconcile); return; }
     openReconcile(); return;
   }
-  const roundingAdjustment = moneyTarget != null && !unitsMismatch && moneyDiffCents(ex, moneyTarget) > 0
-    ? r2(Number(moneyTarget) - ex) : 0;
-  const payableEx = roundingAdjustment ? r2(moneyTarget) : ex;
+  const roundingAdjustment = progressMoneyTarget != null && !unitsMismatch && moneyDiffCents(ex, progressMoneyTarget) > 0
+    ? r2(Number(progressMoneyTarget) - ex) : 0;
+  const payableEx = roundingAdjustment ? r2(progressMoneyTarget) : ex;
   const listHtml = lines.map(l =>
     '<div class="flex items-center justify-between gap-2 py-1.5 border-b border-slate-100 last:border-0">' +
       '<div class="min-w-0"><div class="font-bold text-slate-800 text-sm truncate">' + l.name + '</div>' +
@@ -4614,11 +4613,11 @@ function reconcileReceivedInc() { let ex = 0; (reconcileData || []).forEach(l =>
 function reconcileNoteInc() { let ex = 0; (reconcileData || []).forEach(l => ex += lineTotalFromUnit(l.price, l.noteQty)); return r2(ex); }
 function reconcileScannedUnits() { let u = 0; (reconcileData || []).forEach(l => { if (!l.isDeposit) u += (Number(l.noteQty) || 0); }); return u; } // v176: פיקדון בכסף בלבד
 function reconcileUnitsGap() { if (receiptNoteUnits == null) return null; return receiptNoteUnits - reconcileScannedUnits(); }
-function reconcileGap() { return r2((receiptMoneyTarget() || 0) + (Number(reconcileSupplierDiscount) || 0) - reconcileNoteInc()); }
+function reconcileGap() { return r2((receiptNoteTotal || 0) + (Number(reconcileSupplierDiscount) || 0) - reconcileNoteInc()); }
 function reconcileUnitsBalanced() { const g = reconcileUnitsGap(); return g == null || g === 0; }
 function reconcileMoneyBalanced() {
   const exactUnitAnchor = receiptNoteUnits != null && reconcileUnitsGap() === 0;
-  return receiptMoneyMatches(reconcileNoteInc(), (receiptMoneyTarget() || 0) + (Number(reconcileSupplierDiscount) || 0), exactUnitAnchor);
+  return receiptMoneyMatches(reconcileNoteInc(), (receiptNoteTotal || 0) + (Number(reconcileSupplierDiscount) || 0), exactUnitAnchor);
 }
 function reconcileIsBalanced() { return reconcileMoneyBalanced() && reconcileUnitsBalanced(); }
 function reconcileAssigned() {
@@ -7848,7 +7847,7 @@ function aiFindingsClosure(evaluation, findings) {
   const unitsOk = expectedUnitsDelta != null && Math.abs(actualUnitsDelta - expectedUnitsDelta) < 0.001;
 
   const receivedAmount = reconcileReceivedInc();
-  const expectedAmountDelta = r2((Number(receiptMoneyTarget()) || 0) - receivedAmount);
+  const expectedAmountDelta = r2((Number(receiptNoteTotal) || 0) - receivedAmount);
   let adjustedAmount = 0;
   const seen = new Set();
   receivedRows.forEach(line => {
@@ -9384,8 +9383,7 @@ function aiApplyInvoiceResult() {
     creditClaim: reconcileSupplierCreditClaim ? cloneSafe(reconcileSupplierCreditClaim) : null,
     audit: reconcileAiAudit ? cloneSafe(reconcileAiAudit) : null
   };
-  // v230: שורות הפיקדון הן נתון אוטומטי של המוצרים שנקלטו, לא יחידות
-  // שה-AI צריך לקרוא מהנייר. מסירים עותקים ישנים ובונים אותן מחדש מהקליטה.
+  // v166: שורות פיקדון קודמות מוסרות — ייבנו מחדש מהפענוח הנוכחי.
   reconcileData = (reconcileData || []).filter(l => !l.isDeposit && String(l.productId || '').indexOf('deposit-') !== 0);
   reconcileData.forEach(l => { l.noteQty = 0; l.aiPaperPriceOnly = false; });
   reconcilePaperEntered = true; // v178: מכאן noteQty באמת מגיע מהנייר
@@ -9395,8 +9393,13 @@ function aiApplyInvoiceResult() {
     if (!line) { line = { productId: a.product.id, name: a.product.name, barcode: a.product.barcode || '', received: 0, noteQty: 0, price: a.paperUnitPrice, basePrice: base, promoPct: pct, promoOn: on, checked: true }; reconcileData.unshift(line); }
     line.noteQty = a.qty; line.price = a.paperUnitPrice; line.basePrice = base; line.promoPct = pct; line.promoOn = on; line.checked = true; line.aiPaperPriceOnly = true;
   });
-  receivingDepositLines().forEach(dep => {
-    reconcileData.push({ productId: 'deposit-recv-' + dep.product.id, name: dep.name, barcode: '', received: dep.qty, noteQty: dep.qty, price: dep.unit, basePrice: dep.unit, promoPct: 0, promoOn: false, checked: true, isDeposit: true, aiPaperPriceOnly: true });
+  // v166: הפיקדון נכנס כשורה נפרדת בתעודה — כמות מאושרת מראש (אין מה
+  // לסרוק פיזית), מחיר יחידה לא מעוגל כדי שסכום השורה ייסגר באגורה
+  // (lineTotalFromUnit מעגל את המכפלה, לא את המחיר).
+  (ev.depositRows || []).forEach((dep, depositIndex) => {
+    const depositUnit = dep.qty > 0 ? dep.cents / 100 / dep.qty : dep.cents / 100;
+    const depositLabel = dep.productName ? ('פיקדון · ' + dep.productName) : (/^[\s*]*פ.?קדון[\s*]*$/.test(dep.description) ? 'פיקדון' : ('פיקדון · ' + dep.description));
+    reconcileData.push({ productId: 'deposit-' + dep.document + '-' + depositIndex + '-' + Date.now(), name: depositLabel + (dep.document && aiScanDocuments.length > 1 ? ' (תעודה ' + dep.document + ')' : ''), barcode: '', received: dep.qty, noteQty: dep.qty, price: depositUnit, basePrice: depositUnit, promoPct: 0, promoOn: false, checked: true, isDeposit: true, aiPaperPriceOnly: true });
   });
   reconcileSupplierDiscount = r2(ev.supplierDiscount || 0);
   reconcileSupplierPromoItems = [];
@@ -9917,7 +9920,7 @@ function buildPromoMismatchItems(rows) {
 function computeConfiguredPromoMismatch() {
   const activeRows = configuredPromoRowsInPaper();
   if (!activeRows.length) return { hasMismatch: false, items: [], expected: 0, actual: 0, unmarkedExpected: 0 };
-  const actual = Math.max(0, r2(reconcileNoteInc() - (receiptMoneyTarget() || 0)));
+  const actual = Math.max(0, r2(reconcileNoteInc() - (receiptNoteTotal || 0)));
   const expectedAll = configuredDiscountForRows(activeRows);
   const unmarkedRows = activeRows.filter(row => !row.promoMark);
   const unmarkedExpected = configuredDiscountForRows(unmarkedRows);
@@ -10259,7 +10262,7 @@ function supplierCreditWarningHtml(list, compact) {
 }
 function computePromoResultFromMarks() {
   const marked = ncPaperRows().filter(r => r.promoMark);
-  const needed = r2(reconcileNoteInc() - (receiptMoneyTarget() || 0));
+  const needed = r2(reconcileNoteInc() - (receiptNoteTotal || 0));
   const mismatch = computeConfiguredPromoMismatch();
   if (!marked.length) {
     if (mismatch.hasMismatch) return { ok: true, reverse: true, needed: Math.max(0, needed), marked: [], mismatch, msg: 'נמצא מבצע שמוגדר במערכת, אבל בתעודת הספק הוא לא סומן בכוכבית/לא קיבל הנחה.' };
@@ -10380,10 +10383,9 @@ function saveReconciledReceipt(opts) {
   const supplierDiscount = r2(Number(reconcileSupplierDiscount) || 0);
   const calculatedEx = r2(grossEx - supplierDiscount);
   const exactUnitAnchor = receiptNoteUnits != null && reconcileUnitsGap() === 0;
-  const moneyTarget = receiptMoneyTarget();
-  const roundingAdjustment = moneyTarget != null && exactUnitAnchor && receiptMoneyMatches(calculatedEx, moneyTarget, true) && moneyDiffCents(calculatedEx, moneyTarget) > 0
-    ? r2(Number(moneyTarget) - calculatedEx) : 0;
-  const ex = roundingAdjustment ? r2(moneyTarget) : calculatedEx;
+  const roundingAdjustment = receiptNoteTotal != null && exactUnitAnchor && receiptMoneyMatches(calculatedEx, receiptNoteTotal, true) && moneyDiffCents(calculatedEx, receiptNoteTotal) > 0
+    ? r2(Number(receiptNoteTotal) - calculatedEx) : 0;
+  const ex = roundingAdjustment ? r2(receiptNoteTotal) : calculatedEx;
   const unresolvedAmountGap = reconcileMoneyBalanced() ? 0 : reconcileGap();
   const unresolvedUnitsGap = (reconcileUnitsGap() != null && reconcileUnitsGap() !== 0) ? reconcileUnitsGap() : 0;
   const aiAudit = reconcileAiAudit ? cloneSafe(reconcileAiAudit) : null;
@@ -13516,7 +13518,7 @@ app.addEventListener('click', (e) => {
     const mismatch = computeConfiguredPromoMismatch();
     if (mismatch.hasMismatch) {
       reconcilePromoMismatchItems = mismatch.items || [];
-      ncPromoResult = { ok: true, reverse: true, needed: Math.max(0, r2(reconcileNoteInc() - (receiptMoneyTarget() || 0))), marked: [], mismatch, msg: 'נמצא מבצע שמוגדר במערכת, אבל בתעודת הספק הוא לא סומן בכוכבית/לא קיבל הנחה.' };
+      ncPromoResult = { ok: true, reverse: true, needed: Math.max(0, r2(reconcileNoteInc() - (receiptNoteTotal || 0))), marked: [], mismatch, msg: 'נמצא מבצע שמוגדר במערכת, אבל בתעודת הספק הוא לא סומן בכוכבית/לא קיבל הנחה.' };
     }
     buzz(18);
     if (!n) { showToast('לא הוזנו מחירים', null, null, 2200); }
