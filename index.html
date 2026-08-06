@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v231 תיקון התקדמות בלבד</title>
+    <title>הזמנות יטבתה - v232 פיקדון לפי הנייר</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v231 תיקון התקדמות בלבד</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v232 פיקדון לפי הנייר</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -540,6 +540,7 @@ let receiptNoteTotal = null;     // סכום התעודה מהספק (ללא מ�
 let receiptNotes = [];           // פירוט סכומי תעודות הספק (למקרה שהמשלוח מחולק)
 let editingNotes = false;        // עריכת סכומי התעודות במסך פתוח
 let receiptOpened = false;       // האם נפתחה תעודה (שער לפני סריקה)
+let receiptDepositWaived = false; // v232: התעודה לא חייבה פיקדון — שורות הפיקדון הנגזרות הוסרו לתעודה זו
 let reconcileData = null;        // נתוני מסך השוואת תעודה
 // v178: האם באמת הוזנו נתוני נייר (הקלדה ידנית / החלת סריקת AI) על noteQty.
 // עד שזה קורה, noteQty הוא עותק של מה שנסרק — והכותרת חייבת לומר את זה.
@@ -847,7 +848,7 @@ function readNoteEntry(required) {
   }
   return { amount: r2(v), units: units };
 }
-function saveReceiptDraft() { try { localStorage.setItem(RECEIPT_DRAFT_KEY, JSON.stringify({ items: receiptList, notes: receiptNotes, opened: receiptOpened })); } catch (e) {} }
+function saveReceiptDraft() { try { localStorage.setItem(RECEIPT_DRAFT_KEY, JSON.stringify({ items: receiptList, notes: receiptNotes, opened: receiptOpened, dw: receiptDepositWaived })); } catch (e) {} }
 function restoreReceiptDraft() {
   try {
     const s = localStorage.getItem(RECEIPT_DRAFT_KEY); if (!s) return;
@@ -857,6 +858,7 @@ function restoreReceiptDraft() {
       receiptList = Array.isArray(o.items) ? o.items : [];
       receiptNotes = (Array.isArray(o.notes) ? o.notes : (o.noteTotal != null ? [o.noteTotal] : [])).map(normNote);
       receiptOpened = !!o.opened || receiptList.length > 0;
+      receiptDepositWaived = !!o.dw; // v232
     }
     recomputeNoteTotal();
   } catch (e) {}
@@ -4029,6 +4031,7 @@ function receiptMonthEndStatuses() {
 // אין בקבוק פיקדון פיזי לסרוק: השורה נוצרת ומתעדכנת לבד לפי המוצרים
 // שברשימה, ונספרת בסכום בלבד — בתעודה סכום היחידות אינו כולל פיקדון.
 function receivingDepositLines() {
+  if (receiptDepositWaived) return []; // v232: התעודה לא חייבה פיקדון
   const out = [];
   (receiptList || []).forEach(it => {
     const p = products.find(x => x.id === it.productId);
@@ -4038,6 +4041,7 @@ function receivingDepositLines() {
   return out;
 }
 function receivingDepositRowsHtml() {
+  if (receiptDepositWaived) return '<div class="bg-slate-100 border border-slate-200 rounded-2xl px-4 py-2.5 flex items-center justify-between gap-2"><span class="text-xs font-bold text-slate-500">שורות הפיקדון הוסרו — התעודה לא חייבה פיקדון</span><button data-role="rc-dep-restore" class="btn-tap underline text-xs font-black text-slate-600">החזר</button></div>'; // v232
   const deposits = receivingDepositLines();
   if (!deposits.length) return '';
   return deposits.map(dep => '<div class="bg-indigo-50/70 border border-indigo-200 rounded-2xl px-4 py-2.5 flex items-center justify-between gap-2">' +
@@ -4055,12 +4059,21 @@ function receiptTotals() {
   // v176: כמו בתעודה — הפיקדון בכסף, לא בספירת היחידות.
   return { ex, savings: receiptSavings(), units: productUnits, depositUnits: depositUnits };
 }
-// יעד ההתקדמות הכספי כולל את הפיקדון האוטומטי שכבר נמצא ב-receiptTotals().ex.
-// יעד היחידות נשאר ללא פיקדון.
+// v232: השוואה ישירה — היעד הוא בדיוק הסכום שהוקלד מהנייר. אם הנייר מדפיס
+// שורת פיקדון, היא כבר בתוך הסכום שהוקלד; אם לא — הפער יזוהה ויוצע להסרה
+// (receiptUnbilledDepositGap). יעד היחידות נשאר ללא פיקדון (v176).
 function receiptProgressMoneyTarget() {
-  if (receiptNoteTotal == null) return null;
-  const depositTotal = receivingDepositLines().reduce((sum, dep) => sum + (Number(dep.total) || 0), 0);
-  return r2(Number(receiptNoteTotal) + depositTotal);
+  return receiptNoteTotal == null ? null : r2(Number(receiptNoteTotal));
+}
+// v232: פער שהוא בדיוק סך הפיקדון שהאפליקציה גזרה — סימן לתעודה שלא חייבה
+// פיקדון (משלוח 6.8: נייר 1,642.69, ספירה 1,651.84, הפרש 9.15 = 3 × 3.05).
+// מחזירה את סך הפיקדון רק כשהספירה גבוהה מהמוקלד בדיוק בגובהו, אחרת 0.
+function receiptUnbilledDepositGap(calculatedEx, target) {
+  if (receiptDepositWaived || target == null) return 0;
+  const depTotal = r2(receivingDepositLines().reduce((sum, dep) => sum + (Number(dep.total) || 0), 0));
+  if (!(depTotal > 0)) return 0;
+  if (Number(calculatedEx) <= Number(target)) return 0;
+  return moneyDiffCents(calculatedEx, r2(Number(target) + depTotal)) === 0 ? depTotal : 0;
 }
 function returnTotals(r) {
   if (r && (r.totalIncVat != null || r.totalExVat != null)) {
@@ -4354,7 +4367,7 @@ function renderReceiving() {
       '</div>';
   const progressMoneyTarget = receiptProgressMoneyTarget();
   const amountGap = progressMoneyTarget != null ? r2(progressMoneyTarget - t.ex) : null;
-  const progress = '<div class="sticky top-[7.5rem] z-20 bg-slate-900 text-white rounded-2xl p-3 shadow-xl mb-3"><div class="flex items-center justify-between gap-2"><div><div class="text-xs text-slate-300 font-bold">שלב 2 · סריקת מוצרים</div><div class="font-black text-lg">₪' + fmtMoney(t.ex) + (progressMoneyTarget != null ? ' / ₪' + fmtMoney(progressMoneyTarget) : '') + '</div></div><div class="text-left"><div class="font-black">' + t.units + (receiptNoteUnits != null ? '/' + receiptNoteUnits : '') + ' יח׳</div><div class="text-xs font-bold ' + (amountGap == null || Math.abs(amountGap) <= 0.02 ? 'text-emerald-300' : 'text-amber-300') + '">' + (amountGap == null ? 'ללא יעד סכום' : (Math.abs(amountGap) <= 0.02 ? 'הסכום תואם ✓' : 'פער ₪' + fmtMoney(Math.abs(amountGap)))) + '</div></div></div></div>';
+  const progress = '<div class="sticky top-[7.5rem] z-20 bg-slate-900 text-white rounded-2xl p-3 shadow-xl mb-3"><div class="flex items-center justify-between gap-2"><div><div class="text-xs text-slate-300 font-bold">שלב 2 · סריקת מוצרים</div><div class="font-black text-lg">₪' + fmtMoney(t.ex) + (progressMoneyTarget != null ? ' / ₪' + fmtMoney(progressMoneyTarget) : '') + '</div></div><div class="text-left"><div class="font-black">' + t.units + (receiptNoteUnits != null ? '/' + receiptNoteUnits : '') + ' יח׳</div><div class="text-xs font-bold ' + (amountGap == null || Math.abs(amountGap) <= 0.02 ? 'text-emerald-300' : 'text-amber-300') + '">' + (amountGap == null ? 'ללא יעד סכום' : (Math.abs(amountGap) <= 0.02 ? 'הסכום תואם ✓' : 'פער ₪' + fmtMoney(Math.abs(amountGap)))) + '</div></div></div>' + (receiptUnbilledDepositGap(t.ex, progressMoneyTarget) > 0 ? '<div class="mt-2 pt-2 border-t border-white/15 text-[11px] font-bold text-amber-200">הפער בדיוק בגובה הפיקדון שהאפליקציה הוסיפה (₪' + fmtMoney(receiptUnbilledDepositGap(t.ex, progressMoneyTarget)) + '). בתעודה אין שורת פיקדון? <button data-role="rc-dep-waive" class="btn-tap underline font-black text-white">הסר פיקדון מהתעודה</button></div>' : '') + '</div>';
   app.innerHTML = banner + topButtons + noteBar + progress +
     '<button data-role="rc-scan" class="btn-tap w-full bg-blue-600 text-white rounded-2xl py-4 font-black text-lg flex items-center justify-center gap-3 shadow-lg mb-2"><i class="fa-solid fa-barcode text-2xl"></i> סרוק פריט לתעודה</button>' +
     '<details class="bg-white rounded-2xl border border-slate-200 shadow-sm mb-4"><summary class="cursor-pointer p-3 font-black text-sm text-slate-600"><i class="fa-solid fa-circle-question text-slate-400"></i> לא מצליח לסרוק?</summary><div class="px-3 pb-3">' +
@@ -4552,9 +4565,16 @@ function finishReceipt() {
   // אחרי חישוב מדויק ועיגול כל שורה בסופה, נשארת רשת ביטחון של עד שתי אגורות
   // רק כשהיחידות תואמות בדיוק. פער יחידות לעולם אינו נסגר באמצעות סיבולת כספית.
   const moneyMismatch = progressMoneyTarget != null && !receiptMoneyMatches(ex, progressMoneyTarget, !unitsMismatch);
+  // v232: הפער הוא בדיוק הפיקדון שהאפליקציה הוסיפה ובנייר אין שורת פיקדון —
+  // מציעים להסיר את שורות הפיקדון ולסגור לפי הנייר, עוד לפני מסך ההפרשים.
+  const unbilledDep = receiptUnbilledDepositGap(ex, progressMoneyTarget);
+  if (moneyMismatch && !unitsMismatch && unbilledDep > 0) {
+    showConfirm('פיקדון שלא חויב בתעודה', 'הפער ₪' + fmtMoney(unbilledDep) + ' הוא בדיוק הפיקדון שהאפליקציה הוסיפה, ובתעודות אין שורת פיקדון. להסיר את שורות הפיקדון ולסגור לפי הנייר — ₪' + fmtMoney(progressMoneyTarget) + '?', 'הסר פיקדון וסגור', function () { receiptDepositWaived = true; saveReceiptDraft(); finishReceipt(); });
+    return;
+  }
   if (moneyMismatch || unitsMismatch) {
     const big = Math.max(ex, progressMoneyTarget), small = Math.min(ex, progressMoneyTarget);
-    if (moneyMismatch && big >= 50 && big >= small * 2) { showConfirm('הפרש חריג', 'יעד התעודה כולל הפיקדון הוא ₪' + fmtMoney(progressMoneyTarget) + ', אבל מהסריקה שוחזר ₪' + fmtMoney(ex) + '. הפרש גדול במיוחד — ייתכן שסכום התעודה הוקלד לא נכון (או שבאמת חסר הרבה). להמשיך לבדיקת ההפרשים?', 'המשך לבדיקה', openReconcile); return; }
+    if (moneyMismatch && big >= 50 && big >= small * 2) { showConfirm('הפרש חריג', 'סכום התעודה שהוקלד הוא ₪' + fmtMoney(progressMoneyTarget) + ', אבל מהסריקה שוחזר ₪' + fmtMoney(ex) + '. הפרש גדול במיוחד — ייתכן שסכום התעודה הוקלד לא נכון (או שבאמת חסר הרבה). להמשיך לבדיקת ההפרשים?', 'המשך לבדיקה', openReconcile); return; }
     openReconcile(); return;
   }
   const roundingAdjustment = progressMoneyTarget != null && !unitsMismatch && moneyDiffCents(ex, progressMoneyTarget) > 0
@@ -5533,7 +5553,8 @@ function detectiveApplyResolvedResult(result, i, selectPrefix) {
         l.promoOn = unitEx < base - 0.0005; l.promoPct = l.promoOn ? activePct : 0;
       }
       // v218: סנכרון שורת הפיקדון הנגזרת — הפיקדון עוקב אחרי כמות הנייר
-      if ((Number(p.deposit) || 0) > 0) {
+      // v232: אלא אם התעודה סומנה כלא-מחייבת-פיקדון — אז אין שורה נגזרת בכלל.
+      if (!receiptDepositWaived && (Number(p.deposit) || 0) > 0) {
         const depId = 'deposit-recv-' + pid;
         let dl = (reconcileData || []).find(x => x.productId === depId);
         if (dl) dl.noteQty = Number(l.noteQty) || 0;
@@ -10671,7 +10692,7 @@ async function confirmReceipt() {
   if (!saved) return;
   hideReceiptSummary();
   aiCloseOrientationReview();
-  receiptList = []; pendingReceipt = null; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; reconcileData = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; reconcileAiAudit = null; aiScanDocuments = []; aiScanBusy = false; aiScanProgressText = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; receiptDupConfirmed = false; saveReceiptDraft();
+  receiptList = []; pendingReceipt = null; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; reconcileData = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; reconcileAiAudit = null; aiScanDocuments = []; aiScanBusy = false; aiScanProgressText = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; receiptDupConfirmed = false; receiptDepositWaived = false; saveReceiptDraft();
   setView('receiptsHistory');
   const newOpen = receipts.filter(r => receiptDiscrepancyInfo(r).open).find(r => findOffsetMatch(r));
   if (newOpen) showToast('💡 זוהה קיזוז אפשרי מול תעודה קודמת — ראה בכרטיס התעודה', null, null, 3500);
@@ -13375,10 +13396,12 @@ app.addEventListener('click', (e) => {
   else if (role === 'clear-history') showConfirm('ניקוי היסטוריה', 'למחוק את כל היסטוריית ההזמנות? יישמר גיבוי בסל מחזור.', 'מחק הכל', () => clearAllDocs('history'));
   else if (role === 'clear-returns-history') showConfirm('ניקוי היסטוריה', 'למחוק את כל היסטוריית החזרות? יישמר גיבוי בסל מחזור.', 'מחק הכל', () => clearAllDocs('returns'));
   else if (role === 'rc-scan') openReceivingScanner();
-  else if (role === 'rc-open') { const en = readNoteEntry(receiptNotes.length === 0); if (en === false) return; if (en) receiptNotes.push(en); recomputeNoteTotal(); receiptOpened = true; receiptDupConfirmed = false; saveReceiptDraft(); refreshReceipt(); openReceivingScanner(); }
-  else if (role === 'rc-cancel') { showConfirm('ביטול תעודה', 'לבטל את התעודה הנוכחית? כל הפריטים שנסרקו יימחקו.', 'בטל תעודה', () => { receiptList = []; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; reconcileData = null; receiptDupConfirmed = false; saveReceiptDraft(); setView('receiving'); }); }
+  else if (role === 'rc-open') { const en = readNoteEntry(receiptNotes.length === 0); if (en === false) return; if (en) receiptNotes.push(en); recomputeNoteTotal(); receiptOpened = true; receiptDupConfirmed = false; receiptDepositWaived = false; saveReceiptDraft(); refreshReceipt(); openReceivingScanner(); }
+  else if (role === 'rc-cancel') { showConfirm('ביטול תעודה', 'לבטל את התעודה הנוכחית? כל הפריטים שנסרקו יימחקו.', 'בטל תעודה', () => { receiptList = []; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; reconcileData = null; receiptDupConfirmed = false; receiptDepositWaived = false; saveReceiptDraft(); setView('receiving'); }); }
   else if (role === 'rc-note-add') { const en = readNoteEntry(true); if (en === false) return; if (en) { receiptNotes.push(en); recomputeNoteTotal(); saveReceiptDraft(); } refreshReceipt(); const inp = $('rcNoteInput'); if (inp) inp.focus(); }
   else if (role === 'rc-note-remove') { const i = parseInt(t.dataset.idx, 10); if (i >= 0) { receiptNotes.splice(i, 1); recomputeNoteTotal(); saveReceiptDraft(); refreshReceipt(); } }
+  else if (role === 'rc-dep-waive') { receiptDepositWaived = true; saveReceiptDraft(); buzz(12); refreshReceipt(); } // v232
+  else if (role === 'rc-dep-restore') { receiptDepositWaived = false; saveReceiptDraft(); buzz(12); refreshReceipt(); } // v232
   else if (role === 'rc-notes-edit') { editingNotes = true; refreshReceipt(); }
   else if (role === 'rc-notes-done') {
     const en = readNoteEntry(false); if (en === false) return;
