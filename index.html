@@ -602,7 +602,7 @@ let receiptDupConfirmed = false; // אישור שמירה למרות חשד לכ
 const RECEIPT_DRAFT_KEY = 'tn_receipt_draft';
 let receivingDigitsMissTimer = null;
 let receivingDigitsMissNotified = '';
-const APP_VERSION = '41';
+const APP_VERSION = '42';
 // v40: תג גרסה קבוע בפינת המסך — לדעת בשנייה איזו גרסה באמת רצה על המכשיר
 // (עוזר במיוחד מול מטמון ה-PWA). pointer-events:none — לעולם לא חוסם מגע.
 document.body.insertAdjacentHTML('beforeend', '<div id="appVerBadge" style="position:fixed;bottom:4px;left:6px;z-index:9999;pointer-events:none;font-size:10px;font-weight:800;color:#64748b;opacity:.55;direction:rtl">גרסה ' + APP_VERSION + '</div>');        // מוצג בהגדרות; תואם למטמון sw.js
@@ -7822,6 +7822,14 @@ function aiUnknownProductCreateContextStatus(context, barcodeValue, requireActiv
   return { ok: true, barcode: expected, row, verified };
 }
 function aiResolveInvoiceBarcode(row) {
+  // v42 תנובה: קוד מודפס שהותאם דטרמיניסטית (חוק mod-1e8) למוצר עם ברקוד
+  // קצר מ-6 ספרות (ארגזים, בקבוק פיקדון) — אין "ברקוד מלא" שעומד בכללי
+  // הראיות של יטבתה, אבל ההתאמה ודאית: הקוד על הנייר הוא-הוא הברקוד בקטלוג.
+  if (String(row && row.barcodeMatchMethod || '') === 'tnuva_code_exact') {
+    const p = (products || []).find(x => x.id === (row && row.__tnuvaProductId));
+    if (p) return { product: p, barcode: normalizeBarcode(p.barcode || ''), observed: String(row && row.supplierItemCode || ''), method: 'tnuva_code_exact' };
+    return { error: 'המוצר שהותאם לפי הקוד אינו קיים עוד במאגר' };
+  }
   const readType = String(row && row.barcodeReadType || '');
   const method = String(row && row.barcodeMatchMethod || '');
   const observedRaw = row && row.barcodeObserved != null ? row.barcodeObserved : (row && row.barcodePattern != null ? row.barcodePattern : '');
@@ -8836,6 +8844,13 @@ function tnuvaAdaptScanPayload(payload) {
         rowRegion: null,
         barcode: fullBarcode || null,
         barcodeReadType: fullBarcode ? 'full' : 'unreadable',
+        // v42: תעודת-הזהות של ההתאמה — בדיוק כמו ששרת יטבתה מדביק. הצנרת
+        // הוותיקה מאמתת לפי barcodeMatchMethod+barcodeObserved; בלעדיהם כל
+        // שורה נפלה לשגיאה הגנרית (הבאג שנמצא 7.8). ברקוד קצר (<6 ספרות —
+        // ארגזים/פיקדון) לא עומד בכלל הראיות של exact_full ומקבל ענף ייעודי.
+        barcodeObserved: fullBarcode || null,
+        barcodeMatchMethod: fullBarcode ? (fullBarcode.length < 6 ? 'tnuva_code_exact' : 'exact_full') : null,
+        __tnuvaProductId: product ? product.id : null,
         catalogHintId: null,
         catalogCandidateHintIds: [],
         supplierItemCode: row && row.code != null ? String(row.code) : null,
