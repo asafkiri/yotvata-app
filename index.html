@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v235 ניתוח מוצרים</title>
+    <title>הזמנות יטבתה - v236 דירוג באחוזים</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v235 ניתוח מוצרים</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v236 דירוג באחוזים</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -13102,7 +13102,7 @@ $('btnNotes').addEventListener('click', () => setView('notes'));
 // ===== ניתוח מוצרים (v235) =====
 // מסך קריאה בלבד: אפס כתיבות לענן, אפס נגיעה בקליטה/סריקה/בלש/כסף.
 // הכל נגזר מתעודות הקליטה ומתעודות החזרה שכבר נשמרו.
-let anPreset = 'month';        // month | d30 | d90 | d180 | manual
+let anPreset = 'd30';          // month | d30 | d90 | d180 | manual — ברירת מחדל 30 יום, שהאחוזים יקבלו מכנה אמיתי גם בתחילת חודש (v236)
 let anFrom = '';               // YYYY-MM-DD (טווח ידני)
 let anTo = '';
 let anQuery = '';
@@ -13349,16 +13349,28 @@ function anSelectedCardHtml() {
 
 function anTopListHtml() {
   const rowsArr = (anData && anData.rows) || [];
-  const top = rowsArr.filter(r => r.retUnits > 0).sort((a, b) => b.retValue - a.retValue).slice(0, 10);
-  if (!top.length) return '<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm mb-3"><div class="font-black text-slate-700 text-sm mb-1"><i class="fa-solid fa-rotate-left text-rose-500 ml-1"></i>הכי הרבה חזרות בתקופה</div><div class="text-center text-sm text-slate-400 font-bold py-3">אין חזרות בטווח שנבחר</div></div>';
-  const rowsHtml = top.map((r, i) =>
-    '<button data-role="an-pick" data-key="' + htmlEscape(r.key) + '" class="btn-tap w-full text-right flex items-center gap-2.5 py-2 border-b border-slate-100 last:border-0">' +
+  // v236: דירוג לפי אחוז חזרות — המדד שנשאר הוגן כשהמחירים שונים (החלטת המנהל 7.8).
+  // המכנה מוצג על כל שורה, כך שגם 2-מתוך-2 שקוף לשיפוט אנושי. שורות בלי
+  // קליטות בטווח (אין מכנה) יורדות לתחתית עם תיוג מפורש במקום "מתוך 0".
+  const top = rowsArr.filter(r => r.retUnits > 0).sort((a, b) => {
+    const pa = a.retPct == null ? -1 : a.retPct, pb = b.retPct == null ? -1 : b.retPct;
+    if (pb !== pa) return pb - pa;
+    if (b.retUnits !== a.retUnits) return b.retUnits - a.retUnits;
+    return b.retValue - a.retValue;
+  }).slice(0, 10);
+  if (!top.length) return '<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm mb-3"><div class="font-black text-slate-700 text-sm mb-1"><i class="fa-solid fa-rotate-left text-rose-500 ml-1"></i>הכי הרבה חזרות בתקופה <span class="text-[10px] text-slate-400">· לפי אחוז</span></div><div class="text-center text-sm text-slate-400 font-bold py-3">אין חזרות בטווח שנבחר</div></div>';
+  const rowsHtml = top.map((r, i) => {
+    const sub = r.retPct == null
+      ? 'הוחזרו ' + r.retUnits + ' יח׳ · ₪' + fmtMoney(r.retValue) + ' · לא נקלט בטווח'
+      : 'הוחזרו ' + r.retUnits + ' מתוך ' + r.recvUnits + ' יח׳ שנקלטו · ₪' + fmtMoney(r.retValue);
+    return '<button data-role="an-pick" data-key="' + htmlEscape(r.key) + '" class="btn-tap w-full text-right flex items-center gap-2.5 py-2 border-b border-slate-100 last:border-0">' +
       '<span class="shrink-0 w-6 h-6 rounded-full bg-rose-50 text-rose-600 text-[11px] font-black flex items-center justify-center">' + (i + 1) + '</span>' +
       '<span class="min-w-0 flex-1"><span class="block font-black text-sm text-slate-800 truncate">' + htmlEscape(r.name) + '</span>' +
-      '<span class="block text-[11px] text-slate-400 font-bold">הוחזרו ' + r.retUnits + ' מתוך ' + r.recvUnits + ' יח׳ שנקלטו · ' + anPctText(r) + '</span></span>' +
-      '<span class="shrink-0 text-sm font-black text-rose-600">₪' + fmtMoney(r.retValue) + '</span>' +
-    '</button>').join('');
-  return '<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm mb-3"><div class="font-black text-slate-700 text-sm mb-1"><i class="fa-solid fa-rotate-left text-rose-500 ml-1"></i>הכי הרבה חזרות בתקופה</div>' + rowsHtml + '</div>';
+      '<span class="block text-[11px] text-slate-400 font-bold">' + sub + '</span></span>' +
+      '<span class="shrink-0 text-sm font-black text-rose-600">' + anPctText(r) + '</span>' +
+    '</button>';
+  }).join('');
+  return '<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm mb-3"><div class="font-black text-slate-700 text-sm mb-1"><i class="fa-solid fa-rotate-left text-rose-500 ml-1"></i>הכי הרבה חזרות בתקופה <span class="text-[10px] text-slate-400">· לפי אחוז</span></div>' + rowsHtml + '</div>';
 }
 
 function renderAnalysis() {
