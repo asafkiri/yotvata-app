@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v236 דירוג באחוזים</title>
+    <title>הזמנות יטבתה - v237 סריקה בניתוח</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v236 דירוג באחוזים</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v237 סריקה בניתוח</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -3492,6 +3492,12 @@ function onScanned(val) {
     const b = $('prod_barcode');
     if (b) { b.value = val; syncProductBarcodeDuplicate(true); }
     closeScanner();
+    return;
+  }
+  if (scanPurpose === 'analysis') { // v237: סריקה במסך הניתוח — פגיעה אחת, סוגרים וקופצים למוצר
+    scanBeep(); buzz(40);
+    closeScanner();
+    anApplyScannedCode(val);
     return;
   }
   if (scanPurpose === 'receiving' || scanPurpose === 'returns' || scanPurpose === 'promo') {
@@ -13269,6 +13275,24 @@ async function anLoadData() {
   if (currentView === 'analysis') renderAnalysis();
 }
 
+// v237: ברקוד שנסרק במסך הניתוח — התאמה אחת נכנסת ישר לכרטיס המוצר,
+// כמה התאמות נשארות כרשימת תוצאות, אפס התאמות משאירות את הקוד בתיבה + טוסט.
+function anApplyScannedCode(raw) {
+  const code = normalizeBarcode(raw);
+  if (!code) return 'none';
+  const rowsArr = (anData && anData.rows) || [];
+  const res = anBuildSearchResults(code, rowsArr, products);
+  if (res.length === 1) {
+    anSelectedKey = res[0].key; anQuery = '';
+    renderAnalysis(); window.scrollTo({ top: 0 });
+    return 'picked';
+  }
+  anQuery = code;
+  renderAnalysis();
+  if (!res.length) showToast('לא נמצא: ' + code, null, null, 2600);
+  return res.length ? 'list' : 'none';
+}
+
 function anTsDisp(ts) { try { return new Date(Number(ts) || 0).toLocaleDateString('he-IL'); } catch (e) { return ''; } }
 function anAgoText(ts) {
   const days = Math.floor((Date.now() - (Number(ts) || 0)) / 864e5);
@@ -13404,8 +13428,11 @@ function renderAnalysis() {
     '</div>' +
     (busyHtml || (
       '<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm mb-3">' +
-        '<div class="relative"><i class="fa-solid fa-magnifying-glass absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 text-sm"></i>' +
+        '<div class="flex gap-2">' +
+        '<div class="relative flex-1"><i class="fa-solid fa-magnifying-glass absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 text-sm"></i>' +
         '<input id="anSearch" type="text" value="' + htmlEscape(anQuery) + '" placeholder="חפש מוצר — שם או ספרות מהברקוד" class="w-full border border-slate-200 rounded-xl pr-9 pl-3 py-2.5 text-sm font-bold text-slate-700 outline-none focus:border-blue-500"></div>' +
+        '<button data-role="an-scan" class="btn-tap shrink-0 bg-blue-600 text-white rounded-xl px-4 flex items-center justify-center" aria-label="סרוק ברקוד"><i class="fa-solid fa-barcode text-lg"></i></button>' +
+      '</div>' +
         '<div id="anSearchResults" class="mt-2">' + anSearchResultsHtml() + '</div>' +
       '</div>' +
       anSelectedCardHtml() +
@@ -13689,6 +13716,7 @@ app.addEventListener('click', (e) => {
   }
   if (role === 'an-pick') { anSelectedKey = t.dataset.key || null; anQuery = ''; renderAnalysis(); window.scrollTo({ top: 0 }); return; }
   if (role === 'an-clear') { anSelectedKey = null; renderAnalysis(); return; }
+  if (role === 'an-scan') { scanPurpose = 'analysis'; openScanner(); return; } // v237
   if (role === 'ai-add-photo') { const input = $('aiDocFile_' + (parseInt(t.dataset.doc, 10) || 0)); if (input) input.click(); return; }
   if (role === 'ai-live-cam') { aiOpenLiveCamera(parseInt(t.dataset.doc, 10) || 0); return; }
   if (role === 'ai-review-page') { aiOpenOrientationReview(parseInt(t.dataset.doc, 10) || 0, parseInt(t.dataset.page, 10) || 0, true); if (currentView === 'reconcile') renderReconcile(); return; }
