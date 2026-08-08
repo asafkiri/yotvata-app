@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v237 סריקה בניתוח</title>
+    <title>הזמנות יטבתה - v238 סיבוב לפי עדות</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v237 סריקה בניתוח</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v238 סיבוב לפי עדות</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -8470,15 +8470,20 @@ async function aiScanSingleDocPipeline(token, docIndex) {
     return { payload, doc, pages, score: aiSingleDocScore(doc, inputDoc) };
   };
   const isPerfect = attempt => attempt.score[0] === 1 && attempt.score[1] === 1 && attempt.score[2] === 1;
+  // v238: סיבוב אוטומטי רק על עדות לבעיית כיוון — קריאה שחזרה בלי תוכן שמיש
+  // (תעודה הפוכה/צדדית מניבה כלום). אי-סגירה מול העוגן או חוסר אמיתי אינם
+  // בעיית כיוון, וסיבוב עליהם רק שרף קריאות — ועם הקסקדה, גם קריאות Sol.
+  // ויתור מפורש של השרת ממילא עוצר את הצינור אחרי קריאה אחת (זריקת שגיאה).
+  const looksDisoriented = attempt => attempt.score[2] !== 1;
   let attempts = 1;
   let rotationText = '';
   let best = await runAttempt(inputDoc.pages);
-  if (!isPerfect(best) && AI_SCAN_MAX_AUTO_ROTATION_RETRIES > 0) {
+  if (looksDisoriented(best) && AI_SCAN_MAX_AUTO_ROTATION_RETRIES > 0) {
     const rotatedPlus = await aiBuildRotatedDocuments([{ noteIndex: 0, pages: inputDoc.pages }], [0], 1);
     const second = await runAttempt(rotatedPlus[0].pages);
     attempts = 2;
     if (aiSingleDocScoreBetter(second.score, best.score)) { best = second; rotationText = 'תעודה ' + (docIndex + 1) + ' יושרה אוטומטית ב־90°'; }
-    if (!isPerfect(best) && AI_SCAN_MAX_AUTO_ROTATION_RETRIES > 1) {
+    if (looksDisoriented(best) && AI_SCAN_MAX_AUTO_ROTATION_RETRIES > 1) {
       const bestIsOriginal = best.pages === inputDoc.pages;
       const thirdSource = bestIsOriginal ? inputDoc.pages : best.pages;
       const thirdTurns = bestIsOriginal ? 3 : 2;
