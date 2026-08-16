@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v239 שלט מבצע פנימי</title>
+    <title>הזמנות יטבתה - v240 תיקון ריקון חזרות</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v239 שלט מבצע פנימי</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v240 תיקון ריקון חזרות</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -525,7 +525,9 @@ const avgTimers = {};
 let advanceTimer = null;
 let dragState = null;
 const RETURNS_DRAFT_KEY = 'yt_returns_draft';
+const RETURNS_DRAFT_TS_KEY = 'yt_returns_draft_ts';
 let returnsDraftTimer = null;
+let returnsDraftLocalTs = 0; // v240: מתי המכשיר הזה עדכן את הטיוטה לאחרונה
 
 // ===== מצב קליטת תעודות =====
 let receiptList = [];            // שורות התעודה הנוכחית: {productId,name,barcode,qty}
@@ -759,14 +761,30 @@ function restoreDraft() {
   draftReady = true;
 }
 function saveReturnsDraft() {
-  try { localStorage.setItem(RETURNS_DRAFT_KEY, JSON.stringify(returnsList)); } catch (e) {}
+  returnsDraftLocalTs = Date.now();
+  try { localStorage.setItem(RETURNS_DRAFT_KEY, JSON.stringify(returnsList)); localStorage.setItem(RETURNS_DRAFT_TS_KEY, String(returnsDraftLocalTs)); } catch (e) {}
   if (!db) return;
   clearTimeout(returnsDraftTimer);
   returnsDraftTimer = setTimeout(() => {
-    runCloudTaskSilent('save returns draft', { op: 'set', path: dataPath('drafts', 'returns'), data: { items: returnsList, updatedAt: Date.now() }, merge: true, operationId: 'returns_draft' });
+    returnsDraftTimer = null;
+    runCloudTaskSilent('save returns draft', { op: 'set', path: dataPath('drafts', 'returns'), data: { items: returnsList, updatedAt: returnsDraftLocalTs }, merge: true, operationId: 'returns_draft' });
   }, 700);
 }
-function restoreReturnsDraft() { try { const s = localStorage.getItem(RETURNS_DRAFT_KEY); if (s) { const a = JSON.parse(s); if (Array.isArray(a)) returnsList = a; } } catch (e) {} }
+// v240: כתיבה מיידית של הטיוטה לענן — בלי להמתין לטיימר. חיוני לפני מעבר לוואטסאפ,
+// כי iOS עלול להרוג את האפליקציה ברקע והטיימר של 700ms לא ירוץ לעולם.
+async function flushReturnsDraftToCloudNow(actionName) {
+  clearTimeout(returnsDraftTimer);
+  returnsDraftTimer = null;
+  if (!db) return false;
+  return runCloudTaskSilent(actionName || 'save returns draft', { op: 'set', path: dataPath('drafts', 'returns'), data: { items: returnsList, updatedAt: returnsDraftLocalTs || Date.now() }, merge: true, operationId: 'returns_draft' });
+}
+// v240: מעבר לרקע (נעילת מסך, החלפת אפליקציה) בזמן שכתיבת הטיוטה עוד ממתינה לטיימר —
+// כותבים מיד. אחרת המחיקה/העריכה האחרונה לא מגיעה לענן, והמכשיר השני ממשיך להציג רשימה ישנה.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && returnsDraftTimer) flushReturnsDraftToCloudNow('save returns draft');
+});
+window.addEventListener('pagehide', () => { if (returnsDraftTimer) flushReturnsDraftToCloudNow('save returns draft'); });
+function restoreReturnsDraft() { try { const s = localStorage.getItem(RETURNS_DRAFT_KEY); if (s) { const a = JSON.parse(s); if (Array.isArray(a)) returnsList = a; } returnsDraftLocalTs = Number(localStorage.getItem(RETURNS_DRAFT_TS_KEY)) || 0; } catch (e) {} }
 function parseNoteVal(v) {
   let s = (v || '').toString().trim().replace(/\s/g, '').replace(/[^0-9.,]/g, '');
   if (!s) return null;
@@ -990,8 +1008,13 @@ function startListeners() {
     if (!d || !Array.isArray(d.items)) return;
     const incoming = JSON.stringify(d.items);
     if (incoming === JSON.stringify(returnsList)) return;
+    // v240: טיוטת ענן ישנה לא דורסת מצב מקומי חדש יותר — למשל אחרי "סיים חזרות",
+    // כשהרשימה רוקנה מקומית אבל הכתיבה לענן לא הספיקה לפני המעבר לוואטסאפ.
+    // במקרה כזה דוחפים את המצב המקומי לענן במקום לשחזר ממנו רשימה ישנה.
+    if (Number(d.updatedAt) && returnsDraftLocalTs && Number(d.updatedAt) < returnsDraftLocalTs) { saveReturnsDraft(); return; }
     returnsList = d.items;
-    try { localStorage.setItem(RETURNS_DRAFT_KEY, incoming); } catch (e) {}
+    returnsDraftLocalTs = Number(d.updatedAt) || Date.now();
+    try { localStorage.setItem(RETURNS_DRAFT_KEY, incoming); localStorage.setItem(RETURNS_DRAFT_TS_KEY, String(returnsDraftLocalTs)); } catch (e) {}
     if (currentView === 'returns' && !isDragging) {
       const a = document.activeElement;
       if (!(a && app.contains(a) && (a.tagName === 'INPUT' || a.tagName === 'SELECT'))) refreshReturnsList();
@@ -3300,6 +3323,9 @@ async function performSend(contact) {
     const msg = buildReturnsMessage(items, note);
     const url = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg);
     returnsList = []; saveReturnsDraft();
+    // v240: ריקון הטיוטה בענן חייב לקרות לפני המעבר לוואטסאפ — הטיימר המושהה
+    // לא שורד את היציאה מהאפליקציה, והטיוטה הישנה בענן החזירה את הרשימה.
+    await flushReturnsDraftToCloudNow('clear returns draft after send');
     sendCtx = null; hideSend(); setView('returnsHistory'); window.location.href = url;
     return;
   }
