@@ -766,6 +766,7 @@ function saveReturnsDraft() {
   if (!db) return;
   clearTimeout(returnsDraftTimer);
   returnsDraftTimer = setTimeout(() => {
+    returnsDraftTimer = null;
     runCloudTaskSilent('save returns draft', { op: 'set', path: dataPath('drafts', 'returns'), data: { items: returnsList, updatedAt: returnsDraftLocalTs }, merge: true, operationId: 'returns_draft' });
   }, 700);
 }
@@ -777,6 +778,12 @@ async function flushReturnsDraftToCloudNow(actionName) {
   if (!db) return false;
   return runCloudTaskSilent(actionName || 'save returns draft', { op: 'set', path: dataPath('drafts', 'returns'), data: { items: returnsList, updatedAt: returnsDraftLocalTs || Date.now() }, merge: true, operationId: 'returns_draft' });
 }
+// v240: מעבר לרקע (נעילת מסך, החלפת אפליקציה) בזמן שכתיבת הטיוטה עוד ממתינה לטיימר —
+// כותבים מיד. אחרת המחיקה/העריכה האחרונה לא מגיעה לענן, והמכשיר השני ממשיך להציג רשימה ישנה.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && returnsDraftTimer) flushReturnsDraftToCloudNow('save returns draft');
+});
+window.addEventListener('pagehide', () => { if (returnsDraftTimer) flushReturnsDraftToCloudNow('save returns draft'); });
 function restoreReturnsDraft() { try { const s = localStorage.getItem(RETURNS_DRAFT_KEY); if (s) { const a = JSON.parse(s); if (Array.isArray(a)) returnsList = a; } returnsDraftLocalTs = Number(localStorage.getItem(RETURNS_DRAFT_TS_KEY)) || 0; } catch (e) {} }
 function parseNoteVal(v) {
   let s = (v || '').toString().trim().replace(/\s/g, '').replace(/[^0-9.,]/g, '');
