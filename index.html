@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v242 תיקון סמן ברקוד</title>
+    <title>הזמנות יטבתה - v243 מחיר קופה בקליטה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v242 תיקון סמן ברקוד</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v243 מחיר קופה בקליטה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -301,6 +301,7 @@
         <div class="p-5 text-center">
           <div class="flex items-center justify-center gap-2 mb-1"><i class="fa-solid fa-cubes text-blue-600 text-xl"></i><h3 class="font-black text-lg text-slate-800">כמות</h3></div>
           <p id="qtyName" class="text-slate-700 font-bold text-sm"></p>
+          <div id="qtyPosPrice" class="hidden mt-1.5"></div>
           <p id="qtyRecommended" class="hidden text-[11px] text-emerald-700 font-black mt-1"></p>
           <div id="qtyExisting" class="hidden"></div>
           <div id="qtyPackOffer" class="hidden"></div>
@@ -4265,6 +4266,18 @@ function promptQty(p, target) {
   qtyProduct = p; qtyTarget = target || 'receipt';
   closeScanner();
   $('qtyName').textContent = p.name;
+  // v243: מחיר הקופה מוצג גדול ובולט בקליטה — זו התשובה ל"כמה זה עובר בקופה"
+  // בלי לגשת לקופה. המומלץ למדף נשאר קטן מתחתיו.
+  const posEl = $('qtyPosPrice');
+  if (posEl) {
+    if (qtyTarget === 'receipt' && p.posPrice != null) {
+      posEl.innerHTML = '<div class="text-3xl font-black text-sky-700"><i class="fa-solid fa-cash-register text-xl"></i> בקופה: ₪' + fmtMoney(p.posPrice) + '</div>';
+      posEl.classList.remove('hidden');
+    } else if (qtyTarget === 'receipt') {
+      posEl.innerHTML = '<div class="text-[11px] font-black text-amber-600"><i class="fa-solid fa-triangle-exclamation"></i> אין מחיר קופה — בדוק בקופה ועדכן במסך המחירים</div>';
+      posEl.classList.remove('hidden');
+    } else { posEl.innerHTML = ''; posEl.classList.add('hidden'); }
+  }
   const recEl = $('qtyRecommended');
   const shelfRec = qtyTarget === 'receipt' ? shelfRecommendedPrice(p) : null;
   if (recEl) {
@@ -4482,6 +4495,12 @@ function buildReceiptRow(it) {
   const unit = p ? effectivePrice(p, it.qty, day) : 0;
   const shelfRec = shelfRecommendedPrice(p);
   const shelfRecTag = shelfRec != null ? '<span class="font-bold text-emerald-700">· מומלץ: ₪' + fmtMoney(shelfRec) + '</span>' : '';
+  // v243: מחיר הקופה בולט בשורת המוצר שנקלט; המומלץ נשאר קטן בשורת הפרטים
+  const posLine = p
+    ? (p.posPrice != null
+      ? '<div class="text-base font-black text-sky-700 mt-0.5"><i class="fa-solid fa-cash-register text-xs"></i> בקופה: ₪' + fmtMoney(p.posPrice) + '</div>'
+      : '<div class="text-[11px] font-black text-amber-600 mt-0.5"><i class="fa-solid fa-triangle-exclamation"></i> אין מחיר קופה — בדוק בקופה ועדכן</div>')
+    : '';
   const pr = p ? promoForProduct(p.id, day) : null;
   const active = promoActive(pr, day);
   const triggered = promoTriggered(pr, day);
@@ -4493,6 +4512,7 @@ function buildReceiptRow(it) {
     '<div class="flex items-start gap-2">' +
       '<div class="flex-1 min-w-0">' +
         '<div class="font-black text-slate-800 truncate">' + (it.name || (p ? p.name : '')) + '</div>' +
+        posLine +
         '<div class="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1.5 flex-wrap">' +
           '<span><i class="fa-solid fa-barcode"></i> ' + (it.barcode || 'ללא ברקוד') + '</span>' +
           '<span>· ₪' + fmtUnitPrice(unit, triggered) + ' ליח׳</span>' +
