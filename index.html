@@ -363,6 +363,9 @@
             <label class="text-[11px] text-slate-400 font-bold block mb-1">מחיר קנייה ליחידה (ללא מע״מ) *</label>
             <div class="flex items-center gap-2"><span class="text-slate-400 font-bold text-lg">₪</span><input id="prod_price" type="text" inputmode="decimal" class="flex-1 p-3 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-blue-500" placeholder="0.00"></div>
             <div id="prod_recHint" class="hidden text-[11px] font-black text-emerald-700 text-center mt-2"></div>
+            <label class="text-[11px] text-slate-400 font-bold block mb-1 mt-3">מחיר בקופה (כולל מע״מ) — המחיר המקודד על המוצר</label>
+            <div class="flex items-center gap-2"><span class="text-slate-400 font-bold text-lg">₪</span><input id="prod_posPrice" type="text" inputmode="decimal" class="flex-1 p-3 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-sky-500" placeholder="ריק = לא ידוע, בדוק בקופה"></div>
+            <div class="text-[10px] text-slate-400 font-bold mt-1">מתעדכן אוטומטית מהעלאת דוח שינוי מחירים במסך המחירים.</div>
             <details id="prod_cartonCalc" class="mt-3 bg-slate-50 rounded-xl border border-slate-100">
               <summary class="p-2.5 flex items-center justify-between text-[11px] text-slate-600 font-black"><span><i class="fa-solid fa-calculator"></i> יש לי מחיר של ארגז</span><i class="fa-solid fa-chevron-down hist-chevron"></i></summary>
               <div class="px-2.5 pb-2.5">
@@ -620,6 +623,8 @@ let promoUnitMode = 'unit'; // יחידת סף המבצע: 'unit' | 'carton'
 let promos = [], promoEdit = null, promoSearch = ''; // מבצעי סל
 let promoType = 'receipt'; // סוג מבצע בעורך: 'receipt' (בתעודה) | 'monthEnd' (מרכזת)
 const priceTimers = {};
+const posPriceTimers = {}; // v241: דיליי שמירה למחיר קופה, נפרד ממחיר הקנייה
+let posMissingOnly = false; // v241: סינון "רק מוצרים ללא מחיר קופה" במסך המחירים
 const pendingUnitIntents = {};
 
 const $ = (id) => document.getElementById(id);
@@ -1441,17 +1446,19 @@ function adminClickActionName(role) {
     'rc-fix-open': 'תיקון תעודה מההיסטוריה', 'rc-fix-save': 'שמירת תיקון תעודה', 'pcat-add': 'עריכת קטגוריות רווחיות', 'pcat-up': 'עריכת קטגוריות רווחיות',
     'pcat-round-mode': 'שינוי שיטת המחיר המומלץ',
     'pcat-down': 'עריכת קטגוריות רווחיות', 'pcat-del': 'מחיקת קטגוריה רווחית', 'promo-new': 'יצירת מבצע', 'pe-save': 'שמירת מבצע', 'pe-delete': 'מחיקת מבצע',
-    'trash-delete': 'מחיקה לצמיתות מסל מחזור', 'trash-clear': 'ריקון סל מחזור', 'trash-restore': 'שחזור מסל מחזור', 'del-receipt': 'מחיקת תעודה', 'backup-import-confirm': 'ייבוא גיבוי מלא'
+    'trash-delete': 'מחיקה לצמיתות מסל מחזור', 'trash-clear': 'ריקון סל מחזור', 'trash-restore': 'שחזור מסל מחזור', 'del-receipt': 'מחיקת תעודה', 'backup-import-confirm': 'ייבוא גיבוי מלא',
+    'pos-import-apply': 'עדכון מחירי קופה מדוח'
   };
   return map[role] || 'פעולה זו דורשת מנהל';
 }
-const ADMIN_CLICK_ROLES = new Set(['cfg-save','add-product','del-product','toggle-hidden','sync-local-units','del-contact','clear-history','clear-returns-history','clear-receipts','rc-fix-open','rc-fix-save','pcat-round-mode','pcat-add','pcat-up','pcat-down','pcat-del','promo-new','pe-save','pe-delete','trash-delete','trash-clear','trash-restore','del-receipt','backup-import-confirm','rc-credit-verify','rc-credit-cancel','rc-credit-defer','rc-credit-offset','rc-supplier-verify-open','rc-supplier-defer-open']);
-const ADMIN_INPUT_ROLES = new Set(['price-set','pcat-name','pcat-pct','cat-set','avg','avg-set','box-set']);
+const ADMIN_CLICK_ROLES = new Set(['cfg-save','add-product','del-product','toggle-hidden','sync-local-units','del-contact','clear-history','clear-returns-history','clear-receipts','rc-fix-open','rc-fix-save','pcat-round-mode','pcat-add','pcat-up','pcat-down','pcat-del','promo-new','pe-save','pe-delete','trash-delete','trash-clear','trash-restore','del-receipt','backup-import-confirm','pos-import-apply','rc-credit-verify','rc-credit-cancel','rc-credit-defer','rc-credit-offset','rc-supplier-verify-open','rc-supplier-defer-open']);
+const ADMIN_INPUT_ROLES = new Set(['price-set','pos-set','pcat-name','pcat-pct','cat-set','avg','avg-set','box-set']);
 function restoreLockedAdminInput(t) {
   const role = t && t.getAttribute && t.getAttribute('data-role');
   if (!role) return;
   const id = t.dataset && t.dataset.id;
   if (role === 'price-set') { const p = products.find(x => x.id === id); if (p) t.value = (p.price != null ? p.price : ''); }
+  else if (role === 'pos-set') { const p = products.find(x => x.id === id); if (p) t.value = (p.posPrice != null ? p.posPrice : ''); }
   else if (role === 'avg' || role === 'avg-set') { const p = products.find(x => x.id === id); if (p) t.value = (p.average || ''); }
   else if (role === 'box-set') { const p = products.find(x => x.id === id); if (p) t.value = (p.boxSize || ''); }
   else if (role === 'cat-set') { const p = products.find(x => x.id === id); if (p) t.value = p.category || ''; }
@@ -1805,13 +1812,14 @@ function actionDetailsFromCloud(actionName, task) {
   return '';
 }
 function shouldLogSilentCloudAction(actionName) {
-  return ['save product price','save price from reconcile','save average','save box size','save product category','save default unit','save pricing categories'].includes(actionName);
+  return ['save product price','save pos price','save price from reconcile','save average','save box size','save product category','save default unit','save pricing categories'].includes(actionName);
 }
 function silentActionDetails(actionName, task) {
   const d = (task && task.data) || {};
   const id = task && task.path ? task.path[task.path.length - 1] : '';
   const p = products.find(x => x.id === id);
   if (actionName === 'save product price' || actionName === 'save price from reconcile') return (p ? p.name + ' · ' : '') + 'מחיר: ' + (d.price == null ? 'ריק' : '₪' + fmtMoney(d.price));
+  if (actionName === 'save pos price') return (p ? p.name + ' · ' : '') + 'מחיר קופה: ' + (d.posPrice == null ? 'ריק' : '₪' + fmtMoney(d.posPrice));
   if (actionName === 'save average') return (p ? p.name + ' · ' : '') + 'מומלץ: ' + (d.average || 0);
   if (actionName === 'save box size') return (p ? p.name + ' · ' : '') + 'יח׳ בארגז: ' + (d.boxSize || 0);
   if (actionName === 'save product category') return (p ? p.name + ' · ' : '') + 'קטגוריה עודכנה';
@@ -1837,8 +1845,8 @@ function logCloudActionIfNeeded(actionName, task) {
 }
 function logSilentCloudActionIfNeeded(actionName, task) {
   if (!shouldLogSilentCloudAction(actionName)) return;
-  const type = (actionName === 'save product price' || actionName === 'save price from reconcile') ? 'price' : 'product';
-  const titleMap = { 'save product price': 'שינוי מחיר מוצר', 'save price from reconcile': 'שינוי מחיר מהשוואת תעודה', 'save average': 'שינוי כמות מומלצת', 'save box size': 'שינוי יחידות בארגז', 'save product category': 'שינוי קטגוריית מוצר', 'save default unit': 'שינוי ארגז/יחידה', 'save pricing categories': 'שינוי קטגוריות רווחיות' };
+  const type = (actionName === 'save product price' || actionName === 'save pos price' || actionName === 'save price from reconcile') ? 'price' : 'product';
+  const titleMap = { 'save product price': 'שינוי מחיר מוצר', 'save pos price': 'שינוי מחיר קופה', 'save price from reconcile': 'שינוי מחיר מהשוואת תעודה', 'save average': 'שינוי כמות מומלצת', 'save box size': 'שינוי יחידות בארגז', 'save product category': 'שינוי קטגוריית מוצר', 'save default unit': 'שינוי ארגז/יחידה', 'save pricing categories': 'שינוי קטגוריות רווחיות' };
   logAction(type, titleMap[actionName] || 'שינוי מוצר', silentActionDetails(actionName, task), { actionName, operationId: task && task.operationId });
 }
 
@@ -11719,6 +11727,14 @@ function priceRowHtml(p) {
         : '<span class="text-[10px] text-slate-300 font-bold">' + (cat ? ((Number(cat.pct) || 0) === 0 ? 'מחיר מפוקח — ללא המלצה' : 'הזן מחיר עלות') : 'שייך קטגוריה למחיר מומלץ') + '</span>') +
       '</div>'
     : '');
+  // v241: מחיר הקופה (כולל מע״מ) לצד כל מוצר. שדה ריק מסומן בכתום —
+  // תזכורת לבדוק את המחיר בקופה ולעדכן, עד שכל המאגר יתמלא.
+  const posLine = '<div class="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-slate-100">' +
+    (p.posPrice != null
+      ? '<span class="text-[11px] font-black text-sky-700"><i class="fa-solid fa-cash-register"></i> בקופה (כולל מע״מ)</span>'
+      : '<span class="text-[11px] font-black text-amber-600"><i class="fa-solid fa-triangle-exclamation"></i> בדוק את המחיר בקופה ועדכן</span>') +
+    '<div class="shrink-0 flex items-center gap-1"><span class="text-slate-400 text-sm font-bold">₪</span><input data-role="pos-set" data-id="' + p.id + '" type="text" inputmode="decimal" value="' + (p.posPrice != null ? p.posPrice : '') + '" placeholder="0.00" class="w-20 h-8 text-center font-black border-2 ' + (p.posPrice != null ? 'border-slate-200' : 'border-amber-300 bg-amber-50') + ' rounded-lg outline-none focus:border-sky-500"></div>' +
+  '</div>';
   return '<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm" data-id="' + p.id + '">' +
     '<div class="flex items-center gap-2">' +
       '<button data-role="edit-prod" data-id="' + p.id + '" class="btn-tap flex-1 min-w-0 text-right">' +
@@ -11734,6 +11750,7 @@ function priceRowHtml(p) {
         '</div>'
       : '') +
     recLine +
+    posLine +
   '</div>';
 }
 // ===== מחיר מומלץ לפי קטגוריות רווחיות =====
@@ -11821,6 +11838,7 @@ function renderPrices() {
       '<button data-role="pr-new" class="btn-tap bg-emerald-600 text-white rounded-2xl py-3.5 px-2 font-black text-sm flex items-center justify-center gap-2"><i class="fa-solid fa-plus text-lg"></i> מוצר חדש</button>' +
       '<button data-role="pr-scan" class="btn-tap bg-blue-600 text-white rounded-2xl py-3.5 px-2 font-black text-sm flex items-center justify-center gap-2"><i class="fa-solid fa-barcode text-lg"></i> סרוק מוצר</button>' +
     '</div>' +
+    posImportCardHtml() +
     '<div class="relative mb-3"><i class="fa-solid fa-magnifying-glass absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i><input id="priceSearch" type="text" inputmode="search" autocomplete="off" value="' + (priceQuery || '').replace(/"/g, '&quot;') + '" placeholder="חפש לפי שם או ברקוד..." class="w-full bg-white border border-slate-200 rounded-xl py-3 pr-9 pl-3 text-sm font-bold outline-none focus:border-blue-500"></div>' +
     '<div id="pricesListEl" class="space-y-2.5 pb-24"></div>';
   refreshPricesList(priceQuery);
@@ -11829,6 +11847,7 @@ function refreshPricesList(q) {
   const box = $('pricesListEl'); if (!box) return;
   q = (q || '').trim();
   let list = products.slice().sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+  if (posMissingOnly) list = list.filter(p => p.posPrice == null);
   if (q) list = list.filter(p => (p.name || '').includes(q) || (p.barcode || '').includes(q));
   let head = '';
   if (q && /^\d{6,}$/.test(normalizeBarcode(q)) && !findProductByBarcode(q)) {
@@ -11843,6 +11862,206 @@ function savePrice(id, val) {
   const p = products.find(x => x.id === id); if (p) p.price = price;
   clearTimeout(priceTimers[id]);
   priceTimers[id] = setTimeout(() => { if (db) runCloudTaskSilent('save product price', { op: 'update', path: dataPath('products', id), data: { price }, operationId: makeOperationId('price') }); }, 600);
+}
+function savePosPrice(id, val) {
+  const raw = (val || '').toString().replace(',', '.');
+  const num = parseFloat(raw);
+  const posPrice = (raw.trim() === '') ? null : (num >= 0 ? r2(num) : null);
+  const p = products.find(x => x.id === id); if (!p) return;
+  p.posPrice = posPrice;
+  p.posPriceAt = Date.now();
+  clearTimeout(posPriceTimers[id]);
+  posPriceTimers[id] = setTimeout(() => { if (db) runCloudTaskSilent('save pos price', { op: 'update', path: dataPath('products', id), data: { posPrice, posPriceAt: p.posPriceAt }, operationId: makeOperationId('pos') }); }, 600);
+}
+
+// ===== v241: מחירי קופה — ייבוא דוח שינוי מחירים (Price_Log_Change) =====
+// הדוח מהקופה הוא PDF טקסטואלי (Jasper), ולכן נקרא מקומית בדפדפן עם pdf.js —
+// בלי שרת ובלי AI. הפענוח לפי קואורדינטות עמודות מכותרת הטבלה, כך ששבירת
+// שורות בשמות ובברקודים אינה מפריעה.
+let posImport = null; // { stage:'reading'|'summary'|'error'|'done', ... }
+let pdfjsLibPromise = null;
+function loadPdfJs() {
+  if (!pdfjsLibPromise) {
+    pdfjsLibPromise = import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.6.82/pdf.min.mjs').then(lib => {
+      lib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.6.82/pdf.worker.min.mjs';
+      return lib;
+    }).catch(err => { pdfjsLibPromise = null; throw new Error('טעינת קורא ה-PDF נכשלה — בדוק חיבור אינטרנט ונסה שוב'); });
+  }
+  return pdfjsLibPromise;
+}
+async function posImportReadPdf(file) {
+  const lib = await loadPdfJs();
+  const buf = await file.arrayBuffer();
+  const pdf = await lib.getDocument({ data: buf }).promise;
+  const pages = [];
+  for (let n = 1; n <= pdf.numPages; n++) {
+    const page = await pdf.getPage(n);
+    const tc = await page.getTextContent();
+    pages.push(tc.items.map(it => ({ s: it.str, x: it.transform[4], y: it.transform[5] })));
+  }
+  return pages;
+}
+function parsePriceChangeReport(pages) {
+  const entries = [];
+  let rowCount = 0;
+  let headerFound = false;
+  pages.forEach(items => {
+    const clean = items.filter(it => it.s && it.s.trim());
+    // עוגני עמודות מכותרת הטבלה — כל עמוד מחזיק כותרת משלו
+    const hNew = clean.find(it => it.s.trim() === 'ערך חדש');
+    const hOld = clean.find(it => it.s.trim() === 'ערך ישן');
+    const hBarcode = clean.find(it => it.s.trim() === 'ברקוד');
+    const hDesc = clean.find(it => it.s.trim() === 'תיאור');
+    if (!hNew || !hOld || !hBarcode) return;
+    headerFound = true;
+    const headerY = hBarcode.y;
+    // עוגן שורה: תאריך+שעה של השינוי (dd/mm/yy hh:mm)
+    const anchors = clean
+      .filter(it => it.y < headerY - 3 && /^\d{2}\/\d{2}\/\d{2}\s+\d{2}:\d{2}$/.test(it.s.trim()))
+      .sort((a, b) => b.y - a.y);
+    const colDist = (it, header) => Math.abs(it.x - header.x);
+    anchors.forEach((anchor, i) => {
+      rowCount++;
+      // תחום השורה: אמצע הדרך אל העוגן הקודם/הבא (או הכותרת/תחתית העמוד)
+      const top = i === 0 ? headerY - 3 : (anchors[i - 1].y + anchor.y) / 2;
+      const bottom = i === anchors.length - 1 ? anchor.y - 30 : (anchor.y + anchors[i + 1].y) / 2;
+      const rowItems = clean.filter(it => it.y < top && it.y > bottom && it !== anchor);
+      const priceLike = it => /^\d{1,5}(?:\.\d{1,2})?$/.test(it.s.trim());
+      const nearAnchor = it => Math.abs(it.y - anchor.y) <= 4;
+      // מחיר חדש/ישן: הפריט המספרי בגובה העוגן שהכי קרוב לעמודת הכותרת שלו
+      const pickPrice = header => rowItems
+        .filter(it => priceLike(it) && nearAnchor(it) && colDist(it, header) < 22)
+        .sort((a, b) => colDist(a, header) - colDist(b, header))[0] || null;
+      const newIt = pickPrice(hNew);
+      const oldIt = pickPrice(hOld);
+      // ברקוד: רצפי ספרות בעמודת הברקוד, מלמעלה למטה, מחוברים לרצף אחד
+      const barcode = rowItems
+        .filter(it => /^\d{2,}$/.test(it.s.trim()) && colDist(it, hBarcode) < 15)
+        .sort((a, b) => b.y - a.y)
+        .map(it => it.s.trim())
+        .join('');
+      // תיאור — לתצוגה בלבד (ברקודים שלא נמצאו במאגר)
+      const name = hDesc ? rowItems
+        .filter(it => !priceLike(it) && Math.abs(it.x - hDesc.x) < 20 && colDist(it, hBarcode) >= 15)
+        .sort((a, b) => b.y - a.y)
+        .map(it => it.s.trim())
+        .join(' ') : '';
+      const m = anchor.s.trim().match(/^(\d{2})\/(\d{2})\/(\d{2})\s+(\d{2}):(\d{2})$/);
+      const at = m ? new Date(2000 + (+m[3]), (+m[2]) - 1, +m[1], +m[4], +m[5]).getTime() : 0;
+      if (!newIt || !/^\d{6,14}$/.test(barcode) || !(at > 0)) return;
+      const newPrice = r2(parseFloat(newIt.s));
+      if (!(newPrice > 0)) return;
+      entries.push({ barcode, name, newPrice, oldPrice: oldIt ? r2(parseFloat(oldIt.s)) : null, at });
+    });
+  });
+  // שורה אחרונה מנצחת: לכל ברקוד נשמר רק השינוי עם התאריך המאוחר ביותר
+  const byBarcode = new Map();
+  entries.forEach(e => {
+    const prev = byBarcode.get(normalizeBarcode(e.barcode));
+    if (!prev || e.at > prev.at) byBarcode.set(normalizeBarcode(e.barcode), e);
+  });
+  return { headerFound, rowCount, entries: Array.from(byBarcode.values()) };
+}
+function posImportClassify(entries) {
+  const updates = [], unmatched = [], unchanged = [], skippedOld = [];
+  entries.forEach(e => {
+    const p = findProductByBarcode(e.barcode, null);
+    if (!p) { unmatched.push(e); return; }
+    // עדכון ידני/דוח שנעשה אחרי מועד השינוי שבדוח — הדוח הישן לא דורס אותו
+    if (p.posPrice != null && Number(p.posPriceAt) > e.at) { skippedOld.push({ entry: e, product: p }); return; }
+    if (p.posPrice != null && r2(p.posPrice) === r2(e.newPrice)) { unchanged.push({ entry: e, product: p }); return; }
+    updates.push({ entry: e, product: p });
+  });
+  return { updates, unmatched, unchanged, skippedOld };
+}
+async function posImportStart(file) {
+  if (!file) return;
+  posImport = { stage: 'reading', fileName: file.name || '' };
+  if (currentView === 'prices') renderPrices();
+  try {
+    if (file.size > 20 * 1024 * 1024) throw new Error('קובץ ה-PDF גדול מדי (מעל 20MB)');
+    const pages = await posImportReadPdf(file);
+    const parsed = parsePriceChangeReport(pages);
+    if (!parsed.headerFound) throw new Error('הקובץ לא זוהה כדוח שינוי מחירים מהקופה (לא נמצאו עמודות "ערך חדש"/"ערך ישן"/"ברקוד")');
+    if (!parsed.entries.length) throw new Error('לא נמצאו שורות שינוי מחיר בדוח');
+    Object.assign(posImport, { stage: 'summary', rowCount: parsed.rowCount }, posImportClassify(parsed.entries));
+  } catch (e) {
+    console.error('pos import failed', e);
+    posImport = { stage: 'error', error: (e && e.message) || 'קריאת הדוח נכשלה' };
+  }
+  if (currentView === 'prices') renderPrices();
+}
+function posImportPick() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'application/pdf,.pdf';
+  input.onchange = () => posImportStart(input.files && input.files[0]);
+  input.click();
+}
+async function posImportApply() {
+  if (!posImport || posImport.stage !== 'summary' || posImport.busy) return;
+  if (!db) { showToast('אין חיבור לענן — אי אפשר לעדכן מחירים כרגע', null, null, 3500); return; }
+  posImport.busy = true;
+  if (currentView === 'prices') renderPrices();
+  try {
+    let batch = writeBatch(db), n = 0;
+    for (const u of posImport.updates) {
+      batch.update(doc(db, ...dataPath('products', u.product.id)), { posPrice: u.entry.newPrice, posPriceAt: u.entry.at });
+      if (++n >= 400) { await batch.commit(); batch = writeBatch(db); n = 0; }
+    }
+    if (n) await batch.commit();
+    posImport.updates.forEach(u => { u.product.posPrice = u.entry.newPrice; u.product.posPriceAt = u.entry.at; });
+    logAction('price', 'עדכון מחירי קופה מדוח', posImport.updates.length + ' מחירי קופה עודכנו מדוח שינוי מחירים' + (posImport.unmatched.length ? ' · ' + posImport.unmatched.length + ' ברקודים ללא מוצר במאגר' : ''), { updated: posImport.updates.length, unmatched: posImport.unmatched.length, fileName: posImport.fileName || '' });
+    showToast(posImport.updates.length + ' מחירי קופה עודכנו ✓', null, null, 3200);
+    posImport.stage = 'done';
+  } catch (e) {
+    console.error('pos import apply failed', e);
+    showToast('עדכון המחירים נכשל — בדוק חיבור ונסה שוב', null, null, 4000);
+  }
+  posImport.busy = false;
+  if (currentView === 'prices') renderPrices();
+}
+function posImportCardHtml() {
+  const missingCount = products.filter(p => p.posPrice == null).length;
+  const filterChip = missingCount
+    ? '<button data-role="pos-missing-filter" class="btn-tap w-full rounded-xl py-2 font-black text-xs mt-2 ' + (posMissingOnly ? 'bg-amber-500 text-white' : 'bg-amber-50 text-amber-800 border border-amber-200') + '"><i class="fa-solid fa-filter"></i> ' + missingCount + ' מוצרים ללא מחיר קופה — ' + (posMissingOnly ? 'הצג את כולם' : 'הצג רק אותם') + '</button>'
+    : '';
+  const pickBtn = '<button data-role="pos-import-pick" class="btn-tap w-full bg-sky-600 text-white rounded-xl py-2.5 font-black text-sm"><i class="fa-solid fa-file-arrow-up"></i> העלה דוח שינוי מחירים (PDF)</button>';
+  if (!posImport) {
+    return '<div class="bg-white border-2 border-sky-200 rounded-2xl p-3 shadow-sm mb-3">' +
+      '<div class="font-black text-sm text-slate-800 mb-1"><i class="fa-solid fa-cash-register text-sky-600"></i> מחירי קופה</div>' +
+      '<div class="text-[11px] text-slate-400 font-bold mb-2">דוח שינוי מחירים מהקופה מעדכן כאן את המחירים לבד — לפי ברקוד, השינוי האחרון מנצח.</div>' +
+      pickBtn + filterChip + '</div>';
+  }
+  const st = posImport;
+  if (st.stage === 'reading') {
+    return '<div class="rounded-2xl border-2 border-sky-200 bg-sky-50 p-3 text-center mb-3"><i class="fa-solid fa-spinner fa-spin text-sky-600"></i> <span class="font-black text-sky-800 text-sm">קורא את הדוח…</span></div>';
+  }
+  if (st.stage === 'error') {
+    return '<div class="rounded-2xl border-2 border-rose-200 bg-rose-50 p-3 mb-3"><div class="font-black text-rose-700 text-sm">' + htmlEscape(st.error) + '</div>' +
+      '<div class="flex gap-2 mt-2"><button data-role="pos-import-pick" class="btn-tap flex-1 bg-sky-600 text-white rounded-xl py-2 font-black text-xs">נסה קובץ אחר</button>' +
+      '<button data-role="pos-import-close" class="btn-tap flex-1 bg-white border border-slate-300 text-slate-600 rounded-xl py-2 font-black text-xs">סגור</button></div></div>';
+  }
+  if (st.stage === 'done') {
+    return '<div class="rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-3 mb-3"><div class="font-black text-emerald-800 text-sm"><i class="fa-solid fa-circle-check"></i> ' + st.updates.length + ' מחירי קופה עודכנו מהדוח</div>' +
+      (st.unmatched.length ? '<div class="text-[11px] font-bold text-amber-800 mt-1">' + st.unmatched.length + ' ברקודים מהדוח אינם במאגר — פתח אותם כמוצרים והעלה את הדוח שוב.</div>' : '') +
+      '<button data-role="pos-import-close" class="btn-tap w-full bg-white border border-slate-300 text-slate-600 rounded-xl py-2 font-black text-xs mt-2">סגור</button></div>';
+  }
+  // summary — אישור לפני עדכון
+  const unmatchedRows = st.unmatched.slice(0, 20).map(e =>
+    '<div class="flex items-center justify-between gap-2 border-b border-slate-100 py-1 text-[11px] font-bold text-slate-600"><span class="min-w-0 truncate">' + htmlEscape(e.name || 'ללא שם') + '</span><span class="shrink-0 text-slate-400">' + htmlEscape(e.barcode) + ' · ₪' + fmtMoney(e.newPrice) + '</span></div>'
+  ).join('') + (st.unmatched.length > 20 ? '<div class="text-[10px] text-slate-400 font-bold pt-1">ועוד ' + (st.unmatched.length - 20) + '…</div>' : '');
+  return '<div class="rounded-2xl border-2 border-sky-300 bg-white p-3 mb-3">' +
+    '<div class="font-black text-sky-900"><i class="fa-solid fa-file-import"></i> סיכום הדוח — לאישור לפני עדכון</div>' +
+    '<div class="text-[11px] font-bold text-slate-500 mt-0.5">' + st.rowCount + ' שורות בדוח · לכל ברקוד נלקח השינוי האחרון</div>' +
+    '<div class="mt-2 space-y-1 text-xs font-black">' +
+      '<div class="text-emerald-700">' + st.updates.length + ' מחירים יעודכנו</div>' +
+      (st.unchanged.length ? '<div class="text-slate-400">' + st.unchanged.length + ' כבר מעודכנים (אותו מחיר)</div>' : '') +
+      (st.skippedOld.length ? '<div class="text-slate-400">' + st.skippedOld.length + ' דולגו — באפליקציה יש עדכון חדש יותר מהדוח</div>' : '') +
+    '</div>' +
+    (st.unmatched.length ? '<div class="rounded-xl bg-amber-50 border border-amber-200 p-2 mt-2"><div class="text-[11px] font-black text-amber-900 mb-1"><i class="fa-solid fa-triangle-exclamation"></i> ' + st.unmatched.length + ' ברקודים מהדוח לא נמצאו במאגר:</div>' + unmatchedRows + '</div>' : '') +
+    '<button data-role="pos-import-apply" class="btn-tap w-full bg-sky-600 text-white rounded-xl py-3 font-black mt-2"' + (st.busy || !st.updates.length ? ' disabled' : '') + '>' + (st.busy ? '<i class="fa-solid fa-spinner fa-spin"></i> מעדכן…' : (st.updates.length ? '<i class="fa-solid fa-check-double"></i> עדכן ' + st.updates.length + ' מחירי קופה' : 'אין מה לעדכן')) + '</button>' +
+    '<button data-role="pos-import-close" class="btn-tap w-full bg-white border border-slate-300 text-slate-600 rounded-xl py-2 font-black text-xs mt-2">בטל</button></div>';
 }
 function openPriceScanner() { scanPurpose = 'price'; openScanner(); }
 function handlePriceScan(code) {
@@ -11923,6 +12142,7 @@ function openProdModal(p, fromScan, presetCode, afterSaveTarget) {
   $('prod_barcode').value = p ? (p.barcode || '') : (presetCode || '');
   syncProductBarcodeDuplicate(false);
   $('prod_price').value = (p && p.price != null) ? p.price : '';
+  $('prod_posPrice').value = (p && p.posPrice != null) ? p.posPrice : '';
   $('prod_creditPrice').value = (p && Number(p.creditPrice) > 0) ? p.creditPrice : '';
   $('prod_deposit').value = (p && Number(p.deposit) > 0) ? p.deposit : '';
   fillBillingPackOptions(p ? (p.billingPackId || '') : '', p ? p.id : null);
@@ -11990,6 +12210,10 @@ async function saveProd(again) {
   const num = parseFloat(raw);
   if (raw !== '' && !(num >= 0)) { showToast('מחיר הקנייה אינו תקין', null, null, 2500); $('prod_price').focus(); return; }
   const price = (raw === '') ? null : r2(num);
+  const rawPos = ($('prod_posPrice').value || '').toString().replace(',', '.').trim();
+  const numPos = parseFloat(rawPos);
+  if (rawPos !== '' && !(numPos > 0)) { showToast('מחיר הקופה צריך להיות מספר חיובי או ריק', null, null, 2800); $('prod_posPrice').focus(); return; }
+  const posPrice = (rawPos === '') ? null : r2(numPos);
   const rawCp = ($('prod_creditPrice').value || '').toString().replace(',', '.').trim();
   const numCp = parseFloat(rawCp);
   if (rawCp !== '' && !(numCp > 0)) { showToast('מחיר הזיכוי צריך להיות מספר חיובי או ריק', null, null, 2800); $('prod_creditPrice').focus(); return; }
@@ -12050,7 +12274,12 @@ async function saveProd(again) {
   const boxSize = wholeCarton ? parsedBoxSize : 0;
   const hidden = !$('prod_visible').checked;
   const unitUpdatedAt = Date.now();
-  const data = { name, barcode, price, creditPrice, deposit, billingPackId, billingPackSize, category, average, defaultUnit, defaultUnitUpdatedAt: unitUpdatedAt, boxSize, hidden };
+  // מחיר קופה: חותמת הזמן מתעדכנת רק כשהערך באמת השתנה — כך דוח ישן שיועלה
+  // אחר כך לא ידרוס עדכון ידני טרי (השוואת התאריכים בייבוא הדוח).
+  const existingForPos = id ? products.find(x => x.id === id) : null;
+  const posChanged = !existingForPos || (existingForPos.posPrice != null ? existingForPos.posPrice : null) !== posPrice;
+  const posPriceAt = posChanged ? Date.now() : (Number(existingForPos && existingForPos.posPriceAt) || null);
+  const data = { name, barcode, price, posPrice, posPriceAt, creditPrice, deposit, billingPackId, billingPackSize, category, average, defaultUnit, defaultUnitUpdatedAt: unitUpdatedAt, boxSize, hidden };
   clearTimeout(priceTimers[docId]); clearTimeout(avgTimers[docId]); clearTimeout(boxTimers[docId]);
   let savedProduct = null;
   if (id) {
@@ -13827,6 +14056,7 @@ app.addEventListener('input', (e) => {
   if (role === 'sign-if') { if (signMaker) { const s = signInternalCurrent(); if (s) s[t.dataset.f] = t.value; } return; }
   if (role === 'sign-f') { if (signMaker) { const si = parseInt(t.dataset.id, 10); const s = signMaker.signs[si]; if (s) { s[t.dataset.f] = t.value; drawSignCanvas(); const rc = $('signRec_' + si); if (rc) rc.innerHTML = signRecInnerHtml(s, si); } } return; }
   if (role === 'price-set') { savePrice(t.dataset.id, t.value); return; }
+  if (role === 'pos-set') { savePosPrice(t.dataset.id, t.value); return; }
   if (role === 'pcat-name') { const i = parseInt(t.dataset.i, 10); if (pricingCats[i]) { pricingCats[i].name = t.value; savePricingCats(); } return; }
   if (role === 'pcat-pct') { const i = parseInt(t.dataset.i, 10); let v = t.value.replace(/[^0-9]/g, ''); if (v !== t.value) t.value = v; if (pricingCats[i]) { pricingCats[i].pct = v ? parseInt(v, 10) : 0; savePricingCats(); } return; }
   if (role === 'cat-set') {
@@ -13984,6 +14214,10 @@ app.addEventListener('click', (e) => {
   else if (role === 'backup-import-confirm') confirmRestoreBackup();
   else if (role === 'go-settings') setView('settings');
   else if (role === 'add-product') addProduct();
+  else if (role === 'pos-import-pick') posImportPick();
+  else if (role === 'pos-import-apply') posImportApply();
+  else if (role === 'pos-import-close') { posImport = null; if (currentView === 'prices') renderPrices(); }
+  else if (role === 'pos-missing-filter') { posMissingOnly = !posMissingOnly; if (currentView === 'prices') renderPrices(); }
   else if (role === 'sync-local-units') showConfirm('סנכרון בחירות מהמכשיר הזה', 'להגדיר בענן את בחירות ארגז/יחידה ששמורות במכשיר הזה? בצע זאת רק אם זה המכשיר שבו ההגדרות נכונות.', 'סנכרן לענן', syncLegacyUnitsFromThisDevice);
   else if (role === 'del-product') { const p = products.find(x => x.id === id); showConfirm('מחיקת מוצר', 'למחוק את "' + (p ? p.name : '') + '"?', 'מחק', () => delProduct(id)); }
   else if (role === 'toggle-hidden') toggleHidden(id);
