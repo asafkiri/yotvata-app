@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v241 מחירי קופה</title>
+    <title>הזמנות יטבתה - v242 תיקון סמן ברקוד</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -102,7 +102,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v241 מחירי קופה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v242 תיקון סמן ברקוד</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -337,7 +337,8 @@
     </div>
 
     <!-- כרטיס מוצר מאוחד — יצירה ועריכה -->
-    <div id="prodModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm items-center justify-center p-4 z-[70]">
+    <!-- v242: ללא backdrop-blur — הטשטוש גורם ל-iOS לצייר את סמן ההקלדה במקום שגוי בשדות המודאל -->
+    <div id="prodModal" class="hidden fixed inset-0 bg-slate-900/70 items-center justify-center p-4 z-[70]">
       <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden max-h-[92vh] flex flex-col">
         <div class="p-5 pb-3 shrink-0 border-b border-slate-100">
           <div class="flex items-center gap-2"><i class="fa-solid fa-box-open text-blue-600 text-xl"></i><h3 id="prodTitle" class="font-black text-lg text-slate-800">כרטיס מוצר</h3></div>
@@ -12169,12 +12170,34 @@ function openProdModal(p, fromScan, presetCode, afterSaveTarget) {
     ? '<i class="fa-solid fa-barcode"></i> שמור וסרוק הבא'
     : '<i class="fa-solid fa-plus"></i> שמור והוסף מוצר נוסף';
   closeScanner();
+  lockBodyScrollForProdModal();
   const m = $('prodModal'); m.classList.remove('hidden'); m.classList.add('flex');
   const scroll = $('prodFormScroll'); if (scroll) scroll.scrollTop = 0;
   const focusId = p ? (fromScan ? 'prod_price' : '') : 'prod_name';
   if (focusId) setTimeout(() => { const i = $(focusId); if (i) { i.focus(); if (i.select) i.select(); } }, 80);
 }
+// v242: כשהדף מאחורי מודאל fixed נשאר גלול, iOS מצייר את סמן ההקלדה
+// בהיסט מהשדה ("יורד שורה" בברקוד). נועלים את גלילת הרקע כל עוד עורך
+// המוצר פתוח ומשחזרים את המיקום בסגירה. הנעילה שורדת גם את מעבר הסורק,
+// כי הסורק תמיד מחזיר את המודאל וסגירה אמיתית עוברת רק דרך hideProdModal.
+let prodModalScrollLockY = null;
+function lockBodyScrollForProdModal() {
+  if (prodModalScrollLockY != null) return;
+  prodModalScrollLockY = window.scrollY || 0;
+  const b = document.body.style;
+  b.position = 'fixed';
+  b.top = (-prodModalScrollLockY) + 'px';
+  b.left = '0'; b.right = '0'; b.width = '100%';
+}
+function unlockBodyScrollForProdModal() {
+  if (prodModalScrollLockY == null) return;
+  const b = document.body.style;
+  b.position = ''; b.top = ''; b.left = ''; b.right = ''; b.width = '';
+  window.scrollTo(0, prodModalScrollLockY);
+  prodModalScrollLockY = null;
+}
 function hideProdModal() {
+  unlockBodyScrollForProdModal();
   const m = $('prodModal'); m.classList.add('hidden'); m.classList.remove('flex');
   barcodeDuplicateNotice.product = '';
   setAiUnknownProductBarcodeLock(false);
