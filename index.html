@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v243 מחיר קופה בקליטה</title>
+    <title>הזמנות יטבתה - v244 לחיצה ארוכה לעריכת מוצר</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -34,7 +34,8 @@
       input[type="number"] { -moz-appearance: textfield; }
       .btn-tap { transition: transform .08s ease; }
       .btn-tap:active { transform: scale(.93); }
-      .row-card { transition: background-color .15s ease, border-color .15s ease; }
+      .row-card { transition: background-color .15s ease, border-color .15s ease; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+      .row-card input { -webkit-user-select: text; user-select: text; }
       details > summary { list-style: none; cursor: pointer; }
       details > summary::-webkit-details-marker { display: none; }
       .hist-chevron { transition: transform .2s ease; }
@@ -102,7 +103,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v243 מחיר קופה בקליטה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v244 לחיצה ארוכה לעריכת מוצר</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -1143,7 +1144,7 @@ function renderOrder() {
   const rows = buildOrderRowsGrouped(visible);
   app.innerHTML =
     '<div class="flex items-center justify-between gap-2 mb-3 px-1">' +
-      '<div class="text-[11px] text-slate-400 font-medium leading-tight">טפו על <b class="text-blue-500">מומלץ</b> כדי להזמין את הכמות, או הקלידו כמות אחרת</div>' +
+      '<div class="text-[11px] text-slate-400 font-medium leading-tight">טפו על <b class="text-blue-500">מומלץ</b> כדי להזמין את הכמות, או הקלידו כמות אחרת · לחיצה ארוכה על מוצר פותחת עריכה</div>' +
       '<button data-role="clear-order" class="btn-tap shrink-0 text-xs font-bold text-red-500 bg-red-50 px-3 py-1.5 rounded-lg">נקה</button>' +
     '</div>' +
     '<div id="orderList" class="space-y-2.5 pb-6">' + rows + '</div>' +
@@ -12375,6 +12376,7 @@ async function saveProd(again) {
   hideProdModal();
   if (currentView === 'prices') renderPrices();
   else if (currentView === 'settings') renderSettings();
+  else if (currentView === 'order') renderOrder();
   if (afterTarget !== 'ai_unknown') showToast(id ? 'המוצר עודכן' : 'המוצר נוסף', null, null, 1600);
   if (afterTarget === 'ai_unknown' && savedProduct) { aiCompleteUnknownProduct(savedProduct, unknownCreateContext); return; }
   if (afterTarget === 'promo_import' && savedProduct) { promoImportProductSaved(savedProduct); return; }
@@ -14183,6 +14185,47 @@ app.addEventListener('keydown', (e) => {
   }
   if (!(t.getAttribute && t.getAttribute('data-role') === 'amount')) return;
   if (e.key === 'Enter') { e.preventDefault(); clearTimeout(advanceTimer); advanceFrom(t.dataset.id); }
+});
+
+// v244: לחיצה ארוכה על שורת מוצר במסך ההזמנה פותחת את עריכת המוצר —
+// כך אפשר תוך כדי הזמנה להסתיר מוצר (אזל) או למחוק אותו, בלי לעבור להגדרות.
+const LONG_PRESS_MS = 500, LONG_PRESS_MOVE_PX = 12;
+let longPressTimer = null, longPressStart = null, longPressFiredAt = 0;
+function cancelRowLongPress() {
+  if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+  longPressStart = null;
+}
+app.addEventListener('pointerdown', (e) => {
+  if (currentView !== 'order' || !e.isPrimary) return;
+  if (e.target.closest('input, select, textarea')) return;
+  const row = e.target.closest('#orderList [data-id]');
+  if (!row) return;
+  cancelRowLongPress();
+  const id = row.dataset.id;
+  longPressStart = { x: e.clientX, y: e.clientY };
+  longPressTimer = setTimeout(() => {
+    longPressTimer = null; longPressStart = null;
+    const p = products.find(x => x.id === id);
+    if (!p) return;
+    longPressFiredAt = Date.now();
+    buzz(20);
+    openProdModal(p, false);
+  }, LONG_PRESS_MS);
+});
+app.addEventListener('pointermove', (e) => {
+  if (!longPressStart) return;
+  if (Math.abs(e.clientX - longPressStart.x) > LONG_PRESS_MOVE_PX || Math.abs(e.clientY - longPressStart.y) > LONG_PRESS_MOVE_PX) cancelRowLongPress();
+});
+app.addEventListener('pointerup', cancelRowLongPress);
+app.addEventListener('pointercancel', cancelRowLongPress);
+// שחרור האצבע אחרי לחיצה ארוכה לא יפעיל את הכפתור שמתחתיה (מומלץ/יחידה)
+document.addEventListener('click', (e) => {
+  if (!longPressFiredAt || Date.now() - longPressFiredAt > 700) return;
+  longPressFiredAt = 0;
+  e.preventDefault(); e.stopPropagation();
+}, true);
+app.addEventListener('contextmenu', (e) => {
+  if (e.target.closest('#orderList [data-id]')) e.preventDefault();
 });
 
 app.addEventListener('click', (e) => {
