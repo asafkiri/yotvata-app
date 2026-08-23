@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v244 לחיצה ארוכה לעריכת מוצר</title>
+    <title>הזמנות יטבתה - v245 מאזן ספק בולט בכל המסכים</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -103,7 +103,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v244 לחיצה ארוכה לעריכת מוצר</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v245 מאזן ספק בולט בכל המסכים</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -1134,6 +1134,51 @@ function updateBackBarLabel() {
   b.innerHTML = '<i class="fa-solid fa-chevron-right"></i> ' + txt;
 }
 
+// ===== v245: מאזן פתוח מול הספק — באנר בולט בכל המסכים הראשיים =====
+// מרכז את כל הפערים הפתוחים: מאזן סחורה מתעודות קליטה עם הפרש פתוח,
+// ומאזן זיכויים מחזרות. מוצג בהזמנה, בחזרות, בקליטה ובחלון השליחה —
+// כדי שאי אפשר יהיה לשדר הזמנה ולשכוח שהספק חייב לנו (או שאנחנו לו).
+function supplierGaps() {
+  const rec = receiptsBalance();
+  const ret = returnsBalance();
+  const openRecs = receipts.filter(r => receiptDiscrepancyInfo(r).open).length;
+  const lines = [];
+  if (rec.bal > 0.5) lines.push({ view: 'receiptsHistory', icon: 'fa-scale-unbalanced', text: 'הספק חייב לך ₪' + fmtMoney(rec.bal) + ' בסחורה', owed: true });
+  else if (rec.bal < -0.5) lines.push({ view: 'receiptsHistory', icon: 'fa-scale-unbalanced-flip', text: 'קיבלת ₪' + fmtMoney(-rec.bal) + ' בסחורה מעבר לתעודות', owed: false });
+  if (ret.bal > 0.5) lines.push({ view: 'returnsHistory', icon: 'fa-rotate-left', text: 'הספק חייב לך ₪' + fmtMoney(ret.bal) + ' בזיכויים על חזרות', owed: true });
+  else if (ret.bal < -0.5) lines.push({ view: 'returnsHistory', icon: 'fa-rotate-left', text: 'זוכית ₪' + fmtMoney(-ret.bal) + ' יותר מדי על חזרות', owed: false });
+  if (openRecs && !lines.some(l => l.view === 'receiptsHistory'))
+    lines.push({ view: 'receiptsHistory', icon: 'fa-clipboard-question', text: openRecs + ' תעודות עם הפרש פתוח', owed: true });
+  return { lines, openRecs, recBal: rec.bal, retBal: ret.bal };
+}
+function supplierGapBannerHtml() {
+  const g = supplierGaps();
+  if (!g.lines.length) return '';
+  const anyOwed = g.lines.some(l => l.owed);
+  const rows = g.lines.map(l =>
+    '<button data-role="gap-goto" data-view="' + l.view + '" class="btn-tap w-full flex items-center justify-between gap-2 text-right">' +
+      '<span class="font-black text-base flex items-center gap-2 min-w-0"><i class="fa-solid ' + l.icon + ' shrink-0"></i><span class="min-w-0">' + l.text + '</span></span>' +
+      '<span class="text-[11px] font-black bg-white/20 px-2 py-1 rounded-lg shrink-0">לטיפול ←</span>' +
+    '</button>'
+  ).join('<div class="h-px bg-white/25 my-2.5"></div>');
+  const sub = (g.openRecs && g.lines.some(l => l.view === 'receiptsHistory' && l.icon !== 'fa-clipboard-question'))
+    ? '<div class="text-[11px] text-white/85 font-bold mt-2"><i class="fa-solid fa-clipboard-question"></i> ' + g.openRecs + ' תעודות קליטה עם הפרש פתוח</div>' : '';
+  return '<div class="' + (anyOwed ? 'bg-rose-600' : 'bg-blue-600') + ' text-white rounded-2xl p-3.5 mb-3 shadow-md">' + rows + sub + '</div>';
+}
+// תזכורת לספק בהודעת הוואטסאפ — רק פערים שבהם הספק חייב לנו
+function supplierGapWhatsappNote() {
+  const rec = receiptsBalance(), ret = returnsBalance();
+  const parts = [];
+  if (rec.bal > 0.5) parts.push('חסרה לנו סחורה בשווי ₪' + fmtMoney(rec.bal) + ' מתעודות קודמות');
+  if (ret.bal > 0.5) parts.push('חסר לנו זיכוי של ₪' + fmtMoney(ret.bal) + ' על חזרות');
+  return parts.length ? '⚠️ *תזכורת:* ' + parts.join(', וגם ') : '';
+}
+function appendGapReminder(msg) {
+  const gr = $('gapReminder');
+  if (gr && gr.checked) { const gn = supplierGapWhatsappNote(); if (gn) return msg + '\n\n' + gn; }
+  return msg;
+}
+
 // ===== מסך הזמנה =====
 function renderOrder() {
   const visible = products.filter(p => !p.hidden);
@@ -1143,6 +1188,7 @@ function renderOrder() {
   }
   const rows = buildOrderRowsGrouped(visible);
   app.innerHTML =
+    supplierGapBannerHtml() +
     '<div class="flex items-center justify-between gap-2 mb-3 px-1">' +
       '<div class="text-[11px] text-slate-400 font-medium leading-tight">טפו על <b class="text-blue-500">מומלץ</b> כדי להזמין את הכמות, או הקלידו כמות אחרת · לחיצה ארוכה על מוצר פותחת עריכה</div>' +
       '<button data-role="clear-order" class="btn-tap shrink-0 text-xs font-bold text-red-500 bg-red-50 px-3 py-1.5 rounded-lg">נקה</button>' +
@@ -2469,7 +2515,7 @@ function renderReturns() {
   const histBar = pendingRet
     ? '<button data-role="ret-history" class="btn-tap w-full bg-rose-600 text-white rounded-xl py-3.5 px-3 font-black text-base flex items-center justify-between gap-2 mb-3 shadow-md"><span class="min-w-0 truncate"><i class="fa-solid fa-triangle-exclamation"></i> ' + (pendingRet === 1 ? 'יש תעודת חזרות פתוחה לאימות' : 'יש ' + pendingRet + ' תעודות חזרות פתוחות לאימות') + '</span><span class="text-xs font-black bg-white/20 px-2 py-1 rounded-lg shrink-0">לאימות ←</span></button>'
     : '<button data-role="ret-history" class="btn-tap w-full bg-white border-2 border-slate-200 text-slate-700 rounded-xl py-3.5 font-black text-base flex items-center justify-center gap-2 mb-3 shadow-sm"><i class="fa-solid fa-clock-rotate-left text-blue-600"></i> היסטוריית חזרות</button>';
-  app.innerHTML = histBar +
+  app.innerHTML = supplierGapBannerHtml() + histBar +
     '<div class="relative mb-2">' +
       '<i class="fa-solid fa-magnifying-glass absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>' +
       '<input id="returnsSearch" type="text" inputmode="search" autocomplete="off" placeholder="חפש מוצר להוספה לחזרות..." class="w-full bg-white border border-slate-200 rounded-xl py-3 pr-9 pl-3 text-sm font-bold outline-none focus:border-blue-500">' +
@@ -3281,8 +3327,17 @@ function renderSendModal(items, titleNote, type) {
     }
     return '<div class="flex justify-between items-center text-sm py-1.5 border-b border-slate-100 last:border-0"><span class="font-bold text-slate-700">' + i.name + '</span><span class="font-black text-blue-700 whitespace-nowrap">' + i.amount + ' ' + i.unit + '</span></div>';
   }).join('');
+  const gapNote = supplierGapWhatsappNote();
+  const gapReminderHtml = gapNote
+    ? '<label class="flex items-start gap-2.5 bg-rose-600 text-white rounded-xl p-3 mb-3 cursor-pointer shadow-md">' +
+        '<input id="gapReminder" type="checkbox" checked class="mt-1 w-5 h-5 accent-white shrink-0">' +
+        '<span class="min-w-0"><span class="block font-black text-sm"><i class="fa-solid fa-triangle-exclamation"></i> הספק חייב לך — אל תשכח להזכיר!</span>' +
+        '<span class="block text-[11px] font-bold text-white/90 mt-0.5">מסומן = התזכורת תצורף להודעה: "' + htmlEscape(gapNote.replace(/\*/g, '')) + '"</span></span>' +
+      '</label>'
+    : '';
   $('sendSummary').innerHTML =
     '<div class="mb-2 font-black text-slate-800">' + (titleNote || 'סיכום הזמנה') + ' · ' + items.length + ' פריטים</div>' +
+    gapReminderHtml +
     '<div class="bg-slate-50 rounded-xl p-3 max-h-40 overflow-y-auto border border-slate-100 mb-3">' + list + '</div>' +
     '<div class="mb-3"><input id="orderNote" type="text" placeholder="הערה (לא חובה)..." class="w-full p-2.5 rounded-xl border border-slate-200 outline-none text-sm bg-white"></div>' +
     '<div class="text-xs text-slate-400 mb-1 font-bold">בחר/י איש קשר לשליחה:</div>';
@@ -3317,7 +3372,7 @@ async function performSend(contact) {
   if (type === 'returns') {
     if (sendCtx.resendExisting) {
       // שליחה חוזרת של תעודה קיימת — רק וואטסאפ, בלי ליצור רשומה חדשה ובלי לגעת בטיוטה
-      const msg = buildReturnsMessage(items, note);
+      const msg = appendGapReminder(buildReturnsMessage(items, note));
       const url = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg);
       sendCtx = null; hideSend(); window.location.href = url;
       return;
@@ -3331,7 +3386,7 @@ async function performSend(contact) {
     };
     const saved = await runCloudTask('save returns before send', { op: 'set', path: dataPath('returns', opId), data, operationId: opId });
     if (!saved) return;
-    const msg = buildReturnsMessage(items, note);
+    const msg = appendGapReminder(buildReturnsMessage(items, note));
     const url = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg);
     returnsList = []; saveReturnsDraft();
     // v240: ריקון הטיוטה בענן חייב לקרות לפני המעבר לוואטסאפ — הטיימר המושהה
@@ -3344,7 +3399,7 @@ async function performSend(contact) {
   const data = { timestamp: Date.now(), sentTo: contact.name, items, operationId: opId };
   const saved = await runCloudTask('save order before send', { op: 'set', path: dataPath('history', opId), data, operationId: opId });
   if (!saved) return;
-  const msg = buildMessage(items, note);
+  const msg = appendGapReminder(buildMessage(items, note));
   const url = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg);
   if (resetCurrent) {
     orderState = {};
@@ -4394,8 +4449,7 @@ function commitQty(again) {
 function renderReceiving() {
   const t = receiptTotals();
   const opened = receiptOpened || receiptList.length > 0;
-  const openRecs = receipts.filter(r => receiptDiscrepancyInfo(r).open);
-  const banner = openRecs.length ? '<button data-role="rc-history" class="btn-tap w-full bg-rose-50 border border-rose-200 text-rose-700 rounded-xl py-2.5 px-3 font-bold text-sm flex items-center justify-between gap-2 mb-3"><span><i class="fa-solid fa-clipboard-question"></i> ' + openRecs.length + ' תעודות עם הפרש פתוח</span><span class="text-xs font-black bg-rose-100 px-2 py-0.5 rounded-lg">לטיפול ←</span></button>' : '';
+  const banner = supplierGapBannerHtml();
   const topButtons =
     '<details class="bg-white border border-slate-200 rounded-xl mb-3 overflow-hidden"><summary class="btn-tap cursor-pointer px-3 py-2.5 font-black text-slate-600 text-sm flex items-center justify-between"><span><i class="fa-solid fa-screwdriver-wrench text-slate-400"></i> ניהול</span><i class="fa-solid fa-chevron-down hist-chevron"></i></summary><div class="grid grid-cols-2 gap-2 p-2 pt-0">' +
       '<button data-role="rc-prices" class="btn-tap flex-1 bg-white border border-slate-200 rounded-xl py-2.5 font-black text-slate-700 text-xs flex items-center justify-center gap-1.5"><i class="fa-solid fa-tags text-blue-600"></i> מוצרים ומחירים</button>' +
@@ -14622,6 +14676,7 @@ app.addEventListener('click', (e) => {
   else if (role === 'pr-create') openProdModal(null, false, t.dataset.code);
   else if (role === 'edit-prod') { const p = products.find(x => x.id === id); if (p) openProdModal(p, false); }
   else if (role === 'rc-history') setView('receiptsHistory');
+  else if (role === 'gap-goto') setView(t.dataset.view === 'returnsHistory' ? 'returnsHistory' : 'receiptsHistory');
   else if (role === 'rc-analysis') { anSelectedKey = null; anQuery = ''; setView('analysis'); anLoadData(); } // v235
   else if (role === 'rc-plus') changeReceiptQty(id, 1);
   else if (role === 'rc-minus') changeReceiptQty(id, -1);
