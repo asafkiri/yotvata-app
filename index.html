@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v246 סורק מהיר באייפון</title>
+    <title>הזמנות יטבתה - v247 תיקון מנוע הסריקה באייפון</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -103,7 +103,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v246 סורק מהיר באייפון</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v247 תיקון מנוע הסריקה באייפון</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -192,7 +192,9 @@
         </div>
         <div class="absolute bottom-0 inset-x-0 p-8 text-center">
           <p id="scanHint" class="text-white font-bold" style="text-shadow:0 1px 3px rgba(0,0,0,.6)">כוון את הברקוד אל תוך המסגרת</p>
+          <p id="scanDiag" class="text-white/60 text-[10px] font-bold mt-1" style="text-shadow:0 1px 3px rgba(0,0,0,.6)"></p>
         </div>
+        <button id="scanTorch" class="btn-tap hidden absolute bottom-24 left-5 w-14 h-14 rounded-full bg-black/60 text-white flex items-center justify-center text-xl" title="פנס"><i class="fa-solid fa-bolt"></i></button>
       </div>
     </div>
 
@@ -3460,13 +3462,42 @@ let scanStream = null, scanTimer = null, barcodeDetector = null;
 let zxingReader = null, zxingActive = false;
 let wasmDetectorCls = null;
 let scanUsingWasm = false, scanRoiCanvas = null, scanTickCount = 0;
-// מנוע סריקה חזק (zxing-cpp ב-WASM) לאייפון/ספארי — חושף ממשק BarcodeDetector זהה למובנה
+// מנוע סריקה חזק (zxing-cpp ב-WASM) לאייפון/ספארי — חושף ממשק BarcodeDetector זהה למובנה.
+// חובה לטעון דרך CDN שפותר תלויות (esm.run/esm.sh): קובץ ה-dist הרגיל מכיל import
+// למזהה חבילה עירום ("zxing-wasm") שהדפדפן לא פותר — הייבוא נכשל בשקט והסורק נפל
+// למנוע הגיבוי הישן. זה בדיוק מה שקרה באייפון (אובחן משורת האבחון בשטח)
 async function ensureWasmDetector() {
   if (wasmDetectorCls) return;
-  const mod = await import('https://cdn.jsdelivr.net/npm/barcode-detector@3/dist/es/pure.min.js');
-  wasmDetectorCls = mod.BarcodeDetector;
+  const sources = [
+    'https://esm.run/barcode-detector@3/pure',
+    'https://esm.sh/barcode-detector@3/pure',
+    'https://cdn.jsdelivr.net/npm/barcode-detector@3/dist/es/pure.min.js'
+  ];
+  let lastErr = null;
+  for (const src of sources) {
+    try {
+      const mod = await import(src);
+      if (mod && mod.BarcodeDetector) { wasmDetectorCls = mod.BarcodeDetector; return; }
+    } catch (e) { lastErr = e; console.error('scanner module load failed:', src, e); }
+  }
+  throw lastErr || new Error('wasm detector load failed');
 }
 function nativeScanSupported() { return typeof window.BarcodeDetector !== 'undefined'; }
+// באייפון תמיד משתמשים במסלול ה-WASM המכויל שלנו: גם אם ספארי חושף BarcodeDetector
+// "מובנה", הוא עלול להיות חלקי (למשל QR בלבד) — ואז שום ברקוד מוצר לא נקלט
+function isIOSDevice() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+// חימום מוקדם באייפון: טוענים את מודול הסריקה ואת קובץ ה-WASM ברקע כבר בעליית
+// האפליקציה, כדי שפתיחת הסורק הראשונה תהיה מיידית ולא תיפול לגיבוי בגלל רשת איטית
+if (isIOSDevice()) setTimeout(async () => {
+  try {
+    await ensureWasmDetector();
+    const warm = new wasmDetectorCls({ formats: ['ean_13'] });
+    const c = document.createElement('canvas'); c.width = 4; c.height = 4;
+    await warm.detect(c);
+  } catch (e) {}
+}, 1500);
 // זיהוי מכשיר סמסונג — ה-UA בכרום לאנדרואיד מוקפא (מדווח דגם "K"), לכן שואלים את ה-API הייעודי
 async function isSamsungDevice() {
   try {
@@ -3488,6 +3519,44 @@ function applyScanFocus(stream) {
   } catch (e) {}
 }
 function setScanHint(t) { const h = $('scanHint'); if (h) h.textContent = t; }
+// פנס — תאורה חזקה מקצרת את זמן החשיפה של המצלמה ומעלימה את מריחת התנועה
+// שמכשילה את הפענוח בתאורת פנים. הכפתור מוצג רק כשהמצלמה תומכת
+let scanTorchOn = false;
+function setupScanTorch(stream) {
+  const btn = $('scanTorch'); if (!btn) return;
+  scanTorchOn = false;
+  btn.classList.add('hidden'); btn.classList.remove('bg-amber-400', 'text-black');
+  try {
+    const track = stream && stream.getVideoTracks && stream.getVideoTracks()[0];
+    if (!track || !track.getCapabilities || !track.applyConstraints) return;
+    const caps = track.getCapabilities();
+    if (!caps.torch) return;
+    btn.classList.remove('hidden');
+    btn.onclick = () => {
+      scanTorchOn = !scanTorchOn;
+      track.applyConstraints({ advanced: [{ torch: scanTorchOn }] }).catch(() => {});
+      btn.classList.toggle('bg-amber-400', scanTorchOn);
+      btn.classList.toggle('text-black', scanTorchOn);
+      btn.classList.toggle('bg-black/60', !scanTorchOn);
+    };
+  } catch (e) {}
+}
+// שורת אבחון קטנה במסך הסריקה — איזה מנוע רץ, איזו רזולוציה וזום המצלמה באמת
+// נתנה, ומונה ניסיונות חי (מוכיח שלולאת הסריקה רצה ובאיזה קצב)
+let scanDiagBase = '';
+function setScanDiag(stream, engineLabel) {
+  const el = $('scanDiag'); if (!el) return;
+  try {
+    const track = stream && stream.getVideoTracks && stream.getVideoTracks()[0];
+    const s = track && track.getSettings ? track.getSettings() : {};
+    scanDiagBase = engineLabel + (s.width && s.height ? ' · ' + s.width + '×' + s.height : '') + (s.zoom ? ' · זום ×' + s.zoom : '');
+    el.textContent = scanDiagBase;
+  } catch (e) {}
+}
+function bumpScanDiag() {
+  if (scanTickCount % 25 !== 0) return;
+  const el = $('scanDiag'); if (el && scanDiagBase) el.textContent = scanDiagBase + ' · נ' + scanTickCount;
+}
 // זום אוטומטי — נקרא רק במסלול האייפון. פותר את בעיית הפוקוס הקרוב של עדשות האייפון:
 // מחזיקים את הטלפון רחוק יותר (איפה שהעדשה מתמקדת) והזום "מקרב" את הברקוד
 function applyAutoZoom(stream) {
@@ -3502,13 +3571,14 @@ function applyAutoZoom(stream) {
 }
 async function openScanner() {
   ensureScanAudio();
+  scanTickCount = 0;
   const m = $('scanModal'); m.classList.remove('hidden'); m.classList.add('flex');
   const continuous = (scanPurpose === 'receiving' || scanPurpose === 'returns' || scanPurpose === 'promo' || scanPurpose === 'signprod');
   const ov = $('scanOverlay'); if (ov) ov.classList.toggle('hidden', !continuous);
   const readyHint = continuous ? 'סרוק פריטים — לחץ ✕ לסיום' : 'כוון את הברקוד אל תוך המסגרת';
   setScanHint(continuous ? readyHint : 'מבקש גישה למצלמה...');
   try {
-    if (nativeScanSupported()) {
+    if (nativeScanSupported() && !isIOSDevice()) {
       scanUsingWasm = false;
       if (!barcodeDetector) barcodeDetector = new window.BarcodeDetector();
       scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
@@ -3516,6 +3586,8 @@ async function openScanner() {
       applyScanFocus(scanStream);
       // זום אוטומטי רק בסמסונג (בעיית פוקוס קרוב) — שיאומי ושאר האנדרואידים ללא שינוי
       if (await isSamsungDevice()) applyAutoZoom(scanStream);
+      setupScanTorch(scanStream);
+      setScanDiag(scanStream, 'מובנה');
       setScanHint(readyHint);
       scanTimer = setTimeout(scanTick, 400);
     } else {
@@ -3523,12 +3595,17 @@ async function openScanner() {
       setScanHint('טוען מנוע סריקה...');
       try {
         await ensureWasmDetector();
-        scanUsingWasm = true; scanTickCount = 0;
+        scanUsingWasm = true;
         if (!barcodeDetector) barcodeDetector = new wasmDetectorCls({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf', 'qr_code'] });
-        scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
+        // רזולוציה גבוהה (4K כשאפשר): יותר פיקסלים לכל קו בברקוד — המנוע התוכנתי מתמודד
+        // הרבה יותר טוב עם הדפסה מרוחה/צפופה. במכשירים ישנים הדפדפן יורד לבד ל-1080p
+        scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 3840 }, height: { ideal: 2160 } } });
         const v = $('scanVideo'); v.srcObject = scanStream; await v.play();
         applyScanFocus(scanStream);
         applyAutoZoom(scanStream);
+        setupScanTorch(scanStream);
+        setScanDiag(scanStream, 'WASM');
+        scanSharpMax = 0;
         setScanHint(readyHint);
         scanTimer = setTimeout(scanTick, 400);
       } catch (err) {
@@ -3557,7 +3634,8 @@ function grabScanRoi(v) {
     const scale = Math.max(box.width / v.videoWidth, box.height / v.videoHeight);
     const offX = (v.videoWidth - box.width / scale) / 2;
     const offY = (v.videoHeight - box.height / scale) / 2;
-    const pad = 30; // שוליים סלחניים סביב המסגרת (בפיקסלים של המסך)
+    const pad = 50; // שוליים סלחניים סביב המסגרת — חשוב גם כדי לא לחתוך את "אזור השקט"
+                    // הלבן שהמנוע דורש משני צידי ברקוד שממלא את המסגרת עד הקצה
     let sx = offX + (fr.left - box.left - pad) / scale;
     let sy = offY + (fr.top - box.top - pad) / scale;
     let sw = (fr.width + pad * 2) / scale;
@@ -3572,17 +3650,119 @@ function grabScanRoi(v) {
     return scanRoiCanvas;
   } catch (e) { return null; }
 }
+// תיקון איכות הדפסה: קווים שנמרחים בדפוס מתמזגים והמנוע לא מפענח. מסנן מורפולוגי
+// אופקי של פיקסל אחד — thin מדקק קווים כהים (הדפסה "שמנה"), עיבוי הפוך להדפסה דהויה
+function scanRoiVariant(canvas, thin) {
+  try {
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const w = canvas.width, h = canvas.height;
+    const img = ctx.getImageData(0, 0, w, h);
+    const d = img.data;
+    const g = new Uint8ClampedArray(w * h);
+    for (let i = 0, p = 0; i < g.length; i++, p += 4) g[i] = (d[p] * 3 + d[p + 1] * 6 + d[p + 2]) / 10;
+    for (let y = 0; y < h; y++) {
+      const row = y * w;
+      for (let x = 0; x < w; x++) {
+        const a = g[row + (x > 0 ? x - 1 : 0)], b = g[row + x], c = g[row + (x < w - 1 ? x + 1 : x)];
+        const val = thin ? Math.max(a, b, c) : Math.min(a, b, c);
+        const p = (row + x) * 4;
+        d[p] = d[p + 1] = d[p + 2] = val;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  } catch (e) {}
+  return canvas;
+}
+// מדד חדות זול (אנרגיית גרדיאנט אופקי על רשת דלילה) — פריים מרוח מטשטוש תנועה
+// לא יפוענח לעולם, ועדיף לדלג עליו מהר ולחכות לפריים חד במקום לבזבז עליו פענוח
+let scanSharpMax = 0;
+function roiSharpness(canvas) {
+  try {
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const w = canvas.width, h = canvas.height;
+    const img = ctx.getImageData(0, 0, w, h).data;
+    let sum = 0, cnt = 0;
+    const stepY = Math.max(2, h >> 5);
+    for (let y = stepY >> 1; y < h; y += stepY) {
+      const row = y * w * 4;
+      let prev = img[row] * 3 + img[row + 1] * 6 + img[row + 2];
+      for (let x = 2; x < w; x += 2) {
+        const p = row + x * 4;
+        const cur = img[p] * 3 + img[p + 1] * 6 + img[p + 2];
+        const d = cur - prev; sum += d * d; prev = cur; cnt++;
+      }
+    }
+    return cnt ? sum / cnt : 0;
+  } catch (e) { return 0; }
+}
+// בינאריזציה בסף כהה: בהדפסה מרוחה הקווים "משמינים" עד שהמנוע לא מפענח. סף נמוך
+// משאיר רק את הליבה הכהה של כל קו ומחזיר את הפרופורציות לתקן. הסף אדפטיבי —
+// אחוזון בהירות של אזור הסריקה — כך שלא תלוי בתאורה (אומת על ברקוד אמיתי מהשטח)
+function scanRoiBinarize(canvas, pct) {
+  try {
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const w = canvas.width, h = canvas.height;
+    const img = ctx.getImageData(0, 0, w, h);
+    const d = img.data, n = w * h;
+    const hist = new Uint32Array(256);
+    const g = new Uint8ClampedArray(n);
+    for (let i = 0, p = 0; i < n; i++, p += 4) { const v = (d[p] * 3 + d[p + 1] * 6 + d[p + 2]) / 10 | 0; g[i] = v; hist[v]++; }
+    let acc = 0, t = 128; const target = n * pct;
+    for (let v = 0; v < 256; v++) { acc += hist[v]; if (acc >= target) { t = v; break; } }
+    t = Math.max(40, Math.min(140, t));
+    for (let i = 0, p = 0; i < n; i++, p += 4) { const val = g[i] > t ? 255 : 0; d[p] = d[p + 1] = d[p + 2] = val; }
+    ctx.putImageData(img, 0, 0);
+  } catch (e) {}
+  return canvas;
+}
+// פריים מלא מוקטן — ב-4K פענוח הפריים המלא יקר; להקטנה אין מחיר כי הוא משמש רק
+// כגיבוי לברקוד גדול שמוחזק מחוץ למסגרת
+let scanFullCanvas = null;
+function grabFullFrame(v) {
+  try {
+    if (v.videoWidth <= 1440) return v;
+    const scale = 1280 / v.videoWidth;
+    if (!scanFullCanvas) scanFullCanvas = document.createElement('canvas');
+    scanFullCanvas.width = Math.round(v.videoWidth * scale);
+    scanFullCanvas.height = Math.round(v.videoHeight * scale);
+    const ctx = scanFullCanvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(v, 0, 0, scanFullCanvas.width, scanFullCanvas.height);
+    return scanFullCanvas;
+  } catch (e) { return v; }
+}
 function scanTick() {
   if (!scanStream || !barcodeDetector) return;
   const v = $('scanVideo');
   if (!v || v.readyState < 2) { scanTimer = setTimeout(scanTick, 200); return; }
+  scanTickCount++;
+  bumpScanDiag();
   let src = v;
   if (scanUsingWasm) {
     // אייפון: המנוע רץ בתוכנה, ופענוח פריים מלא איטי ומפספס. סורקים רק את אזור
-    // המסגרת — תמונה קטנה פי ~10 שנפענחת מהר ואמין — ובקצב מהיר; כל טיק שלישי
-    // נסרק הפריים המלא, למקרה שהברקוד מוחזק מחוץ למסגרת
-    scanTickCount++;
-    if (scanTickCount % 3 !== 0) { const roi = grabScanRoi(v); if (roi) src = roi; }
+    // המסגרת — תמונה קטנה שנפענחת מהר ואמין — ובקצב מהיר. מחזור של 8 טיקים:
+    // רוב הזמן ROI רגיל, שני טיקים עם בינאריזציה כהה (הדפסה מרוחה — הפתרון
+    // המוכח לברקודים של שקיות הלחם), טיק עם הדקת קווים, ואחד פריים מלא (מוקטן)
+    // למקרה שהברקוד מוחזק מחוץ למסגרת
+    const mode = scanTickCount % 8;
+    if (mode === 0) {
+      src = grabFullFrame(v);
+    } else {
+      const roi = grabScanRoi(v);
+      if (roi) {
+        // שער חדות: פריים מרוח מדולג מיד (40ms) במקום לבזבז עליו פענוח יקר —
+        // כך הניסיונות מתרכזים בפריימים החדים. כל טיק רביעי עובר בלי שער, כרשת ביטחון
+        const sharp = roiSharpness(roi);
+        scanSharpMax = Math.max(sharp, scanSharpMax * 0.995);
+        if (sharp < scanSharpMax * 0.5 && (scanTickCount & 3) !== 0) {
+          scanTimer = setTimeout(scanTick, 40);
+          return;
+        }
+        if (mode === 3) src = scanRoiBinarize(roi, 0.2);
+        else if (mode === 5) src = scanRoiBinarize(roi, 0.3);
+        else if (mode === 7) src = scanRoiVariant(roi, true);
+        else src = roi;
+      }
+    }
   }
   barcodeDetector.detect(src).then(codes => {
     if (!scanStream) return;
@@ -3610,7 +3790,7 @@ async function startZxing() {
     $('scanVideo'),
     (result) => { if (result && zxingActive) { const t = result.getText ? result.getText() : (result.text || ''); if (t) onScanned(t); } }
   );
-  const vEl = $('scanVideo'); if (vEl && vEl.srcObject) { applyScanFocus(vEl.srcObject); applyAutoZoom(vEl.srcObject); }
+  const vEl = $('scanVideo'); if (vEl && vEl.srcObject) { applyScanFocus(vEl.srcObject); applyAutoZoom(vEl.srcObject); setupScanTorch(vEl.srcObject); setScanDiag(vEl.srcObject, 'גיבוי'); }
 }
 function onScanned(val) {
   val = (val || '').toString().trim();
@@ -3656,6 +3836,9 @@ function closeScanner() {
   if (restoreProductEditor) {
     const pm = $('prodModal'); if (pm) { pm.classList.remove('hidden'); pm.classList.add('flex'); }
   }
+  const tb = $('scanTorch'); if (tb) { tb.classList.add('hidden'); tb.classList.remove('bg-amber-400', 'text-black'); }
+  scanTorchOn = false;
+  const dg = $('scanDiag'); if (dg) dg.textContent = '';
   const ov = $('scanOverlay'); if (ov) ov.classList.add('hidden');
   const m = $('scanModal'); if (m) { m.classList.add('hidden'); m.classList.remove('flex'); }
   scanPurpose = 'field';
