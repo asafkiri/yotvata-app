@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v245 מאזן ספק בולט בכל המסכים</title>
+    <title>הזמנות יטבתה - v246 סורק מהיר באייפון</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -103,7 +103,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v245 מאזן ספק בולט בכל המסכים</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v246 סורק מהיר באייפון</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -180,7 +180,7 @@
       <div class="relative flex-1 overflow-hidden">
         <video id="scanVideo" class="w-full h-full object-cover" playsinline muted></video>
         <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div class="w-72 h-44 border-4 border-white/90 rounded-2xl" style="box-shadow:0 0 0 9999px rgba(0,0,0,0.45)"></div>
+          <div id="scanFrame" class="w-72 h-44 border-4 border-white/90 rounded-2xl" style="box-shadow:0 0 0 9999px rgba(0,0,0,0.45)"></div>
         </div>
         <div class="absolute top-0 inset-x-0 p-4 flex items-center justify-between">
           <span class="text-white font-black text-lg" style="text-shadow:0 1px 3px rgba(0,0,0,.6)">סריקת ברקוד</span>
@@ -3459,6 +3459,7 @@ function scanBeep() {
 let scanStream = null, scanTimer = null, barcodeDetector = null;
 let zxingReader = null, zxingActive = false;
 let wasmDetectorCls = null;
+let scanUsingWasm = false, scanRoiCanvas = null, scanTickCount = 0;
 // מנוע סריקה חזק (zxing-cpp ב-WASM) לאייפון/ספארי — חושף ממשק BarcodeDetector זהה למובנה
 async function ensureWasmDetector() {
   if (wasmDetectorCls) return;
@@ -3508,6 +3509,7 @@ async function openScanner() {
   setScanHint(continuous ? readyHint : 'מבקש גישה למצלמה...');
   try {
     if (nativeScanSupported()) {
+      scanUsingWasm = false;
       if (!barcodeDetector) barcodeDetector = new window.BarcodeDetector();
       scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
       const v = $('scanVideo'); v.srcObject = scanStream; await v.play();
@@ -3521,6 +3523,7 @@ async function openScanner() {
       setScanHint('טוען מנוע סריקה...');
       try {
         await ensureWasmDetector();
+        scanUsingWasm = true; scanTickCount = 0;
         if (!barcodeDetector) barcodeDetector = new wasmDetectorCls({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf', 'qr_code'] });
         scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
         const v = $('scanVideo'); v.srcObject = scanStream; await v.play();
@@ -3543,15 +3546,49 @@ async function openScanner() {
     closeScanner();
   }
 }
+// חיתוך אזור המסגרת הלבנה מתוך פריים הווידאו — הווידאו מוצג ב-object-cover,
+// לכן ממפים את מלבן המסגרת שעל המסך חזרה לקואורדינטות הפריים המקורי
+function grabScanRoi(v) {
+  try {
+    const frame = $('scanFrame');
+    if (!frame || !v.videoWidth || !v.videoHeight) return null;
+    const box = v.getBoundingClientRect(), fr = frame.getBoundingClientRect();
+    if (!box.width || !box.height || !fr.width) return null;
+    const scale = Math.max(box.width / v.videoWidth, box.height / v.videoHeight);
+    const offX = (v.videoWidth - box.width / scale) / 2;
+    const offY = (v.videoHeight - box.height / scale) / 2;
+    const pad = 30; // שוליים סלחניים סביב המסגרת (בפיקסלים של המסך)
+    let sx = offX + (fr.left - box.left - pad) / scale;
+    let sy = offY + (fr.top - box.top - pad) / scale;
+    let sw = (fr.width + pad * 2) / scale;
+    let sh = (fr.height + pad * 2) / scale;
+    sx = Math.max(0, sx); sy = Math.max(0, sy);
+    sw = Math.min(sw, v.videoWidth - sx); sh = Math.min(sh, v.videoHeight - sy);
+    if (sw < 50 || sh < 50) return null;
+    if (!scanRoiCanvas) scanRoiCanvas = document.createElement('canvas');
+    scanRoiCanvas.width = Math.round(sw); scanRoiCanvas.height = Math.round(sh);
+    const ctx = scanRoiCanvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(v, sx, sy, sw, sh, 0, 0, scanRoiCanvas.width, scanRoiCanvas.height);
+    return scanRoiCanvas;
+  } catch (e) { return null; }
+}
 function scanTick() {
   if (!scanStream || !barcodeDetector) return;
   const v = $('scanVideo');
   if (!v || v.readyState < 2) { scanTimer = setTimeout(scanTick, 200); return; }
-  barcodeDetector.detect(v).then(codes => {
+  let src = v;
+  if (scanUsingWasm) {
+    // אייפון: המנוע רץ בתוכנה, ופענוח פריים מלא איטי ומפספס. סורקים רק את אזור
+    // המסגרת — תמונה קטנה פי ~10 שנפענחת מהר ואמין — ובקצב מהיר; כל טיק שלישי
+    // נסרק הפריים המלא, למקרה שהברקוד מוחזק מחוץ למסגרת
+    scanTickCount++;
+    if (scanTickCount % 3 !== 0) { const roi = grabScanRoi(v); if (roi) src = roi; }
+  }
+  barcodeDetector.detect(src).then(codes => {
     if (!scanStream) return;
     if (codes && codes.length && codes[0].rawValue) onScanned(codes[0].rawValue);
-    else scanTimer = setTimeout(scanTick, 200);
-  }).catch(() => { if (scanStream) scanTimer = setTimeout(scanTick, 300); });
+    else scanTimer = setTimeout(scanTick, scanUsingWasm ? 80 : 200);
+  }).catch(() => { if (scanStream) scanTimer = setTimeout(scanTick, scanUsingWasm ? 150 : 300); });
 }
 function loadScript(src) {
   return new Promise((resolve, reject) => {
@@ -3577,7 +3614,7 @@ async function startZxing() {
 }
 function onScanned(val) {
   val = (val || '').toString().trim();
-  if (!val) { if (barcodeDetector && scanStream) scanTimer = setTimeout(scanTick, 250); return; }
+  if (!val) { if (barcodeDetector && scanStream) scanTimer = setTimeout(scanTick, scanUsingWasm ? 100 : 250); return; }
   if (scanPurpose === 'price') { scanBeep(); buzz(40); handlePriceScan(val); return; }
   if (scanPurpose === 'prodbarcode') {
     scanBeep(); buzz(40);
@@ -3595,7 +3632,7 @@ function onScanned(val) {
   if (scanPurpose === 'receiving' || scanPurpose === 'returns' || scanPurpose === 'promo' || scanPurpose === 'signprod') {
     const now = Date.now();
     if (val === lastScanCode && (now - lastScanTime) < 1400) {
-      if (barcodeDetector && scanStream) scanTimer = setTimeout(scanTick, 250);
+      if (barcodeDetector && scanStream) scanTimer = setTimeout(scanTick, scanUsingWasm ? 150 : 250);
       return;
     }
     lastScanCode = val; lastScanTime = now;
