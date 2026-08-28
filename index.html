@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v247 תיקון מנוע הסריקה באייפון</title>
+    <title>הזמנות יטבתה - v248 מוצרי המבצע בעריכת השלטים</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -103,7 +103,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v247 תיקון מנוע הסריקה באייפון</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v248 מוצרי המבצע בעריכת השלטים</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -13417,6 +13417,17 @@ function signKindBtn(idx, kind, label, cur) {
 function signEditCard(s, idx) {
   const prods = signProductsFor(s);
   const isInt = signIsInternal(s);
+  // v248: רשימת מוצרי המבצע גלויה בזמן עריכת הכותרת — כדי לדעת איך לנסח אותה.
+  // תצוגה בלבד; לא משנה את המוצרים שבשלט.
+  const prodListHtml = prods.length
+    ? '<div class="mb-2 rounded-lg border border-slate-200 bg-slate-50 p-2 max-h-28 overflow-y-auto">' +
+        '<div class="text-[10px] font-black text-slate-400 mb-1"><i class="fa-solid fa-basket-shopping"></i> המוצרים במבצע — לעזרה בניסוח הכותרת</div>' +
+        prods.map(p =>
+          '<div class="text-[11px] font-bold text-slate-700 leading-snug">• ' + (p.name || p.barcode || '(ללא שם)') +
+          (p.name && p.barcode ? ' <span class="text-slate-400 font-normal">· ' + p.barcode + '</span>' : '') +
+          '</div>').join('') +
+      '</div>'
+    : '';
   let fields = '';
   if (s.kind === 'unit') {
     fields = '<div class="flex-1"><label class="text-[10px] font-bold text-slate-400 block mb-0.5">מחיר ליח׳ (₪)</label><input data-role="sign-f" data-id="' + idx + '" data-f="price" type="text" inputmode="decimal" value="' + (s.price || '') + '" class="w-full h-10 text-center font-black border-2 border-slate-200 rounded-lg outline-none focus:border-rose-500" placeholder="0.00"></div>';
@@ -13431,6 +13442,7 @@ function signEditCard(s, idx) {
       '<div class="text-[10px] font-black text-slate-400">שלט ' + (idx + 1) + ' · ' + prods.length + ' מוצרים' + (isInt ? ' <span class="text-amber-600">· מבצע פנימי</span>' : ' במבצע') + '</div>' +
       (isInt ? '<button data-role="sign-edit-prods" data-id="' + idx + '" class="btn-tap text-[10px] font-black text-amber-700 bg-amber-100 px-2 py-1 rounded-md"><i class="fa-solid fa-pen"></i> מוצרים</button>' : '') +
     '</div>' +
+    prodListHtml +
     '<label class="text-[10px] font-bold text-slate-400 block mb-0.5">כותרת השלט</label>' +
     '<input data-role="sign-f" data-id="' + idx + '" data-f="title" type="text" value="' + (s.title || '').replace(/"/g, '&quot;') + '" class="w-full h-10 px-2 font-black border-2 border-slate-200 rounded-lg outline-none focus:border-rose-500 mb-2">' +
     '<div class="flex gap-1.5 mb-2">' + signKindBtn(idx, 'unit', 'מחיר ליח׳', s.kind) + signKindBtn(idx, 'bundle', 'כמות במחיר', s.kind) + signKindBtn(idx, 'pct', '% הנחה', s.kind) + '</div>' +
