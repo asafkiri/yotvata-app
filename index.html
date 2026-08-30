@@ -41,6 +41,12 @@
       .hist-chevron { transition: transform .2s ease; }
       details[open] .hist-chevron { transform: rotate(180deg); }
 
+      /* v250: אזהרת "הוקלד סכום שגוי" — כרטיס אדום פועם שאי אפשר לפספס */
+      @keyframes anchorAlertPulse { 0%,100% { box-shadow:0 0 0 0 rgba(225,29,72,.6); } 50% { box-shadow:0 0 0 14px rgba(225,29,72,0); } }
+      .anchor-alert { animation: anchorAlertPulse 1.4s ease-out infinite; }
+      .anchor-alert-btn { background:#fff !important; color:#be123c !important; }
+      @media (prefers-reduced-motion: reduce) { .anchor-alert { animation:none; } }
+
       /* ===== מצב כהה ===== */
       html.dark body, html.dark .bg-slate-50 { background-color:#0f172a !important; }
       html.dark .bg-white { background-color:#1e293b !important; }
@@ -562,6 +568,8 @@ let aiScanProgressText = '';
 let aiScanResponse = null;
 let aiScanEvaluation = null;
 let aiScanError = '';
+let aiScanErrorAnchor = false;   // v250: השגיאה היא הסבר-שרת על עוגן שגוי (למשל הוקלד סכום שלפני הנחות) — מוצגת כאזהרה בולטת
+let anchorFixHint = '';          // v250: ההסבר נודד עם המשתמש לעורך הסכומים, כדי שהסכום הנכון יהיה מול העיניים בזמן התיקון
 let aiScanAutoRotationNote = '';
 let aiScanAttemptCount = 0;
 const AI_SCAN_MAX_AUTO_ROTATION_RETRIES = 2;
@@ -4691,6 +4699,8 @@ function renderReceiving() {
   const noteBar = editingNotes
     ? '<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm mb-3">' +
         '<div class="flex items-center justify-between mb-2"><span class="font-black text-slate-800 text-sm"><i class="fa-solid fa-file-invoice text-blue-600"></i> תעודות ספק</span><button data-role="rc-notes-done" class="btn-tap text-xs font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg">סיום</button></div>' +
+        // v250: ההסבר מהסריקה מלווה את התיקון — הסכום הנכון מול העיניים בזמן ההקלדה
+        (anchorFixHint ? '<div class="rounded-xl bg-rose-600 p-2.5 text-xs font-black leading-relaxed mb-2" style="color:#fff"><i class="fa-solid fa-triangle-exclamation text-amber-300"></i> ' + htmlEscape(anchorFixHint) + '</div>' : '') +
         noteEditorBodyHtml() +
       '</div>'
     : '<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm mb-3 flex items-center justify-between gap-2">' +
@@ -6193,7 +6203,7 @@ function resetAiInvoiceScan() {
   aiCloseOrientationReview();
   const source = receiptNotes.length ? receiptNotes.map(normNote) : [{ amount: receiptNoteTotal, units: receiptNoteUnits }];
   aiScanDocuments = source.map((note, i) => ({ noteIndex: i, amount: note.amount, units: note.units, pages: [] }));
-  aiScanBusy = false; aiScanProgressText = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; reconcileAiAudit = null; aiUnknownProductCreateContext = null;
+  aiScanBusy = false; aiScanProgressText = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanErrorAnchor = false; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; reconcileAiAudit = null; aiUnknownProductCreateContext = null;
   aiAnalyzeBusy = false; aiAnalyzeError = ''; aiAnalyzeResult = null; // v187
 }
 function aiTotalPages() { return aiScanDocuments.reduce((sum, d) => sum + d.pages.length, 0); }
@@ -8750,14 +8760,22 @@ async function aiRequestSingleDocScan(token, pages, expected) {
   if (!response.ok || !payload.ok) {
     const code = payload.error || '';
     const fatal = code === 'rate_limited' || code === 'invalid_auth' || code === 'auth_required';
+    // v250: שרת שמוותר עם הסבר עברי (למשל anchor_pre_discount — הוקלד סכום שלפני
+    // ההנחות) — ההסבר מוצג כלשונו. משפחת השגיאות הזו אומרת כמעט תמיד "העוגן
+    // שהוקלד שגוי", ולכן מסומנת ומוצגת כאזהרה בולטת במקום קופסת שגיאה רגילה.
+    const anchorExplained = !fatal
+      && !['incomplete_model_output', 'model_refusal', 'invalid_model_output', 'openai_error'].includes(code)
+      && typeof payload.message === 'string' && !!payload.message.trim();
     const error = new Error(
       code === 'rate_limited' ? 'בוצעו יותר מדי ניסיונות. המתן 10 דקות ונסה שוב.'
         : (code === 'invalid_auth' || code === 'auth_required') ? 'האימות המאובטח נכשל. רענן את האפליקציה ונסה שוב.'
         : (code === 'incomplete_model_output' || code === 'model_refusal' || code === 'invalid_model_output') ? 'ה-AI לא החזיר פענוח מלא ובטוח לתעודה זו.'
         : (code === 'openai_error' && payload.message) ? 'שירות ה-AI החזיר שגיאה: ' + payload.message
+        : anchorExplained ? payload.message.trim()
         : 'הסריקה החכמה לא הצליחה לתעודה זו.'
     );
     error.fatal = fatal;
+    error.anchorExplained = anchorExplained;
     throw error;
   }
   return payload;
@@ -8857,7 +8875,7 @@ async function aiRunInvoiceScan() {
   if (!aiScanDocuments.length || aiScanDocuments.some(d => !d.pages.length)) { showToast('צלם לפחות עמוד אחד מכל תעודה', null, null, 3000); return; }
   if (!aiAllPagesOrientationConfirmed()) { showToast('אשר שכל התמונות ישרות לפני הפענוח', null, null, 3200); aiOpenNextUnconfirmedOrientation(); return; }
   if (!auth || !auth.currentUser) { showToast('עדיין אין חיבור מאובטח — המתן רגע ונסה שוב', null, null, 3000); return; }
-  aiScanBusy = true; aiScanProgressText = aiScanDocuments.length > 1 ? 'ה-AI קורא ' + aiScanDocuments.length + ' תעודות, אחת אחרי השנייה…' : 'ה-AI קורא את דפי התעודה…'; aiScanError = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; renderReconcile();
+  aiScanBusy = true; aiScanProgressText = aiScanDocuments.length > 1 ? 'ה-AI קורא ' + aiScanDocuments.length + ' תעודות, אחת אחרי השנייה…' : 'ה-AI קורא את דפי התעודה…'; aiScanError = ''; aiScanErrorAnchor = false; aiScanResponse = null; aiScanEvaluation = null; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; renderReconcile();
   try {
     const token = await auth.currentUser.getIdToken();
     // v132: כל תעודה נסרקת בבקשה משלה, במקביל. כשל בתעודה אחת אינו מפיל
@@ -8876,12 +8894,13 @@ async function aiRunInvoiceScan() {
         results.push(await aiScanSingleDocPipeline(token, docIndex));
       } catch (error) {
         if (error && error.fatal) throw error;
-        results.push({ ok: false, docIndex, errorMessage: (error && error.message) || 'הסריקה נכשלה לתעודה זו' });
+        results.push({ ok: false, docIndex, errorMessage: (error && error.message) || 'הסריקה נכשלה לתעודה זו', errorAnchor: !!(error && error.anchorExplained) });
       }
     }
     const okResults = results.filter(result => result.ok);
     if (!okResults.length) {
       aiScanError = (results[0] && results[0].errorMessage) || 'הסריקה החכמה נכשלה. נסה שוב או עבור לבדיקה ידנית.';
+      aiScanErrorAnchor = !!(results[0] && results[0].errorAnchor);
       return;
     }
     const mergedWarnings = [];
@@ -8905,10 +8924,16 @@ async function aiRunInvoiceScan() {
         : { docIndex: result.docIndex, ok: false, error: result.errorMessage || '' })
     };
     aiScanEvaluation = aiEvaluateInvoiceScan(aiScanResponse);
-  } catch (error) { aiScanError = error && error.message ? error.message : 'הסריקה החכמה נכשלה'; }
+  } catch (error) { aiScanError = error && error.message ? error.message : 'הסריקה החכמה נכשלה'; aiScanErrorAnchor = !!(error && error.anchorExplained); }
   finally {
     aiScanBusy = false; aiScanProgressText = '';
     if (currentView === 'reconcile') renderReconcile();
+    // v250: אזהרת סריקה נגללת אל מול העיניים — קופסה שנשארה מתחת לקו המסך
+    // פשוט לא נקראת בשטח (הוקלד סכום שלפני ההנחות ואיש לא ראה את ההסבר).
+    if (aiScanError && currentView === 'reconcile') setTimeout(() => {
+      const el = document.getElementById('aiScanErrorBox');
+      if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); if (navigator.vibrate) navigator.vibrate([150, 80, 150]); }
+    }, 150);
     // v188: המנתח רץ מעצמו מיד אחרי הסריקה, בלי לחיצה — אבל רק כשיש מה
     // להסביר. תעודה שנסגרה נקייה אינה שולחת בקשה מיותרת.
     const ev = aiScanEvaluation;
@@ -9645,9 +9670,22 @@ function aiInvoiceCaptureHtml() {
   }).join('');
   const ready = aiAllPagesOrientationConfirmed();
   return '<div class="bg-white rounded-2xl border-2 border-violet-200 p-4 shadow-sm mb-24"><div class="font-black text-xl text-slate-800"><i class="fa-solid fa-camera-retro text-violet-600"></i> סריקה חכמה של התעודות</div><div class="text-xs text-slate-500 font-bold leading-relaxed mt-1 mb-2">הבלש הפשוט לא פתר את הפער. צלם פעם אחת כל עמוד מכל תעודה. התמונות נשלחות לפענוח בלבד ואינן נשמרות באפליקציה.</div><div class="rounded-xl bg-blue-50 border border-blue-200 p-2 text-[11px] font-black text-blue-800 mb-3"><i class="fa-solid fa-expand"></i> כל צילום נפתח בגודל גדול. סובב עד שהכותרת למעלה והכתב ישר, ואז אשר. ללא אישור התמונה לא תישלח.</div>' +
-    (aiScanError ? '<div class="rounded-xl bg-rose-50 border border-rose-300 p-2.5 text-xs font-black text-rose-700 mb-3">' + htmlEscape(aiScanError) + '</div>' : '') + docCards +
+    (aiScanError ? aiScanErrorHtml() : '') + docCards +
     '<button data-role="ai-run" ' + (ready ? '' : 'disabled') + ' class="btn-tap w-full rounded-xl py-3.5 font-black ' + (ready ? 'bg-violet-600 text-white' : 'bg-slate-200 text-slate-400') + '"><i class="fa-solid fa-wand-magic-sparkles"></i> פענח את כל התעודות ב-AI</button>' +
     '<div class="text-[10px] text-slate-400 font-bold text-center mt-2">בדרך כלל מתבצעת קריאת AI אחת. אם הקריאה חסרה או אינה נסגרת מול הסכום והיחידות, המערכת עשויה לנסות עד שתי זוויות נוספות.</div><button data-role="rc-goto-manual" class="btn-tap w-full bg-white border border-slate-200 text-slate-500 rounded-xl py-2 font-bold text-xs mt-2">או: בדיקה ידנית בלי סריקה</button><button data-role="rc-goto-manual" class="btn-tap w-full text-slate-400 py-2 font-black text-xs underline">המשך בלי AI — בדיקה ידנית</button></div>';
+}
+// v250: אזהרת "הוקלד סכום שגוי" — בשטח קופסת שגיאה קטנה פשוט לא נקלטת: מנהל
+// שהקליד את הסכום שלפני ההנחות לא הבחין שההודעה בכלל מדברת על זה. כשהשרת
+// מסביר שהעוגן שהוקלד כנראה שגוי, ההסבר מוצג ככרטיס אדום מלא ופועם, עם
+// כותרת ברורה וכפתור שמוביל ישר לתיקון הסכום. כל שאר השגיאות — כמו שהיו.
+function aiScanErrorHtml() {
+  const anchorSuspect = aiScanErrorAnchor && /הוקלד|עוגן|סד הנחה|חייב מע/.test(aiScanError);
+  if (!anchorSuspect) return '<div id="aiScanErrorBox" class="rounded-xl bg-rose-50 border border-rose-300 p-2.5 text-xs font-black text-rose-700 mb-3">' + htmlEscape(aiScanError) + '</div>';
+  return '<div id="aiScanErrorBox" class="anchor-alert rounded-2xl bg-rose-600 p-4 mb-3 shadow-lg" style="color:#fff">' +
+    '<div class="flex items-center gap-2.5 text-lg font-black leading-tight"><i class="fa-solid fa-triangle-exclamation text-2xl text-amber-300"></i> עצור — הסכום שהוקלד כנראה שגוי</div>' +
+    '<div class="rounded-xl p-3 text-sm font-bold leading-relaxed mt-2.5" style="background:rgba(255,255,255,.16)">' + htmlEscape(aiScanError) + '</div>' +
+    '<button data-role="ai-fix-note-amount" class="btn-tap anchor-alert-btn w-full rounded-xl py-3.5 font-black text-base mt-3"><i class="fa-solid fa-pen"></i> תקן את הסכום שהוקלד</button>' +
+  '</div>';
 }
 function aiAutomaticNamePriceMappingsAudit() {
   const documents = aiScanResponse && aiScanResponse.scan && Array.isArray(aiScanResponse.scan.documents)
@@ -14740,7 +14778,7 @@ app.addEventListener('click', (e) => {
   else if (role === 'clear-returns-history') showConfirm('ניקוי היסטוריה', 'למחוק את כל היסטוריית החזרות? יישמר גיבוי בסל מחזור.', 'מחק הכל', () => clearAllDocs('returns'));
   else if (role === 'rc-scan') openReceivingScanner();
   else if (role === 'rc-open') { const en = readNoteEntry(receiptNotes.length === 0); if (en === false) return; if (en) receiptNotes.push(en); recomputeNoteTotal(); receiptOpened = true; receiptDupConfirmed = false; receiptDepositWaived = false; saveReceiptDraft(); refreshReceipt(); openReceivingScanner(); }
-  else if (role === 'rc-cancel') { showConfirm('ביטול תעודה', 'לבטל את התעודה הנוכחית? כל הפריטים שנסרקו יימחקו.', 'בטל תעודה', () => { receiptList = []; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; reconcileData = null; receiptDupConfirmed = false; receiptDepositWaived = false; saveReceiptDraft(); setView('receiving'); }); }
+  else if (role === 'rc-cancel') { showConfirm('ביטול תעודה', 'לבטל את התעודה הנוכחית? כל הפריטים שנסרקו יימחקו.', 'בטל תעודה', () => { receiptList = []; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; anchorFixHint = ''; reconcileData = null; receiptDupConfirmed = false; receiptDepositWaived = false; saveReceiptDraft(); setView('receiving'); }); }
   else if (role === 'rc-note-add') { const en = readNoteEntry(true); if (en === false) return; if (en) { receiptNotes.push(en); recomputeNoteTotal(); saveReceiptDraft(); } refreshReceipt(); const inp = $('rcNoteInput'); if (inp) inp.focus(); }
   else if (role === 'rc-note-remove') { const i = parseInt(t.dataset.idx, 10); if (i >= 0) { receiptNotes.splice(i, 1); recomputeNoteTotal(); saveReceiptDraft(); refreshReceipt(); } }
   else if (role === 'rc-dep-waive') { receiptDepositWaived = true; saveReceiptDraft(); buzz(12); refreshReceipt(); } // v232
@@ -14752,7 +14790,7 @@ app.addEventListener('click', (e) => {
     recomputeNoteTotal();
     const anchorsReady = receiptNotes.length > 0 && receiptNotes.every(raw => { const note = normNote(raw); return note.amount > 0 && note.units != null && note.units > 0; });
     if (!anchorsReady) { showToast('חובה להשאיר לפחות תעודה אחת עם סכום וסך יחידות', null, null, 3200); refreshReceipt(); return; }
-    editingNotes = false; saveReceiptDraft(); refreshReceipt();
+    editingNotes = false; anchorFixHint = ''; saveReceiptDraft(); refreshReceipt();
   }
   else if (role === 'rc-recon-minus') reconcileStepNote(id, -1);
   else if (role === 'rc-recon-plus') reconcileStepNote(id, 1);
@@ -14968,6 +15006,13 @@ app.addEventListener('click', (e) => {
   else if (role === 'rf-add-item') receiptFixAddItem(id);
   else if (role === 'rc-digits-pick') receivingDigitsPick(id);
   else if (role === 'rc-recon-cancel') { resetAiInvoiceScan(); reconcileData = null; setView('receiving'); }
+  // v250: מהאזהרה הבולטת ישר לתיקון — חזרה למסך הקליטה עם עורך הסכומים פתוח,
+  // וההסבר של השרת (עם הסכום הנכון) נשאר מול העיניים בזמן ההקלדה מחדש.
+  else if (role === 'ai-fix-note-amount') {
+    anchorFixHint = aiScanError;
+    resetAiInvoiceScan(); reconcileData = null; editingNotes = true; setView('receiving');
+    setTimeout(() => { const inp = $('rcNoteInput'); if (inp) { inp.scrollIntoView({ behavior: 'smooth', block: 'center' }); inp.focus(); } }, 150);
+  }
   else if (role === 'rc-recon-save') saveReconciledReceipt();
   else if (role === 'rc-fix-open') openReceiptFix(id);
   else if (role === 'rc-offset-choose') openManualOffsetPicker(id, t.dataset.product, t.dataset.dir);
