@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v250 ברקודים לקופה</title>
+    <title>הזמנות יטבתה - v251 ברקוד חד לסריקה ממסך</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -109,7 +109,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v250 ברקודים לקופה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v251 ברקוד חד לסריקה ממסך</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -13189,6 +13189,25 @@ function drawBarcodeTo(cv, code, opts) {
   }
   return false;
 }
+// v251: רינדור חד לסריקה ממסך — הקנבס נמתח קודם ב-CSS (w-full) והמתיחה
+// טשטשה את הקווים, וסורק הקופה לא הצליח לקרוא ממסך הטלפון. עכשיו בוחרים
+// את עובי הקו הגדול ביותר שנכנס ברוחב הכרטיס כך שכל קו ממופה למספר שלם
+// של פיקסלים פיזיים, והקנבס מוצג בגודלו האמיתי — בלי מתיחה ובלי טשטוש.
+// שוליים של 10 מודולים = אזור שקט תקני שהסורק צריך משני צידי הברקוד.
+function drawBarcodeSharp(cv, code, availCssW) {
+  const dpr = Math.max(1, Math.round(window.devicePixelRatio || 1));
+  const availDev = Math.floor(Math.max(240, availCssW || 320) * dpr);
+  let ok = false;
+  for (let m = 10 * dpr; m >= 2; m--) {
+    ok = drawBarcodeTo(cv, code, { width: m, height: 160 * dpr, displayValue: false, margin: m * 10 });
+    if (!ok) return false;
+    if (cv.width <= availDev) break;
+  }
+  cv.style.width = (cv.width / dpr) + 'px';
+  cv.style.height = (cv.height / dpr) + 'px';
+  cv.style.imageRendering = 'pixelated';
+  return ok;
+}
 function closePromoBarcodes() { const ov = document.getElementById('promoBarcodesOverlay'); if (ov) ov.remove(); }
 async function openPromoBarcodes(promoId) {
   const pr = promos.find(x => x.id === promoId); if (!pr) return;
@@ -13227,7 +13246,7 @@ async function openPromoBarcodes(promoId) {
         '<div class="text-center font-black text-slate-900 text-2xl leading-tight">' + htmlEscape(p.name || '(ללא שם)') + '</div>' +
         '<div class="bg-white rounded-2xl border-2 border-slate-200 p-3 mt-3">' +
           (code
-            ? '<canvas id="pbCanvas" class="w-full"></canvas><div dir="ltr" class="text-center font-black text-slate-900 mt-1" style="font-size:30px;letter-spacing:3px">' + htmlEscape(code) + '</div>'
+            ? '<canvas id="pbCanvas" class="mx-auto block max-w-full"></canvas><div dir="ltr" class="text-center font-black text-slate-900 mt-1" style="font-size:30px;letter-spacing:3px">' + htmlEscape(code) + '</div>'
             : '<div class="text-center text-slate-400 font-bold py-8">למוצר הזה אין ברקוד במערכת</div>') +
         '</div>' +
         '<div class="grid grid-cols-2 gap-2 mt-3">' +
@@ -13239,7 +13258,8 @@ async function openPromoBarcodes(promoId) {
     ov.querySelector('#pbCounter').textContent = 'מוצר ' + (idx + 1) + ' מתוך ' + prods.length;
     if (code) {
       const cv = card.querySelector('#pbCanvas');
-      const ok = libOk && window.JsBarcode && drawBarcodeTo(cv, code);
+      const host = cv && cv.parentElement;
+      const ok = libOk && window.JsBarcode && drawBarcodeSharp(cv, code, (host && host.clientWidth ? host.clientWidth - 26 : 320));
       if (!ok && cv) cv.insertAdjacentHTML('beforebegin', '<div class="text-center text-slate-400 text-xs font-bold pt-4">הברקוד הגרפי לא נטען — הקלד את הספרות בקופה</div>'), cv.remove();
     }
   };
