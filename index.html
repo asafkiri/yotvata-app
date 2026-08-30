@@ -1039,6 +1039,7 @@ function startListeners() {
     if (currentView === 'receiptsHistory' || currentView === 'receiving' || currentView === 'health') rerender();
     setTimeout(migrateLegacyReceiptOffsets, 0);
     setTimeout(stampResolvedAiPriceFindings, 0); // v202
+    setTimeout(autoOffsetSweep, 0); // v249: קיזוז אוטומטי כשמתגלה זוג מדויק
   }, console.error);
 
   const prmRef = collection(db, 'artifacts', appId, 'public', 'data', 'promos');
@@ -11039,7 +11040,9 @@ async function saveReceiptFix() {
   receiptFix = null;
   setView('receiptsHistory');
   const offRc = receipts.find(x => x.id === id);
-  if (offRc && findOffsetMatch(offRc)) showToast('💡 זוהה קיזוז אפשרי מול תעודה קודמת — ראה בכרטיס התעודה', null, null, 3500);
+  const autoApplied = await autoApplyExactOffsets(); // v249: זוג מדויק מתקזז לבד
+  if (autoApplied.length) showToast(autoOffsetToastText(autoApplied), null, null, 4200);
+  else if (offRc && findOffsetMatch(offRc)) showToast('💡 זוהה קיזוז אפשרי מול תעודה קודמת — ראה בכרטיס התעודה', null, null, 3500);
   else showToast(open ? 'נשמר — עדיין נותר הפרש' : 'התעודה תוקנה ✓', null, null, 2000);
 }
 async function confirmReceipt() {
@@ -11054,8 +11057,10 @@ async function confirmReceipt() {
   aiCloseOrientationReview();
   receiptList = []; pendingReceipt = null; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; reconcileData = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; reconcileAiAudit = null; aiScanDocuments = []; aiScanBusy = false; aiScanProgressText = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; receiptDupConfirmed = false; receiptDepositWaived = false; saveReceiptDraft();
   setView('receiptsHistory');
+  const autoApplied = await autoApplyExactOffsets(); // v249: זוג מדויק מתקזז לבד
   const newOpen = receipts.filter(r => receiptDiscrepancyInfo(r).open).find(r => findOffsetMatch(r));
-  if (newOpen) showToast('💡 זוהה קיזוז אפשרי מול תעודה קודמת — ראה בכרטיס התעודה', null, null, 3500);
+  if (autoApplied.length) showToast(autoOffsetToastText(autoApplied), null, null, 4200);
+  else if (newOpen) showToast('💡 זוהה קיזוז אפשרי מול תעודה קודמת — ראה בכרטיס התעודה', null, null, 3500);
   else showToast('התעודה נקלטה ✓', null, null, 2200);
 }
 async function delReceipt(id) {
@@ -11420,6 +11425,98 @@ function crossOffsetId(aId, bId, productId, otherProductId) {
     : productId;
   return 'xo2|' + [aId, bId].sort().join('|') + '|' + pids;
 }
+// v249: קיזוז אוטומטי — כשמופיעים חוסר ועודף של אותו מוצר בדיוק, באותו מחיר
+// ובאותה כמות, בתוך 9 התעודות האחרונות, ההתאמה ודאית ואישור יד לא מוסיף מידע:
+// הקיזוז נרשם לבד (source: 'auto'), מוצג בכרטיס התעודה ככל קיזוז אחר וניתן
+// לביטול בכפתור "בטל". ביטול נשמר על התעודות (canceledOffsetIds) כדי שהזוג
+// שבוטל במודע לא יקוזז שוב אוטומטית. התאמות חלשות יותר — מחיר זהה במוצר
+// אחר, כמות שונה, או תעודות ישנות מהחלון — נשארות הצעה לאישור ידני בלבד.
+const AUTO_OFFSET_RECENT_DOCS = 9;
+let autoOffsetBusy = false;
+function autoOffsetDismissed(rc, other, oid) {
+  return (Array.isArray(rc.canceledOffsetIds) && rc.canceledOffsetIds.includes(oid)) ||
+         (Array.isArray(other.canceledOffsetIds) && other.canceledOffsetIds.includes(oid));
+}
+function findAutoOffsetPair() {
+  // receipts כבר ממוין מהחדשה לישנה — 9 הראשונות הן "ההזמנות האחרונות".
+  const recent = receipts.slice(0, AUTO_OFFSET_RECENT_DOCS)
+    .filter(rc => !(rc.offsetClosed && Number(rc.offsetSchemaVersion || 0) < 2));
+  for (let i = 0; i < recent.length; i++) {
+    const rc = recent[i];
+    const mine = receiptOffsets(rc);
+    if (!mine.length) continue;
+    for (let j = i + 1; j < recent.length; j++) {
+      const other = recent[j];
+      const theirs = receiptOffsets(other);
+      if (!theirs.length) continue;
+      for (const a of mine) {
+        const aCents = Math.round((Number(a.price) || 0) * 100);
+        if (aCents <= 0 || !a.productId || !a.d) continue;
+        for (const b of theirs) {
+          if (b.productId !== a.productId || b.d !== -a.d) continue;
+          if (Math.round((Number(b.price) || 0) * 100) !== aCents) continue;
+          const oid = crossOffsetId(rc.id, other.id, a.productId);
+          if (autoOffsetDismissed(rc, other, oid)) continue;
+          return { rc, other, oid, productId: a.productId, name: a.name, otherName: b.name,
+                   qty: Math.abs(a.d), myDir: a.d > 0 ? 'short' : 'over', price: Number(a.price) || 0 };
+        }
+      }
+    }
+  }
+  return null;
+}
+async function applyAutoOffsetPair(p) {
+  const stamp = Date.now();
+  const mine = { id: p.oid, otherId: p.other.id, productId: p.productId, name: p.name, qty: p.qty, dir: p.myDir, at: stamp, source: 'auto' };
+  const theirs = { id: p.oid, otherId: p.rc.id, productId: p.productId, name: p.otherName || p.name, qty: p.qty, dir: p.myDir === 'short' ? 'over' : 'short', at: stamp, source: 'auto' };
+  const rcOffsets = mergeReceiptExternalOffsets(p.rc.externalOffsets, [mine]);
+  const otherOffsets = mergeReceiptExternalOffsets(p.other.externalOffsets, [theirs]);
+  if (db) {
+    const saved = await runCloudTaskSilent('apply automatic receipt offset', {
+      op: 'batch', operationId: makeOperationId('offset_auto'),
+      writes: [
+        { op: 'update', path: dataPath('receipts', p.rc.id), data: { externalOffsets: rcOffsets, offsetClosed: false, offsetWith: p.other.id, offsetAt: stamp, offsetSchemaVersion: 2 } },
+        { op: 'update', path: dataPath('receipts', p.other.id), data: { externalOffsets: otherOffsets, offsetClosed: false, offsetWith: p.rc.id, offsetAt: stamp, offsetSchemaVersion: 2 } }
+      ]
+    });
+    if (!saved) return false;
+  }
+  p.rc.externalOffsets = rcOffsets; p.rc.offsetClosed = false; p.rc.offsetSchemaVersion = 2;
+  p.other.externalOffsets = otherOffsets; p.other.offsetClosed = false; p.other.offsetSchemaVersion = 2;
+  return true;
+}
+async function autoApplyExactOffsets() {
+  // בלי אינטרנט לא מנסים: כתיבה שקטה שנכשלת הייתה מציפה טוסטים; הזוג יקוזז
+  // אוטומטית בהזדמנות הבאה כשהסנכרון יחזור.
+  if (autoOffsetBusy || (db && !navigator.onLine)) return [];
+  autoOffsetBusy = true;
+  const applied = [];
+  try {
+    for (let guard = 0; guard < 15; guard++) {
+      const p = findAutoOffsetPair();
+      if (!p) break;
+      const ok = await applyAutoOffsetPair(p);
+      if (!ok) break;
+      applied.push(p);
+    }
+  } finally { autoOffsetBusy = false; }
+  if (applied.length) {
+    buzz(18);
+    if (currentView === 'receiptsHistory') renderReceiptsHistory();
+  }
+  return applied;
+}
+function autoOffsetToastText(applied) {
+  const total = r2(applied.reduce((a, p) => a + p.qty * p.price, 0));
+  const what = applied.length === 1
+    ? applied[0].qty + ' × ' + applied[0].name + ' קוזזו מול תעודה אחרת'
+    : applied.length + ' פריטים קוזזו בין תעודות';
+  return '⚖️ קיזוז אוטומטי: ' + what + ' — מוצר, מחיר וכמות זהים (₪' + fmtMoney(total) + '). ניתן לבטל בכרטיס התעודה.';
+}
+async function autoOffsetSweep() {
+  const applied = await autoApplyExactOffsets();
+  if (applied.length) showToast(autoOffsetToastText(applied), null, null, 4200);
+}
 function exactLegacyOffsetMatches(a, b) {
   const ad = receiptDiscrepancyInfo(a, { skipExternal: true });
   const bd = receiptDiscrepancyInfo(b, { skipExternal: true });
@@ -11647,10 +11744,11 @@ async function applyManualValueOffset(shortSide, overSide, requestedAmount) {
 async function cancelReceiptOffset(receiptId, groupId) {
   const affected = receipts.filter(rc => (rc.externalOffsets || []).some(x => (x.groupId || x.id) === groupId));
   if (!affected.length) { showToast('הקיזוז כבר בוטל', null, null, 2200); return; }
-  const updates = affected.map(rc => ({ rc, offsets: (rc.externalOffsets || []).filter(x => (x.groupId || x.id) !== groupId) }));
-  const saved = await runCloudTask('cancel receipt offset', { op: 'batch', writes: updates.map(x => ({ op: 'update', path: dataPath('receipts', x.rc.id), data: { externalOffsets: x.offsets, offsetClosed: false, offsetSchemaVersion: 3 } })), operationId: makeOperationId('offset_cancel') });
+  // v249: הביטול נרשם על התעודה — קיזוז אוטומטי לא יחיל שוב זוג שבוטל במודע.
+  const updates = affected.map(rc => ({ rc, offsets: (rc.externalOffsets || []).filter(x => (x.groupId || x.id) !== groupId), canceled: Array.from(new Set((Array.isArray(rc.canceledOffsetIds) ? rc.canceledOffsetIds : []).concat([groupId]))) }));
+  const saved = await runCloudTask('cancel receipt offset', { op: 'batch', writes: updates.map(x => ({ op: 'update', path: dataPath('receipts', x.rc.id), data: { externalOffsets: x.offsets, canceledOffsetIds: x.canceled, offsetClosed: false, offsetSchemaVersion: 3 } })), operationId: makeOperationId('offset_cancel') });
   if (!saved) return;
-  updates.forEach(x => { x.rc.externalOffsets = x.offsets; });
+  updates.forEach(x => { x.rc.externalOffsets = x.offsets; x.rc.canceledOffsetIds = x.canceled; });
   buzz(16); showToast('הקיזוז בוטל — חוק החוסר והעודף הרגיל חזר לפעול', null, null, 3200);
   if (currentView === 'receiptsHistory') renderReceiptsHistory();
 }
@@ -11774,7 +11872,8 @@ function renderReceiptsHistory() {
         ((rc.externalOffsets || []).length ? (function () {
           const groups = [], seen = new Set();
           (rc.externalOffsets || []).forEach(o => { const key = o.groupId || o.id; if (!key || seen.has(key)) return; seen.add(key); groups.push(o); });
-          return '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800"><div class="font-black mb-1"><i class="fa-solid fa-scale-balanced"></i> קיזוזים שאושרו במודע</div>' + groups.map(o => '<div class="flex items-center justify-between gap-2 py-1 border-b border-emerald-100 last:border-0"><div class="font-bold min-w-0">' + (o.source === 'manual-value' ? manualOffsetSummary(o) : ((Number(o.qty) || 0) + ' × ' + htmlEscape(o.name || '') + ' — קוזז')) + '</div><button data-role="rc-offset-cancel" data-id="' + htmlEscape(rc.id) + '" data-group="' + htmlEscape(o.groupId || o.id) + '" class="btn-tap shrink-0 bg-white border border-emerald-300 text-rose-600 rounded-lg px-2 py-1 text-[10px] font-black">בטל</button></div>').join('') + (effectiveOpen ? '<div class="mt-1 pt-1 border-t border-emerald-200 text-rose-700 font-black"><i class="fa-solid fa-triangle-exclamation"></i> נשארו הפרשים נוספים — התעודה עדיין פתוחה</div>' : '<div class="mt-1 font-black">כל ההפרשים בתעודה הזאת טופלו ✓</div>') + '</div>';
+          const hasAuto = groups.some(o => o.source === 'auto');
+          return '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800"><div class="font-black mb-1"><i class="fa-solid fa-scale-balanced"></i> ' + (hasAuto ? 'קיזוזים פעילים — כולל קיזוז אוטומטי' : 'קיזוזים שאושרו במודע') + '</div>' + groups.map(o => '<div class="flex items-center justify-between gap-2 py-1 border-b border-emerald-100 last:border-0"><div class="font-bold min-w-0">' + (o.source === 'manual-value' ? manualOffsetSummary(o) : ((Number(o.qty) || 0) + ' × ' + htmlEscape(o.name || '') + (o.source === 'auto' ? ' — קוזז אוטומטית (מוצר, מחיר וכמות זהים)' : ' — קוזז'))) + '</div><button data-role="rc-offset-cancel" data-id="' + htmlEscape(rc.id) + '" data-group="' + htmlEscape(o.groupId || o.id) + '" class="btn-tap shrink-0 bg-white border border-emerald-300 text-rose-600 rounded-lg px-2 py-1 text-[10px] font-black">בטל</button></div>').join('') + (effectiveOpen ? '<div class="mt-1 pt-1 border-t border-emerald-200 text-rose-700 font-black"><i class="fa-solid fa-triangle-exclamation"></i> נשארו הפרשים נוספים — התעודה עדיין פתוחה</div>' : '<div class="mt-1 font-black">כל ההפרשים בתעודה הזאת טופלו ✓</div>') + '</div>';
         })() : '') +
         (legacyRecovering ? '<div class="mt-2 bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-xs font-black text-amber-800"><i class="fa-solid fa-rotate"></i> משחזר קיזוז ישן ובודק מחדש את שאר החוסרים…</div>' : '') +
         (legacyRecovering ? '' : (function () { const m = findOffsetMatch(rc); if (!m) return ''; const od = new Date(m.other.timestamp).toLocaleDateString('he-IL');
