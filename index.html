@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v257 הוסר כפתור דף הברקודים הנפרד</title>
+    <title>הזמנות יטבתה - v258 הברקודים בתוך דפי השלטים</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -109,7 +109,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v257 הוסר כפתור דף הברקודים הנפרד</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v258 הברקודים בתוך דפי השלטים</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -13339,90 +13339,6 @@ function shareCanvasPng(cv, name) {
 // להדפיס. כל עמוד ביחס A4 (150dpi), מבצע ארוך נשבר לעמוד הבא עם "(המשך)",
 // והשיתוף שולח את כל העמודים יחד.
 // v255: בניית העמודים הופרדה מהשיתוף — כדי שגם מחולל השלטים יוכל לצרף
-// את דפי הברקודים לשיתוף אחד יחד עם השלטים.
-function buildPromoBarcodesPages(list) {
-  const day = todayStr();
-  const W = 1240, pageH = 1754, cols = 3, cellW = Math.floor((W - 80) / cols), cellH = 195, headH = 96, pageHead = 100, footPad = 30;
-  const secs = list.map(pr => {
-    const prods = (pr.productIds || []).map(pid => products.find(p => p.id === pid)).filter(Boolean);
-    return { pr: pr, prods: prods, rows: Math.ceil(prods.length / cols) };
-  });
-  const pages = [];
-  let ctx = null, y = 0;
-  const newPage = () => {
-    const cv = document.createElement('canvas'); cv.width = W; cv.height = pageH;
-    ctx = cv.getContext('2d');
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, pageH);
-    ctx.textAlign = 'right'; ctx.fillStyle = '#0f172a'; ctx.font = '900 40px Heebo, Arial';
-    ctx.fillText('ברקודים לקופה — מבצעים', W - 40, 52);
-    ctx.font = '700 24px Heebo, Arial'; ctx.fillStyle = '#64748b';
-    ctx.fillText('הודפס: ' + dDisp(day) + ' · ' + list.length + ' מבצעים', W - 40, 88);
-    pages.push(cv);
-    y = pageHead;
-  };
-  const drawSecHead = (pr, cont) => {
-    ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 2.5;
-    ctx.beginPath(); ctx.moveTo(40, y); ctx.lineTo(W - 40, y); ctx.stroke();
-    ctx.textAlign = 'right'; ctx.fillStyle = '#0f172a'; ctx.font = '900 34px Heebo, Arial';
-    ctx.fillText((pr.name || ('מבצע ' + pr.pct + '%')) + (cont ? ' (המשך)' : ''), W - 40, y + 44);
-    ctx.font = '800 25px Heebo, Arial'; ctx.fillStyle = '#334155';
-    const future = pr.start && pr.start > day;
-    ctx.fillText((future ? 'עתידי · ' : '') + pr.pct + '% הנחה · עד ' + (pr.end ? dDisp(pr.end) : '?') + ' · עלות המוצר היקר: ₪' + fmtMoney(signMaxCost(pr.id)), W - 40, y + 82);
-    y += headH;
-  };
-  const drawCell = (p, col) => {
-    // עברית: התא הראשון בצד ימין של הדף
-    const x0 = W - 40 - (col + 1) * cellW, cy = y;
-    const code = (p.barcode || '').toString().trim();
-    if (code) {
-      const bc = document.createElement('canvas');
-      let ok = drawBarcodeTo(bc, code, { width: 2, height: 95, displayValue: true, fontSize: 24, font: 'Arial', margin: 8 });
-      // ברקוד ארוך מדי לתא — מציירים דק יותר במקום לכווץ ולטשטש
-      if (ok && bc.width > cellW - 16) ok = drawBarcodeTo(bc, code, { width: 1, height: 95, displayValue: true, fontSize: 20, font: 'Arial', margin: 6 });
-      if (ok) ctx.drawImage(bc, x0 + Math.max(0, Math.floor((cellW - bc.width) / 2)), cy + 10);
-      else { ctx.textAlign = 'center'; ctx.fillStyle = '#0f172a'; ctx.font = '900 26px Arial'; ctx.fillText(code, x0 + cellW / 2, cy + 75); }
-    } else { ctx.textAlign = 'center'; ctx.fillStyle = '#94a3b8'; ctx.font = '700 22px Heebo, Arial'; ctx.fillText('אין ברקוד', x0 + cellW / 2, cy + 75); }
-    ctx.textAlign = 'center'; ctx.fillStyle = '#475569'; ctx.font = '700 20px Heebo, Arial';
-    let nm = p.name || '';
-    while (ctx.measureText(nm).width > cellW - 24 && nm.length > 3) nm = nm.slice(0, -2);
-    ctx.fillText(nm, x0 + cellW / 2, cy + 168);
-  };
-  newPage();
-  secs.forEach(sec => {
-    // כותרת מבצע לא נשארת יתומה בתחתית עמוד — חייבת להיכנס עם שורה אחת לפחות
-    if (y + headH + cellH > pageH - footPad) newPage();
-    drawSecHead(sec.pr, false);
-    for (let row = 0; row < sec.rows; row++) {
-      if (y + cellH > pageH - footPad) { newPage(); drawSecHead(sec.pr, true); }
-      for (let col = 0; col < cols; col++) {
-        const p = sec.prods[row * cols + col];
-        if (p) drawCell(p, col);
-      }
-      y += cellH;
-    }
-    y += 18;
-  });
-  // מספור עמודים — רק אחרי שידוע כמה יצאו
-  pages.forEach((cv, i) => {
-    const c = cv.getContext('2d');
-    c.textAlign = 'left'; c.fillStyle = '#64748b'; c.font = '800 26px Heebo, Arial';
-    c.fillText(pages.length > 1 ? ((i + 1) + ' / ' + pages.length) : '', 40, 56);
-  });
-  return pages;
-}
-// עמודי הברקודים של המבצעים שבשלטים, כקבצים לצירוף לשיתוף השלט
-async function signBarcodePagesFiles() {
-  if (!signMaker) return [];
-  // v256: רק המבצעים שסומנו בכרטיס השלט שלהם — בחירה פר מבצע, לא לכל הדף
-  const ids = [];
-  (signMaker.signs || []).forEach(s => { if (s.withBarcodes && s.promoId && ids.indexOf(s.promoId) === -1) ids.push(s.promoId); });
-  const list = ids.map(id => promos.find(p => p.id === id)).filter(pr => pr && (pr.productIds || []).length);
-  if (!list.length) return [];
-  try { await ensureJsBarcode(); } catch (e) { showToast('דף הברקודים לא צורף — מחולל הברקודים לא נטען', null, null, 2600); return []; }
-  const pages = buildPromoBarcodesPages(list);
-  const blobs = await Promise.all(pages.map(cv => new Promise(res => { try { cv.toBlob(res, 'image/png'); } catch (e) { res(null); } })));
-  return blobs.filter(Boolean).map((b, i) => new File([b], 'barcodes-' + todayStr() + (blobs.length > 1 ? '-' + (i + 1) : '') + '.png', { type: 'image/png' }));
-}
 // ===== הכנת שלטי מבצע (1/2/4 בדף, ייצוא PNG) =====
 const SIGN_MAX = 4;
 function signMarginFactor() { return 1 + (Number(signMarginPct) || 0) / 100; }
@@ -13875,7 +13791,7 @@ function renderSignPreview() {
       '<div class="flex gap-1"><button data-role="sign-pp" data-pp="4" class="btn-tap px-3 py-1.5 rounded-lg text-[11px] font-black ' + (signMaker.perPage === 4 ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-600') + '">4 בדף</button>' +
       '<button data-role="sign-pp" data-pp="2" class="btn-tap px-3 py-1.5 rounded-lg text-[11px] font-black ' + (signMaker.perPage === 2 ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-600') + '">2 בדף (גדול)</button>' +
       '<button data-role="sign-pp" data-pp="1" class="btn-tap px-3 py-1.5 rounded-lg text-[11px] font-black ' + (signMaker.perPage === 1 ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-600') + '">1 בדף (רוחב)</button></div></div>' +
-    '<div class="bg-slate-200 rounded-2xl p-2.5 mb-3"><canvas id="signCanvas" class="w-full rounded-lg shadow"></canvas></div>' +
+    '<div id="signPages" class="bg-slate-200 rounded-2xl p-2.5 mb-3 space-y-1"></div>' +
     '<div class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 p-3 flex gap-2 z-40">' +
       '<button data-role="sign-back" class="btn-tap px-4 py-3 rounded-xl font-black bg-slate-100 text-slate-600"><i class="fa-solid fa-arrow-right"></i></button>' +
       '<button data-role="sign-download" class="btn-tap flex-1 py-3 rounded-xl font-black bg-rose-600 text-white flex items-center justify-center gap-2"><i class="fa-solid fa-share-nodes"></i> שתף / שמור תמונה</button>' +
@@ -13906,22 +13822,8 @@ function signWrapText(ctx, text, maxW) {
   if (cur) lines.push(cur);
   return lines;
 }
-function drawSignCanvas() {
-  const cv = $('signCanvas'); if (!cv || !signMaker) return;
-  const singleLandscape = signMaker.perPage === 1; // שלט בודד — דף לרוחב, כמו שלט חלון אמיתי
-  const W = singleLandscape ? 1754 : 1240, H = singleLandscape ? 1240 : 1754;
-  cv.width = W; cv.height = H;
-  const ctx = cv.getContext('2d');
-  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
-  ctx.textAlign = 'center'; ctx.direction = 'rtl';
-  const pad = 40, gap = 24;
-  const top0 = pad;
-  const n = ([1, 2, 4].indexOf(signMaker.perPage) >= 0 ? signMaker.perPage : 4);
-  const slotH = Math.floor((H - top0 - pad - gap * (n - 1)) / n);
-  const drawCount = Math.min(signMaker.signs.length, n);
-  for (let i = 0; i < drawCount; i++) {
-    const s = signMaker.signs[i];
-    const y0 = top0 + i * (slotH + gap);
+function drawSignSlot(ctx, s, y0, slotH, W) {
+  const pad = 40;
     const x0 = pad, x1 = W - pad, cx = W / 2;
     // מסגרת
     ctx.strokeStyle = '#e11d48'; ctx.lineWidth = 5;
@@ -14105,44 +14007,143 @@ function drawSignCanvas() {
       });
       if (hasMore && moreCount > 0) { ctx.font = '900 ' + M.listSmall + 'px Heebo, Arial'; ctx.lineWidth = Math.max(0.6, M.listSmall * 0.05); ctx.fillText('ועוד ' + moreCount + ' מוצרים…', cx, ly); ctx.strokeText('ועוד ' + moreCount + ' מוצרים…', cx, ly); }
     }
+}
+function drawSignCanvas() {
+  const host = $('signPages'); if (!host || !signMaker) return;
+  const singleLandscape = signMaker.perPage === 1; // שלט בודד — דף לרוחב, כמו שלט חלון אמיתי
+  const W = singleLandscape ? 1754 : 1240, H = singleLandscape ? 1240 : 1754;
+  const pad = 40, gap = 24;
+  const n = ([1, 2, 4].indexOf(signMaker.perPage) >= 0 ? signMaker.perPage : 4);
+  const slotH = Math.floor((H - pad * 2 - gap * (n - 1)) / n);
+  // v258: השלטים ורצועות הברקודים זורמים יחד על פני כמה עמודים — רצועת
+  // הברקודים נכנסת מיד אחרי השלט שסומן, לא כדף נפרד שכולו ברקודים,
+  // והתצוגה המקדימה מציגה את כל העמודים כפי שיודפסו.
+  const wantsBarcodes = signMaker.signs.some(s => s.withBarcodes && s.promoId);
+  if (wantsBarcodes && !window.JsBarcode && !drawSignCanvas._loading) {
+    // טעינה עצלה: מציירים בינתיים בלי ברקודים גרפיים, ומציירים שוב כשנטען
+    drawSignCanvas._loading = true;
+    ensureJsBarcode().then(() => { drawSignCanvas._loading = false; drawSignCanvas(); }).catch(() => { drawSignCanvas._loading = false; });
   }
-  // משבצות ריקות — מסגרת עדינה מקווקוות
-  for (let i = drawCount; i < n; i++) {
-    const y0 = top0 + i * (slotH + gap);
-    ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 2; ctx.setLineDash([12, 10]);
-    ctx.strokeRect(pad, y0, W - pad * 2, slotH);
-    ctx.setLineDash([]);
+  const pages = [];
+  const st = { ctx: null, y: 0 };
+  const newPage = () => {
+    const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    st.ctx = cv.getContext('2d');
+    st.ctx.fillStyle = '#ffffff'; st.ctx.fillRect(0, 0, W, H);
+    st.ctx.textAlign = 'center'; st.ctx.direction = 'rtl';
+    pages.push(cv); st.y = pad;
+  };
+  newPage();
+  let hasStrips = false;
+  signMaker.signs.forEach(s => {
+    if (st.y + slotH > H - pad + 1 && st.y > pad) newPage();
+    drawSignSlot(st.ctx, s, st.y, slotH, W);
+    st.y += slotH + gap;
+    if (s.withBarcodes && s.promoId) { if (drawSignBarcodeStrip(st, newPage, s, W, H, pad)) hasStrips = true; }
+  });
+  // משבצות גזירה ריקות (מסגרת מקווקוות) — רק במצב הקלאסי: עמוד יחיד בלי רצועות
+  if (pages.length === 1 && !hasStrips) {
+    for (let i = signMaker.signs.length; i < n; i++) {
+      const y0 = pad + i * (slotH + gap);
+      st.ctx.strokeStyle = '#e2e8f0'; st.ctx.lineWidth = 2; st.ctx.setLineDash([12, 10]);
+      st.ctx.strokeRect(pad, y0, W - pad * 2, slotH);
+      st.ctx.setLineDash([]);
+    }
   }
+  signMaker._pages = pages;
+  host.innerHTML = '';
+  pages.forEach((cv, i) => {
+    if (pages.length > 1) {
+      const lbl = document.createElement('div');
+      lbl.className = 'text-[10px] font-black text-slate-500 px-1' + (i ? ' pt-2' : '');
+      lbl.textContent = 'עמוד ' + (i + 1) + ' מתוך ' + pages.length;
+      host.appendChild(lbl);
+    }
+    cv.className = 'w-full rounded-lg shadow bg-white';
+    host.appendChild(cv);
+  });
+}
+// רצועת ברקודים לקופה — ממשיכה את הדף מיד אחרי השלט שסומן ונשברת לעמוד
+// הבא עם "(המשך)" כשאין מקום. קו מקווקו + מספריים = כאן גוזרים, זה לצוות.
+function drawSignBarcodeStrip(st, newPage, s, W, H, pad) {
+  const pr = promos.find(p => p.id === s.promoId); if (!pr) return false;
+  const prods = (pr.productIds || []).map(pid => products.find(p => p.id === pid)).filter(Boolean);
+  if (!prods.length) return false;
+  const cols = W > 1500 ? 4 : 3;
+  const cellW = Math.floor((W - pad * 2) / cols), cellH = 168, headH = 48;
+  const rows = Math.ceil(prods.length / cols);
+  const head = cont => {
+    const ctx = st.ctx;
+    ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 2; ctx.setLineDash([10, 8]);
+    ctx.beginPath(); ctx.moveTo(pad, st.y + 4); ctx.lineTo(W - pad, st.y + 4); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = '#334155'; ctx.font = '800 26px Heebo, Arial'; ctx.textAlign = 'right';
+    let txt = '✂ ברקודים לקופה — ' + (pr.name || ('מבצע ' + pr.pct + '%')) + (cont ? ' (המשך)' : '') + ' · עלות המוצר היקר: ₪' + fmtMoney(signMaxCost(pr.id));
+    while (ctx.measureText(txt).width > W - pad * 2 && txt.length > 20) txt = txt.slice(0, -2);
+    ctx.fillText(txt, W - pad, st.y + 40);
+    ctx.textAlign = 'center';
+    st.y += headH;
+  };
+  if (st.y + headH + cellH > H - pad) newPage();
+  head(false);
+  for (let row = 0; row < rows; row++) {
+    if (st.y + cellH > H - pad) { newPage(); head(true); }
+    const ctx = st.ctx;
+    for (let col = 0; col < cols; col++) {
+      const p = prods[row * cols + col]; if (!p) continue;
+      const x0 = W - pad - (col + 1) * cellW;
+      const code = (p.barcode || '').toString().trim();
+      if (code && window.JsBarcode) {
+        const bc = document.createElement('canvas');
+        let ok = drawBarcodeTo(bc, code, { width: 2, height: 86, displayValue: true, fontSize: 22, font: 'Arial', margin: 8 });
+        // ברקוד ארוך מדי לתא — מציירים דק יותר במקום לכווץ ולטשטש
+        if (ok && bc.width > cellW - 14) ok = drawBarcodeTo(bc, code, { width: 1, height: 86, displayValue: true, fontSize: 18, font: 'Arial', margin: 6 });
+        if (ok) ctx.drawImage(bc, x0 + Math.max(0, Math.floor((cellW - bc.width) / 2)), st.y + 6);
+        else { ctx.fillStyle = '#0f172a'; ctx.font = '900 24px Arial'; ctx.fillText(code, x0 + cellW / 2, st.y + 66); }
+      } else if (code) {
+        ctx.fillStyle = '#0f172a'; ctx.font = '900 24px Arial'; ctx.fillText(code, x0 + cellW / 2, st.y + 66);
+      } else {
+        ctx.fillStyle = '#94a3b8'; ctx.font = '700 20px Heebo, Arial'; ctx.fillText('אין ברקוד', x0 + cellW / 2, st.y + 66);
+      }
+      ctx.fillStyle = '#475569'; ctx.font = '700 18px Heebo, Arial';
+      let nm = p.name || '';
+      while (ctx.measureText(nm).width > cellW - 20 && nm.length > 3) nm = nm.slice(0, -2);
+      ctx.fillText(nm, x0 + cellW / 2, st.y + 148);
+    }
+    st.y += cellH;
+  }
+  st.y += 20;
+  return true;
 }
 async function downloadSignImage() {
-  const cv = $('signCanvas'); if (!cv) return;
+  if (!signMaker || !(signMaker._pages || []).length) return;
   const empty = (signMaker && signMaker.signs ? signMaker.signs : []).map((s, i) => (!signLineText(s) ? (i + 1) : null)).filter(x => x != null);
   if (empty.length && !downloadSignImage._skipWarn) {
     showConfirm('שלטים בלי מחיר', 'שלט ' + empty.join(', ') + ' עדיין בלי מחיר/אחוז — הם ייצאו עם חלל ריק. להוריד בכל זאת?', 'הורד בכל זאת', function () { downloadSignImage._skipWarn = true; downloadSignImage(); downloadSignImage._skipWarn = false; });
     return;
   }
-  // v255: אם סומן "צרף דף ברקודים לקופה" — עמודי הברקודים של המבצעים
-  // שבשלטים מצטרפים לאותו שיתוף, בחירה אחת ושתי המשימות סגורות.
-  const extraFiles = await signBarcodePagesFiles();
+  // רצועות ברקודים בלי הספרייה — טוענים ומציירים מחדש לפני הייצוא
+  if (signMaker.signs.some(s => s.withBarcodes && s.promoId) && !window.JsBarcode) {
+    try { await ensureJsBarcode(); drawSignCanvas(); } catch (e) {}
+  }
+  const pages = signMaker._pages || [];
+  const blobs = await Promise.all(pages.map(cv => new Promise(res => { try { cv.toBlob(res, 'image/png'); } catch (e) { res(null); } })));
+  if (blobs.some(b => !b)) { showToast('שגיאה ביצירת התמונה', null, null, 2500); return; }
+  const files = blobs.map((b, i) => new File([b], 'shelet-' + todayStr() + (blobs.length > 1 ? '-' + (i + 1) : '') + '.png', { type: 'image/png' }));
   try {
-    cv.toBlob(async function (blob) {
-      if (!blob) { showToast('שגיאה ביצירת התמונה', null, null, 2500); return; }
-      const files = [new File([blob], 'shelet-' + todayStr() + '.png', { type: 'image/png' })].concat(extraFiles);
-      // שיתוף מקורי (iOS/Android) — מאפשר "שמור תמונה" ישירות לתמונות
-      if (navigator.canShare && navigator.canShare({ files: files }) && navigator.share) {
-        try { await navigator.share({ files: files }); return; }
-        catch (e) { if (e && e.name === 'AbortError') return; /* המשתמש ביטל */ }
-      }
-      // נפילה: הורדה רגילה לקבצים
-      files.forEach((f, i) => setTimeout(() => {
-        const a = document.createElement('a');
-        a.download = f.name;
-        a.href = URL.createObjectURL(f);
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-      }, i * 400));
-      showToast(files.length > 1 ? files.length + ' תמונות ירדו — פתח מהקבצים/הורדות' : 'התמונה ירדה — פתח אותה מהקבצים/הורדות', null, null, 3000);
-    }, 'image/png');
+    // שיתוף מקורי (iOS/Android) — מאפשר "שמור תמונה" ישירות לתמונות
+    if (navigator.canShare && navigator.canShare({ files: files }) && navigator.share) {
+      try { await navigator.share({ files: files }); return; }
+      catch (e) { if (e && e.name === 'AbortError') return; /* המשתמש ביטל */ }
+    }
+    // נפילה: הורדה רגילה לקבצים
+    files.forEach((f, i) => setTimeout(() => {
+      const a = document.createElement('a');
+      a.download = f.name;
+      a.href = URL.createObjectURL(f);
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    }, i * 400));
+    showToast(files.length > 1 ? files.length + ' תמונות ירדו — פתח מהקבצים/הורדות' : 'התמונה ירדה — פתח אותה מהקבצים/הורדות', null, null, 3000);
   } catch (e) { console.error(e); showToast('שגיאה בהורדה — נסה שוב', null, null, 2500); }
 }
 function renderPromoEdit() {
@@ -15359,7 +15360,7 @@ app.addEventListener('click', (e) => {
   else if (role === 'sign-back') { if (signMaker) { signMaker.step = 'pick'; renderSignMaker(); } }
   else if (role === 'sign-kind') { if (signMaker) { const s = signMaker.signs[parseInt(id, 10)]; if (s) { s.kind = t.dataset.kind; renderSignMaker(); } } }
   else if (role === 'sign-download') downloadSignImage();
-  else if (role === 'sign-with-barcodes') { if (signMaker) { const s = signMaker.signs[parseInt(id, 10)]; if (s) { s.withBarcodes = !s.withBarcodes; const ic = t.querySelector('i'); if (ic) ic.className = 'fa-solid ' + (s.withBarcodes ? 'fa-square-check text-rose-600' : 'fa-square text-slate-300') + ' text-xl shrink-0'; buzz(10); } } }
+  else if (role === 'sign-with-barcodes') { if (signMaker) { const s = signMaker.signs[parseInt(id, 10)]; if (s) { s.withBarcodes = !s.withBarcodes; const ic = t.querySelector('i'); if (ic) ic.className = 'fa-solid ' + (s.withBarcodes ? 'fa-square-check text-rose-600' : 'fa-square text-slate-300') + ' text-xl shrink-0'; buzz(10); drawSignCanvas(); } } }
   else if (role === 'sign-apply-rec') { if (signMaker) { const s = signMaker.signs[parseInt(id, 10)]; if (s) { const rec = signRecommend(s); if (rec) { if (rec.type === 'pct') s.pct = String(rec.value); else s.price = String(rec.value); renderSignMaker(); } } } }
   else if (role === 'sign-pp') { if (signMaker) { const pp = parseInt(t.dataset.pp, 10); if (signMaker.signs.length > pp) { showToast('בחרת ' + signMaker.signs.length + ' מבצעים — הסר כדי לעבור ל-' + pp + ' בדף', null, null, 2800); } else { signMaker.perPage = pp; renderSignMaker(); } } }
   else if (role === 'cfg-save') saveAppConfig();
