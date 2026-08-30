@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v261 מחיר עלות ליד כל ברקוד</title>
+    <title>הזמנות יטבתה - v262 מסך המבצע הפך לרשימת ברקודים</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -109,7 +109,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v261 מחיר עלות ליד כל ברקוד</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v262 מסך המבצע הפך לרשימת ברקודים</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -13192,97 +13192,48 @@ function drawBarcodeTo(cv, code, opts) {
   }
   return false;
 }
-// v251: רינדור חד לסריקה ממסך — הקנבס נמתח קודם ב-CSS (w-full) והמתיחה
-// טשטשה את הקווים, וסורק הקופה לא הצליח לקרוא ממסך הטלפון. עכשיו בוחרים
-// את עובי הקו הגדול ביותר שנכנס ברוחב הכרטיס כך שכל קו ממופה למספר שלם
-// של פיקסלים פיזיים, והקנבס מוצג בגודלו האמיתי — בלי מתיחה ובלי טשטוש.
-// שוליים של 10 מודולים = אזור שקט תקני שהסורק צריך משני צידי הברקוד.
-function drawBarcodeSharp(cv, code, availCssW) {
-  const dpr = Math.max(1, Math.round(window.devicePixelRatio || 1));
-  const availDev = Math.floor(Math.max(240, availCssW || 320) * dpr);
-  let ok = false;
-  for (let m = 10 * dpr; m >= 2; m--) {
-    ok = drawBarcodeTo(cv, code, { width: m, height: 160 * dpr, displayValue: false, margin: m * 10 });
-    if (!ok) return false;
-    if (cv.width <= availDev) break;
-  }
-  cv.style.width = (cv.width / dpr) + 'px';
-  cv.style.height = (cv.height / dpr) + 'px';
-  cv.style.imageRendering = 'pixelated';
-  return ok;
-}
 function closePromoBarcodes() { const ov = document.getElementById('promoBarcodesOverlay'); if (ov) ov.remove(); }
+// v262: המסך הפך לרשימה — סורק לייזר ממילא לא קורא ממסך, אז במקום
+// ברקוד מצויר אחד גדול: כל מוצרי המבצע בבת אחת עם הספרות (להקלדה
+// ידנית בקופה), מחיר העלות ומחיר הקופה. הדפסה — בדף המרוכז למטה.
 async function openPromoBarcodes(promoId) {
   const pr = promos.find(x => x.id === promoId); if (!pr) return;
   const prods = (pr.productIds || []).map(pid => products.find(p => p.id === pid)).filter(Boolean);
   if (!prods.length) { showToast('אין מוצרים בסל המבצע', null, null, 2200); return; }
-  let libOk = true;
-  try { await ensureJsBarcode(); } catch (e) { libOk = false; }
   closePromoBarcodes();
-  let idx = 0;
   const ov = document.createElement('div');
   ov.id = 'promoBarcodesOverlay';
-  ov.className = 'fixed inset-0 bg-white z-[125] flex flex-col';
+  ov.className = 'fixed inset-0 bg-slate-50 z-[125] flex flex-col';
   ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', 'ברקודים לקופה');
   ov.innerHTML =
-    '<div class="p-3 border-b border-slate-100 flex items-center gap-2 shrink-0">' +
+    '<div class="p-3 border-b border-slate-100 bg-white flex items-center gap-2 shrink-0">' +
       '<div class="w-10 h-10 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0"><i class="fa-solid fa-barcode"></i></div>' +
-      '<div class="flex-1 min-w-0"><div class="font-black text-slate-900 truncate">' + htmlEscape(pr.name || ('מבצע ' + pr.pct + '%')) + '</div><div class="text-[11px] text-slate-500 font-bold">ברקודים לקופה · הגבר בהירות מסך לסריקה</div></div>' +
+      '<div class="flex-1 min-w-0"><div class="font-black text-slate-900 truncate">' + htmlEscape(pr.name || ('מבצע ' + pr.pct + '%')) + '</div><div class="text-[11px] text-slate-500 font-bold">' + prods.length + ' מוצרים · ברקוד ועלות ליחידה ללא מע״מ</div></div>' +
       '<span class="bg-rose-100 text-rose-700 font-black px-2.5 py-1 rounded-full text-sm shrink-0">' + pr.pct + '%</span>' +
       '<button data-pb-close class="btn-tap w-10 h-10 rounded-xl bg-slate-100 text-slate-600 shrink-0" aria-label="סגור"><i class="fa-solid fa-xmark"></i></button>' +
     '</div>' +
-    '<div id="pbCard" class="flex-1 overflow-y-auto px-4 py-4"></div>' +
-    '<div class="p-3 border-t border-slate-100 shrink-0">' +
-      '<div class="flex items-center gap-2 mb-2">' +
-        '<button data-pb-prev class="btn-tap w-14 h-12 rounded-xl bg-slate-100 text-slate-700 font-black" aria-label="המוצר הקודם"><i class="fa-solid fa-chevron-right"></i></button>' +
-        '<div id="pbCounter" class="flex-1 text-center font-black text-slate-700 text-sm"></div>' +
-        '<button data-pb-next class="btn-tap w-14 h-12 rounded-xl bg-slate-800 text-white font-black" aria-label="המוצר הבא"><i class="fa-solid fa-chevron-left"></i></button>' +
-      '</div>' +
-      '<button data-pb-print class="btn-tap w-full py-2.5 rounded-xl font-black text-sm bg-white border-2 border-slate-200 text-slate-700"><i class="fa-solid fa-print"></i> דף מרוכז לכל המוצרים — להדפסה או שיתוף</button>' +
+    '<div id="pbList" class="flex-1 overflow-y-auto px-3 py-3 space-y-2">' +
+      prods.map(p => {
+        const code = normalizeBarcode(p.barcode);
+        return '<div class="bg-white rounded-xl border border-slate-200 p-3 flex items-start justify-between gap-3">' +
+          '<div class="min-w-0 flex-1"><div class="font-black text-slate-800 text-sm leading-tight">' + htmlEscape(p.name || '(ללא שם)') + '</div>' +
+          '<div dir="ltr" class="text-right font-black text-slate-900 mt-1" style="font-size:19px;letter-spacing:1.5px">' + (code ? htmlEscape(code) : '<span class="text-slate-300 text-sm">אין ברקוד</span>') + '</div></div>' +
+          '<div class="shrink-0 text-left"><div class="text-[10px] text-slate-400 font-black">עלות (ללא מע״מ)</div><div class="font-black text-xl text-slate-900">' + (p.price != null ? '₪' + fmtMoney(p.price) : '—') + '</div>' +
+          (p.posPrice != null
+            ? '<div class="text-[11px] text-sky-700 font-black mt-0.5">קופה: ₪' + fmtMoney(p.posPrice) + '</div>'
+            : '<div class="text-[11px] text-amber-600 font-black mt-0.5"><i class="fa-solid fa-triangle-exclamation"></i> חסר בקופה</div>') +
+          '</div>' +
+        '</div>';
+      }).join('') +
+    '</div>' +
+    '<div class="p-3 border-t border-slate-100 bg-white shrink-0">' +
+      '<button data-pb-print class="btn-tap w-full py-3 rounded-xl font-black text-sm bg-slate-800 text-white"><i class="fa-solid fa-print"></i> דף מרוכז לכל המוצרים — להדפסה או שיתוף</button>' +
     '</div>';
-  const renderCard = () => {
-    const p = prods[idx];
-    const code = normalizeBarcode(p.barcode);
-    const card = ov.querySelector('#pbCard');
-    card.innerHTML =
-      '<div class="max-w-md mx-auto">' +
-        '<div class="text-center font-black text-slate-900 text-2xl leading-tight">' + htmlEscape(p.name || '(ללא שם)') + '</div>' +
-        '<div class="bg-white rounded-2xl border-2 border-slate-200 p-3 mt-3">' +
-          (code
-            ? '<canvas id="pbCanvas" class="mx-auto block max-w-full"></canvas><div dir="ltr" class="text-center font-black text-slate-900 mt-1" style="font-size:30px;letter-spacing:3px">' + htmlEscape(code) + '</div>'
-            : '<div class="text-center text-slate-400 font-bold py-8">למוצר הזה אין ברקוד במערכת</div>') +
-        '</div>' +
-        '<div class="grid grid-cols-2 gap-2 mt-3">' +
-          '<div class="bg-slate-50 rounded-2xl p-3 text-center"><div class="text-[11px] text-slate-400 font-black">מחיר עלות (ללא מע״מ)</div><div class="font-black text-2xl text-slate-800 mt-0.5">' + (p.price != null ? '₪' + fmtMoney(p.price) : '—') + '</div></div>' +
-          '<div class="bg-sky-50 rounded-2xl p-3 text-center"><div class="text-[11px] text-sky-600 font-black">מחיר בקופה (כולל מע״מ)</div><div class="font-black text-2xl text-sky-800 mt-0.5">' + (p.posPrice != null ? '₪' + fmtMoney(p.posPrice) : '—') + '</div></div>' +
-        '</div>' +
-        (p.posPrice == null ? '<div class="mt-2 bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-xs font-bold text-amber-800 text-center"><i class="fa-solid fa-triangle-exclamation"></i> אין מחיר קופה שמור — כנראה המוצר עדיין לא מוקם בקופה</div>' : '') +
-      '</div>';
-    ov.querySelector('#pbCounter').textContent = 'מוצר ' + (idx + 1) + ' מתוך ' + prods.length;
-    if (code) {
-      const cv = card.querySelector('#pbCanvas');
-      const host = cv && cv.parentElement;
-      const ok = libOk && window.JsBarcode && drawBarcodeSharp(cv, code, (host && host.clientWidth ? host.clientWidth - 26 : 320));
-      if (!ok && cv) cv.insertAdjacentHTML('beforebegin', '<div class="text-center text-slate-400 text-xs font-bold pt-4">הברקוד הגרפי לא נטען — הקלד את הספרות בקופה</div>'), cv.remove();
-    }
-  };
-  const nav = d => { idx = (idx + d + prods.length) % prods.length; buzz(10); renderCard(); };
   ov.addEventListener('click', e => {
     if (e.target.closest('[data-pb-close]')) { closePromoBarcodes(); return; }
-    if (e.target.closest('[data-pb-prev]')) { nav(-1); return; }
-    if (e.target.closest('[data-pb-next]')) { nav(1); return; }
     if (e.target.closest('[data-pb-print]')) { sharePromoBarcodesSheet(pr, prods); return; }
   });
-  // החלקה בין מוצרים — ימינה = הבא (כיוון הדפדוף בעברית)
-  let swipeX = null;
-  ov.addEventListener('touchstart', e => { swipeX = e.touches[0].clientX; }, { passive: true });
-  ov.addEventListener('touchend', e => {
-    if (swipeX == null) return;
-    const dx = e.changedTouches[0].clientX - swipeX; swipeX = null;
-    if (Math.abs(dx) > 60) nav(dx > 0 ? 1 : -1);
-  }, { passive: true });
   document.body.appendChild(ov);
-  renderCard();
 }
 // דף מרוכז: שורה לכל מוצר — ברקוד, שם, עלות ומחיר קופה — לשיתוף או הדפסה
 async function sharePromoBarcodesSheet(pr, prods) {
