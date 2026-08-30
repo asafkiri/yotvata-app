@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v259 שלט וברקודים על אותו עמוד</title>
+    <title>הזמנות יטבתה - v260 תיקון ברקודים עם תו נסתר + דף צפוף</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -109,7 +109,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v259 שלט וברקודים על אותו עמוד</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v260 תיקון ברקודים עם תו נסתר + דף צפוף</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -13179,6 +13179,9 @@ function barcodeFormatFor(code) {
 function drawBarcodeTo(cv, code, opts) {
   // מנסה קודם את הפורמט המדויק (EAN13 נפסל כשספרת הביקורת שגויה) ונופל
   // ל-CODE128 — שמעביר לקופה את אותן ספרות גם כשהברקוד לא תקני.
+  // v260: נרמול קודם — ברקוד מודבק עם תו נסתר (רווח/סימן כיווניות) נכשל
+  // בשני הפורמטים ויצא ספרות בלבד; אותו נרמול קנוני כמו בסריקה.
+  code = normalizeBarcode(code);
   const fmt = barcodeFormatFor(code);
   const tries = fmt === 'CODE128' ? ['CODE128'] : [fmt, 'CODE128'];
   for (const f of tries) {
@@ -13239,7 +13242,7 @@ async function openPromoBarcodes(promoId) {
     '</div>';
   const renderCard = () => {
     const p = prods[idx];
-    const code = (p.barcode || '').toString().trim();
+    const code = normalizeBarcode(p.barcode);
     const card = ov.querySelector('#pbCard');
     card.innerHTML =
       '<div class="max-w-md mx-auto">' +
@@ -13304,7 +13307,7 @@ async function sharePromoBarcodesSheet(pr, prods) {
     ctx.fillText('מחיר עלות: ' + (p.price != null ? '₪' + fmtMoney(p.price) : '—') + ' (ללא מע״מ)', W - 40, y0 + 112);
     ctx.fillStyle = p.posPrice != null ? '#0369a1' : '#b45309';
     ctx.fillText(p.posPrice != null ? 'מחיר בקופה: ₪' + fmtMoney(p.posPrice) + ' (כולל מע״מ)' : '⚠ אין מחיר קופה — כנראה חסר בקופה', W - 40, y0 + 156);
-    const code = (p.barcode || '').toString().trim();
+    const code = normalizeBarcode(p.barcode);
     if (code) {
       const bc = document.createElement('canvas');
       if (drawBarcodeTo(bc, code, { width: 2, height: 110, displayValue: true, fontSize: 26, font: 'Arial', margin: 8 })) {
@@ -14077,7 +14080,7 @@ function signStripMetrics(s, W, pad) {
   const pr = promos.find(p => p.id === s.promoId); if (!pr) return null;
   const prods = (pr.productIds || []).map(pid => products.find(p => p.id === pid)).filter(Boolean);
   if (!prods.length) return null;
-  const cols = W > 1500 ? 4 : 3;
+  const cols = W > 1500 ? 5 : 4;
   const cellH = 168, headH = 48;
   const rows = Math.ceil(prods.length / cols);
   return { pr: pr, prods: prods, cols: cols, cellW: Math.floor((W - pad * 2) / cols), cellH: cellH, headH: headH, rows: rows, total: headH + rows * cellH + 20 };
@@ -14104,7 +14107,7 @@ function drawSignBarcodeStrip(st, newPage, s, W, H, pad) {
     for (let col = 0; col < cols; col++) {
       const p = prods[row * cols + col]; if (!p) continue;
       const x0 = W - pad - (col + 1) * cellW;
-      const code = (p.barcode || '').toString().trim();
+      const code = normalizeBarcode(p.barcode);
       if (code && window.JsBarcode) {
         const bc = document.createElement('canvas');
         let ok = drawBarcodeTo(bc, code, { width: 2, height: 86, displayValue: true, fontSize: 22, font: 'Arial', margin: 8 });
