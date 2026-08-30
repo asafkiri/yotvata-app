@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v253 דף הברקודים מחולק לעמודי A4</title>
+    <title>הזמנות יטבתה - v254 בחירת מבצעים לדף הברקודים</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -109,7 +109,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v253 דף הברקודים מחולק לעמודי A4</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v254 בחירת מבצעים לדף הברקודים</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -13107,7 +13107,7 @@ function renderPromos() {
   const head = '<div class="flex items-center justify-between px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">מבצעים</h2></div>' +
     '<button data-role="promo-new" class="btn-tap w-full bg-rose-600 text-white rounded-2xl py-3.5 font-black text-base flex items-center justify-center gap-2 mb-2"><i class="fa-solid fa-plus"></i> מבצע חדש</button>' +
     '<button data-role="promo-import" class="btn-tap w-full bg-white border-2 border-violet-300 text-violet-700 rounded-2xl py-3 font-black text-sm flex items-center justify-center gap-2 mb-2"><i class="fa-solid fa-file-import"></i> ייבוא מבצעים מדף הפעילות</button>' +
-    (promos.length ? '<button data-role="promo-barcodes-all" class="btn-tap w-full bg-white border-2 border-slate-300 text-slate-700 rounded-2xl py-3 font-black text-sm flex items-center justify-center gap-2 mb-2"><i class="fa-solid fa-barcode"></i> דף ברקודים לקופה — כל המבצעים</button>' : '') +
+    (promos.length ? '<button data-role="promo-barcodes-all" class="btn-tap w-full bg-white border-2 border-slate-300 text-slate-700 rounded-2xl py-3 font-black text-sm flex items-center justify-center gap-2 mb-2"><i class="fa-solid fa-barcode"></i> דף ברקודים לקופה — בחירת מבצעים</button>' : '') +
     (promos.length ? '<button data-role="sign-start" class="btn-tap w-full bg-white border-2 border-rose-200 text-rose-700 rounded-2xl py-3 font-black text-sm flex items-center justify-center gap-2 mb-2"><i class="fa-solid fa-print"></i> הכן שלט למבצעים</button>' : '') +
     '<button data-role="sign-start-internal" class="btn-tap w-full bg-white border-2 border-amber-300 text-amber-700 rounded-2xl py-3 font-black text-sm flex items-center justify-center gap-2 mb-3"><i class="fa-solid fa-tag"></i> שלט למבצע פנימי של החנות</button>' +
     promoImportHtml();
@@ -13339,16 +13339,77 @@ function shareCanvasPng(cv, name) {
 // v253: חלוקה לעמודי A4 — עם הרבה מבצעים יצאה תמונה אחת ענקית שאי אפשר
 // להדפיס. כל עמוד ביחס A4 (150dpi), מבצע ארוך נשבר לעמוד הבא עם "(המשך)",
 // והשיתוף שולח את כל העמודים יחד.
-async function shareAllPromoBarcodesSheet() {
+// v254: הכפתור ייצר מיד עמודים לכל המבצעים בלי לשאול. עכשיו נפתח קודם
+// מסך בחירה, ורק המבצעים שסומנו נכנסים לדף.
+function promoSheetEligible() {
   const day = todayStr();
-  const list = promos
+  return promos
     .filter(pr => (pr.productIds || []).length && (promoActive(pr, day) || (pr.start && pr.start > day)))
     .sort((a, b) => {
       const aA = promoActive(a, day) ? 0 : 1, bA = promoActive(b, day) ? 0 : 1;
       if (aA !== bA) return aA - bA;
       return aA === 0 ? (a.end || '').localeCompare(b.end || '') : (a.start || '').localeCompare(b.start || '');
     });
+}
+function closePromoSheetPicker() { const ov = document.getElementById('promoSheetPicker'); if (ov) ov.remove(); }
+function openPromoSheetPicker() {
+  const list = promoSheetEligible();
   if (!list.length) { showToast('אין מבצעים פעילים או עתידיים עם מוצרים', null, null, 2600); return; }
+  closePromoSheetPicker();
+  const day = todayStr();
+  const sel = new Set();
+  const ov = document.createElement('div');
+  ov.id = 'promoSheetPicker';
+  ov.className = 'fixed inset-0 bg-slate-900/65 backdrop-blur-sm z-[125] flex items-end sm:items-center justify-center p-0 sm:p-4';
+  ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-modal', 'true'); ov.setAttribute('aria-label', 'בחירת מבצעים לדף ברקודים');
+  ov.innerHTML = '<div class="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl shadow-2xl max-h-[88vh] flex flex-col overflow-hidden">' +
+    '<div class="p-4 border-b border-slate-100 flex items-center gap-3">' +
+      '<div class="w-11 h-11 rounded-2xl bg-slate-100 text-slate-700 flex items-center justify-center shrink-0"><i class="fa-solid fa-barcode"></i></div>' +
+      '<div class="flex-1 min-w-0"><div class="font-black text-slate-900 text-lg">דף ברקודים לקופה</div><div class="text-xs text-slate-500 font-bold">בחר אילו מבצעים ייכנסו לדף</div></div>' +
+      '<button data-ps-close class="btn-tap w-11 h-11 rounded-xl bg-slate-100 text-slate-600 shrink-0" aria-label="סגור"><i class="fa-solid fa-xmark"></i></button>' +
+    '</div>' +
+    '<div class="px-4 pt-3 flex gap-2">' +
+      '<button data-ps-all class="btn-tap flex-1 py-2 rounded-xl font-black text-xs bg-slate-100 text-slate-700"><i class="fa-solid fa-check-double"></i> בחר הכל</button>' +
+      '<button data-ps-none class="btn-tap flex-1 py-2 rounded-xl font-black text-xs bg-slate-100 text-slate-500">נקה בחירה</button>' +
+    '</div>' +
+    '<div id="psList" class="p-4 pt-2.5 overflow-y-auto space-y-1.5"></div>' +
+    '<div class="p-3 border-t border-slate-100">' +
+      '<button data-ps-go class="btn-tap w-full py-3 rounded-xl font-black bg-slate-800 text-white"></button>' +
+    '</div>' +
+  '</div>';
+  const rows = () => {
+    ov.querySelector('#psList').innerHTML = list.map(pr => {
+      const on = sel.has(pr.id);
+      const future = pr.start && pr.start > day;
+      return '<button data-ps-toggle="' + pr.id + '" class="btn-tap w-full flex items-center justify-between gap-2 p-2.5 rounded-xl border-2 text-right ' + (on ? 'border-slate-700 bg-slate-50' : 'border-slate-100 bg-white') + '">' +
+        '<div class="min-w-0"><div class="font-black text-slate-800 text-sm truncate">' + htmlEscape(pr.name || ('מבצע ' + pr.pct + '%')) + '</div>' +
+        '<div class="text-[11px] text-slate-400 font-bold mt-0.5">' + (future ? '<span class="text-blue-600">עתידי</span> · ' : '<span class="text-emerald-600">פעיל</span> · ') + pr.pct + '% · ' + (pr.productIds || []).length + ' מוצרים · עד ' + (pr.end ? dDisp(pr.end) : '?') + '</div></div>' +
+        '<i class="fa-solid ' + (on ? 'fa-square-check text-slate-800' : 'fa-square text-slate-200') + ' text-2xl shrink-0"></i>' +
+      '</button>';
+    }).join('');
+    const go = ov.querySelector('[data-ps-go]');
+    go.innerHTML = sel.size ? '<i class="fa-solid fa-print"></i> צור דף — ' + sel.size + ' מבצעים' : 'בחר מבצעים לדף';
+    go.classList.toggle('opacity-40', !sel.size);
+  };
+  ov.addEventListener('click', async e => {
+    if (e.target === ov || e.target.closest('[data-ps-close]')) { closePromoSheetPicker(); return; }
+    const tg = e.target.closest('[data-ps-toggle]');
+    if (tg) { const id = tg.getAttribute('data-ps-toggle'); if (sel.has(id)) sel.delete(id); else sel.add(id); buzz(10); rows(); return; }
+    if (e.target.closest('[data-ps-all]')) { list.forEach(pr => sel.add(pr.id)); buzz(10); rows(); return; }
+    if (e.target.closest('[data-ps-none]')) { sel.clear(); buzz(10); rows(); return; }
+    if (e.target.closest('[data-ps-go]')) {
+      if (!sel.size) { showToast('סמן לפחות מבצע אחד', null, null, 2200); return; }
+      const chosen = list.filter(pr => sel.has(pr.id));
+      closePromoSheetPicker();
+      await sharePromoBarcodesPages(chosen);
+    }
+  });
+  document.body.appendChild(ov);
+  rows();
+}
+async function sharePromoBarcodesPages(list) {
+  const day = todayStr();
+  if (!list || !list.length) return;
   try { await ensureJsBarcode(); } catch (e) { showToast('אין חיבור לרשת — מחולל הברקודים לא נטען', null, null, 2600); return; }
   const W = 1240, pageH = 1754, cols = 3, cellW = Math.floor((W - 80) / cols), cellH = 195, headH = 96, pageHead = 100, footPad = 30;
   const secs = list.map(pr => {
@@ -15369,7 +15430,7 @@ app.addEventListener('click', (e) => {
   else if (role === 'cfg-save') saveAppConfig();
   else if (role === 'promo-open') openPromoEdit(id);
   else if (role === 'promo-barcodes') openPromoBarcodes(id);
-  else if (role === 'promo-barcodes-all') shareAllPromoBarcodesSheet();
+  else if (role === 'promo-barcodes-all') openPromoSheetPicker();
   else if (role === 'promo-info') openPromoPopup(id);
   else if (role === 'pe-toggle') togglePromoProduct(id);
   else if (role === 'promo-scan') { scanPurpose = 'promo'; openScanner(); }
