@@ -4296,19 +4296,27 @@ function promoConflictKind(a, b) {
   const sb = (b.productIds || []).slice().sort().join('|');
   return (sa === sb && r2(a.pct) === r2(b.pct)) ? 'duplicate' : 'overlap';
 }
-function promoConflictMap() {
-  const map = {};
+function promoConflictPairs() {
+  const out = [];
   for (let i = 0; i < promos.length; i++) {
     for (let j = i + 1; j < promos.length; j++) {
       const a = promos[i], b = promos[j];
       if (!promosCollide(a, b)) continue;
-      const kind = promoConflictKind(a, b);
-      [[a, b], [b, a]].forEach(pair => {
-        const cur = map[pair[0].id];
-        if (!cur || (cur.kind === 'overlap' && kind === 'duplicate')) map[pair[0].id] = { kind: kind, other: pair[1] };
-      });
+      const shared = (a.productIds || []).filter(id => (b.productIds || []).indexOf(id) !== -1);
+      out.push({ a: a, b: b, kind: promoConflictKind(a, b), shared: shared.length });
     }
   }
+  // כפילות לפני חפיפה: היא החד-משמעית לטיפול — פשוט מוחקים אחד מהשניים.
+  return out.sort((x, y) => (x.kind === y.kind) ? 0 : (x.kind === 'duplicate' ? -1 : 1));
+}
+function promoConflictMap() {
+  const map = {};
+  promoConflictPairs().forEach(pair => {
+    [[pair.a, pair.b], [pair.b, pair.a]].forEach(side => {
+      const cur = map[side[0].id];
+      if (!cur || (cur.kind === 'overlap' && pair.kind === 'duplicate')) map[side[0].id] = { kind: pair.kind, other: side[1] };
+    });
+  });
   return map;
 }
 function promoMinUnitsP(pr) {
@@ -13237,17 +13245,14 @@ function renderPromos() {
   const day = todayStr();
   promoAutoCleanup();
   const conflicts = promoConflictMap(); // v265
-  const conflictCount = Object.keys(conflicts).length;
-  const conflictBanner = conflictCount
-    ? '<div class="rounded-2xl border-2 border-amber-300 bg-amber-50 p-3 mb-3"><div class="font-black text-amber-900 text-sm"><i class="fa-solid fa-triangle-exclamation ml-1"></i>' + conflictCount + ' מבצעים חולקים מוצרים באותה תקופה</div>' +
-      '<div class="text-[11px] font-bold text-amber-800 mt-1">כשמוצר נמצא בשני מבצעים חופפים רק אחד מהם יחול בפועל. המסומנים למטה דורשים בדיקה.</div></div>'
-    : '';
+  const conflictBanner = promoConflictBannerHtml(); // v266
   const head = '<div class="flex items-center justify-between px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">מבצעים</h2></div>' +
+    conflictBanner + // v266: מיד מתחת לכותרת — לפני כפתורי הפעולה, לא אחריהם
     '<button data-role="promo-new" class="btn-tap w-full bg-rose-600 text-white rounded-2xl py-3.5 font-black text-base flex items-center justify-center gap-2 mb-2"><i class="fa-solid fa-plus"></i> מבצע חדש</button>' +
     '<button data-role="promo-import" class="btn-tap w-full bg-white border-2 border-violet-300 text-violet-700 rounded-2xl py-3 font-black text-sm flex items-center justify-center gap-2 mb-2"><i class="fa-solid fa-file-import"></i> ייבוא מבצעים מדף הפעילות</button>' +
     (promos.length ? '<button data-role="sign-start" class="btn-tap w-full bg-white border-2 border-rose-200 text-rose-700 rounded-2xl py-3 font-black text-sm flex items-center justify-center gap-2 mb-2"><i class="fa-solid fa-print"></i> הכן שלט למבצעים</button>' : '') +
     '<button data-role="sign-start-internal" class="btn-tap w-full bg-white border-2 border-amber-300 text-amber-700 rounded-2xl py-3 font-black text-sm flex items-center justify-center gap-2 mb-3"><i class="fa-solid fa-tag"></i> שלט למבצע פנימי של החנות</button>' +
-    promoImportHtml() + conflictBanner;
+    promoImportHtml();
   if (!promos.length) { app.innerHTML = head + '<div class="text-center text-slate-400 py-10"><i class="fa-solid fa-percent text-4xl mb-2 opacity-30"></i><div class="font-bold">אין מבצעים עדיין</div></div>'; return; }
   const withState = promos.slice().map(pr => {
     let state;
@@ -13275,6 +13280,29 @@ function renderPromos() {
     html += promoRowHtml(o.pr, o.state, conflicts[o.pr.id]);
   });
   app.innerHTML = head + '<div class="pb-6">' + html + '</div>';
+}
+// v266: "2 מבצעים חולקים מוצרים" ספר כמה אבל לא אמר אילו, והמשתמש נשאר לגלול
+// ולחפש. במקומו כרטיס לכל זוג מתנגש, למעלה, עם שני השמות זה מתחת לזה — כל
+// אחד כפתור שפותח את המבצע ישירות — ומשפט אחד גדול שאומר מה לעשות.
+function promoConflictBannerHtml() {
+  return promoConflictPairs().map(pair => {
+    const dup = pair.kind === 'duplicate';
+    const border = dup ? 'border-rose-300' : 'border-amber-300';
+    const line = pr =>
+      '<button data-role="promo-open" data-id="' + pr.id + '" class="btn-tap w-full bg-white rounded-xl border ' + border + ' px-3 py-2.5 text-right flex items-center justify-between gap-2 mt-1.5">' +
+        '<div class="min-w-0"><div class="font-black text-slate-800 text-base truncate">' + htmlEscape(pr.name || ('מבצע ' + pr.pct + '%')) + '</div>' +
+        '<div class="text-xs font-bold text-slate-500 mt-0.5">' + pr.pct + '% · ' + (pr.productIds || []).length + ' מוצרים · ' + (pr.start || '?') + ' ← ' + (pr.end || '?') + '</div></div>' +
+        '<i class="fa-solid fa-chevron-left text-slate-300 shrink-0"></i>' +
+      '</button>';
+    return '<div class="rounded-2xl border-2 ' + border + ' ' + (dup ? 'bg-rose-50' : 'bg-amber-50') + ' p-3.5 mb-2.5">' +
+      '<div class="font-black ' + (dup ? 'text-rose-800' : 'text-amber-900') + ' text-lg leading-tight"><i class="fa-solid fa-triangle-exclamation ml-1.5"></i>' +
+        (dup ? 'אותו מבצע פתוח פעמיים' : 'שני מבצעים על אותם מוצרים') + '</div>' +
+      '<div class="text-sm font-bold ' + (dup ? 'text-rose-900' : 'text-amber-900') + ' leading-snug mt-1.5">' +
+        (dup
+          ? 'שני אלה זהים לגמרי — אותם ' + pair.shared + ' מוצרים, אותו אחוז ואותם תאריכים. רק אחד מהם יחול בפועל. פתח אחד מהם ומחק אותו.'
+          : pair.shared + ' מוצרים נמצאים בשני אלה באותה תקופה. רק מבצע אחד יחול עליהם ואי אפשר לדעת איזה. פתח והחלט מי נשאר.') +
+      '</div>' + line(pair.a) + line(pair.b) + '</div>';
+  }).join('');
 }
 function promoRowHtml(pr, state, conflict) {
   const cnt = (pr.productIds || []).length;
