@@ -12877,8 +12877,55 @@ function promoImportPriceMismatches(sheet) {
   });
   return out;
 }
+// v263: אותה כותרת חוזרת על עצמה בדף מעל טבלאות שונות — בדף ספטמבר 2026
+// "מובחרת / ממרחומוס 400" הופיע פעמיים (פעם על החומוסים ופעם על סלטי ה-400),
+// ו"סלטי 250" שלוש פעמים. הזיהוי לפי שם+תאריכים בלבד סימן את הקבוצה השנייה
+// כ"כבר קיימת" מיד אחרי שהראשונה נפתחה, והמבצע נדחה בלי שהמשתמש ידע. שתי
+// הפונקציות כאן מפרידות בין קבוצות כאלה: שם ייחודי לתצוגה, וזיהוי לפי המוצרים.
+function promoImportGroupKey(group) {
+  return (group.name || '').trim() + ' § ' + (Number(group.discountPct) || 0) + ' § ' +
+    (Array.isArray(group.products) ? group.products : []).map(item => normalizeBarcode(item && item.barcode)).sort().join('|');
+}
+function promoImportLabelGroups(sheet) {
+  // קבוצה שחזרה בפלט המודל אות באות — אותה כותרת, אותו אחוז ואותם ברקודים —
+  // היא כפילות ולא מבצע נוסף, ולכן היא מוסרת כאן ולא מגיעה למסך הסיכום.
+  const seenGroups = new Set();
+  sheet.groups = (sheet.groups || []).filter(group => {
+    const key = promoImportGroupKey(group);
+    if (seenGroups.has(key)) return false;
+    seenGroups.add(key);
+    return true;
+  });
+  const counts = {};
+  sheet.groups.forEach(group => {
+    const name = (group.name || '').trim();
+    if (name) counts[name] = (counts[name] || 0) + 1;
+  });
+  const taken = new Set();
+  sheet.groups.forEach(group => {
+    const base = (group.name || '').trim();
+    group.sheetName = base; // הכותרת כפי שמודפסת — לזיהוי מבצעים שנפתחו לפני v263
+    if (!base) return;
+    // כותרת כפולה מקבלת את המחיר הקמעונאי כסימן היכר (7.78 מול 9.98 בדף),
+    // ואם גם המחיר זהה — מספר רץ, כדי ששני המבצעים לא ייראו זהים ברשימה.
+    let name = (counts[base] > 1 && Number(group.unitPriceExVat) > 0) ? (base + ' · ₪' + fmtMoney(group.unitPriceExVat)) : base;
+    let unique = name;
+    for (let n = 2; taken.has(unique); n++) unique = name + ' (' + n + ')';
+    taken.add(unique);
+    group.name = unique;
+  });
+}
 function promoImportExistingPromo(group, sheet) {
-  return promos.find(pr => (pr.name || '') === (group.name || '') && (pr.start || '') === (sheet.validFrom || '') && (pr.end || '') === (sheet.validTo || ''));
+  // מבצע נחשב קיים רק אם הוא נושא את אותה כותרת ואותם תאריכים *וגם* חולק
+  // מוצר עם הקבוצה. חפיפה במוצר אחד מספיקה כדי לזהות ייבוא חוזר של אותה
+  // קבוצה גם אחרי עריכה ידנית, ובלי לבלוע קבוצה אחרת שרק שמה זהה.
+  const ids = Array.isArray(group.productIds) ? group.productIds : [];
+  if (!ids.length) return null;
+  const names = new Set([group.name || '', group.sheetName || ''].filter(Boolean));
+  return promos.find(pr => names.has(pr.name || '')
+    && (pr.start || '') === (sheet.validFrom || '')
+    && (pr.end || '') === (sheet.validTo || '')
+    && Array.isArray(pr.productIds) && ids.some(id => pr.productIds.indexOf(id) !== -1));
 }
 async function promoImportStart(files) {
   if (!files || !files.length) return;
@@ -12913,6 +12960,7 @@ async function promoImportStart(files) {
       throw new Error('קריאת הדף לא הצליחה. נסה שוב עם צילום חד יותר.');
     }
     const sheet = payload.sheet;
+    promoImportLabelGroups(sheet); // v263: כותרות כפולות בדף מקבלות שם ייחודי
     const missing = promoImportMatch(sheet);
     promoImport = { stage: missing.length ? 'wizard' : 'summary', sheet: sheet, missing: missing, error: '' };
     if (missing.length) promoImportOpenNextMissing();
@@ -12986,9 +13034,16 @@ async function promoImportCreateAll() {
   promoImport.busy = true;
   renderPromos();
   let created = 0, skipped = 0, failed = 0;
+  // v263: promos מתעדכן מ-onSnapshot בין הכתיבות, ולכן קבוצה שנפתחה זה עתה
+  // כבר נמצאת ברשימה כשנבדקת הקבוצה הבאה. המפתח הזה חוסם רק כפילות אמיתית
+  // בתוך אותו דף (אותה קבוצה בדיוק), בלי להישען על תזמון ההאזנה לענן.
+  const doneKeys = new Set();
   for (const group of sheet.groups) {
     if (!group.productIds.length) { skipped++; continue; }
+    const runKey = (group.name || '') + ' ' + group.productIds.slice().sort().join('|');
+    if (doneKeys.has(runKey)) { skipped++; continue; }
     if (promoImportExistingPromo(group, sheet)) { skipped++; continue; }
+    doneKeys.add(runKey);
     const newId = makeOperationId('promo');
     const data = {
       name: group.name || ('מבצע ' + group.discountPct + '%'),
