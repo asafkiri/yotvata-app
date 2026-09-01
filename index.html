@@ -12904,7 +12904,6 @@ function promoImportLabelGroups(sheet) {
   const taken = new Set();
   sheet.groups.forEach(group => {
     const base = (group.name || '').trim();
-    group.sheetName = base; // הכותרת כפי שמודפסת — לזיהוי מבצעים שנפתחו לפני v263
     if (!base) return;
     // כותרת כפולה מקבלת את המחיר הקמעונאי כסימן היכר (7.78 מול 9.98 בדף),
     // ואם גם המחיר זהה — מספר רץ, כדי ששני המבצעים לא ייראו זהים ברשימה.
@@ -12916,15 +12915,19 @@ function promoImportLabelGroups(sheet) {
   });
 }
 function promoImportExistingPromo(group, sheet) {
-  // מבצע נחשב קיים רק אם הוא נושא את אותה כותרת ואותם תאריכים *וגם* חולק
-  // מוצר עם הקבוצה. חפיפה במוצר אחד מספיקה כדי לזהות ייבוא חוזר של אותה
-  // קבוצה גם אחרי עריכה ידנית, ובלי לבלוע קבוצה אחרת שרק שמה זהה.
+  // v264: הזהות של מבצע היא המוצרים שלו, לא הכותרת. אותה כותרת מודפסת נקראה
+  // אחרת בשתי סריקות — "ממרחחומוס" באוגוסט מול "ממרחומוס" בספטמבר — ודרישת
+  // שם זהה פתחה מבצע כפול על אותם שבעה חומוסים. השם יצא כאן מהזיהוי לגמרי:
+  // אותם תאריכים, אותו אחוז וחפיפה במוצר אחד לפחות הם אותה קבוצה, בכל כתיב
+  // שבו נקראה הכותרת. טבלאות שונות בדף אינן חולקות מוצרים, ולכן שתי קבוצות
+  // נפרדות עדיין נפתחות שתיהן.
   const ids = Array.isArray(group.productIds) ? group.productIds : [];
   if (!ids.length) return null;
-  const names = new Set([group.name || '', group.sheetName || ''].filter(Boolean));
-  return promos.find(pr => names.has(pr.name || '')
+  const pct = r2(group.discountPct);
+  return promos.find(pr => pr && pr.type !== 'monthEnd'
     && (pr.start || '') === (sheet.validFrom || '')
     && (pr.end || '') === (sheet.validTo || '')
+    && r2(pr.pct) === pct
     && Array.isArray(pr.productIds) && ids.some(id => pr.productIds.indexOf(id) !== -1));
 }
 async function promoImportStart(files) {
