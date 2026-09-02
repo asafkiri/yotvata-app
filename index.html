@@ -1503,7 +1503,7 @@ function adminClickActionName(role) {
   const map = {
     'cfg-save': 'שמירת הגדרות מערכת', 'add-product': 'הוספת מוצר', 'del-product': 'מחיקת מוצר', 'toggle-hidden': 'הסתרת/הצגת מוצר', 'sync-local-units': 'סנכרון ארגז/יחידה לענן',
     'del-contact': 'מחיקת איש קשר', 'clear-history': 'מחיקת היסטוריית הזמנות', 'clear-returns-history': 'מחיקת היסטוריית חזרות', 'clear-receipts': 'מחיקת תעודות קליטה',
-    'rc-fix-open': 'תיקון תעודה מההיסטוריה', 'rc-fix-save': 'שמירת תיקון תעודה', 'pcat-add': 'עריכת קטגוריות רווחיות', 'pcat-up': 'עריכת קטגוריות רווחיות',
+    'rc-fix-open': 'תיקון תעודה מההיסטוריה', 'rc-fix-save': 'שמירת תיקון תעודה', 'rc-date-edit': 'שינוי תאריך תעודה', 'pcat-add': 'עריכת קטגוריות רווחיות', 'pcat-up': 'עריכת קטגוריות רווחיות',
     'pcat-round-mode': 'שינוי שיטת המחיר המומלץ',
     'pcat-down': 'עריכת קטגוריות רווחיות', 'pcat-del': 'מחיקת קטגוריה רווחית', 'promo-new': 'יצירת מבצע', 'pe-save': 'שמירת מבצע', 'pe-delete': 'מחיקת מבצע',
     'trash-delete': 'מחיקה לצמיתות מסל מחזור', 'trash-clear': 'ריקון סל מחזור', 'trash-restore': 'שחזור מסל מחזור', 'del-receipt': 'מחיקת תעודה', 'backup-import-confirm': 'ייבוא גיבוי מלא',
@@ -1511,7 +1511,7 @@ function adminClickActionName(role) {
   };
   return map[role] || 'פעולה זו דורשת מנהל';
 }
-const ADMIN_CLICK_ROLES = new Set(['cfg-save','add-product','del-product','toggle-hidden','sync-local-units','del-contact','clear-history','clear-returns-history','clear-receipts','rc-fix-open','rc-fix-save','pcat-round-mode','pcat-add','pcat-up','pcat-down','pcat-del','promo-new','pe-save','pe-delete','trash-delete','trash-clear','trash-restore','del-receipt','backup-import-confirm','pos-import-apply','rc-credit-verify','rc-credit-cancel','rc-credit-defer','rc-credit-offset','rc-supplier-verify-open','rc-supplier-defer-open']);
+const ADMIN_CLICK_ROLES = new Set(['cfg-save','add-product','del-product','toggle-hidden','sync-local-units','del-contact','clear-history','clear-returns-history','clear-receipts','rc-fix-open','rc-fix-save','rc-date-edit','pcat-round-mode','pcat-add','pcat-up','pcat-down','pcat-del','promo-new','pe-save','pe-delete','trash-delete','trash-clear','trash-restore','del-receipt','backup-import-confirm','pos-import-apply','rc-credit-verify','rc-credit-cancel','rc-credit-defer','rc-credit-offset','rc-supplier-verify-open','rc-supplier-defer-open']);
 const ADMIN_INPUT_ROLES = new Set(['price-set','pos-set','pcat-name','pcat-pct','cat-set','avg','avg-set','box-set']);
 function restoreLockedAdminInput(t) {
   const role = t && t.getAttribute && t.getAttribute('data-role');
@@ -1829,6 +1829,8 @@ function actionTitleFromCloud(actionName, task) {
     'save returns before send': ['returns', 'שליחת חזרות'],
     'save receipt before clearing draft': ['receipt', 'קליטת תעודה'],
     'save receipt fix': ['receipt', 'תיקון תעודה'],
+    'change receipt date': ['receipt', 'שינוי תאריך תעודת קליטה'],
+    'change return date': ['returns', 'שינוי תאריך תעודת חזרות'],
     'save return verification': ['returns', 'אימות תעודת זיכוי'],
     'edit return items': ['returns', 'עריכת פריטים בתעודת חזרות'],
     'close shortage by supplier credit': ['receipts', 'סגירת חוסר בזיכוי מהספק'],
@@ -1858,6 +1860,7 @@ function actionDetailsFromCloud(actionName, task) {
   if (actionName === 'save returns before send') return 'נשלח אל: ' + (d.sentTo || 'לא ידוע') + ' · פריטים: ' + ((d.items || []).length || 0) + ' · סה״כ ללא מע״מ: ₪' + fmtMoney(d.totalExVat || 0);
   if (actionName === 'save receipt before clearing draft') return 'שורות: ' + (d.count || 0) + ' · סה״כ ללא מע״מ: ₪' + fmtMoney(d.totalExVat || 0) + ' · סטטוס: ' + (d.status || 'ok');
   if (actionName === 'save receipt fix') return 'תעודה עודכנה · שורות: ' + (d.count || 0) + ' · סה״כ: ₪' + fmtMoney(d.totalExVat || 0) + ' · סטטוס: ' + (d.status || 'ok');
+  if (actionName === 'change receipt date' || actionName === 'change return date') return 'תאריך חדש: ' + dDisp(d.date || '') + (d.originalTimestamp ? ' · במקור: ' + new Date(Number(d.originalTimestamp)).toLocaleDateString('he-IL') : '');
   if (actionName === 'save return verification') return d.creditStatus === 'open' ? 'נשמר עם פער פתוח בזיכוי' : 'הזיכוי אומת ללא פער פתוח';
   if (actionName === 'add product' || actionName === 'create product' || actionName === 'save product') return d.name ? ('מוצר: ' + d.name + ' · מומלץ: ' + (d.average || 0) + ' · ברירת מחדל: ' + (d.defaultUnit === 'unit' ? 'יחידות' : 'ארגז')) : '';
   if (actionName === 'sync legacy default units') return 'סונכרנו בחירות ארגז/יחידה מהמכשיר הזה לענן';
@@ -2763,7 +2766,7 @@ function renderReturnsHistory() {
           '<div class="text-left shrink-0"><span class="bg-blue-100 text-blue-800 font-black px-3 py-1 rounded-full text-xs inline-block">' + ((r.items || []).length) + ' פריטים</span><div class="text-xs font-black text-emerald-700 mt-1">זיכוי ₪' + fmtMoney(rt.ex) + '</div></div>' +
         '</div>' +
         '<div class="p-4"><ul class="space-y-2">' + items + '</ul></div>' +
-        '<div class="p-3 border-t border-slate-100">' + actionArea + '</div>' +
+        '<div class="p-3 border-t border-slate-100">' + docDateEditorHtml('return', r) + '<div class="mt-2"></div>' + actionArea + '</div>' + // v267
       '</div>';
     }).join('');
 }
@@ -11219,7 +11222,7 @@ function returnCardInReceipts(r) {
         '<div class="flex items-center gap-2 shrink-0"><div class="text-left"><div class="text-[11px] text-slate-400">זיכוי ללא מע"מ</div><div class="font-black text-emerald-700">₪' + fmtMoney(rt.ex) + '</div></div><i class="fa-solid fa-chevron-down hist-chevron text-slate-400 transition-transform"></i></div>' +
       '</div>' +
     '</summary>' +
-    '<div class="px-4 pb-4"><div class="bg-slate-50 rounded-xl p-3 border border-slate-100">' + rows + '</div>' + actionArea + '</div>' +
+    '<div class="px-4 pb-4"><div class="bg-slate-50 rounded-xl p-3 border border-slate-100">' + rows + '</div>' + docDateEditorHtml('return', r) + actionArea + '</div>' + // v267
   '</details>';
 }
 function receiptsRangeHtml() {
@@ -11868,6 +11871,79 @@ function receiptFilterBucket(rc) {
   if (di.open || recovering || supplierCreditClaimOpen(rc)) return 'attention';
   return 'done';
 }
+// ===== v267: שינוי תאריך תעודה =====
+// תעודת קליטה נשמרת עם timestamp (למיון ולדוח התשלום לספק) ועם date
+// (לבדיקת מבצעים לפי יום). שינוי תאריך מעדכן את שניהם יחד: היום החדש עם
+// שעת השמירה המקורית, כך שהמיון בתוך אותו יום נשמר. התאריך המקורי נשמר
+// בשדה נפרד כדי שאפשר יהיה לדעת שהתעודה הוזזה.
+let receiptDateEdit = null; // { kind: 'receipt' | 'return', id }
+function docDateStr(r) {
+  if (r && r.date) return r.date;
+  if (r && r.timestamp) return new Date(Number(r.timestamp)).toLocaleDateString('en-CA');
+  return todayStr();
+}
+function docDateBoxId(kind, id) { return 'rcDateBox_' + kind + '_' + id; }
+function docDateEditorInnerHtml(kind, r) {
+  const editing = !!(receiptDateEdit && receiptDateEdit.kind === kind && receiptDateEdit.id === r.id);
+  const cur = docDateStr(r);
+  const moved = r.originalTimestamp != null && Number(r.originalTimestamp) !== Number(r.timestamp)
+    ? ' <span class="text-[10px] text-slate-400">(במקור ' + new Date(Number(r.originalTimestamp)).toLocaleDateString('he-IL') + ')</span>' : '';
+  if (!editing) {
+    return '<div class="flex items-center justify-between gap-2 mt-2 px-1 text-xs font-bold text-slate-500">' +
+      '<span class="min-w-0"><i class="fa-solid fa-calendar-days"></i> תאריך התעודה: <b class="text-slate-700">' + dDisp(cur) + '</b>' + moved + '</span>' +
+      '<button data-role="rc-date-edit" data-kind="' + kind + '" data-id="' + htmlEscape(r.id) + '" class="btn-tap shrink-0 text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg font-black"><i class="fa-solid fa-pen"></i> שנה תאריך</button>' +
+    '</div>';
+  }
+  return '<div class="mt-2 bg-blue-50 border border-blue-200 rounded-xl p-2.5">' +
+    '<div class="text-[11px] font-black text-blue-900 mb-1.5"><i class="fa-solid fa-calendar-days"></i> שינוי תאריך התעודה</div>' +
+    '<div class="flex gap-2 items-stretch">' +
+      '<input id="rcDateInput_' + htmlEscape(r.id) + '" type="date" value="' + cur + '" class="flex-1 min-w-0 p-2 rounded-lg border-2 border-slate-200 bg-white outline-none text-sm font-bold focus:border-blue-500">' +
+      '<button data-role="rc-date-save" data-kind="' + kind + '" data-id="' + htmlEscape(r.id) + '" class="btn-tap px-3 rounded-lg bg-blue-600 text-white font-black text-sm">שמור</button>' +
+      '<button data-role="rc-date-cancel" data-kind="' + kind + '" data-id="' + htmlEscape(r.id) + '" class="btn-tap px-3 rounded-lg bg-white border border-slate-200 text-slate-600 font-black text-sm">ביטול</button>' +
+    '</div>' +
+    '<div class="text-[10px] text-blue-800/80 font-bold mt-1.5">התאריך קובע באיזה דוח תשלום התעודה נכללת' + (kind === 'receipt' ? ' ולפי איזה יום נבדקים המבצעים' : '') + '. השעה המקורית נשמרת.</div>' +
+  '</div>';
+}
+function docDateEditorHtml(kind, r) {
+  return '<div id="' + docDateBoxId(kind, r.id) + '">' + docDateEditorInnerHtml(kind, r) + '</div>';
+}
+// מחליף רק את תיבת התאריך בכרטיס — בלי לרנדר מחדש את כל המסך, כדי שהכרטיס
+// הפתוח (details) לא ייסגר מתחת לידיים של המשתמש.
+function refreshDocDateBox(kind, id) {
+  const list = kind === 'return' ? returns : receipts;
+  const r = list.find(x => x.id === id);
+  const box = $(docDateBoxId(kind, id));
+  if (!r || !box) { rerender(); return; }
+  box.innerHTML = docDateEditorInnerHtml(kind, r);
+  if (receiptDateEdit && receiptDateEdit.id === id) { const inp = $('rcDateInput_' + id); if (inp) { try { inp.focus(); } catch (e) {} } }
+}
+async function saveDocDate(kind, id) {
+  const isReturn = kind === 'return';
+  const list = isReturn ? returns : receipts;
+  const r = list.find(x => x.id === id); if (!r) return;
+  const inp = $('rcDateInput_' + id);
+  const val = inp ? String(inp.value || '').trim() : '';
+  const dayStart = Date.parse(val + 'T00:00:00');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(val) || !isFinite(dayStart)) { showToast('בחר תאריך תקין', null, null, 2400); return; }
+  const cur = docDateStr(r);
+  if (val === cur) { receiptDateEdit = null; refreshDocDateBox(kind, id); return; }
+  const old = new Date(Number(r.timestamp) || Date.now());
+  const next = new Date(dayStart);
+  next.setHours(old.getHours(), old.getMinutes(), old.getSeconds(), old.getMilliseconds());
+  const data = {
+    timestamp: next.getTime(), date: val,
+    dateChangedAt: Date.now(),
+    originalTimestamp: (r.originalTimestamp != null ? Number(r.originalTimestamp) : (Number(r.timestamp) || next.getTime()))
+  };
+  const actionName = isReturn ? 'change return date' : 'change receipt date';
+  const saved = await runCloudTask(actionName, { op: 'update', path: dataPath(isReturn ? 'returns' : 'receipts', id), data, operationId: makeOperationId(isReturn ? 'ret_date' : 'rc_date') });
+  if (!saved) return;
+  receiptDateEdit = null;
+  Object.assign(r, data); // עדכון מקומי מיידי — ה-snapshot מהענן יאשר מיד אחריו
+  buzz(14);
+  showToast('תאריך התעודה עודכן ל-' + dDisp(val) + ' ✓', null, null, 2600);
+  rerender();
+}
 function renderReceiptsHistory() {
   const head = '<div class="flex items-center justify-between px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">תעודות קליטה</h2>' +
     (receipts.length ? '<button data-role="clear-receipts" class="btn-tap text-xs font-bold text-red-500 bg-red-50 px-3 py-2 rounded-lg flex items-center gap-1.5"><i class="fa-solid fa-trash-can"></i> נקה הכל</button>' : '') +
@@ -11990,6 +12066,7 @@ function renderReceiptsHistory() {
                 : '<div class="text-xs font-bold text-slate-700 mb-2">' + m.qty + ' × ' + m.name + ' ' + (m.myDir === 'over' ? 'שקיבלת בעודף' : 'שחסרו') + ' כאן מתקזזים בדיוק מול תעודת ' + od + '</div>') +
               '<button data-role="rc-offset" data-id="' + rc.id + '" data-other="' + m.other.id + '" data-product="' + m.productId + '" data-other-product="' + (m.otherProductId || m.productId) + '" class="btn-tap w-full bg-indigo-600 text-white rounded-xl py-2 font-black text-sm"><i class="fa-solid fa-check"></i> אשר קיזוז לפריט הזה</button>' +
             '</div>'; })()) +
+        docDateEditorHtml('receipt', rc) + // v267
         (legacyRecovering ? '<button disabled class="mt-2 w-full font-black py-2.5 rounded-xl text-sm bg-slate-100 text-slate-400"><i class="fa-solid fa-spinner fa-spin"></i> ממתין לשחזור הקיזוז</button>' : '<button data-role="rc-fix-open" data-id="' + rc.id + '" class="btn-tap mt-2 w-full font-black py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 ' + (effectiveOpen ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700') + '"><i class="fa-solid ' + (effectiveOpen ? 'fa-wrench' : 'fa-pen') + '"></i> ' + (effectiveOpen ? 'תקן הפרשים' : 'ערוך תעודה') + '</button>') +
         '<button data-role="del-receipt" data-id="' + rc.id + '" class="btn-tap mt-2 w-full bg-red-50 text-red-600 font-bold py-2 rounded-xl text-sm flex items-center justify-center gap-2"><i class="fa-solid fa-trash-can"></i> מחק תעודה</button>' +
       '</div>' +
@@ -12189,6 +12266,50 @@ function compareSupplierStatement() {
   out.innerHTML = html;
   out.classList.remove('hidden');
 }
+// v267: רשימת כל התעודות שנכנסו לדוח — סכום לכל תעודה, נפתחת בלחיצה
+// מתחת לסיכום החשבון. הסכומים כאן ללא מע״מ, בדיוק כפי שהם נכנסים לחישוב:
+// לתעודת קליטה הסכום לתשלום (אחרי הורדת חוסר פתוח), לתעודת חזרה סכום הזיכוי.
+function receiptRangeDocsListHtml(d) {
+  const rows = []
+    .concat((d.recs || []).map(r => ({ ts: Number(r.timestamp) || 0, kind: 'receipt', r })))
+    .concat((d.rets || []).map(r => ({ ts: Number(r.timestamp) || 0, kind: 'return', r })))
+    .sort((a, b) => b.ts - a.ts);
+  if (!rows.length) return '';
+  const body = rows.map(x => {
+    const day = dDisp(docDateStr(x.r));
+    if (x.kind === 'receipt') {
+      const di = receiptDiscrepancyInfo(x.r);
+      const pay = receiptPayableBaseEx(x.r);
+      const n = Number(x.r.count) || (x.r.items || []).length;
+      let st = '';
+      if (di.open) st = ' · <span class="text-rose-600 font-black">הפרש פתוח</span>';
+      else if (supplierCreditClaimOpen(x.r)) st = ' · <span class="text-orange-700 font-black">ממתין לזיכוי ספק</span>';
+      else if ((di.shortItems || []).length && di.shortFullyCredited) st = ' · <span class="text-emerald-700 font-black">חוסר נסגר בזיכוי</span>';
+      const paper = x.r.noteTotalInc != null && Math.round(Math.abs((Number(x.r.noteTotalInc) || 0) - pay) * 100) > 0
+        ? '<div class="text-[10px] text-slate-400 font-bold">תעודת ספק ₪' + fmtMoney(x.r.noteTotalInc) + '</div>' : '';
+      return '<div class="flex items-center justify-between gap-2 py-1.5 border-b border-slate-100 last:border-0">' +
+        '<div class="min-w-0"><div class="text-sm font-bold text-slate-800 truncate"><i class="fa-solid fa-file-invoice text-blue-600"></i> קליטה · ' + day + '</div><div class="text-[11px] text-slate-500">' + n + ' פריטים' + (x.r.noteParts && x.r.noteParts.length > 1 ? ' · ' + x.r.noteParts.length + ' תעודות ספק' : '') + st + '</div></div>' +
+        '<div class="text-left shrink-0"><div class="text-sm font-black text-slate-800">₪' + fmtMoney(pay) + '</div>' + paper + '</div>' +
+      '</div>';
+    }
+    const rt = returnTotals(x.r);
+    const credited = !!x.r.credited;
+    const gap = credited && x.r.creditStatus === 'open';
+    const st = !credited ? ' · <span class="text-amber-700 font-black">לא אומתה</span>' : (gap ? ' · <span class="text-rose-600 font-black">נותר פער</span>' : ' · <span class="text-emerald-700 font-black">אומתה</span>');
+    return '<div class="flex items-center justify-between gap-2 py-1.5 border-b border-slate-100 last:border-0">' +
+      '<div class="min-w-0"><div class="text-sm font-bold text-slate-800 truncate"><i class="fa-solid fa-rotate-left text-emerald-600"></i> חזרה · ' + day + '</div><div class="text-[11px] text-slate-500">' + ((x.r.items || []).length) + ' פריטים' + (x.r.sentTo ? ' · ' + htmlEscape(x.r.sentTo) : '') + st + '</div></div>' +
+      '<div class="text-sm font-black text-emerald-700 shrink-0">−₪' + fmtMoney(rt.ex) + '</div>' +
+    '</div>';
+  }).join('');
+  return '<details class="mt-2 mb-3 bg-white border border-amber-200 rounded-xl overflow-hidden">' +
+    '<summary class="cursor-pointer p-3 flex items-center justify-between gap-2 text-sm font-black text-slate-800"><span><i class="fa-solid fa-list-ul text-amber-600"></i> רשימת התעודות — סכום לכל תעודה (' + rows.length + ')</span><i class="fa-solid fa-chevron-down hist-chevron text-slate-400"></i></summary>' +
+    '<div class="px-3 pb-3">' +
+      '<div class="text-[11px] text-slate-500 font-bold mb-1.5"><i class="fa-solid fa-circle-info"></i> הסכומים ללא מע״מ, כפי שנכנסו לחישוב. קליטה עם חוסר פתוח מוצגת אחרי הורדת החוסר.</div>' +
+      '<div class="bg-slate-50 rounded-xl p-2.5 border border-slate-100 max-h-80 overflow-y-auto">' + body + '</div>' +
+      '<div class="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-slate-200 text-xs font-black text-slate-700"><span>' + (d.recs || []).length + ' קליטות · ' + (d.rets || []).length + ' חזרות</span><span>₪' + fmtMoney(d.recEx) + ' − ₪' + fmtMoney(d.retEx) + ' = ₪' + fmtMoney(r2((Number(d.recEx) || 0) - (Number(d.retEx) || 0))) + '</span></div>' +
+    '</div>' +
+  '</details>';
+}
 function calcReceiptRange() {
   const fromEl = $('rcFrom'), toEl = $('rcTo'), out = $('rcRangeResult');
   if (!out) return;
@@ -12200,6 +12321,7 @@ function calcReceiptRange() {
     '<div class="text-[11px] font-bold text-slate-500 mb-2">' + d.recs.length + ' תעודות קליטה · ' + d.rets.length + ' תעודות חזרה</div>' +
     supplierPaymentModeCardsHtml(d) +
     supplierCalculationStepsHtml(d) +
+    receiptRangeDocsListHtml(d) + // v267: פירוט סכום לכל תעודה
     (d.meEx > 0 ? '<div class="text-[11px] text-rose-700/80 font-bold mt-2 bg-rose-50 rounded-lg p-2"><i class="fa-solid fa-triangle-exclamation"></i> הנחות מרכזת הן צפי — ודא שהספק זיכה אותן בחשבון החודשי</div>' : '') +
     (d.openCnt ? '<div class="text-[11px] text-rose-700/80 font-bold mt-2 bg-rose-50 rounded-lg p-2"><i class="fa-solid fa-clipboard-question"></i> ' + d.openCnt + ' תעודות עם הפרש פתוח' +
       (d.openShortNetEx > 0 ? '<br>· חוסר ₪' + fmtMoney(d.openShortNetEx) + ' — <b>אינו כלול בתשלום</b> כי הסחורה לא הגיעה' : '') +
@@ -15451,6 +15573,10 @@ app.addEventListener('click', (e) => {
   }
   else if (role === 'rc-recon-save') saveReconciledReceipt();
   else if (role === 'rc-fix-open') openReceiptFix(id);
+  // v267: שינוי תאריך תעודה — עריכה בתוך הכרטיס בלי לסגור אותו
+  else if (role === 'rc-date-edit') { const kind = t.dataset.kind === 'return' ? 'return' : 'receipt'; receiptDateEdit = { kind, id }; refreshDocDateBox(kind, id); }
+  else if (role === 'rc-date-cancel') { const kind = t.dataset.kind === 'return' ? 'return' : 'receipt'; receiptDateEdit = null; refreshDocDateBox(kind, id); }
+  else if (role === 'rc-date-save') saveDocDate(t.dataset.kind === 'return' ? 'return' : 'receipt', id);
   else if (role === 'rc-offset-choose') openManualOffsetPicker(id, t.dataset.product, t.dataset.dir);
   else if (role === 'rc-offset-cancel') { const groupId = t.dataset.group; showConfirm('ביטול קיזוז', 'לבטל את הקיזוז המאושר? הסכום יוסר מהתשלום והחוסר והעודף יחזרו להיות פתוחים לפי החוק הרגיל.', 'בטל קיזוז', () => cancelReceiptOffset(id, groupId)); }
   else if (role === 'rc-offset') { const otherId = t.dataset.other, productId = t.dataset.product, otherProductId = t.dataset.otherProduct || productId; const rc = receipts.find(x => x.id === id); const other = receipts.find(x => x.id === otherId); const m = rc ? findOffsetMatch(rc, otherId, productId, otherProductId) : null; if (m && other) showConfirm('אישור קיזוז לפריט', (m.byPrice ? m.qty + ' × ' + m.name + ' מתקזזים מול ' + m.qty + ' × ' + m.otherName + ' (אותו מחיר ₪' + fmtMoney(m.price) + ')' + (otherId === id ? ' באותה תעודה' : ' בתעודת ' + new Date(other.timestamp).toLocaleDateString('he-IL')) : m.qty + ' × ' + m.name + ' מתקזזים מול תעודת ' + new Date(other.timestamp).toLocaleDateString('he-IL')) + '. הקיזוז יחול רק על הפריט הזה; כל חוסר או עודף אחר יישאר פתוח לטיפול.', 'אשר קיזוז לפריט', () => applyOffset(id, otherId, productId, otherProductId)); }
