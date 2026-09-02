@@ -1834,6 +1834,7 @@ function actionTitleFromCloud(actionName, task) {
     'save return verification': ['returns', 'אימות תעודת זיכוי'],
     'edit return items': ['returns', 'עריכת פריטים בתעודת חזרות'],
     'close shortage by supplier credit': ['receipts', 'סגירת חוסר בזיכוי מהספק'],
+    'close shortage by goods': ['receipts', 'סגירת חוסר בהשלמת סחורה'],
     'add product': ['product', 'הוספת מוצר'],
     'create product': ['product', 'הוספת מוצר'],
     'save product': ['product', 'עריכת מוצר'],
@@ -1860,6 +1861,7 @@ function actionDetailsFromCloud(actionName, task) {
   if (actionName === 'save returns before send') return 'נשלח אל: ' + (d.sentTo || 'לא ידוע') + ' · פריטים: ' + ((d.items || []).length || 0) + ' · סה״כ ללא מע״מ: ₪' + fmtMoney(d.totalExVat || 0);
   if (actionName === 'save receipt before clearing draft') return 'שורות: ' + (d.count || 0) + ' · סה״כ ללא מע״מ: ₪' + fmtMoney(d.totalExVat || 0) + ' · סטטוס: ' + (d.status || 'ok');
   if (actionName === 'save receipt fix') return 'תעודה עודכנה · שורות: ' + (d.count || 0) + ' · סה״כ: ₪' + fmtMoney(d.totalExVat || 0) + ' · סטטוס: ' + (d.status || 'ok');
+  if (actionName === 'close shortage by goods') return 'הושלם בסחורה: ' + ((d.shortGoodsNotes || []).map(x => (Number(x.qty) || 0) + ' × ' + (x.name || '')).join(' · ') || '');
   if (actionName === 'change receipt date' || actionName === 'change return date') return 'תאריך חדש: ' + dDisp(d.date || '') + (d.originalTimestamp ? ' · במקור: ' + new Date(Number(d.originalTimestamp)).toLocaleDateString('he-IL') : '');
   if (actionName === 'save return verification') return d.creditStatus === 'open' ? 'נשמר עם פער פתוח בזיכוי' : 'הזיכוי אומת ללא פער פתוח';
   if (actionName === 'add product' || actionName === 'create product' || actionName === 'save product') return d.name ? ('מוצר: ' + d.name + ' · מומלץ: ' + (d.average || 0) + ' · ברירת מחדל: ' + (d.defaultUnit === 'unit' ? 'יחידות' : 'ארגז')) : '';
@@ -11326,6 +11328,9 @@ function receiptDiscrepancyInfo(rc, opts) {
   // קיזוז בין תעודות נשמר ברמת מוצר וכמות. הוא צורך רק את ההפרש שאושר,
   // ולעולם אינו מסתיר חוסר/עודף אחר שנשאר באותה תעודה.
   const externalOffsets = opts.skipExternal ? [] : consumeStoredReceiptOffsets(rc, shortItems, overItems);
+  // v268: חוסר שהספק השלים בסחורה (בלי חיוב נוסף) נצרך משורות החוסר כמו
+  // קיזוז — התעודה משולמת במלואה לפי הנייר, ולא נדרש זיכוי כספי.
+  const shortGoodsNotes = consumeShortGoodsNotes(rc, shortItems);
   const finalShort = shortItems.filter(x => (Number(x.n) || 0) > 0);
   const finalOver = overItems.filter(x => (Number(x.n) || 0) > 0);
   let shortVal = finalShort.reduce((a, x) => a + lineTotalFromUnit(x.price, x.n), 0);
@@ -11380,7 +11385,43 @@ function receiptDiscrepancyInfo(rc, opts) {
   // חוסר) נבלע גם הוא בזיכוי. עודף, פער יחידות וממצאי AI אינם נסגרים בכסף.
   const shortSideOpen = (finalShort.length > 0 || (amountGapOpen && Math.round(unresolvedAmountGap * 100) > 0)) && !shortFullyCredited;
   const overSideOpen = finalOver.length > 0 || (amountGapOpen && Math.round(unresolvedAmountGap * 100) < 0);
-  return { open: !!(shortSideOpen || overSideOpen || unresolvedUnitsGap !== 0 || aiAuditOpen || creditOpen), shortItems: finalShort, overItems: finalOver, priceOffsets, externalOffsets, shortVal: r2(shortVal), overVal: r2(overVal), shortValRaw, shortCreditEx, shortCreditNotes, shortFullyCredited, unresolvedAmountGap, unresolvedUnitsGap, amountGapOpen, amountToleranceCents, aiAuditOpen };
+  return { open: !!(shortSideOpen || overSideOpen || unresolvedUnitsGap !== 0 || aiAuditOpen || creditOpen), shortItems: finalShort, overItems: finalOver, priceOffsets, externalOffsets, shortGoodsNotes, shortVal: r2(shortVal), overVal: r2(overVal), shortValRaw, shortCreditEx, shortCreditNotes, shortFullyCredited, unresolvedAmountGap, unresolvedUnitsGap, amountGapOpen, amountToleranceCents, aiAuditOpen };
+}
+// v268: "התקבל זיכוי בסחורה" — הספק השלים את הפריטים החסרים במשלוח מאוחר
+// יותר בלי לחייב שוב. הרישום נשמר לפי מוצר וכמות (shortGoodsNotes) ונצרך
+// משורות החוסר, כך שהחוסר המקורי נשאר בהיסטוריה אך אינו מוריד מהתשלום.
+function consumeShortGoodsNotes(rc, shortItems) {
+  const applied = [];
+  (Array.isArray(rc && rc.shortGoodsNotes) ? rc.shortGoodsNotes : []).forEach(x => {
+    if (!x || !(Number(x.qty) > 0) || !x.productId) return;
+    let left = Number(x.qty) || 0, used = 0;
+    (shortItems || []).filter(it => it.productId === x.productId && (Number(it.n) || 0) > 0).forEach(it => {
+      if (left <= 0) return;
+      const take = Math.min(Number(it.n) || 0, left);
+      if (take > 0) { it.n = r2((Number(it.n) || 0) - take); left = r2(left - take); used = r2(used + take); }
+    });
+    if (used > 0) applied.push({ ...x, qty: used });
+  });
+  return applied;
+}
+function openShortGoodsConfirm(rcId) {
+  const rc = receipts.find(x => x.id === rcId); if (!rc) return;
+  const di = receiptDiscrepancyInfo(rc);
+  const items = (di.shortItems || []).filter(x => (Number(x.n) || 0) > 0 && x.productId);
+  if (!items.length) { showToast('אין חוסר פתוח בתעודה הזאת', null, null, 2600); return; }
+  const val = r2(items.reduce((a, x) => a + lineTotalFromUnit(x.price, x.n), 0));
+  showConfirm('התקבל זיכוי בסחורה', 'הספק השלים את הסחורה החסרה: ' + receiptSideText(items) + ' (₪' + fmtMoney(val) + '). התעודה תשולם במלואה לפי הנייר ולא יידרש זיכוי כספי. לאשר?', 'כן, הסחורה הגיעה', () => saveShortGoods(rcId, items));
+}
+async function saveShortGoods(rcId, items) {
+  const rc = receipts.find(x => x.id === rcId); if (!rc) return;
+  const at = Date.now();
+  const notes = (Array.isArray(rc.shortGoodsNotes) ? rc.shortGoodsNotes : []).concat(items.map(x => ({ productId: x.productId || '', name: x.name || '', qty: Number(x.n) || 0, price: Number(x.price) || 0, at })));
+  const saved = await runCloudTask('close shortage by goods', { op: 'update', path: dataPath('receipts', rc.id), data: { shortGoodsNotes: cloneSafe(notes) }, operationId: makeOperationId('short_goods') });
+  if (!saved) return;
+  rc.shortGoodsNotes = notes;
+  buzz(18);
+  showToast('החוסר הושלם בסחורה ✓ התעודה משולמת במלואה', null, null, 3000);
+  if (currentView === 'receiptsHistory') renderReceiptsHistory();
 }
 function receiptsBalance() {
   let bal = 0, n = 0;
@@ -12047,8 +12088,13 @@ function renderReceiptsHistory() {
             : '';
           const creditLabel = 'התקבל זיכוי מהספק' + ((di.shortCreditEx || 0) > 0 ? ' (נותר ₪' + fmtMoney(openShortNow) + ')' : ' (₪' + fmtMoney(openShortNow) + ')');
           const creditBtn = '<button data-role="rc-short-credit" data-id="' + rc.id + '" class="btn-tap mt-2 w-full bg-white border-2 border-emerald-300 text-emerald-700 rounded-xl py-2.5 font-black text-sm"><i class="fa-solid fa-file-invoice-dollar"></i> ' + creditLabel + '</button>';
-          return balanceLine + creditBtn;
+          // v268: הספק השלים את הסחורה החסרה במקום לזכות בכסף
+          const goodsBtn = '<button data-role="rc-short-goods" data-id="' + rc.id + '" class="btn-tap mt-2 w-full bg-white border-2 border-sky-300 text-sky-700 rounded-xl py-2.5 font-black text-sm"><i class="fa-solid fa-box-open"></i> התקבל זיכוי בסחורה — הסחורה החסרה הגיעה</button>';
+          return balanceLine + creditBtn + goodsBtn;
         })() +
+        ((di.shortGoodsNotes || []).length ? '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800"><div class="font-black mb-1"><i class="fa-solid fa-box-open"></i> החוסר הושלם בסחורה מהספק ✓</div>' +
+          di.shortGoodsNotes.map(x => '<div class="flex justify-between text-emerald-700"><span>' + (Number(x.qty) || 0) + ' × ' + htmlEscape(x.name || '') + ' · ' + new Date(Number(x.at) || 0).toLocaleDateString('he-IL') + '</span><span>₪' + fmtMoney(lineTotalFromUnit(x.price, x.qty)) + '</span></div>').join('') +
+          '<div class="mt-1 pt-1 border-t border-emerald-200 text-emerald-700/80">הסחורה הגיעה בלי חיוב נוסף — התעודה משולמת במלואה לפי הנייר ולא נדרש זיכוי כספי.</div></div>' : '') + // v268
         supplierCreditClaimCardHtml(rc) +
         (((rc.supplierPromoMismatchItems || []).length) ? '<div class="mt-2 bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-xs text-amber-800"><div class="font-black mb-1"><i class="fa-solid fa-triangle-exclamation"></i> מבצע מוגדר במערכת אך לא הופיע אצל הספק</div><div class="font-bold">' + (rc.supplierPromoMismatchItems || []).map(x => x.name).join(' · ') + '</div></div>' : '') +
         ((rc.externalOffsets || []).length ? (function () {
@@ -15319,6 +15365,7 @@ app.addEventListener('click', (e) => {
   else if (role === 'rv-cancel') { returnVerify = null; setView(rvOrigin); }
   else if (role === 'rv-save') saveReturnVerify();
   else if (role === 'rc-short-credit') openShortCreditPrompt(id);
+  else if (role === 'rc-short-goods') openShortGoodsConfirm(id); // v268
   else if (role === 'ret-edit-items') openReturnItemsEdit(id);
   else if (role === 're-qty-minus') retEditStepQty(parseInt(id, 10), -1);
   else if (role === 're-qty-plus') retEditStepQty(parseInt(id, 10), 1);
