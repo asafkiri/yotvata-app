@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v262 מסך המבצע הפך לרשימת ברקודים</title>
+    <title>הזמנות יטבתה - v269 קיזוז אוטומטי בין כל התעודות</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -109,7 +109,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v262 מסך המבצע הפך לרשימת ברקודים</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v269 קיזוז אוטומטי בין כל התעודות</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -11535,7 +11535,7 @@ function findOffsetMatch(rc, preferredOtherId, preferredProductId, preferredOthe
       if (preferredProductId && a.productId !== preferredProductId) continue;
       for (const b of theirs) {
         if (preferredOtherProductId && b.productId !== preferredOtherProductId) continue;
-        if (a.productId === b.productId && a.d === -b.d && a.d !== 0) {
+        if (a.productId === b.productId && sameOffsetQty(a.d, -b.d) && a.d !== 0) {
           return { other: other, productId: a.productId, name: a.name,
                    otherProductId: b.productId, otherName: b.name, byPrice: false,
                    price: Number(a.price) || 0, qty: Math.abs(a.d),
@@ -11558,7 +11558,7 @@ function findOffsetMatch(rc, preferredOtherId, preferredProductId, preferredOthe
       if (aCents <= 0) continue;
       for (const b of theirs) {
         if (preferredOtherProductId && b.productId !== preferredOtherProductId) continue;
-        if (Math.round((Number(b.price) || 0) * 100) === aCents && a.d === -b.d && a.d !== 0) {
+        if (Math.round((Number(b.price) || 0) * 100) === aCents && sameOffsetQty(a.d, -b.d) && a.d !== 0) {
           return { other: other, productId: a.productId, name: a.name,
                    otherProductId: b.productId, otherName: b.name, byPrice: true,
                    price: Number(a.price) || 0, qty: Math.abs(a.d),
@@ -11576,34 +11576,43 @@ function crossOffsetId(aId, bId, productId, otherProductId) {
   return 'xo2|' + [aId, bId].sort().join('|') + '|' + pids;
 }
 // v249: קיזוז אוטומטי — כשמופיעים חוסר ועודף של אותו מוצר בדיוק, באותו מחיר
-// ובאותה כמות, בתוך 9 התעודות האחרונות, ההתאמה ודאית ואישור יד לא מוסיף מידע:
+// ובאותה כמות, ההתאמה ודאית ואישור יד לא מוסיף מידע:
 // הקיזוז נרשם לבד (source: 'auto'), מוצג בכרטיס התעודה ככל קיזוז אחר וניתן
 // לביטול בכפתור "בטל". ביטול נשמר על התעודות (canceledOffsetIds) כדי שהזוג
 // שבוטל במודע לא יקוזז שוב אוטומטית. התאמות חלשות יותר — מחיר זהה במוצר
-// אחר, כמות שונה, או תעודות ישנות מהחלון — נשארות הצעה לאישור ידני בלבד.
-const AUTO_OFFSET_RECENT_DOCS = 9;
+// אחר או כמות שונה — נשארות הצעה לאישור ידני בלבד.
+// v269: החלון של 9 התעודות האחרונות הוסר — חוסר בתעודה ישנה שמולו הגיע עודף
+// זהה בתעודה חדשה נשאר קודם "הצעה לאישור" והמשתמש נאלץ לאשר ביד. עכשיו כל
+// זוג מדויק בין כל התעודות הטעונות מתקזז לבד. הסריקה מעדיפה זוגות קרובים
+// בזמן: כל תעודה נבדקת קודם מול התעודות הסמוכות לה.
 let autoOffsetBusy = false;
 function autoOffsetDismissed(rc, other, oid) {
   return (Array.isArray(rc.canceledOffsetIds) && rc.canceledOffsetIds.includes(oid)) ||
          (Array.isArray(other.canceledOffsetIds) && other.canceledOffsetIds.includes(oid));
 }
+// v269: כמויות משוקללות (1.25 ק"ג) עלולות לצבור רעש נקודה צפה בחיסור
+// noteQty - qty; השוואה במיליוניות במקום שוויון מדויק.
+function sameOffsetQty(a, b) {
+  return Math.abs((Number(a) || 0) - (Number(b) || 0)) < 0.000001;
+}
 function findAutoOffsetPair() {
-  // receipts כבר ממוין מהחדשה לישנה — 9 הראשונות הן "ההזמנות האחרונות".
-  const recent = receipts.slice(0, AUTO_OFFSET_RECENT_DOCS)
+  // receipts כבר ממוין מהחדשה לישנה — כל תעודה נבדקת מול כל התעודות שאחריה.
+  const recent = receipts
     .filter(rc => !(rc.offsetClosed && Number(rc.offsetSchemaVersion || 0) < 2));
+  const sides = recent.map(rc => receiptOffsets(rc));
   for (let i = 0; i < recent.length; i++) {
     const rc = recent[i];
-    const mine = receiptOffsets(rc);
+    const mine = sides[i];
     if (!mine.length) continue;
     for (let j = i + 1; j < recent.length; j++) {
       const other = recent[j];
-      const theirs = receiptOffsets(other);
+      const theirs = sides[j];
       if (!theirs.length) continue;
       for (const a of mine) {
         const aCents = Math.round((Number(a.price) || 0) * 100);
         if (aCents <= 0 || !a.productId || !a.d) continue;
         for (const b of theirs) {
-          if (b.productId !== a.productId || b.d !== -a.d) continue;
+          if (b.productId !== a.productId || !sameOffsetQty(b.d, -a.d)) continue;
           if (Math.round((Number(b.price) || 0) * 100) !== aCents) continue;
           const oid = crossOffsetId(rc.id, other.id, a.productId);
           if (autoOffsetDismissed(rc, other, oid)) continue;
@@ -11642,7 +11651,9 @@ async function autoApplyExactOffsets() {
   autoOffsetBusy = true;
   const applied = [];
   try {
-    for (let guard = 0; guard < 15; guard++) {
+    // v269: בלי חלון תעודות ייתכנו יותר זוגות בסריקה הראשונה — התקרה הוגדלה;
+    // מה שנשאר ייתפס בסנכרון הבא, כי כל כתיבה מפעילה סריקה נוספת.
+    for (let guard = 0; guard < 60; guard++) {
       const p = findAutoOffsetPair();
       if (!p) break;
       const ok = await applyAutoOffsetPair(p);
