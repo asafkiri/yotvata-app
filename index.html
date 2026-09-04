@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v279 טאב ניהול — כלי המנהל בשורת המצבים, ליד הזמנה/חזרות/קליטה</title>
+    <title>הזמנות יטבתה - v280 תעודת חזרות פתוחה — הבאנר האדום מופיע בכל המסכים הראשיים</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -111,7 +111,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v279 טאב ניהול — כלי המנהל בשורת המצבים, ליד הזמנה/חזרות/קליטה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v280 תעודת חזרות פתוחה — הבאנר האדום מופיע בכל המסכים הראשיים</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -1280,12 +1280,12 @@ function appendGapReminder(msg) {
 function renderOrder() {
   const visible = products.filter(p => !p.hidden);
   if (!visible.length) {
-    app.innerHTML = '<div class="text-center p-10 text-slate-500">אין מוצרים להצגה. הוסף או הצג מוצרים בהגדרות.</div>';
+    app.innerHTML = pendingReturnsBannerHtml() + '<div class="text-center p-10 text-slate-500">אין מוצרים להצגה. הוסף או הצג מוצרים בהגדרות.</div>';
     updateCart(); return;
   }
   const rows = buildOrderRowsGrouped(visible);
   app.innerHTML =
-    supplierGapBannerHtml() +
+    supplierGapBannerHtml() + pendingReturnsBannerHtml() +
     '<div class="flex items-center justify-between gap-2 mb-3 px-1">' +
       '<div class="text-[11px] text-slate-400 font-medium leading-tight">טפו על <b class="text-blue-500">מומלץ</b> כדי להזמין את הכמות, או הקלידו כמות אחרת · לחיצה ארוכה על מוצר פותחת עריכה</div>' +
       '<button data-role="clear-order" class="btn-tap shrink-0 text-xs font-bold text-red-500 bg-red-50 px-3 py-1.5 rounded-lg">נקה</button>' +
@@ -2632,11 +2632,16 @@ function buildReturnRow(it) {
     '<button data-role="ret-remove" data-id="' + it.productId + '" class="btn-tap shrink-0 p-2 text-red-500"><i class="fa-solid fa-trash-can"></i></button>' +
   '</div>';
 }
-function renderReturns() {
+// v280: תעודת חזרות פתוחה לאימות — באנר אדום בכל המסכים הראשיים (הזמנה, חזרות,
+// קליטה, ניהול), כדי שאי אפשר לשכוח אותה גם כשלא נמצאים בחזרות.
+function pendingReturnsBannerHtml() {
   const pendingRet = returns.filter(r => !r.credited).length;
-  const histBar = pendingRet
-    ? '<button data-role="ret-history" class="btn-tap w-full bg-rose-600 text-white rounded-xl py-3.5 px-3 font-black text-base flex items-center justify-between gap-2 mb-3 shadow-md"><span class="min-w-0 truncate"><i class="fa-solid fa-triangle-exclamation"></i> ' + (pendingRet === 1 ? 'יש תעודת חזרות פתוחה לאימות' : 'יש ' + pendingRet + ' תעודות חזרות פתוחות לאימות') + '</span><span class="text-xs font-black bg-white/20 px-2 py-1 rounded-lg shrink-0">לאימות ←</span></button>'
-    : '<button data-role="ret-history" class="btn-tap w-full bg-white border-2 border-slate-200 text-slate-700 rounded-xl py-3.5 font-black text-base flex items-center justify-center gap-2 mb-3 shadow-sm"><i class="fa-solid fa-clock-rotate-left text-blue-600"></i> היסטוריית חזרות</button>';
+  if (!pendingRet) return '';
+  return '<button data-role="ret-history" class="btn-tap w-full bg-rose-600 text-white rounded-xl py-3.5 px-3 font-black text-base flex items-center justify-between gap-2 mb-3 shadow-md"><span class="min-w-0 truncate"><i class="fa-solid fa-triangle-exclamation"></i> ' + (pendingRet === 1 ? 'יש תעודת חזרות פתוחה לאימות' : 'יש ' + pendingRet + ' תעודות חזרות פתוחות לאימות') + '</span><span class="text-xs font-black bg-white/20 px-2 py-1 rounded-lg shrink-0">לאימות ←</span></button>';
+}
+
+function renderReturns() {
+  const histBar = pendingReturnsBannerHtml() || '<button data-role="ret-history" class="btn-tap w-full bg-white border-2 border-slate-200 text-slate-700 rounded-xl py-3.5 font-black text-base flex items-center justify-center gap-2 mb-3 shadow-sm"><i class="fa-solid fa-clock-rotate-left text-blue-600"></i> היסטוריית חזרות</button>';
   app.innerHTML = supplierGapBannerHtml() + histBar +
     '<div class="relative mb-2">' +
       '<i class="fa-solid fa-magnifying-glass absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>' +
@@ -4878,7 +4883,7 @@ function commitQty(again) {
 function renderManage() {
   const btn = (role, icon, label, extra) =>
     '<button data-role="' + role + '" class="btn-tap ' + (extra || 'border-slate-200') + ' bg-white border rounded-2xl py-4 px-3 font-black text-slate-700 text-sm flex flex-col items-center justify-center gap-2 shadow-sm"><i class="fa-solid ' + icon + ' text-2xl"></i><span>' + label + '</span></button>';
-  app.innerHTML = supplierGapBannerHtml() +
+  app.innerHTML = supplierGapBannerHtml() + pendingReturnsBannerHtml() +
     '<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">' +
       '<div class="flex items-center gap-2 mb-3"><i class="fa-solid fa-screwdriver-wrench text-slate-400"></i><span class="font-black text-slate-800 text-base">ניהול</span></div>' +
       '<div class="grid grid-cols-2 gap-2">' +
@@ -4900,7 +4905,7 @@ function renderReceiving() {
   // v279: כלי הניהול עברו לטאב "ניהול" משלהם בשורת המצבים — מסך הקליטה נשאר נקי
   const topButtons = '';
   if (!opened) {
-    app.innerHTML = banner + topButtons +
+    app.innerHTML = banner + pendingReturnsBannerHtml() + topButtons +
       '<div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm mt-2">' +
         '<div class="grid grid-cols-3 gap-1 mb-4 text-center text-xs font-black"><div class="bg-blue-600 text-white rounded-lg py-2">1 · נתוני תעודה</div><div class="bg-slate-100 text-slate-400 rounded-lg py-2">2 · סריקה</div><div class="bg-slate-100 text-slate-400 rounded-lg py-2">3 · בדיקה</div></div>' +
         '<div class="text-center mb-3"><i class="fa-solid fa-file-invoice text-blue-600 text-4xl mb-2"></i><div class="font-black text-slate-800 text-lg">נתוני התעודה</div><div class="text-sm text-slate-500">הזן את הסכום ללא מע״מ ואת סך היחידות שמודפס בתעודה.</div></div>' +
@@ -4921,7 +4926,7 @@ function renderReceiving() {
         '<div class="flex items-center gap-1.5 shrink-0"><button data-role="rc-notes-edit" class="btn-tap text-xs font-bold text-blue-600 bg-blue-50 px-2.5 py-2 rounded-lg"><i class="fa-solid fa-pen"></i> ערוך</button><button data-role="rc-cancel" class="btn-tap text-xs font-bold text-red-500 bg-red-50 px-2.5 py-2 rounded-lg"><i class="fa-solid fa-xmark"></i></button></div>' +
       '</div>';
   const progress = receivingProgressHtml(t);
-  app.innerHTML = banner + topButtons + noteBar + progress +
+  app.innerHTML = banner + pendingReturnsBannerHtml() + topButtons + noteBar + progress +
     '<button data-role="rc-scan" class="btn-tap w-full bg-blue-600 text-white rounded-2xl py-4 font-black text-lg flex items-center justify-center gap-3 shadow-lg mb-2"><i class="fa-solid fa-barcode text-2xl"></i> סרוק פריט לתעודה</button>' +
     '<details class="bg-white rounded-2xl border border-slate-200 shadow-sm mb-4"><summary class="cursor-pointer p-3 font-black text-sm text-slate-600"><i class="fa-solid fa-circle-question text-slate-400"></i> לא מצליח לסרוק?</summary><div class="px-3 pb-3">' +
       '<div class="text-[11px] font-bold text-slate-400 mb-1.5"><i class="fa-solid fa-keyboard"></i> הסורק לא קורא? הקלד את הספרות האחרונות של הברקוד (6 מומלץ)</div>' +
