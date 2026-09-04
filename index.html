@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v273 מבצע נמדד על מה שחויב</title>
+    <title>הזמנות יטבתה - v274 סך היחידות חובה — אלא אם הצהרת שאין</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -109,7 +109,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v273 מבצע נמדד על מה שחויב</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v274 סך היחידות חובה — אלא אם הצהרת שאין</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -824,6 +824,15 @@ function parseNoteVal(v) {
   return isFinite(n) && n > 0 ? r2(n) : null;
 }
 let receiptNoteUnits = null; // עוגן נייר: סה"כ יחידות מודפסות בתחתית תעודות הספק
+// ===== v274: סך היחידות חזר להיות עוגן חובה — עם דלת יציאה מוצהרת =====
+// v270 הפך אותו לרשות בשקט, וכך כובו בבת אחת כל בדיקות הכמות: בשרת, בכל
+// תעודה, בדירוג הקריאות ובשער הממצאים. נשאר שער אחד — הכסף — וכל צירוף
+// של חוסרים מומצאים סוגר פער כספי בדיוק לאגורה.
+// ובפועל התברר שהעוגן כן קיים: בתעודת שטראוס הוא מודפס בעמוד האחרון,
+// בשורת החתימה ("סה״כ יחידות בחדדות"), ולא בתחתית טבלת הפריטים.
+// לכן: חובה כברירת מחדל, ומי שבאמת אוחז נייר בלי סך יחידות מצהיר על כך
+// במפורש. הצהרה, לא שדה ריק — כדי שהכיבוי יהיה החלטה ולא תאונה.
+let receiptUnitsWaived = false;
 function normNote(x) {
   if (x && typeof x === 'object') {
     const units = parseInt(x.units, 10);
@@ -853,23 +862,42 @@ function noteEditorBodyHtml() {
       '<button data-role="rc-note-remove" data-idx="' + i + '" class="btn-tap text-red-500 px-1"><i class="fa-solid fa-xmark"></i></button></div>' +
     '</div>';
   }).join('');
-  // v270: כשעוגן היחידות כבוי אומרים זאת במפורש — העובד רואה למה מונה
-  // היחידות לא יופיע בהמשך, ושהבדיקה תרוץ על הסכום בלבד.
+  // v274: שלושה מצבים, וכל אחד אומר את שמו. עוגן קיים, עוגן חסר (חוסם),
+  // או הצהרה מפורשת שבנייר אין סך יחידות — ואז גם דרך חזרה בלחיצה אחת.
   const anchorsSummary = receiptNoteUnits != null
     ? '<div class="text-[11px] font-bold text-slate-400 mt-1">סה"כ יחידות: ' + receiptNoteUnits + '</div>'
-    : '<div class="text-[11px] font-bold text-amber-600 mt-1"><i class="fa-solid fa-circle-info"></i> עוגן היחידות כבוי — לא לכל התעודות הוקלד סך יחידות. הבדיקה תתבצע לפי הסכום בלבד</div>';
+    : (receiptUnitsWaived
+      ? '<div class="text-[11px] font-bold text-amber-600 mt-1"><i class="fa-solid fa-circle-info"></i> הצהרת שבנייר אין סך יחידות — הבדיקה תרוץ על הכסף בלבד ' +
+        '<button data-role="rc-units-unwaive" class="btn-tap underline font-black text-blue-600">מצאתי אותו, אקליד</button></div>'
+      : '<div class="text-[11px] font-bold text-rose-600 mt-1"><i class="fa-solid fa-triangle-exclamation"></i> חסר סך יחידות — בלעדיו אי אפשר לבדוק כמויות</div>');
   const total = receiptNotes.length ? '<div class="flex items-center justify-between mt-2 pt-2 border-t border-slate-200"><span class="font-bold text-slate-500 text-sm">סה"כ ' + receiptNotes.length + ' תעודות</span><span class="font-black text-blue-600 text-lg">₪' + fmtMoney(noteSum()) + '</span></div>' + anchorsSummary : '';
   return chips +
-    '<div class="text-[11px] text-slate-400 font-bold mb-1.5"><i class="fa-solid fa-circle-info"></i> לכל תעודה הקלד את הסכום <b class="text-slate-600">ללא מע״מ</b>; סך היחידות הוא רשות</div>' +
+    '<div class="text-[11px] text-slate-400 font-bold mb-1.5"><i class="fa-solid fa-circle-info"></i> לכל תעודה הקלד את הסכום <b class="text-slate-600">ללא מע״מ</b> ואת <b class="text-slate-600">סך היחידות</b></div>' +
     '<div class="flex gap-2 items-stretch">' +
       '<div class="flex-1 flex items-center gap-1 border-2 border-slate-200 rounded-xl px-2 focus-within:border-blue-500"><span class="text-slate-400 font-black">₪</span><input id="rcNoteInput" type="text" inputmode="decimal" placeholder="סכום ללא מע״מ" class="w-full h-11 text-center text-base font-black outline-none bg-transparent"></div>' +
       '<button data-role="rc-note-add" class="btn-tap px-4 rounded-xl font-black bg-slate-100 text-slate-700 flex items-center gap-1"><i class="fa-solid fa-plus"></i> הוסף</button>' +
     '</div>' +
-    '<input id="rcNoteUnits" type="text" inputmode="numeric" placeholder="סך יחידות בתעודה (רשות)" class="w-full h-10 mt-1.5 text-center text-sm font-black border-2 border-slate-200 rounded-xl outline-none focus:border-blue-500 bg-white">' +
-    '<div class="text-[10px] text-slate-400 font-bold mt-1"><i class="fa-solid fa-wand-magic-sparkles"></i> סך היחידות מודפס בתחתית תעודת הספק ועוזר לבלש לזהות חוסרים בכמות. אין אותו בנייר? השאר ריק — העוגן ייכבה לכל התעודות והבדיקה תרוץ לפי הסכום בלבד</div>' +
+    '<input id="rcNoteUnits" type="text" inputmode="numeric" placeholder="סך יחידות בתעודה" class="w-full h-10 mt-1.5 text-center text-sm font-black border-2 border-slate-200 rounded-xl outline-none focus:border-blue-500 bg-white">' +
+    // v274: איפה למצוא אותו. בתעודת שטראוס הוא לא בתחתית טבלת הפריטים אלא
+    // בעמוד האחרון, בשורת החתימה — ובדיוק בגלל זה הוא נראה "חסר".
+    '<div class="text-[10px] text-slate-400 font-bold mt-1"><i class="fa-solid fa-wand-magic-sparkles"></i> סך היחידות מודפס ב<b class="text-slate-600">עמוד האחרון</b> של תעודת הספק, בשורת החתימה: "סה״כ יחידות בחדדות". הוא מה שמאפשר לתפוס חוסר בכמות ולא רק בכסף</div>' +
     total;
 }
-function readNoteEntry(required) {
+// v274: דלת היציאה היחידה מעוגן היחידות — שאלה מפורשת, ותשובה שנשמרת.
+// retry מריץ מחדש בדיוק את הפעולה שנחסמה, כדי שאישור ההצהרה ימשיך את
+// הזרימה במקום להחזיר את העובד לתחילת המסך.
+function askUnitsWaiver(retry) {
+  showConfirm('חסר סך יחידות',
+    'סך היחידות הוא מה שמאפשר לבדוק את הכמויות. בלעדיו הבדיקה נשענת על הכסף בלבד — וחוסר בכמות עלול לא להיתפס. בתעודות שטראוס הוא מודפס בעמוד האחרון, בשורת החתימה: "סה״כ יחידות בחדדות". בתעודה שלפניך באמת לא מודפס סך יחידות בשום מקום?',
+    'אין בנייר — המשך בלי',
+    function () {
+      receiptUnitsWaived = true;
+      saveReceiptDraft();
+      if (typeof retry === 'function') retry(); else refreshReceipt();
+    });
+  return false;
+}
+function readNoteEntry(required, onWaive) {
   const amountInp = $('rcNoteInput'), unitsInp = $('rcNoteUnits');
   const amountRaw = ((amountInp || {}).value || '').trim();
   const unitsRaw = ((unitsInp || {}).value || '').replace(/[^0-9]/g, '');
@@ -880,10 +908,10 @@ function readNoteEntry(required) {
     if (amountInp) amountInp.focus();
     return false;
   }
-  // v270: סך היחידות הוא עוגן רשות. יש תעודות ספק שאינן מדפיסות אותו כלל
-  // (משלוח 4.9 של שטראוס), והדרישה הקשיחה חסמה קליטה של תעודה תקינה לגמרי.
-  // שדה ריק = "אין סך יחידות בנייר", ולא שגיאת הקלדה.
+  // v274: שדה ריק אינו "אין סך יחידות בנייר" — הוא חסר. מי שבאמת אוחז
+  // נייר בלי סך יחידות עונה על השאלה, וההצהרה נשמרת לשאר התעודות.
   const units = parseInt(unitsRaw, 10) || 0;
+  if (!(units > 0) && !receiptUnitsWaived) return askUnitsWaiver(onWaive);
   return { amount: r2(v), units: units > 0 ? units : null };
 }
 // v272: קריאת הנייר נשמרת בטיוטה, הצילומים לא.
@@ -892,7 +920,7 @@ function readNoteEntry(required) {
 // ונשארות בזיכרון בלבד כפי שהוחלט מלכתחילה. אחרי שחזור אפשר להמשיך לעבוד
 // על התוצאות; מה שיידרש צילום מחדש הוא רק סריקה חדשה של אותו נייר.
 function receiptDraftPayload(includeScan) {
-  const base = { items: receiptList, notes: receiptNotes, opened: receiptOpened, dw: receiptDepositWaived };
+  const base = { items: receiptList, notes: receiptNotes, opened: receiptOpened, dw: receiptDepositWaived, uw: receiptUnitsWaived };
   if (includeScan && aiScanResponse && aiScanResponse.scan) {
     base.aiScan = {
       serviceVersion: aiScanResponse.serviceVersion || null,
@@ -944,6 +972,7 @@ function restoreReceiptDraft() {
       receiptNotes = (Array.isArray(o.notes) ? o.notes : (o.noteTotal != null ? [o.noteTotal] : [])).map(normNote);
       receiptOpened = !!o.opened || receiptList.length > 0;
       receiptDepositWaived = !!o.dw; // v232
+      receiptUnitsWaived = !!o.uw;   // v274: ההצהרה שורדת רענון, כמו שאר הטיוטה
     }
     recomputeNoteTotal();
     // v272: אחרי recomputeNoteTotal — שחזור הקריאה נשען על העוגנים המחושבים.
@@ -5054,13 +5083,20 @@ async function saveNewProduct() {
 // --- סיכום ואישור תעודה ---
 function finishReceipt() {
   if (!receiptList.length) return;
-  // הסכום ללא מע״מ הוא עוגן חובה לכל תעודה. סך היחידות הוא עוגן רשות
-  // (v270) — יש תעודות ספק שאינן מדפיסות אותו, ודרישה קשיחה חסמה אותן.
-  const anchorsReady = receiptNotes.length > 0 && receiptNotes.every(raw => normNote(raw).amount > 0);
-  if (!anchorsReady || receiptNoteTotal == null) {
+  // הסכום ללא מע״מ וסך היחידות הם עוגני חובה לכל תעודה. הדרך היחידה
+  // להמשיך בלי סך יחידות היא ההצהרה המפורשת של v274 — גם לטיוטה ישנה
+  // שנוצרה בזמן ש-v270 איפשר להשאיר את השדה ריק בשקט.
+  const amountsReady = receiptNotes.length > 0 && receiptNotes.every(raw => normNote(raw).amount > 0);
+  if (!amountsReady || receiptNoteTotal == null) {
     editingNotes = true;
     showToast('לפני האישור חובה להזין לכל תעודה סכום ללא מע״מ', null, null, 3800);
     refreshReceipt();
+    return;
+  }
+  if (receiptNoteUnits == null && !receiptUnitsWaived) {
+    editingNotes = true;
+    refreshReceipt();
+    askUnitsWaiver(finishReceipt);
     return;
   }
   const day = todayStr();
@@ -8650,6 +8686,13 @@ function aiEvaluateInvoiceScan(payload) {
     const printedUnitsAnchor = inputDoc.units == null && printedUnits != null && isFinite(printedUnits) ? Math.round(printedUnits) : null;
     if (printedUnitsAnchor != null) unitsAnchoredDocuments++;
     else if (inputDoc.units == null) unitsUnanchoredDocuments++;
+    // v274: העובד הצהיר שבנייר אין סך יחידות — והקריאה מצאה אותו. זה בדיוק
+    // המקרה שקרה: הסך מודפס בעמוד האחרון ולא בתחתית טבלת הפריטים, ולכן
+    // נראה כאילו אינו קיים. אומרים לו את המספר, כדי שיקליד ויקבל בחזרה גם
+    // את בדיקת הכמות ולא רק את בדיקת הכסף.
+    if (printedUnitsAnchor != null && receiptUnitsWaived) {
+      warnings.push('תעודה ' + (index + 1) + ': בנייר כן מודפס סך יחידות — ' + printedUnitsAnchor + '. הצהרת שאין; הקלד אותו בעריכת התעודות והבדיקה תיסגר גם על הכמות.');
+    }
     if (printedUnits != null && isFinite(printedUnits) && Math.round(printedUnits) !== docUnits) {
       if (printedUnitsAnchor != null) errors.push('תעודה ' + (index + 1) + ': נקראו ' + docUnits + ' יחידות מול ' + printedUnitsAnchor + ' שמודפסות בסיכום התעודה — הכמויות אינן מאומתות. צלם את התעודה שוב, או הקלד את סך היחידות שבנייר כדי לקבוע מי מהם נכון.');
       else warnings.push('תעודה ' + (index + 1) + ': שדה היחידות המודפס נקרא אחרת מסכום השורות — נבדק מול הכמות שהוקלדה');
@@ -11426,7 +11469,7 @@ async function confirmReceipt() {
   if (!saved) return;
   hideReceiptSummary();
   aiCloseOrientationReview();
-  receiptList = []; pendingReceipt = null; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; reconcileData = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; reconcileAiAudit = null; aiScanDocuments = []; aiScanBusy = false; aiScanProgressText = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanReused = false; aiScanFromDraft = false; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; receiptDupConfirmed = false; receiptDepositWaived = false; saveReceiptDraft();
+  receiptList = []; pendingReceipt = null; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; reconcileData = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; reconcileAiAudit = null; aiScanDocuments = []; aiScanBusy = false; aiScanProgressText = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanReused = false; aiScanFromDraft = false; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; receiptDupConfirmed = false; receiptDepositWaived = false; receiptUnitsWaived = false; saveReceiptDraft();
   setView('receiptsHistory');
   const autoApplied = await autoApplyExactOffsets(); // v249: זוג מדויק מתקזז לבד
   const newOpen = receipts.filter(r => receiptDiscrepancyInfo(r).open).find(r => findOffsetMatch(r));
@@ -15685,19 +15728,35 @@ app.addEventListener('click', (e) => {
   // v272: ביטול תעודה חייב למחוק גם את הצילומים ואת קריאת הנייר. כל עוד כל
   // כניסה למסך ההשוואה איפסה אותם ממילא, הדילוג כאן לא הזיק; מרגע שהם שורדים
   // בין המסכים, תעודה שבוטלה הייתה יכולה להוריש את הנייר שלה לתעודה הבאה.
-  else if (role === 'rc-cancel') { showConfirm('ביטול תעודה', 'לבטל את התעודה הנוכחית? כל הפריטים שנסרקו יימחקו.', 'בטל תעודה', () => { receiptList = []; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; anchorFixHint = ''; reconcileData = null; receiptDupConfirmed = false; receiptDepositWaived = false; resetAiInvoiceScan(true); aiScanDocuments = []; saveReceiptDraft(); setView('receiving'); }); }
-  else if (role === 'rc-note-add') { const en = readNoteEntry(true); if (en === false) return; if (en) { receiptNotes.push(en); recomputeNoteTotal(); saveReceiptDraft(); } refreshReceipt(); const inp = $('rcNoteInput'); if (inp) inp.focus(); }
+  else if (role === 'rc-cancel') { showConfirm('ביטול תעודה', 'לבטל את התעודה הנוכחית? כל הפריטים שנסרקו יימחקו.', 'בטל תעודה', () => { receiptList = []; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; anchorFixHint = ''; reconcileData = null; receiptDupConfirmed = false; receiptDepositWaived = false; receiptUnitsWaived = false; resetAiInvoiceScan(true); aiScanDocuments = []; saveReceiptDraft(); setView('receiving'); }); }
+  else if (role === 'rc-note-add') {
+    // v274: הפעולה עוטפת את עצמה, כדי שאישור ההצהרה על חוסר סך יחידות
+    // יוסיף את התעודה במקום להשאיר את העובד מול שדות מלאים שלא נקלטו.
+    const addNote = () => {
+      const en = readNoteEntry(true, addNote); if (en === false) return;
+      if (en) { receiptNotes.push(en); recomputeNoteTotal(); saveReceiptDraft(); }
+      refreshReceipt(); const inp = $('rcNoteInput'); if (inp) inp.focus();
+    };
+    addNote();
+  }
+  else if (role === 'rc-units-unwaive') { receiptUnitsWaived = false; saveReceiptDraft(); refreshReceipt(); }
   else if (role === 'rc-note-remove') { const i = parseInt(t.dataset.idx, 10); if (i >= 0) { receiptNotes.splice(i, 1); recomputeNoteTotal(); saveReceiptDraft(); refreshReceipt(); } }
   else if (role === 'rc-dep-waive') { receiptDepositWaived = true; saveReceiptDraft(); buzz(12); refreshReceipt(); } // v232
   else if (role === 'rc-dep-restore') { receiptDepositWaived = false; saveReceiptDraft(); buzz(12); refreshReceipt(); } // v232
   else if (role === 'rc-notes-edit') { editingNotes = true; refreshReceipt(); }
   else if (role === 'rc-notes-done') {
-    const en = readNoteEntry(false); if (en === false) return;
-    if (en) receiptNotes.push(en);
-    recomputeNoteTotal();
-    const anchorsReady = receiptNotes.length > 0 && receiptNotes.every(raw => normNote(raw).amount > 0); // v270: סך היחידות רשות
-    if (!anchorsReady) { showToast('חובה להשאיר לפחות תעודה אחת עם סכום ללא מע״מ', null, null, 3200); refreshReceipt(); return; }
-    editingNotes = false; anchorFixHint = ''; saveReceiptDraft(); refreshReceipt();
+    const doneNotes = () => {
+      const en = readNoteEntry(false, doneNotes); if (en === false) return;
+      if (en) receiptNotes.push(en);
+      recomputeNoteTotal();
+      const amountsReady = receiptNotes.length > 0 && receiptNotes.every(raw => normNote(raw).amount > 0);
+      if (!amountsReady) { showToast('חובה להשאיר לפחות תעודה אחת עם סכום ללא מע״מ', null, null, 3200); refreshReceipt(); return; }
+      // v274: תעודה שנוספה לפני ההצהרה יכולה להיות בלי יחידות גם כשהשדות
+      // ריקים עכשיו — לכן הבדיקה חוזרת כאן על העוגן המחושב, לא על הקלט.
+      if (receiptNoteUnits == null && !receiptUnitsWaived) { askUnitsWaiver(doneNotes); return; }
+      editingNotes = false; anchorFixHint = ''; saveReceiptDraft(); refreshReceipt();
+    };
+    doneNotes();
   }
   else if (role === 'rc-recon-minus') reconcileStepNote(id, -1);
   else if (role === 'rc-recon-plus') reconcileStepNote(id, 1);
