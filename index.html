@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v270 תעודה בלי סך יחידות</title>
+    <title>הזמנות יטבתה - v271 סיבולת אגורות גם בלי עוגן יחידות</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -109,7 +109,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v270 תעודה בלי סך יחידות</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v271 סיבולת אגורות גם בלי עוגן יחידות</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -4222,8 +4222,14 @@ function fmtUnitPrice(n, precise) {
   return precise ? v.toLocaleString('he-IL', { minimumFractionDigits: 2, maximumFractionDigits: 5 }) : fmtMoney(v);
 }
 // פערי אגורות מצטברים נוצרים כשהספק מדפיס מחיר יחידה מעוגל אך מחשב את
-// השורות בדיוק פנימי. מתירים עד 20 אגורות רק כשסך היחידות ידוע ותואם בדיוק.
+// השורות בדיוק פנימי. מתירים עד 20 אגורות כשסך היחידות אינו סותר.
 const RECEIPT_ROUNDING_TOLERANCE_CENTS = 20;
+// v271 (הכרעת המשתמש): הסיבולת אינה תלויה בקיום עוגן היחידות אלא רק בכך
+// שהוא אינו סותר. עוגן שנסגר בדיוק מתיר אותה — ובאותה מידה גם תעודה שאין
+// בה עוגן כלל, שאחרת הייתה נופלת על אגורות בלי שום דרך לסגור אותן. מה
+// שנשאר חוסם הוא פער יחידות ידוע ופתוח: פער יחידות לעולם אינו נסגר
+// באמצעות סיבולת כספית (v176). null = אין עוגן, 0 = עוגן שנסגר.
+function unitsAnchorAllowsRounding(unitsGap) { return unitsGap == null || unitsGap === 0; }
 function moneyDiffCents(a, b) { return Math.abs(Math.round((Number(a) || 0) * 100) - Math.round((Number(b) || 0) * 100)); }
 function receiptMoneyMatches(calculated, paperTotal, unitsMatch) {
   const diff = moneyDiffCents(calculated, paperTotal);
@@ -4998,13 +5004,12 @@ function finishReceipt() {
     if (dup) { showConfirm('אולי כפילות', 'כבר קיימת תעודה מ-' + dDisp(day) + ' בסכום דומה (₪' + fmtMoney(ex) + ' · ' + lines.length + ' מוצרים). ייתכן שכבר קלטת אותה — לשמור בכל זאת?', 'כן, שמור בכל זאת', function () { receiptDupConfirmed = true; finishReceipt(); }); return; }
   }
   const unitsMismatch = receiptNoteUnits != null && scannedUnits !== receiptNoteUnits;
-  // אחרי חישוב מדויק ועיגול כל שורה בסופה, נשארת רשת ביטחון של עד שתי אגורות
-  // רק כשהיחידות תואמות בדיוק. פער יחידות לעולם אינו נסגר באמצעות סיבולת כספית.
-  // v270: "אין עוגן" אינו "היחידות תואמות" — בלי עוגן אין מה שיצדיק את הרשת,
-  // ולכן היא כבויה. זה גם מיישר קו עם reconcileMoneyBalanced ועם השמירה,
-  // שכבר דורשים עוגן קיים שנסגר; אחרת המסך הזה היה מאשר סכום שמסך
-  // ההתאמה מיד אחריו מסמן כפער.
-  const unitsAnchorMatched = receiptNoteUnits != null && !unitsMismatch;
+  // אחרי חישוב מדויק ועיגול כל שורה בסופה, נשארת רשת ביטחון של עד 20 אגורות
+  // כשעוגן היחידות אינו סותר. פער יחידות לעולם אינו נסגר באמצעות סיבולת כספית.
+  // v271: unitsMismatch הוא false גם כשאין עוגן כלל, ולכן הרשת פעילה בשני
+  // המצבים שאינם סותרים — עוגן שנסגר, או תעודה בלי עוגן. אותו כלל בדיוק
+  // חל במסך ההתאמה, בשמירה ובתיקון ההפרשים.
+  const unitsAnchorMatched = !unitsMismatch;
   const moneyMismatch = progressMoneyTarget != null && !receiptMoneyMatches(ex, progressMoneyTarget, unitsAnchorMatched);
   // v232: הפער הוא בדיוק הפיקדון שהאפליקציה הוסיפה ובנייר אין שורת פיקדון —
   // מציעים להסיר את שורות הפיקדון ולסגור לפי הנייר, עוד לפני מסך ההפרשים.
@@ -5018,7 +5023,7 @@ function finishReceipt() {
     if (moneyMismatch && big >= 50 && big >= small * 2) { showConfirm('הפרש חריג', 'סכום התעודה שהוקלד הוא ₪' + fmtMoney(progressMoneyTarget) + ', אבל מהסריקה שוחזר ₪' + fmtMoney(ex) + '. הפרש גדול במיוחד — ייתכן שסכום התעודה הוקלד לא נכון (או שבאמת חסר הרבה). להמשיך לבדיקת ההפרשים?', 'המשך לבדיקה', openReconcile); return; }
     openReconcile(); return;
   }
-  // תיקון עיגול נכתב לתעודה רק כשעוגן היחידות הוכיח שהכמויות זהות (v270).
+  // תיקון עיגול נכתב לתעודה כשעוגן היחידות אינו סותר — כולל תעודה בלי עוגן (v271).
   const roundingAdjustment = progressMoneyTarget != null && unitsAnchorMatched && moneyDiffCents(ex, progressMoneyTarget) > 0
     ? r2(Number(progressMoneyTarget) - ex) : 0;
   const payableEx = roundingAdjustment ? r2(progressMoneyTarget) : ex;
@@ -5078,7 +5083,7 @@ function reconcileUnitsGap() { if (receiptNoteUnits == null) return null; return
 function reconcileGap() { return r2((receiptNoteTotal || 0) + (Number(reconcileSupplierDiscount) || 0) - reconcileNoteInc()); }
 function reconcileUnitsBalanced() { const g = reconcileUnitsGap(); return g == null || g === 0; }
 function reconcileMoneyBalanced() {
-  const exactUnitAnchor = receiptNoteUnits != null && reconcileUnitsGap() === 0;
+  const exactUnitAnchor = unitsAnchorAllowsRounding(reconcileUnitsGap()); // v271: גם בלי עוגן
   return receiptMoneyMatches(reconcileNoteInc(), (receiptNoteTotal || 0) + (Number(reconcileSupplierDiscount) || 0), exactUnitAnchor);
 }
 function reconcileIsBalanced() { return reconcileMoneyBalanced() && reconcileUnitsBalanced(); }
@@ -8348,9 +8353,9 @@ function aiFindingsClosure(evaluation, findings) {
   const actualAmountDelta = r2(adjustedAmount - receivedAmount + pricingDelta - supplierDiscount);
   const amountTolerance = Number(RECEIPT_ROUNDING_TOLERANCE_CENTS) || 0;
   const amountDiffCents = Math.abs(Math.round(actualAmountDelta * 100) - Math.round(expectedAmountDelta * 100));
-  // סיבולת העיגול נשענת על יחידות מוכחות, ולכן היא נשארת מותנית בעוגן
-  // שהוקלד באמת ונסגר בדיוק (v270). בלי עוגן — הכסף חייב לסגור לאגורה.
-  const amountOk = amountDiffCents === 0 || (expectedUnitsDelta != null && unitsOk && amountDiffCents <= amountTolerance);
+  // v271: unitsOk הוא true גם כשאין עוגן, ולכן הסיבולת חלה בשני המצבים
+  // שאינם סותרים. פער יחידות שנמדד ולא נסגר עדיין חוסם אותה.
+  const amountOk = amountDiffCents === 0 || (unitsOk && amountDiffCents <= amountTolerance);
   const ok = unitsOk && amountOk;
   const reason = ok ? '' : (!unitsOk
     ? 'הממצאים אינם סוגרים את פער היחידות: צפוי ' + expectedUnitsDelta + ', נמצא ' + actualUnitsDelta
@@ -10902,7 +10907,7 @@ function saveReconciledReceipt(opts) {
   const grossEx = r2(lines.reduce((a, l) => a + l.lineTotal, 0));
   const supplierDiscount = r2(Number(reconcileSupplierDiscount) || 0);
   const calculatedEx = r2(grossEx - supplierDiscount);
-  const exactUnitAnchor = receiptNoteUnits != null && reconcileUnitsGap() === 0;
+  const exactUnitAnchor = unitsAnchorAllowsRounding(reconcileUnitsGap()); // v271: גם בלי עוגן
   const roundingAdjustment = receiptNoteTotal != null && exactUnitAnchor && receiptMoneyMatches(calculatedEx, receiptNoteTotal, true) && moneyDiffCents(calculatedEx, receiptNoteTotal) > 0
     ? r2(Number(receiptNoteTotal) - calculatedEx) : 0;
   const ex = roundingAdjustment ? r2(receiptNoteTotal) : calculatedEx;
@@ -10984,7 +10989,7 @@ function receiptFixTotals() {
   let grossEx = 0; (receiptFix.items || []).forEach(l => grossEx += lineTotalFromUnit(l.unitPrice, l.qty)); grossEx = r2(grossEx);
   const calculatedEx = r2(grossEx - (Number(receiptFix.supplierDiscount) || 0));
   const unitAnchor = receiptFixUnitAnchorState(receiptFix.items || []);
-  const usePaperTotal = receiptFix.noteTotalInc != null && unitAnchor.matches && receiptMoneyMatches(calculatedEx, receiptFix.noteTotalInc, true);
+  const usePaperTotal = receiptFix.noteTotalInc != null && unitAnchor.allowsRounding && receiptMoneyMatches(calculatedEx, receiptFix.noteTotalInc, true);
   return { ex: usePaperTotal ? r2(receiptFix.noteTotalInc) : calculatedEx, grossEx, calculatedEx };
 }
 function receiptFixUnitAnchorState(items) {
@@ -10993,7 +10998,10 @@ function receiptFixUnitAnchorState(items) {
   const complete = normalized.length > 0 && normalized.every(x => x.units != null);
   const paperUnits = complete ? normalized.reduce((a, x) => a + (Number(x.units) || 0), 0) : null;
   const assignedUnits = (items || []).reduce((a, l) => a + (l.noteQty != null ? (Number(l.noteQty) || 0) : (Number(l.qty) || 0)), 0);
-  return { complete, paperUnits, assignedUnits, matches: complete && assignedUnits === paperUnits };
+  // matches = העוגן קיים ונסגר. allowsRounding = העוגן אינו סותר, כלומר
+  // נסגר או שאינו קיים כלל (v271) — זה השדה שמתיר את סיבולת האגורות.
+  const matches = complete && assignedUnits === paperUnits;
+  return { complete, paperUnits, assignedUnits, matches, allowsRounding: unitsAnchorAllowsRounding(complete ? paperUnits - assignedUnits : null) };
 }
 function receiptFixEffectiveInfo(items) {
   if (!receiptFix) return { open: false, shortItems: [], overItems: [], externalOffsets: [] };
@@ -11002,7 +11010,7 @@ function receiptFixEffectiveInfo(items) {
   const unitAnchor = receiptFixUnitAnchorState(useItems);
   const targetGross = receiptFix.noteTotalInc != null ? r2((Number(receiptFix.noteTotalInc) || 0) + (Number(receiptFix.supplierDiscount) || 0)) : null;
   const rawAmountGap = targetGross != null ? r2(targetGross - paperValue) : r2(Number(receiptFix.unresolvedAmountGap) || 0);
-  const amountGap = targetGross != null && receiptMoneyMatches(paperValue, targetGross, unitAnchor.matches) ? 0 : rawAmountGap;
+  const amountGap = targetGross != null && receiptMoneyMatches(paperValue, targetGross, unitAnchor.allowsRounding) ? 0 : rawAmountGap;
   return receiptDiscrepancyInfo({ items: useItems, externalOffsets: receiptFix.externalOffsets || [], noteParts: receiptFix.noteParts || [], unresolvedAmountGap: amountGap, unresolvedUnitsGap: unitAnchor.complete ? 0 : (Number(receiptFix.unresolvedUnitsGap) || 0) });
 }
 function receiptFixOpenLines() {
@@ -11155,7 +11163,7 @@ async function saveReceiptFix() {
   const grossEx = r2(items.reduce((a, l) => a + l.lineTotal, 0));
   const calculatedEx = r2(grossEx - (Number(receiptFix.supplierDiscount) || 0));
   const unitAnchor = receiptFixUnitAnchorState(items);
-  const roundingAdjustment = receiptFix.noteTotalInc != null && unitAnchor.matches && receiptMoneyMatches(calculatedEx, receiptFix.noteTotalInc, true) && moneyDiffCents(calculatedEx, receiptFix.noteTotalInc) > 0
+  const roundingAdjustment = receiptFix.noteTotalInc != null && unitAnchor.allowsRounding && receiptMoneyMatches(calculatedEx, receiptFix.noteTotalInc, true) && moneyDiffCents(calculatedEx, receiptFix.noteTotalInc) > 0
     ? r2(Number(receiptFix.noteTotalInc) - calculatedEx) : 0;
   const ex = roundingAdjustment ? r2(receiptFix.noteTotalInc) : calculatedEx;
   const originalReceipt = receipts.find(x => x.id === receiptFix.id);
@@ -11386,7 +11394,10 @@ function receiptDiscrepancyInfo(rc, opts) {
   // (המתוקנת) היא האמת; השדה השמור הוא גיבוי רק לתעודות בלי עוגן.
   const unresolvedUnitsGap = paperUnits == null ? storedUnitsGap : derivedUnitsGap;
   const amountGapCents = Math.abs(Math.round(unresolvedAmountGap * 100));
-  const amountToleranceCents = paperUnits != null && unresolvedUnitsGap === 0 ? RECEIPT_ROUNDING_TOLERANCE_CENTS : 0;
+  // v271: תעודה בלי עוגן יחידות (paperUnits == null) נשענת על הפער השמור,
+  // שהוא 0 כשלא נשאר פער פתוח — ולכן היא מקבלת את אותה סיבולת עיגול
+  // כמו תעודה עם עוגן שנסגר, במקום להישאר פתוחה לנצח על אגורות.
+  const amountToleranceCents = unresolvedUnitsGap === 0 ? RECEIPT_ROUNDING_TOLERANCE_CENTS : 0;
   const amountGapOpen = amountGapCents > amountToleranceCents;
   if (amountGapOpen && Math.round(unresolvedAmountGap * 100) > 0) shortVal += unresolvedAmountGap;
   else if (amountGapOpen && Math.round(unresolvedAmountGap * 100) < 0) overVal += -unresolvedAmountGap;
