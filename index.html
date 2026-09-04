@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v281 בלי קוד מנהל — כל הפעולות פתוחות · מחיקת תעודת חזרות שטרם אומתה</title>
+    <title>הזמנות יטבתה - v282 ניתוח מוצרים — נמכר בפועל, דירוגים, השוואה לתקופה קודמת, רווח, גרף שבועי ושיתוף</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -111,7 +111,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v281 בלי קוד מנהל — כל הפעולות פתוחות · מחיקת תעודת חזרות שטרם אומתה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v282 ניתוח מוצרים — נמכר בפועל, דירוגים, השוואה לתקופה קודמת, רווח, גרף שבועי ושיתוף</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -15083,77 +15083,125 @@ $('segReceiving').addEventListener('click', () => setView('receiving'));
 $('segManage').addEventListener('click', () => setView('manage')); // v279
 $('btnSettings').addEventListener('click', () => setView('settings'));
 $('btnNotes').addEventListener('click', () => setView('notes'));
-// ===== ניתוח מוצרים (v235) =====
-// מסך קריאה בלבד: אפס כתיבות לענן, אפס נגיעה בקליטה/סריקה/בלש/כסף.
-// הכל נגזר מתעודות הקליטה ומתעודות החזרה שכבר נשמרו.
-let anPreset = 'd30';          // month | d30 | d90 | d180 | manual — ברירת מחדל 30 יום, שהאחוזים יקבלו מכנה אמיתי גם בתחילת חודש (v236)
+// ===== ניתוח מוצרים (v282) =====
+// מסך קריאה בלבד: אפס כתיבות לענן. הכל נגזר מתעודות הקליטה והחזרה שכבר נשמרו.
+// ציר הזמן = תאריך הנייר (docDate/date), ואם אין — היום של חותמת ההקלדה.
+// v282: "נמכר בפועל" (נקלט פחות הוחזר), דירוגים נוספים, השוואה לתקופה קודמת
+// באותו אורך, רווח מול מחיר הקופה, גרף שבועי לכל מוצר, ושיתוף/העתקה של הסיכום.
+const AN_APP_NAME = 'יטבתה';
+let anPreset = 'd30';          // month | d30 | d90 | d180 | manual — ברירת מחדל 30 יום
 let anFrom = '';               // YYYY-MM-DD (טווח ידני)
 let anTo = '';
 let anQuery = '';
 let anSelectedKey = null;
-let anData = null;             // { rows, rcCount, retCount, fromTs, toTs, source, truncated }
+let anRank = 'returns';        // returns | sold | money | stars | prices | missing | profit | margin
+let anData = null;             // { rows, prevRows, rcCount, retCount, prevRcCount, fromD, toD, prevFromD, prevToD, missing, source, truncated }
 let anBusy = false;
 let anError = '';
 let anSeq = 0;
 
-// פיקדון = כסף בלבד, אף פעם לא מוצר — מוחרג מכל הניתוח (אותו כלל כמו v176/v190).
+// פיקדון = כסף בלבד, אף פעם לא מוצר — מוחרג מכל הניתוח.
 function anIsDepositLine(l) { return !!(l && (l.isDeposit || String(l.productId || '').indexOf('deposit-') === 0)); }
+// ארגזים (תנובה): החזרה יומית היא חלק מהשיטה, לא איתות — לא מדורגים ולא נספרים בסיכומים.
+function anIsCrate(p) { return !!(p && typeof isQuickCrate === 'function' && isQuickCrate(p)); }
 
-function anRangeBounds() {
-  const now = Date.now();
-  if (anPreset === 'manual' && anFrom) {
-    const fromTs = Date.parse(anFrom + 'T00:00:00');
-    const toTs = anTo ? Date.parse(anTo + 'T23:59:59.999') : now;
-    if (isFinite(fromTs) && isFinite(toTs) && fromTs <= toTs) return { fromTs, toTs };
-  }
-  if (anPreset === 'd30') return { fromTs: now - 30 * 864e5, toTs: now };
-  if (anPreset === 'd90') return { fromTs: now - 90 * 864e5, toTs: now };
-  if (anPreset === 'd180') return { fromTs: now - 180 * 864e5, toTs: now };
-  const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0);
-  return { fromTs: d.getTime(), toTs: now };
+// תאריך האמת של מסמך: תאריך הנייר, ואם אין — תאריך ההקלדה, ואם אין — מהחותמת.
+function anDocDate(doc) {
+  const d = doc && (doc.docDate || doc.date);
+  if (d) return String(d).slice(0, 10);
+  const ts = Number(doc && doc.timestamp) || 0;
+  return ts ? new Date(ts).toLocaleDateString('en-CA') : '';
+}
+function anDateShift(days, fromD) {
+  const base = fromD ? new Date(fromD + 'T12:00:00') : new Date();
+  base.setDate(base.getDate() + days);
+  return base.toLocaleDateString('en-CA');
+}
+function anDaysBetween(a, b) { return Math.round((Date.parse(b + 'T12:00:00') - Date.parse(a + 'T12:00:00')) / 864e5); }
+function anTsDisp(ts) { try { return new Date(Number(ts) || 0).toLocaleDateString('he-IL'); } catch (e) { return ''; } }
+function anShortDM(d) { const m = String(d || '').match(/^\d{4}-(\d{2})-(\d{2})$/); return m ? (parseInt(m[2], 10) + '/' + parseInt(m[1], 10)) : ''; }
+// מפתח שבוע = יום ראשון של אותו שבוע
+function anWeekKey(d) {
+  const dt = new Date(d + 'T12:00:00');
+  if (isNaN(dt.getTime())) return '';
+  dt.setDate(dt.getDate() - dt.getDay());
+  return dt.toLocaleDateString('en-CA');
 }
 
-// האם ההיסטוריה שכבר בזיכרון (100 תעודות / 20 חזרות אחרונות, ממוינות מהחדש לישן)
-// מכסה את תחילת הטווח. אם לא — נשלוף מהענן טווח מדויק, קריאה בלבד.
-function anMemoryCovers(fromTs, rcs, rets) {
-  const R = rcs || receipts, T = rets || returns;
-  const rcOk = R.length < 100 || (R.length > 0 && Number(R[R.length - 1].timestamp || 0) <= fromTs);
-  const retOk = T.length < 20 || (T.length > 0 && Number(T[T.length - 1].timestamp || 0) <= fromTs);
+function anRangeBounds() {
+  const today = todayStr();
+  if (anPreset === 'manual' && anFrom) {
+    const to = anTo || today;
+    if (anFrom <= to) return { fromD: anFrom, toD: to };
+  }
+  if (anPreset === 'month') return { fromD: today.slice(0, 8) + '01', toD: today };
+  if (anPreset === 'd90') return { fromD: anDateShift(-90), toD: today };
+  if (anPreset === 'd180') return { fromD: anDateShift(-180), toD: today };
+  return { fromD: anDateShift(-30), toD: today };
+}
+// התקופה הקודמת להשוואה: אותו מספר ימים, נגמרת יום לפני תחילת הטווח.
+function anPrevBounds(b) {
+  const len = anDaysBetween(b.fromD, b.toD) + 1;
+  const toD = anDateShift(-1, b.fromD);
+  return { fromD: anDateShift(-(len - 1), toD), toD };
+}
+
+// הזיכרון מחזיק את 100 התעודות ו-20 החזרות האחרונות (לפי הקלדה). תאריך נייר יכול
+// לפגר אחרי ההקלדה, לכן דורשים ריפוד של 45 יום לפני תחילת התקופה הקודמת.
+function anMemoryCovers(fromD) {
+  const R = receipts, T = returns;
+  if (R.length < 100 && T.length < 20) return true;
+  const need = Date.parse(fromD + 'T00:00:00') - 45 * 864e5;
+  const rcOk = R.length < 100 || (R.length > 0 && Number(R[R.length - 1].timestamp || 0) <= need);
+  const retOk = T.length < 20 || (T.length > 0 && Number(T[T.length - 1].timestamp || 0) <= need);
   return rcOk && retOk;
 }
 
-// ליבת הניתוח — פונקציה טהורה: תעודות + חזרות + טווח + קטלוג ← שורות מסוכמות.
-// התאמת שורה למוצר: productId ← ברקוד מנורמל ← שם מדויק (שורות חזרה ישנות לא נושאות productId).
-function analysisAggregate(rcs, rets, fromTs, toTs, catalog) {
-  const list = catalog || products;
+// התאמת שורה למוצר: productId ← ברקוד מנורמל ← שם מדויק (שורות ישנות לא נושאות productId).
+function anCatalogIndex(catalog) {
   const byId = new Map(), byBc = new Map(), byName = new Map();
-  list.forEach(p => {
+  (catalog || products).forEach(p => {
     byId.set(p.id, p);
     const b = normalizeBarcode(p.barcode || ''); if (b && !byBc.has(b)) byBc.set(b, p);
     const n = String(p.name || '').trim(); if (n && !byName.has(n)) byName.set(n, p);
   });
+  return { byId, byBc, byName };
+}
+function anMatchProduct(idx, l) {
+  if (l.productId && idx.byId.has(l.productId)) return idx.byId.get(l.productId);
+  const bc = normalizeBarcode(l.barcode || '');
+  if (bc && idx.byBc.has(bc)) return idx.byBc.get(bc);
+  const nm = String(l.name || '').trim();
+  if (!bc && nm && idx.byName.has(nm)) return idx.byName.get(nm);
+  return null;
+}
+
+// ליבת הניתוח — פונקציה טהורה: תעודות + חזרות + טווח תאריכי-נייר + קטלוג ← שורות.
+function analysisAggregate(rcs, rets, fromD, toD, catalog) {
+  const idx = anCatalogIndex(catalog);
   const rows = new Map();
   let rcCount = 0, retCount = 0;
   const rowFor = (l) => {
-    let p = null;
-    if (l.productId && byId.has(l.productId)) p = byId.get(l.productId);
+    const p = anMatchProduct(idx, l);
     const bc = normalizeBarcode(l.barcode || '');
-    if (!p && bc && byBc.has(bc)) p = byBc.get(bc);
     const nm = String(l.name || '').trim();
-    if (!p && !bc && nm && byName.has(nm)) p = byName.get(nm);
     const key = p ? 'p:' + p.id : (bc ? 'b:' + bc : (nm ? 'n:' + nm : ''));
     if (!key) return null;
     let r = rows.get(key);
     if (!r) {
-      r = { key, name: p ? p.name : (nm || bc), barcode: p ? (p.barcode || '') : (l.barcode || ''), inCatalog: !!p, recvUnits: 0, recvValue: 0, retUnits: 0, retValue: 0, lastRecv: null, lastRet: null, prices: [] };
+      r = { key, name: p ? p.name : (nm || bc), barcode: p ? (p.barcode || '') : (l.barcode || ''), inCatalog: !!p, product: p || null, crate: anIsCrate(p),
+        recvUnits: 0, recvValue: 0, retUnits: 0, retValue: 0, lastRecv: null, lastRet: null, prices: [], byWeek: {} };
       rows.set(key, r);
     }
     return r;
   };
+  const newer = (d, ts, cur) => !cur || d > cur.d || (d === cur.d && ts > cur.ts);
+  const week = (r, d) => { const k = anWeekKey(d); if (!k) return null; return r.byWeek[k] || (r.byWeek[k] = { recv: 0, ret: 0 }); };
   (rcs || []).forEach(rc => {
-    const ts = Number(rc.timestamp) || 0;
-    if (ts < fromTs || ts > toTs) return;
+    const dd = anDocDate(rc);
+    if (!dd || dd < fromD || dd > toD) return;
     rcCount++;
+    const ts = Number(rc.timestamp) || 0;
     (rc.items || []).forEach(l => {
       if (anIsDepositLine(l)) return;
       const r = rowFor(l); if (!r) return;
@@ -15161,15 +15209,18 @@ function analysisAggregate(rcs, rets, fromTs, toTs, catalog) {
       const unit = Number(l.unitPrice) || 0;
       const val = (l.lineTotal != null) ? (Number(l.lineTotal) || 0) : r2(unit * qty);
       r.recvUnits += qty; r.recvValue = r2(r.recvValue + val);
-      if (r.lastRecv && ts === r.lastRecv.ts) { r.lastRecv.qty += qty; }
-      else if (!r.lastRecv || ts > r.lastRecv.ts) { r.lastRecv = { ts, date: rc.date || '', qty, unit }; }
-      r.prices.push({ ts, date: rc.date || '', qty, unit });
+      if (r.lastRecv && dd === r.lastRecv.d && ts === r.lastRecv.ts) { r.lastRecv.qty += qty; }
+      else if (newer(dd, ts, r.lastRecv)) { r.lastRecv = { d: dd, ts, qty, unit }; }
+      r.prices.push({ d: dd, ts, qty, unit });
+      const w = week(r, dd); if (w) w.recv += qty;
     });
   });
   (rets || []).forEach(rt => {
-    const ts = Number(rt.timestamp) || 0;
-    if (ts < fromTs || ts > toTs) return;
+    const dd = anDocDate(rt);
+    if (!dd || dd < fromD || dd > toD) return;
     retCount++;
+    const ts = Number(rt.timestamp) || 0;
+    const status = rt.credited ? (rt.creditStatus === 'open' ? 'partial' : 'full') : 'pending';
     (rt.items || []).forEach(l => {
       if (anIsDepositLine(l)) return;
       const r = rowFor(l); if (!r) return;
@@ -15177,16 +15228,61 @@ function analysisAggregate(rcs, rets, fromTs, toTs, catalog) {
       const unit = Number(l.unitPrice) || 0;
       const val = (l.lineTotal != null) ? (Number(l.lineTotal) || 0) : r2(unit * qty);
       r.retUnits += qty; r.retValue = r2(r.retValue + val);
-      if (r.lastRet && ts === r.lastRet.ts) { r.lastRet.qty += qty; }
-      else if (!r.lastRet || ts > r.lastRet.ts) { r.lastRet = { ts, qty, unit, credited: !!rt.credited }; }
+      if (r.lastRet && dd === r.lastRet.d && ts === r.lastRet.ts) { r.lastRet.qty += qty; }
+      else if (newer(dd, ts, r.lastRet)) { r.lastRet = { d: dd, ts, qty, unit, status }; }
+      const w = week(r, dd); if (w) w.ret += qty;
     });
   });
   const out = Array.from(rows.values());
-  out.forEach(r => {
-    r.prices.sort((a, b) => a.ts - b.ts);
-    r.retPct = r.recvUnits > 0 ? Math.round((r.retUnits / r.recvUnits) * 1000) / 10 : null;
-  });
+  out.forEach(anFinishRow);
   return { rows: out, rcCount, retCount };
+}
+
+// השלמת שורה: נמכר, מחיר ראשון/אחרון בטווח, ורווח מול מחיר הקופה.
+function anFinishRow(r) {
+  r.prices.sort((a, b) => (a.d < b.d ? -1 : (a.d > b.d ? 1 : a.ts - b.ts)));
+  r.retPct = r.recvUnits > 0 ? Math.round((r.retUnits / r.recvUnits) * 1000) / 10 : null;
+  // נמכר בפועל ≈ נקלט פחות הוחזר. חסום באפס: חזרה של סחורה שנקלטה לפני הטווח.
+  r.soldUnits = Math.max(0, r.recvUnits - r.retUnits);
+  r.soldValue = Math.max(0, r2(r.recvValue - r.retValue));
+  r.avgCost = r.recvUnits > 0 ? r2(r.recvValue / r.recvUnits) : null;
+  const priced = r.prices.filter(p => p.unit > 0);
+  r.priceFirst = priced.length ? priced[0].unit : null;
+  r.priceLast = priced.length ? priced[priced.length - 1].unit : null;
+  r.priceChangePct = (r.priceFirst > 0 && r.priceLast != null) ? Math.round((r.priceLast - r.priceFirst) / r.priceFirst * 1000) / 10 : null;
+  // רווח על העלות — אותה הגדרה כמו "רווח מומלץ" בהגדרות: (קופה בלי מע״מ − עלות) / עלות
+  const p = r.product;
+  const pos = (p && p.posPrice != null && isFinite(Number(p.posPrice)) && Number(p.posPrice) > 0) ? Number(p.posPrice) : null;
+  const cost = r.lastRecv && r.lastRecv.unit > 0 ? r.lastRecv.unit : (r.avgCost > 0 ? r.avgCost : (p ? (Number(p.price) || 0) : 0));
+  r.cost = cost > 0 ? r2(cost) : null;
+  r.posPrice = pos;
+  r.posNet = pos != null ? r2(pos / (1 + VAT)) : null;
+  r.marginPct = (pos != null && r.cost > 0) ? Math.round((r.posNet - r.cost) / r.cost * 1000) / 10 : null;
+  r.belowCost = pos != null && r.cost > 0 && r.posNet < r.cost;
+  // רווח גולמי משוער בתקופה: מה שנמכר × מחיר קופה בלי מע״מ, פחות מה ששולם נטו לספק
+  r.grossProfit = pos != null ? r2(r.soldUnits * r.posNet - r.soldValue) : null;
+}
+
+// מוצרים בקטלוג (לא מוסתרים, לא ארגזים) שלא נקלטו בטווח, עם הקליטה האחרונה הידועה.
+function anMissingList(rows, rcs, prevFromD, toD) {
+  const has = new Set(rows.filter(r => r.recvUnits > 0).map(r => r.key));
+  const idx = anCatalogIndex(products);
+  const last = new Map();
+  (rcs || []).forEach(rc => {
+    const dd = anDocDate(rc); if (!dd || dd > toD) return;
+    (rc.items || []).forEach(l => {
+      if (anIsDepositLine(l)) return;
+      const p = anMatchProduct(idx, l); if (!p) return;
+      const cur = last.get(p.id); if (!cur || dd > cur) last.set(p.id, dd);
+    });
+  });
+  const windowDays = anDaysBetween(prevFromD, toD) + 1;
+  const out = products.filter(p => !p.hidden && !anIsCrate(p) && !has.has('p:' + p.id)).map(p => {
+    const d = last.get(p.id) || null;
+    return { key: 'p:' + p.id, name: p.name, barcode: p.barcode || '', lastD: d, days: d ? anDaysBetween(d, toD) : null, windowDays };
+  });
+  out.sort((a, b) => (b.days == null ? 1e9 : b.days) - (a.days == null ? 1e9 : a.days));
+  return out;
 }
 
 // חיפוש: שם (מחרוזת) או ספרות מתוך הברקוד. קודם מוצרי קטלוג, אחר כך שורות מחוץ לקטלוג.
@@ -15216,50 +15312,61 @@ function anBuildSearchResults(qRaw, rowsArr, catalog) {
 
 async function anLoadData() {
   const b = anRangeBounds();
+  const prev = anPrevBounds(b);
   const seq = ++anSeq;
   anError = '';
-  if (anMemoryCovers(b.fromTs)) {
-    const agg = analysisAggregate(receipts, returns, b.fromTs, b.toTs, products);
-    anData = { rows: agg.rows, rcCount: agg.rcCount, retCount: agg.retCount, fromTs: b.fromTs, toTs: b.toTs, source: 'memory', truncated: false };
+  const build = (rcs, rets, source, truncated) => {
+    const cur = analysisAggregate(rcs, rets, b.fromD, b.toD, products);
+    const old = analysisAggregate(rcs, rets, prev.fromD, prev.toD, products);
+    anData = {
+      rows: cur.rows, prevRows: new Map(old.rows.map(r => [r.key, r])),
+      rcCount: cur.rcCount, retCount: cur.retCount, prevRcCount: old.rcCount,
+      fromD: b.fromD, toD: b.toD, prevFromD: prev.fromD, prevToD: prev.toD,
+      missing: anMissingList(cur.rows, rcs, prev.fromD, b.toD),
+      source, truncated
+    };
+  };
+  if (anMemoryCovers(prev.fromD)) {
+    build(receipts, returns, 'memory', false);
     anBusy = false;
     if (currentView === 'analysis') renderAnalysis();
     return;
   }
   anBusy = true;
   if (currentView === 'analysis') renderAnalysis();
+  // שתי התקופות במשיכה אחת; תאריך נייר יכול לפגר אחרי ההקלדה — ריפוד 45 יום אחורה
+  const fromTs = Date.parse(prev.fromD + 'T00:00:00') - 45 * 864e5;
+  const toTs = Date.parse(b.toD + 'T23:59:59') + 2 * 864e5;
   let rcs = null, rets = null;
   try {
     const rcRef = collection(db, 'artifacts', appId, 'public', 'data', 'receipts');
     const retRef = collection(db, 'artifacts', appId, 'public', 'data', 'returns');
     const snaps = await Promise.all([
-      getDocs(query(rcRef, where('timestamp', '>=', b.fromTs), where('timestamp', '<=', b.toTs), orderBy('timestamp', 'desc'), limit(800))),
-      getDocs(query(retRef, where('timestamp', '>=', b.fromTs), where('timestamp', '<=', b.toTs), orderBy('timestamp', 'desc'), limit(300)))
+      getDocs(query(rcRef, where('timestamp', '>=', fromTs), where('timestamp', '<=', toTs), orderBy('timestamp', 'desc'), limit(1200))),
+      getDocs(query(retRef, where('timestamp', '>=', fromTs), where('timestamp', '<=', toTs), orderBy('timestamp', 'desc'), limit(400)))
     ]);
     rcs = snaps[0].docs.map(d => ({ id: d.id, ...d.data() }));
     rets = snaps[1].docs.map(d => ({ id: d.id, ...d.data() }));
   } catch (e) {
     console.warn('analysis range fetch failed', e);
   }
-  if (seq !== anSeq) return; // נבחר טווח חדש בינתיים — התוצאה הזו כבר לא רלוונטית
+  if (seq !== anSeq) return; // נבחר טווח חדש בינתיים
   anBusy = false;
   if (rcs) {
-    const agg = analysisAggregate(rcs, rets || [], b.fromTs, b.toTs, products);
-    anData = { rows: agg.rows, rcCount: agg.rcCount, retCount: agg.retCount, fromTs: b.fromTs, toTs: b.toTs, source: 'cloud', truncated: rcs.length >= 800 };
+    build(rcs, rets || [], 'cloud', rcs.length >= 1200);
   } else {
-    const agg = analysisAggregate(receipts, returns, b.fromTs, b.toTs, products);
-    anData = { rows: agg.rows, rcCount: agg.rcCount, retCount: agg.retCount, fromTs: b.fromTs, toTs: b.toTs, source: 'partial', truncated: false };
+    build(receipts, returns, 'partial', false);
     anError = 'לא הצלחתי למשוך את כל ההיסטוריה מהענן כרגע — מוצג ממה שבזיכרון (עד 100 תעודות ו-20 תעודות חזרה אחרונות).';
   }
   if (currentView === 'analysis') renderAnalysis();
 }
 
-// v237: ברקוד שנסרק במסך הניתוח — התאמה אחת נכנסת ישר לכרטיס המוצר,
+// ברקוד שנסרק במסך הניתוח — התאמה אחת נכנסת ישר לכרטיס המוצר,
 // כמה התאמות נשארות כרשימת תוצאות, אפס התאמות משאירות את הקוד בתיבה + טוסט.
 function anApplyScannedCode(raw) {
   const code = normalizeBarcode(raw);
   if (!code) return 'none';
-  const rowsArr = (anData && anData.rows) || [];
-  const res = anBuildSearchResults(code, rowsArr, products);
+  const res = anBuildSearchResults(code, anRows(), products);
   if (res.length === 1) {
     anSelectedKey = res[0].key; anQuery = '';
     renderAnalysis(); window.scrollTo({ top: 0 });
@@ -15271,23 +15378,168 @@ function anApplyScannedCode(raw) {
   return res.length ? 'list' : 'none';
 }
 
-function anTsDisp(ts) { try { return new Date(Number(ts) || 0).toLocaleDateString('he-IL'); } catch (e) { return ''; } }
-function anAgoText(ts) {
-  const days = Math.floor((Date.now() - (Number(ts) || 0)) / 864e5);
-  if (days <= 0) return 'היום';
+function anRows() { return (anData && anData.rows) || []; }
+function anPrev(key) { return (anData && anData.prevRows && anData.prevRows.get(key)) || null; }
+function anHasPrev() { return !!(anData && anData.prevRcCount > 0); }
+function anAgoText(d) {
+  const days = Math.floor((Date.parse(todayStr() + 'T12:00:00') - Date.parse(d + 'T12:00:00')) / 864e5);
+  if (!isFinite(days) || days <= 0) return 'היום';
   if (days === 1) return 'אתמול';
   return 'לפני ' + days + ' ימים';
 }
 function anPctText(r) { return r.retPct == null ? '—' : String(r.retPct).replace(/\.0$/, '') + '%'; }
+function anRetStatusHtml(st) {
+  if (st === 'full') return '<span class="text-emerald-600">זוכתה ✓</span>';
+  if (st === 'partial') return '<span class="text-amber-600">זוכתה חלקית</span>';
+  return '<span class="text-amber-600">ממתינה לזיכוי</span>';
+}
+
+// --- השוואה לתקופה הקודמת: חץ ירוק/אדום לפי מה שטוב לחנות ---
+function anDeltaHtml(cur, prev, opts) {
+  const o = opts || {};
+  if (prev == null) return '';
+  if (!(prev > 0)) return cur > 0 ? '<span class="text-[10px] font-black text-slate-400">חדש</span>' : '';
+  const pct = Math.round((cur - prev) / prev * 100);
+  if (pct === 0) return '<span class="text-[10px] font-black text-slate-400">ללא שינוי</span>';
+  const up = pct > 0;
+  const good = o.lowerIsBetter ? !up : up;
+  return '<span class="text-[10px] font-black ' + (good ? 'text-emerald-600' : 'text-rose-600') + '"><i class="fa-solid ' + (up ? 'fa-arrow-up' : 'fa-arrow-down') + '"></i> ' + Math.abs(pct) + '%</span>';
+}
+function anPctDeltaHtml(curPct, prevPct) {
+  if (curPct == null || prevPct == null) return '';
+  const diff = Math.round((curPct - prevPct) * 10) / 10;
+  if (Math.abs(diff) < 0.05) return '<span class="text-[10px] font-black text-slate-400">כמו קודם</span>';
+  const up = diff > 0;
+  return '<span class="text-[10px] font-black ' + (up ? 'text-rose-600' : 'text-emerald-600') + '"><i class="fa-solid ' + (up ? 'fa-arrow-up' : 'fa-arrow-down') + '"></i> ' + String(Math.abs(diff)).replace(/\.0$/, '') + ' נק׳</span>';
+}
+function anDeltaText(cur, prev) {
+  if (!(prev > 0)) return '';
+  const pct = Math.round((cur - prev) / prev * 100);
+  if (pct === 0) return '';
+  return ' (' + (pct > 0 ? '▲' : '▼') + Math.abs(pct) + '%)';
+}
+
+// סיכומי תקופה (בלי ארגזים)
+function anTotals(rows) {
+  const t = { recvUnits: 0, recvValue: 0, retUnits: 0, retValue: 0, soldUnits: 0, soldValue: 0, profit: 0, profitRows: 0 };
+  (rows || []).forEach(r => {
+    if (r.crate) return;
+    t.recvUnits += r.recvUnits; t.recvValue = r2(t.recvValue + r.recvValue);
+    t.retUnits += r.retUnits; t.retValue = r2(t.retValue + r.retValue);
+    t.soldUnits += r.soldUnits; t.soldValue = r2(t.soldValue + r.soldValue);
+    if (r.grossProfit != null && r.soldUnits > 0) { t.profit = r2(t.profit + r.grossProfit); t.profitRows++; }
+  });
+  t.retPct = t.recvUnits > 0 ? Math.round(t.retUnits / t.recvUnits * 1000) / 10 : null;
+  return t;
+}
+function anPrevTotals() { return anTotals(anData && anData.prevRows ? Array.from(anData.prevRows.values()) : []); }
+
+// --- דירוגים ---
+const AN_RANKS = [
+  { k: 'returns', label: 'חזרות', icon: 'fa-rotate-left', color: 'text-rose-500' },
+  { k: 'sold', label: 'הכי נמכר', icon: 'fa-cart-shopping', color: 'text-blue-600' },
+  { k: 'money', label: 'הכי הרבה כסף', icon: 'fa-sack-dollar', color: 'text-amber-600' },
+  { k: 'stars', label: 'כוכבים', icon: 'fa-star', color: 'text-amber-500' },
+  { k: 'prices', label: 'מחירים שעלו', icon: 'fa-arrow-trend-up', color: 'text-rose-600' },
+  { k: 'missing', label: 'לא הגיע', icon: 'fa-clock', color: 'text-slate-500' },
+  { k: 'profit', label: 'רווח', icon: 'fa-coins', color: 'text-emerald-600' },
+  { k: 'margin', label: 'מרווח נמוך', icon: 'fa-triangle-exclamation', color: 'text-amber-600' }
+];
+const anByPct = (a, b) => {
+  const pa = a.retPct == null ? -1 : a.retPct, pb = b.retPct == null ? -1 : b.retPct;
+  if (pb !== pa) return pb - pa;
+  if (b.retUnits !== a.retUnits) return b.retUnits - a.retUnits;
+  return b.retValue - a.retValue;
+};
+function anRankReturns(rows) { return rows.filter(r => r.retUnits > 0).sort(anByPct); }
+function anRankSold(rows) { return rows.filter(r => r.soldUnits > 0).sort((a, b) => b.soldUnits - a.soldUnits || b.soldValue - a.soldValue); }
+function anRankMoney(rows) { return rows.filter(r => r.recvValue > 0).sort((a, b) => b.recvValue - a.recvValue); }
+function anRankStars(rows) { return rows.filter(r => r.recvUnits >= 4 && r.retUnits === 0).sort((a, b) => b.soldUnits - a.soldUnits || b.soldValue - a.soldValue); }
+function anRankPriceUp(rows) { return rows.filter(r => r.priceChangePct != null && r.priceChangePct > 0.5).sort((a, b) => b.priceChangePct - a.priceChangePct); }
+function anRankPriceDown(rows) { return rows.filter(r => r.priceChangePct != null && r.priceChangePct < -0.5).sort((a, b) => a.priceChangePct - b.priceChangePct); }
+function anRankProfit(rows) { return rows.filter(r => r.grossProfit != null && r.soldUnits > 0).sort((a, b) => b.grossProfit - a.grossProfit); }
+function anRankMargin(rows) { return rows.filter(r => r.marginPct != null && r.recvUnits > 0).sort((a, b) => a.marginPct - b.marginPct); }
+
+function anRankRowHtml(i, key, name, sub, metricHtml, badgeCls) {
+  return '<button data-role="an-pick" data-key="' + htmlEscape(key) + '" class="btn-tap w-full text-right flex items-center gap-2.5 py-2 border-b border-slate-100 last:border-0">' +
+    '<span class="shrink-0 w-6 h-6 rounded-full ' + (badgeCls || 'bg-slate-100 text-slate-600') + ' text-[11px] font-black flex items-center justify-center">' + (i + 1) + '</span>' +
+    '<span class="min-w-0 flex-1"><span class="block font-black text-sm text-slate-800 truncate">' + htmlEscape(name) + '</span>' +
+    '<span class="block text-[11px] text-slate-400 font-bold">' + sub + '</span></span>' +
+    '<span class="shrink-0 text-left leading-tight">' + metricHtml + '</span>' +
+  '</button>';
+}
+function anMetric(big, cls, delta) { return '<span class="block text-sm font-black ' + (cls || 'text-slate-800') + '">' + big + '</span>' + (delta ? '<span class="block">' + delta + '</span>' : ''); }
+
+function anRankingsHtml() {
+  const rowsArr = anRows().filter(r => !r.crate);
+  const hasPrev = anHasPrev();
+  const prevOf = (r) => anPrev(r.key);
+  const chips = AN_RANKS.map(c => '<button data-role="an-rank" data-rank="' + c.k + '" class="btn-tap px-2.5 py-1.5 rounded-lg text-[11px] font-black border ' + (anRank === c.k ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-600') + '"><i class="fa-solid ' + c.icon + ' ' + (anRank === c.k ? '' : c.color) + '"></i> ' + c.label + '</button>').join('');
+  let title = '', body = '', note = '', empty = 'אין נתונים בטווח שנבחר';
+  const crateKinds = anRows().filter(r => r.crate && r.retUnits > 0).length;
+  if (anRank === 'sold') {
+    title = '<i class="fa-solid fa-cart-shopping text-blue-600 ml-1"></i>הכי נמכר <span class="text-[10px] text-slate-400">· נקלט פחות הוחזר</span>';
+    body = anRankSold(rowsArr).slice(0, 10).map((r, i) => { const p = prevOf(r); return anRankRowHtml(i, r.key, r.name, 'נקלט ' + r.recvUnits + ' · הוחזר ' + r.retUnits + ' · ₪' + fmtMoney(r.soldValue) + ' בעלות', anMetric(r.soldUnits + ' יח׳', 'text-blue-700', hasPrev ? anDeltaHtml(r.soldUnits, p ? p.soldUnits : 0) : ''), 'bg-blue-50 text-blue-700'); }).join('');
+    empty = 'אין מכירות בטווח שנבחר';
+  } else if (anRank === 'money') {
+    title = '<i class="fa-solid fa-sack-dollar text-amber-600 ml-1"></i>הכי הרבה כסף <span class="text-[10px] text-slate-400">· לפי סכום הקליטות</span>';
+    body = anRankMoney(rowsArr).slice(0, 10).map((r, i) => { const p = prevOf(r); return anRankRowHtml(i, r.key, r.name, r.recvUnits + ' יח׳ · ממוצע ₪' + fmtMoney(r.avgCost || 0) + ' ליח׳' + (r.retValue > 0 ? ' · זוכה ₪' + fmtMoney(r.retValue) : ''), anMetric('₪' + fmtMoney(r.recvValue), 'text-amber-700', hasPrev ? anDeltaHtml(r.recvValue, p ? p.recvValue : 0) : ''), 'bg-amber-50 text-amber-700'); }).join('');
+  } else if (anRank === 'stars') {
+    title = '<i class="fa-solid fa-star text-amber-500 ml-1"></i>כוכבים <span class="text-[10px] text-slate-400">· נמכר הכל, אפס חזרות</span>';
+    body = anRankStars(rowsArr).slice(0, 10).map((r, i) => { const p = prevOf(r); return anRankRowHtml(i, r.key, r.name, 'נקלט ' + r.recvUnits + ' יח׳ · ₪' + fmtMoney(r.recvValue) + ' · בלי חזרה אחת', anMetric(r.soldUnits + ' יח׳', 'text-emerald-700', hasPrev ? anDeltaHtml(r.soldUnits, p ? p.soldUnits : 0) : ''), 'bg-amber-50 text-amber-600'); }).join('');
+    note = 'מוצרים שנקלטו לפחות 4 יחידות בטווח ולא חזרה אף אחת. סימן שאפשר להזמין יותר.';
+    empty = 'אין מוצרים עם אפס חזרות בטווח שנבחר';
+  } else if (anRank === 'prices') {
+    title = '<i class="fa-solid fa-arrow-trend-up text-rose-600 ml-1"></i>המחירים שעלו <span class="text-[10px] text-slate-400">· ראשון מול אחרון בטווח</span>';
+    const up = anRankPriceUp(rowsArr), down = anRankPriceDown(rowsArr);
+    body = up.slice(0, 10).map((r, i) => anRankRowHtml(i, r.key, r.name, '₪' + fmtMoney(r.priceFirst) + ' ← ₪' + fmtMoney(r.priceLast) + ' · ' + r.prices.length + ' קליטות', anMetric('+' + String(r.priceChangePct).replace(/\.0$/, '') + '%', 'text-rose-600'), 'bg-rose-50 text-rose-600')).join('');
+    if (down.length) body += '<div class="font-black text-slate-700 text-sm mt-3 mb-1"><i class="fa-solid fa-arrow-trend-down text-emerald-600 ml-1"></i>ירדו במחיר</div>' + down.slice(0, 5).map((r, i) => anRankRowHtml(i, r.key, r.name, '₪' + fmtMoney(r.priceFirst) + ' ← ₪' + fmtMoney(r.priceLast), anMetric(String(r.priceChangePct).replace(/\.0$/, '') + '%', 'text-emerald-600'), 'bg-emerald-50 text-emerald-700')).join('');
+    empty = 'אין שינויי מחיר בטווח שנבחר';
+  } else if (anRank === 'missing') {
+    title = '<i class="fa-solid fa-clock text-slate-500 ml-1"></i>בקטלוג אבל לא הגיע <span class="text-[10px] text-slate-400">· בטווח שנבחר</span>';
+    const miss = (anData && anData.missing) || [];
+    body = miss.slice(0, 20).map((m, i) => anRankRowHtml(i, m.key, m.name, m.lastD ? 'קליטה אחרונה ' + dDisp(m.lastD) : 'לא נקלט ב-' + m.windowDays + ' הימים שנבדקו', anMetric(m.days != null ? m.days + ' ימים' : 'מעל ' + m.windowDays, m.days != null && m.days < 14 ? 'text-slate-600' : 'text-rose-600'), 'bg-slate-100 text-slate-500')).join('');
+    if (miss.length > 20) note = 'ועוד ' + (miss.length - 20) + ' מוצרים.';
+    empty = 'כל המוצרים בקטלוג נקלטו בטווח שנבחר';
+  } else if (anRank === 'profit') {
+    title = '<i class="fa-solid fa-coins text-emerald-600 ml-1"></i>הכי רווחי <span class="text-[10px] text-slate-400">· רווח גולמי משוער</span>';
+    body = anRankProfit(rowsArr).slice(0, 10).map((r, i) => anRankRowHtml(i, r.key, r.name, 'נמכרו ' + r.soldUnits + ' · מרווח ' + String(r.marginPct).replace(/\.0$/, '') + '% · קופה ₪' + fmtMoney(r.posPrice), anMetric('₪' + fmtMoney(r.grossProfit), r.grossProfit >= 0 ? 'text-emerald-700' : 'text-rose-600'), 'bg-emerald-50 text-emerald-700')).join('');
+    const noPos = rowsArr.filter(r => r.soldUnits > 0 && r.posPrice == null).length;
+    note = '(מחיר קופה בלי מע״מ פחות מה ששולם לספק) × מה שנמכר.' + (noPos ? ' ' + noPos + ' מוצרים בלי מחיר קופה לא נכללים.' : '');
+    empty = 'אין מוצרים עם מחיר קופה ומכירות בטווח';
+  } else if (anRank === 'margin') {
+    title = '<i class="fa-solid fa-triangle-exclamation text-amber-600 ml-1"></i>מרווח נמוך <span class="text-[10px] text-slate-400">· מהנמוך לגבוה</span>';
+    body = anRankMargin(rowsArr).slice(0, 10).map((r, i) => anRankRowHtml(i, r.key, r.name, (r.belowCost ? '<span class="text-rose-600">מתחת לעלות!</span> · ' : '') + 'עלות ₪' + fmtMoney(r.cost) + ' · קופה ₪' + fmtMoney(r.posPrice) + ' (₪' + fmtMoney(r.posNet) + ' בלי מע״מ)', anMetric(String(r.marginPct).replace(/\.0$/, '') + '%', r.belowCost ? 'text-rose-600' : (r.marginPct < 10 ? 'text-amber-600' : 'text-slate-700')), r.belowCost ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-700')).join('');
+    const noPos = rowsArr.filter(r => r.recvUnits > 0 && r.posPrice == null).length;
+    note = 'רווח על העלות, כמו בהגדרת "רווח מומלץ".' + (noPos ? ' ' + noPos + ' מוצרים שנקלטו בלי מחיר קופה.' : '');
+    empty = 'אין מוצרים עם מחיר קופה בטווח';
+  } else {
+    title = '<i class="fa-solid fa-rotate-left text-rose-500 ml-1"></i>הכי הרבה חזרות <span class="text-[10px] text-slate-400">· לפי אחוז</span>';
+    body = anRankReturns(rowsArr).slice(0, 10).map((r, i) => {
+      const p = prevOf(r);
+      const sub = r.retPct == null
+        ? 'הוחזרו ' + r.retUnits + ' יח׳ · ₪' + fmtMoney(r.retValue) + ' · לא נקלט בטווח'
+        : 'הוחזרו ' + r.retUnits + ' מתוך ' + r.recvUnits + ' יח׳ שנקלטו · ₪' + fmtMoney(r.retValue);
+      return anRankRowHtml(i, r.key, r.name, sub, anMetric(anPctText(r), 'text-rose-600', hasPrev && p ? anPctDeltaHtml(r.retPct, p.retPct) : ''), 'bg-rose-50 text-rose-600');
+    }).join('');
+    if (crateKinds > 0) note = crateKinds + ' סוגי ארגזים עם חזרות בטווח — לא מדורגים, זמינים בחיפוש';
+    empty = 'אין חזרות מוצרים בטווח שנבחר';
+  }
+  return '<div id="anRankBox" class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm mb-3">' +
+    '<div class="flex flex-wrap gap-1.5 mb-3">' + chips + '</div>' +
+    '<div class="font-black text-slate-700 text-sm mb-1">' + title + '</div>' +
+    (body || '<div class="text-center text-sm text-slate-400 font-bold py-3">' + empty + '</div>') +
+    (note ? '<div class="text-[11px] text-slate-400 font-bold pt-2">' + note + '</div>' : '') +
+  '</div>';
+}
 
 function anSearchResultsHtml() {
-  const rowsArr = (anData && anData.rows) || [];
-  const res = anBuildSearchResults(anQuery, rowsArr, products);
+  const res = anBuildSearchResults(anQuery, anRows(), products);
   if (!String(anQuery || '').trim()) return '';
   if (!res.length) return '<div class="text-center text-sm text-slate-400 font-bold py-3">לא נמצא מוצר מתאים</div>';
   return res.map(x => {
     const hint = x.row
-      ? ('נקלט ' + x.row.recvUnits + ' יח׳ · הוחזר ' + x.row.retUnits + ' יח׳ בטווח')
+      ? ('נקלט ' + x.row.recvUnits + ' · הוחזר ' + x.row.retUnits + ' · נמכר ' + x.row.soldUnits + ' יח׳ בטווח')
       : 'אין תנועה בטווח שנבחר';
     return '<button data-role="an-pick" data-key="' + htmlEscape(x.key) + '" class="btn-tap w-full text-right bg-white border border-slate-200 rounded-xl px-3 py-2.5 mb-1.5 flex items-center justify-between gap-2">' +
       '<span class="min-w-0"><span class="block font-black text-sm text-slate-800 truncate">' + htmlEscape(x.name) + '</span>' +
@@ -15302,7 +15554,7 @@ function anPriceHistoryHtml(r) {
   const marked = ps.map((p, i) => {
     const prev = i > 0 ? ps[i - 1].unit : null;
     const diff = prev == null ? 0 : r2(p.unit - prev);
-    return { ...p, diff };
+    return { d: p.d, qty: p.qty, unit: p.unit, diff };
   });
   const show = marked.slice(-12).reverse();
   const older = marked.length - show.length;
@@ -15311,72 +15563,178 @@ function anPriceHistoryHtml(r) {
       ? '<span class="text-[11px] font-black text-rose-600"><i class="fa-solid fa-arrow-up"></i> +' + fmtMoney(p.diff) + '</span>'
       : (p.diff < -0.004 ? '<span class="text-[11px] font-black text-emerald-600"><i class="fa-solid fa-arrow-down"></i> ' + fmtMoney(p.diff) + '</span>' : '');
     return '<div class="flex items-center justify-between gap-2 py-1.5 border-b border-slate-100 last:border-0">' +
-      '<span class="text-xs font-bold text-slate-500">' + (p.date ? dDisp(p.date) : anTsDisp(p.ts)) + '</span>' +
+      '<span class="text-xs font-bold text-slate-500">' + dDisp(p.d) + '</span>' +
       '<span class="text-xs font-bold text-slate-500">' + p.qty + ' יח׳</span>' +
       '<span class="text-sm font-black text-slate-800">₪' + fmtMoney(p.unit) + ' ' + arrow + '</span>' +
     '</div>';
   }).join('');
-  return '<div class="mt-3 pt-2 border-t border-slate-100"><div class="text-xs font-black text-slate-500 mb-1"><i class="fa-solid fa-shekel-sign ml-1"></i>מחיר ליחידה בכל קליטה</div>' + rowsHtml +
+  return '<div class="mt-3 pt-2 border-t border-slate-100"><div class="text-xs font-black text-slate-500 mb-1"><i class="fa-solid fa-shekel-sign ml-1"></i>מחיר ליחידה בכל קליטה (לפי תאריך הנייר)</div>' + rowsHtml +
     (older > 0 ? '<div class="text-[11px] text-slate-400 font-bold pt-1.5">ועוד ' + older + ' קליטות קודמות בטווח</div>' : '') + '</div>';
+}
+
+// גרף שבועי: עמודה לכל שבוע (ראשון עד שבת), נקלט מול הוחזר. ציר הזמן משמאל לימין.
+function anWeeksInRange(fromD, toD) {
+  const out = []; let k = anWeekKey(fromD); const last = anWeekKey(toD);
+  let guard = 0;
+  while (k && k <= last && guard++ < 120) { out.push(k); k = anDateShift(7, k); }
+  return out;
+}
+function anWeekChartHtml(r) {
+  if (!anData) return '';
+  const weeks = anWeeksInRange(anData.fromD, anData.toD).slice(-26);
+  if (weeks.length < 2) return '';
+  const bw = r.byWeek || {};
+  const max = Math.max(1, ...weeks.map(w => Math.max((bw[w] || {}).recv || 0, (bw[w] || {}).ret || 0)));
+  const every = weeks.length <= 8 ? 1 : Math.ceil(weeks.length / 6);
+  const cols = weeks.map((w, i) => {
+    const b = bw[w] || { recv: 0, ret: 0 };
+    const bar = (v, cls) => '<div class="' + cls + ' rounded-t" style="width:40%;height:' + (v > 0 ? Math.max(3, Math.round(v / max * 100)) : 0) + '%"></div>';
+    const lab = (i % every === 0 || i === weeks.length - 1) ? anShortDM(w) : '';
+    return '<div class="flex-1 min-w-0 flex flex-col items-center"><div class="w-full h-20 flex items-end justify-center gap-px" title="שבוע ' + dDisp(w) + ': נקלט ' + b.recv + ' · הוחזר ' + b.ret + '">' + bar(b.recv, 'bg-blue-500') + bar(b.ret, 'bg-rose-400') + '</div><div class="text-[9px] text-slate-400 font-bold h-3 leading-3 whitespace-nowrap">' + lab + '</div></div>';
+  }).join('');
+  return '<div class="mt-3 pt-2 border-t border-slate-100">' +
+    '<div class="flex items-center justify-between mb-1"><div class="text-xs font-black text-slate-500"><i class="fa-solid fa-chart-column ml-1"></i>לפי שבועות</div>' +
+    '<div class="text-[10px] font-bold text-slate-400"><span class="inline-block w-2 h-2 rounded-sm bg-blue-500 align-middle"></span> נקלט <span class="inline-block w-2 h-2 rounded-sm bg-rose-400 align-middle mr-1.5"></span> הוחזר</div></div>' +
+    '<div class="flex items-end gap-0.5" dir="ltr">' + cols + '</div></div>';
+}
+
+function anTileHtml(cls, big, small, delta) {
+  return '<div class="' + cls + ' rounded-xl py-2 px-1 text-center"><div class="text-lg font-black leading-tight">' + big + '</div><div class="text-[10px] font-black opacity-80 leading-tight">' + small + '</div><div class="h-3.5 leading-none mt-0.5">' + (delta || '') + '</div></div>';
+}
+function anTotalsHtml() {
+  if (!anData) return '';
+  const t = anTotals(anRows()), tp = anPrevTotals(), hasPrev = anHasPrev();
+  return '<div class="grid grid-cols-3 gap-2 mt-3">' +
+    anTileHtml('bg-blue-50 border border-blue-100 text-blue-700', '₪' + fmtMoney(t.recvValue), 'נקלט · ' + t.recvUnits + ' יח׳', hasPrev ? anDeltaHtml(t.recvValue, tp.recvValue) : '') +
+    anTileHtml('bg-rose-50 border border-rose-100 text-rose-700', (t.retPct != null ? String(t.retPct).replace(/\.0$/, '') + '%' : '—'), 'הוחזר · ' + t.retUnits + ' יח׳ · ₪' + fmtMoney(t.retValue), hasPrev ? anPctDeltaHtml(t.retPct, tp.retPct) : '') +
+    anTileHtml('bg-emerald-50 border border-emerald-100 text-emerald-700', '₪' + fmtMoney(t.soldValue), 'נמכר · ' + t.soldUnits + ' יח׳ · בעלות', hasPrev ? anDeltaHtml(t.soldValue, tp.soldValue) : '') +
+  '</div>' +
+  (t.profitRows ? '<div class="text-[11px] text-slate-500 font-bold mt-1.5"><i class="fa-solid fa-coins text-emerald-600"></i> רווח גולמי משוער: <b class="text-slate-700">₪' + fmtMoney(t.profit) + '</b> <span class="text-slate-400">· ' + t.profitRows + ' מוצרים עם מחיר קופה</span></div>' : '') +
+  (hasPrev
+    ? '<div class="text-[10px] text-slate-400 font-bold mt-1">החצים משווים ל-' + dDisp(anData.prevFromD) + ' – ' + dDisp(anData.prevToD) + ' (אותו אורך)</div>'
+    : '<div class="text-[10px] text-slate-400 font-bold mt-1">אין תעודות בתקופה הקודמת (' + dDisp(anData.prevFromD) + ' – ' + dDisp(anData.prevToD) + ') — בלי השוואה</div>');
 }
 
 function anSelectedCardHtml() {
   if (!anSelectedKey || !anData) return '';
-  let r = (anData.rows || []).find(x => x.key === anSelectedKey) || null;
-  let name = r ? r.name : '', barcode = r ? r.barcode : '';
+  let r = anRows().find(x => x.key === anSelectedKey) || null;
+  let name = r ? r.name : '', barcode = r ? r.barcode : '', crate = r ? r.crate : false;
   if (!r && String(anSelectedKey).indexOf('p:') === 0) {
     const p = products.find(x => 'p:' + x.id === anSelectedKey);
     if (!p) return '';
-    name = p.name; barcode = p.barcode || '';
+    name = p.name; barcode = p.barcode || ''; crate = anIsCrate(p);
   } else if (!r) { return ''; }
-  const stats = r
-    ? '<div class="grid grid-cols-3 gap-2 text-center mt-3">' +
-        '<div class="bg-blue-50 border border-blue-100 rounded-xl py-2"><div class="text-lg font-black text-blue-700">' + r.recvUnits + '</div><div class="text-[10px] font-black text-blue-600">נקלטו · ₪' + fmtMoney(r.recvValue) + '</div></div>' +
-        '<div class="bg-rose-50 border border-rose-100 rounded-xl py-2"><div class="text-lg font-black text-rose-700">' + r.retUnits + '</div><div class="text-[10px] font-black text-rose-600">הוחזרו · ₪' + fmtMoney(r.retValue) + '</div></div>' +
-        '<div class="bg-slate-50 border border-slate-200 rounded-xl py-2"><div class="text-lg font-black text-slate-700">' + anPctText(r) + '</div><div class="text-[10px] font-black text-slate-500">אחוז חזרות</div></div>' +
+  const prev = anPrev(anSelectedKey), hasPrev = anHasPrev();
+  const crateTag = crate ? ' <span class="text-[10px] font-black text-indigo-700 bg-indigo-50 border border-indigo-200 rounded px-1.5 py-0.5 align-middle">ארגז</span>' : '';
+  const row = (label, valueHtml) => '<div class="flex items-center justify-between gap-2"><span class="text-xs font-black text-slate-500 shrink-0">' + label + '</span><span class="text-sm font-bold text-slate-800 text-left">' + valueHtml + '</span></div>';
+  let stats;
+  if (r) {
+    const pct = (v) => String(v).replace(/\.0$/, '');
+    const marginHtml = r.posPrice == null
+      ? '<span class="text-amber-600">אין מחיר קופה</span>'
+      : (r.belowCost
+        ? '<span class="text-rose-600">' + pct(r.marginPct) + '% · מתחת לעלות!</span>'
+        : '<span class="' + (r.marginPct < 10 ? 'text-amber-600' : 'text-emerald-700') + '">' + pct(r.marginPct) + '%</span>');
+    const priceChange = (r.priceFirst != null && r.priceLast != null && r.priceFirst !== r.priceLast)
+      ? '₪' + fmtMoney(r.priceFirst) + ' ← ₪' + fmtMoney(r.priceLast) + ' <span class="text-[11px] font-black ' + (r.priceChangePct > 0 ? 'text-rose-600' : 'text-emerald-600') + '">(' + (r.priceChangePct > 0 ? '+' : '') + pct(r.priceChangePct) + '%)</span>'
+      : (r.priceFirst != null ? '<span class="text-slate-400">ללא שינוי · ₪' + fmtMoney(r.priceFirst) + '</span>' : '—');
+    stats =
+      '<div class="grid grid-cols-2 gap-2 mt-3">' +
+        anTileHtml('bg-blue-50 border border-blue-100 text-blue-700', r.recvUnits, 'נקלטו · ₪' + fmtMoney(r.recvValue), hasPrev ? anDeltaHtml(r.recvUnits, prev ? prev.recvUnits : 0) : '') +
+        anTileHtml('bg-rose-50 border border-rose-100 text-rose-700', r.retUnits, 'הוחזרו · ₪' + fmtMoney(r.retValue), hasPrev ? anDeltaHtml(r.retUnits, prev ? prev.retUnits : 0, { lowerIsBetter: true }) : '') +
+        anTileHtml('bg-emerald-50 border border-emerald-100 text-emerald-700', r.soldUnits, 'נמכרו · ₪' + fmtMoney(r.soldValue) + ' בעלות', hasPrev ? anDeltaHtml(r.soldUnits, prev ? prev.soldUnits : 0) : '') +
+        anTileHtml('bg-slate-50 border border-slate-200 text-slate-700', anPctText(r), 'אחוז חזרות', hasPrev && prev ? anPctDeltaHtml(r.retPct, prev.retPct) : '') +
       '</div>' +
+      (hasPrev ? '<div class="text-[10px] text-slate-400 font-bold mt-1 text-center">החצים משווים ל-' + dDisp(anData.prevFromD) + ' – ' + dDisp(anData.prevToD) + (prev ? '' : ' (לא היה בתקופה הקודמת)') + '</div>' : '') +
       '<div class="mt-3 space-y-1.5">' +
-        '<div class="flex items-center justify-between gap-2"><span class="text-xs font-black text-slate-500">קליטה אחרונה בטווח</span><span class="text-sm font-bold text-slate-800">' + (r.lastRecv ? ((r.lastRecv.date ? dDisp(r.lastRecv.date) : anTsDisp(r.lastRecv.ts)) + ' <span class="text-[11px] text-slate-400">(' + anAgoText(r.lastRecv.ts) + ')</span> · ' + r.lastRecv.qty + ' יח׳ · ₪' + fmtMoney(r.lastRecv.unit) + ' ליח׳') : '—') + '</span></div>' +
-        '<div class="flex items-center justify-between gap-2"><span class="text-xs font-black text-slate-500">חזרה אחרונה בטווח</span><span class="text-sm font-bold text-slate-800">' + (r.lastRet ? (anTsDisp(r.lastRet.ts) + ' <span class="text-[11px] text-slate-400">(' + anAgoText(r.lastRet.ts) + ')</span> · ' + r.lastRet.qty + ' יח׳ · ' + (r.lastRet.credited ? '<span class="text-emerald-600">זוכתה ✓</span>' : '<span class="text-amber-600">ממתינה לזיכוי</span>')) : '—') + '</span></div>' +
+        row('קליטה אחרונה בטווח', r.lastRecv ? (dDisp(r.lastRecv.d) + ' <span class="text-[11px] text-slate-400">(' + anAgoText(r.lastRecv.d) + ')</span> · ' + r.lastRecv.qty + ' יח׳ · ₪' + fmtMoney(r.lastRecv.unit) + ' ליח׳') : '—') +
+        row('חזרה אחרונה בטווח', r.lastRet ? (dDisp(r.lastRet.d) + ' <span class="text-[11px] text-slate-400">(' + anAgoText(r.lastRet.d) + ')</span> · ' + r.lastRet.qty + ' יח׳ · ' + anRetStatusHtml(r.lastRet.status)) : '—') +
+        row('שינוי מחיר בטווח', priceChange) +
       '</div>' +
-      anPriceHistoryHtml(r)
-    : '<div class="text-center text-sm text-slate-400 font-bold py-4">אין קליטות או חזרות למוצר הזה בטווח שנבחר</div>';
+      (crate ? '' :
+      '<div class="mt-3 pt-2 border-t border-slate-100 space-y-1.5">' +
+        '<div class="text-xs font-black text-slate-500 mb-1"><i class="fa-solid fa-coins ml-1"></i>רווח מול מחיר הקופה</div>' +
+        row('עלות אחרונה', r.cost != null ? '₪' + fmtMoney(r.cost) + ' <span class="text-[11px] text-slate-400">בלי מע״מ</span>' : '—') +
+        row('מחיר קופה', r.posPrice != null ? '₪' + fmtMoney(r.posPrice) + ' <span class="text-[11px] text-slate-400">· ₪' + fmtMoney(r.posNet) + ' בלי מע״מ</span>' : '<span class="text-amber-600">אין מחיר קופה</span>') +
+        row('רווח על העלות', marginHtml) +
+        row('רווח גולמי משוער בתקופה', r.grossProfit != null ? '<span class="' + (r.grossProfit >= 0 ? 'text-emerald-700' : 'text-rose-600') + '">₪' + fmtMoney(r.grossProfit) + '</span> <span class="text-[11px] text-slate-400">· לפי ' + r.soldUnits + ' יח׳ שנמכרו</span>' : '—') +
+      '</div>') +
+      anWeekChartHtml(r) +
+      anPriceHistoryHtml(r);
+  } else {
+    stats = '<div class="text-center text-sm text-slate-400 font-bold py-4">אין קליטות או חזרות למוצר הזה בטווח שנבחר</div>';
+  }
+  const shareBtns = r
+    ? '<button data-role="an-share" data-what="product" class="btn-tap shrink-0 w-9 h-9 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center" title="שתף"><i class="fa-solid fa-share-nodes"></i></button>' +
+      '<button data-role="an-copy" data-what="product" class="btn-tap shrink-0 w-9 h-9 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center" title="העתק כטקסט"><i class="fa-solid fa-copy"></i></button>'
+    : '';
   return '<div class="bg-white rounded-2xl border-2 border-blue-200 p-4 shadow-sm mb-3">' +
     '<div class="flex items-start justify-between gap-2">' +
-      '<div class="min-w-0"><div class="font-black text-slate-800 truncate">' + htmlEscape(name) + '</div>' +
+      '<div class="min-w-0"><div class="font-black text-slate-800 truncate">' + htmlEscape(name) + crateTag + '</div>' +
       (barcode ? '<div class="text-[11px] text-slate-400" dir="ltr">' + htmlEscape(barcode) + '</div>' : '') + '</div>' +
-      '<button data-role="an-clear" class="btn-tap shrink-0 text-xs font-black text-slate-400 bg-slate-100 rounded-lg px-2.5 py-1.5"><i class="fa-solid fa-xmark"></i></button>' +
+      '<div class="flex gap-1.5 shrink-0">' + shareBtns +
+      '<button data-role="an-clear" class="btn-tap shrink-0 w-9 h-9 rounded-lg bg-slate-100 text-slate-400 flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button></div>' +
     '</div>' + stats + '</div>';
 }
 
-function anTopListHtml() {
-  const rowsArr = (anData && anData.rows) || [];
-  // v236: דירוג לפי אחוז חזרות — המדד שנשאר הוגן כשהמחירים שונים (החלטת המנהל 7.8).
-  // המכנה מוצג על כל שורה, כך שגם 2-מתוך-2 שקוף לשיפוט אנושי. שורות בלי
-  // קליטות בטווח (אין מכנה) יורדות לתחתית עם תיוג מפורש במקום "מתוך 0".
-  const top = rowsArr.filter(r => r.retUnits > 0).sort((a, b) => {
-    const pa = a.retPct == null ? -1 : a.retPct, pb = b.retPct == null ? -1 : b.retPct;
-    if (pb !== pa) return pb - pa;
-    if (b.retUnits !== a.retUnits) return b.retUnits - a.retUnits;
-    return b.retValue - a.retValue;
-  }).slice(0, 10);
-  if (!top.length) return '<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm mb-3"><div class="font-black text-slate-700 text-sm mb-1"><i class="fa-solid fa-rotate-left text-rose-500 ml-1"></i>הכי הרבה חזרות בתקופה <span class="text-[10px] text-slate-400">· לפי אחוז</span></div><div class="text-center text-sm text-slate-400 font-bold py-3">אין חזרות בטווח שנבחר</div></div>';
-  const rowsHtml = top.map((r, i) => {
-    const sub = r.retPct == null
-      ? 'הוחזרו ' + r.retUnits + ' יח׳ · ₪' + fmtMoney(r.retValue) + ' · לא נקלט בטווח'
-      : 'הוחזרו ' + r.retUnits + ' מתוך ' + r.recvUnits + ' יח׳ שנקלטו · ₪' + fmtMoney(r.retValue);
-    return '<button data-role="an-pick" data-key="' + htmlEscape(r.key) + '" class="btn-tap w-full text-right flex items-center gap-2.5 py-2 border-b border-slate-100 last:border-0">' +
-      '<span class="shrink-0 w-6 h-6 rounded-full bg-rose-50 text-rose-600 text-[11px] font-black flex items-center justify-center">' + (i + 1) + '</span>' +
-      '<span class="min-w-0 flex-1"><span class="block font-black text-sm text-slate-800 truncate">' + htmlEscape(r.name) + '</span>' +
-      '<span class="block text-[11px] text-slate-400 font-bold">' + sub + '</span></span>' +
-      '<span class="shrink-0 text-sm font-black text-rose-600">' + anPctText(r) + '</span>' +
-    '</button>';
-  }).join('');
-  return '<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm mb-3"><div class="font-black text-slate-700 text-sm mb-1"><i class="fa-solid fa-rotate-left text-rose-500 ml-1"></i>הכי הרבה חזרות בתקופה <span class="text-[10px] text-slate-400">· לפי אחוז</span></div>' + rowsHtml + '</div>';
+// --- שיתוף / העתקה כטקסט (וואטסאפ-ידידותי) ---
+function anRangeText() { return anData ? (dDisp(anData.fromD) + ' – ' + dDisp(anData.toD)) : ''; }
+function anSummaryText() {
+  if (!anData) return '';
+  const rows = anRows().filter(r => !r.crate);
+  const t = anTotals(rows), tp = anPrevTotals(), hasPrev = anHasPrev();
+  const L = [];
+  L.push('📊 *ניתוח מוצרים — ' + AN_APP_NAME + '*');
+  L.push('📅 ' + anRangeText() + ' (' + (anDaysBetween(anData.fromD, anData.toD) + 1) + ' ימים) · ' + anData.rcCount + ' תעודות קליטה · ' + anData.retCount + ' תעודות חזרה');
+  L.push('📥 נקלט: ' + t.recvUnits + ' יח׳ · ₪' + fmtMoney(t.recvValue) + (hasPrev ? anDeltaText(t.recvValue, tp.recvValue) : ''));
+  L.push('↩️ הוחזר: ' + t.retUnits + ' יח׳ · ₪' + fmtMoney(t.retValue) + (t.retPct != null ? ' (' + t.retPct + '%)' : '') + (hasPrev && tp.retPct != null ? ' · בתקופה הקודמת ' + tp.retPct + '%' : ''));
+  L.push('🛒 נמכר: ' + t.soldUnits + ' יח׳ · ₪' + fmtMoney(t.soldValue) + ' בעלות' + (hasPrev ? anDeltaText(t.soldValue, tp.soldValue) : ''));
+  if (t.profitRows) L.push('💰 רווח גולמי משוער: ₪' + fmtMoney(t.profit) + ' (' + t.profitRows + ' מוצרים עם מחיר קופה)');
+  if (hasPrev) L.push('לעומת ' + dDisp(anData.prevFromD) + ' – ' + dDisp(anData.prevToD));
+  const top5 = (list, fmt) => list.slice(0, 5).map((r, i) => (i + 1) + '. ' + fmt(r)).join('\n');
+  const ret = anRankReturns(rows);
+  if (ret.length) { L.push(''); L.push('*הכי הרבה חזרות*'); L.push(top5(ret, r => r.name + ' — ' + anPctText(r) + (r.retPct != null ? ' (' + r.retUnits + ' מתוך ' + r.recvUnits + ')' : ' (' + r.retUnits + ' יח׳)'))); }
+  const sold = anRankSold(rows);
+  if (sold.length) { L.push(''); L.push('*הכי נמכר*'); L.push(top5(sold, r => r.name + ' — ' + r.soldUnits + ' יח׳')); }
+  const up = anRankPriceUp(rows);
+  if (up.length) { L.push(''); L.push('*המחירים שעלו*'); L.push(up.slice(0, 5).map(r => '• ' + r.name + ': ₪' + fmtMoney(r.priceFirst) + ' ← ₪' + fmtMoney(r.priceLast) + ' (+' + r.priceChangePct + '%)').join('\n')); }
+  const miss = anData.missing || [];
+  if (miss.length) { L.push(''); L.push('*לא הגיע בטווח*: ' + miss.slice(0, 8).map(m => m.name).join(', ') + (miss.length > 8 ? ' ועוד ' + (miss.length - 8) : '')); }
+  return L.join('\n');
+}
+function anProductText(key) {
+  const r = anRows().find(x => x.key === key);
+  if (!r || !anData) return '';
+  const prev = anPrev(key), hasPrev = anHasPrev();
+  const L = [];
+  L.push('📊 *' + r.name + '*' + (r.barcode ? ' (' + r.barcode + ')' : ''));
+  L.push('📅 ' + anRangeText() + ' · ' + AN_APP_NAME);
+  L.push('📥 נקלט ' + r.recvUnits + ' יח׳ · ₪' + fmtMoney(r.recvValue));
+  L.push('↩️ הוחזר ' + r.retUnits + ' יח׳ · ₪' + fmtMoney(r.retValue) + (r.retPct != null ? ' (' + anPctText(r) + ')' : ''));
+  L.push('🛒 נמכר ' + r.soldUnits + ' יח׳ · ₪' + fmtMoney(r.soldValue) + ' בעלות');
+  if (hasPrev) L.push('לעומת ' + dDisp(anData.prevFromD) + ' – ' + dDisp(anData.prevToD) + ': ' + (prev ? ('נמכר ' + prev.soldUnits + ' יח׳' + anDeltaText(r.soldUnits, prev.soldUnits) + (prev.retPct != null ? ' · חזרות ' + anPctText(prev) : '')) : 'לא היה בתקופה הקודמת'));
+  if (r.cost != null) L.push('💰 עלות אחרונה ₪' + fmtMoney(r.cost) + (r.posPrice != null ? ' · קופה ₪' + fmtMoney(r.posPrice) + ' · רווח ' + r.marginPct + '%' + (r.belowCost ? ' ⚠ מתחת לעלות' : '') : ' · אין מחיר קופה'));
+  if (r.grossProfit != null) L.push('📈 רווח גולמי משוער בתקופה: ₪' + fmtMoney(r.grossProfit));
+  if (r.priceFirst != null && r.priceLast != null && r.priceFirst !== r.priceLast) L.push('🏷 מחיר: ₪' + fmtMoney(r.priceFirst) + ' ← ₪' + fmtMoney(r.priceLast) + ' (' + (r.priceChangePct > 0 ? '+' : '') + r.priceChangePct + '%)');
+  if (r.lastRecv) L.push('קליטה אחרונה: ' + dDisp(r.lastRecv.d) + ' · ' + r.lastRecv.qty + ' יח׳ · ₪' + fmtMoney(r.lastRecv.unit) + ' ליח׳');
+  if (r.lastRet) L.push('חזרה אחרונה: ' + dDisp(r.lastRet.d) + ' · ' + r.lastRet.qty + ' יח׳');
+  return L.join('\n');
+}
+async function anShareText(text) {
+  if (!text) { showToast('אין מה לשתף עדיין', null, null, 2200); return; }
+  if (navigator.share) {
+    try { await navigator.share({ text }); return; }
+    catch (e) { if (e && e.name === 'AbortError') return; }
+  }
+  window.location.href = 'https://wa.me/?text=' + encodeURIComponent(text);
+}
+function anCopyText(text) {
+  if (!text) { showToast('אין מה להעתיק עדיין', null, null, 2200); return; }
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => showToast('הסיכום הועתק', null, null, 2200)).catch(() => showToast('ההעתקה נכשלה', null, null, 2200));
+  else showToast('ההעתקה אינה נתמכת בדפדפן הזה', null, null, 2400);
 }
 
 function renderAnalysis() {
-  const b = anRangeBounds();
   const chips = [
     { p: 'month', label: 'החודש' },
     { p: 'd30', label: '30 יום' },
@@ -15393,16 +15751,22 @@ function renderAnalysis() {
       '</div>'
     : '';
   const coverage = anData
-    ? '<div class="text-[11px] text-slate-400 font-bold mt-2">' + anTsDisp(anData.fromTs) + ' – ' + anTsDisp(anData.toTs) + ' · ' + anData.rcCount + ' תעודות קליטה · ' + anData.retCount + ' תעודות חזרה' + (anData.truncated ? ' · <span class="text-amber-600">הטווח גדול — נקראו 800 התעודות האחרונות בלבד</span>' : '') + '</div>'
+    ? '<div class="text-[11px] text-slate-400 font-bold mt-2">' + anRangeText() + ' · ' + anData.rcCount + ' תעודות קליטה · ' + anData.retCount + ' תעודות חזרה · לפי תאריך הנייר' + (anData.truncated ? ' · <span class="text-amber-600">הטווח גדול — נקראו 1200 התעודות האחרונות בלבד</span>' : '') + '</div>'
     : '';
   const warn = anError ? '<div class="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs font-bold text-amber-800 mt-2">' + anError + '</div>' : '';
   const busyHtml = anBusy ? '<div class="text-center py-8 text-slate-400 font-black"><i class="fa-solid fa-circle-notch fa-spin text-2xl mb-2"></i><div>מושך היסטוריה מהענן…</div></div>' : '';
   const emptyHtml = (!anBusy && anData && !anData.rows.length) ? '<div class="text-center py-8 text-slate-400 font-bold">אין תעודות בטווח שנבחר</div>' : '';
+  const shareBtns = (anData && !anBusy)
+    ? '<div class="flex gap-1.5 shrink-0">' +
+        '<button data-role="an-share" data-what="summary" class="btn-tap h-9 px-3 rounded-xl bg-emerald-600 text-white text-xs font-black flex items-center gap-1.5"><i class="fa-solid fa-share-nodes"></i> שתף סיכום</button>' +
+        '<button data-role="an-copy" data-what="summary" class="btn-tap w-9 h-9 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center" title="העתק כטקסט"><i class="fa-solid fa-copy"></i></button>' +
+      '</div>'
+    : '';
   app.innerHTML =
     '<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm mb-3">' +
-      '<div class="flex items-center gap-2 mb-1"><i class="fa-solid fa-chart-simple text-emerald-600"></i><div class="font-black text-slate-800">ניתוח מוצרים</div></div>' +
-      '<div class="text-[11px] text-slate-400 font-bold mb-2.5">קליטות וחזרות לפי מוצר · קריאה בלבד — שום דבר כאן לא משנה נתונים</div>' +
-      '<div class="flex flex-wrap gap-1.5">' + chips + '</div>' + manualRow + coverage + warn +
+      '<div class="flex items-center justify-between gap-2 mb-1"><div class="flex items-center gap-2 min-w-0"><i class="fa-solid fa-chart-simple text-emerald-600"></i><div class="font-black text-slate-800">ניתוח מוצרים</div></div>' + shareBtns + '</div>' +
+      '<div class="text-[11px] text-slate-400 font-bold mb-2.5">קליטות, חזרות, מה נמכר ורווח לפי מוצר · קריאה בלבד — שום דבר כאן לא משנה נתונים</div>' +
+      '<div class="flex flex-wrap gap-1.5">' + chips + '</div>' + manualRow + coverage + (anBusy ? '' : anTotalsHtml()) + warn +
     '</div>' +
     (busyHtml || (
       '<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm mb-3">' +
@@ -15415,7 +15779,7 @@ function renderAnalysis() {
       '</div>' +
       anSelectedCardHtml() +
       emptyHtml +
-      anTopListHtml()
+      anRankingsHtml()
     ));
 }
 
@@ -15733,28 +16097,30 @@ app.addEventListener('click', (e) => {
   const role = t.dataset.role, id = t.dataset.id;
   // v235: ניתוח מוצרים — כל הפעולות כאן הן תצוגה בלבד
   if (role === 'an-preset') {
-    const p = t.dataset.preset || 'month';
+    const p = t.dataset.preset || 'd30';
     if (p === 'manual') {
       const b0 = anRangeBounds();
-      if (!anFrom) anFrom = new Date(b0.fromTs).toLocaleDateString('en-CA');
-      if (!anTo) anTo = new Date(b0.toTs).toLocaleDateString('en-CA');
+      if (!anFrom) anFrom = b0.fromD;
+      if (!anTo) anTo = b0.toD;
       anPreset = 'manual'; renderAnalysis();
     } else { anPreset = p; renderAnalysis(); anLoadData(); }
     return;
   }
   if (role === 'an-apply') {
     const f = $('anFrom'), t2 = $('anTo');
-    const nf = f ? f.value : anFrom, nt = t2 ? t2.value : anTo;
-    const fTs = Date.parse(String(nf || '') + 'T00:00:00');
-    const tTs = Date.parse(String(nt || todayStr()) + 'T23:59:59');
-    if (!isFinite(fTs) || !isFinite(tTs) || fTs > tTs) { showToast('טווח תאריכים לא תקין', null, null, 2400); return; }
+    const nf = f ? f.value : anFrom, nt = (t2 ? t2.value : anTo) || todayStr();
+    if (!nf || !isFinite(Date.parse(nf + 'T00:00:00')) || nf > nt) { showToast('טווח תאריכים לא תקין', null, null, 2400); return; }
     anFrom = nf; anTo = nt; anPreset = 'manual';
     renderAnalysis(); anLoadData();
     return;
   }
   if (role === 'an-pick') { anSelectedKey = t.dataset.key || null; anQuery = ''; renderAnalysis(); window.scrollTo({ top: 0 }); return; }
   if (role === 'an-clear') { anSelectedKey = null; renderAnalysis(); return; }
-  if (role === 'an-scan') { scanPurpose = 'analysis'; openScanner(); return; } // v237
+  if (role === 'an-scan') { scanPurpose = 'analysis'; openScanner(); return; }
+  // v282: בחירת דירוג, שיתוף והעתקה של הסיכום / המוצר
+  if (role === 'an-rank') { anRank = t.dataset.rank || 'returns'; const box = $('anRankBox'); if (box) box.outerHTML = anRankingsHtml(); else renderAnalysis(); return; }
+  if (role === 'an-share') { anShareText(t.dataset.what === 'product' ? anProductText(anSelectedKey) : anSummaryText()); return; }
+  if (role === 'an-copy') { anCopyText(t.dataset.what === 'product' ? anProductText(anSelectedKey) : anSummaryText()); return; }
   if (role === 'ai-add-photo') { const input = $('aiDocFile_' + (parseInt(t.dataset.doc, 10) || 0)); if (input) input.click(); return; }
   if (role === 'ai-live-cam') { aiOpenLiveCamera(parseInt(t.dataset.doc, 10) || 0); return; }
   if (role === 'ai-review-page') { aiOpenOrientationReview(parseInt(t.dataset.doc, 10) || 0, parseInt(t.dataset.page, 10) || 0, true); if (currentView === 'reconcile') renderReconcile(); return; }
