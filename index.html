@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v278 ייבוא השקות — כל מוצר נפתח בכרטיס המוצר, אחד אחרי השני</title>
+    <title>הזמנות יטבתה - v279 טאב ניהול — כלי המנהל בשורת המצבים, ליד הזמנה/חזרות/קליטה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -94,6 +94,8 @@
           <button id="segOrder" class="flex-1 py-2 rounded-lg text-sm font-black flex items-center justify-center gap-1.5"><i class="fa-solid fa-cart-shopping text-xs"></i> הזמנה</button>
           <button id="segReturns" class="flex-1 py-2 rounded-lg text-sm font-black flex items-center justify-center gap-1.5"><i class="fa-solid fa-rotate-left text-xs"></i> חזרות</button>
           <button id="segReceiving" class="flex-1 py-2 rounded-lg text-sm font-black flex items-center justify-center gap-1.5"><i class="fa-solid fa-truck-ramp-box text-xs"></i> קליטה</button>
+          <!-- v279: ניהול הוא טאב קבוע בשורה — לא כרטיס מתקפל בתוך הקליטה -->
+          <button id="segManage" class="flex-1 py-2 rounded-lg text-sm font-black flex items-center justify-center gap-1.5"><i class="fa-solid fa-screwdriver-wrench text-xs"></i> ניהול</button>
         </div>
       </div>
 
@@ -109,7 +111,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v278 ייבוא השקות — כל מוצר נפתח בכרטיס המוצר, אחד אחרי השני</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v279 טאב ניהול — כלי המנהל בשורת המצבים, ליד הזמנה/חזרות/קליטה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -1173,23 +1175,25 @@ function rerender() {
 function setView(v) {
   currentView = v;
   movingId = null;
-  if (v === 'order' || v === 'returns' || v === 'receiving') mainMode = v;
+  if (v === 'order' || v === 'returns' || v === 'receiving' || v === 'manage') mainMode = v;
   renderView();
   window.scrollTo({ top: 0 });
 }
 function updateModeTabs() {
-  const o = $('segOrder'), r = $('segReturns'), c = $('segReceiving'); if (!o || !r || !c) return;
-  const base = 'flex-1 py-2 rounded-lg text-sm font-black flex items-center justify-center gap-1.5 ';
+  const o = $('segOrder'), r = $('segReturns'), c = $('segReceiving'), m = $('segManage'); if (!o || !r || !c) return;
+  const base = 'flex-1 py-2 rounded-lg text-sm font-black flex items-center justify-center gap-1.5 whitespace-nowrap ';
   const act = 'bg-white text-blue-700 shadow', off = 'text-white/75';
   o.className = base + (mainMode === 'order' ? act : off);
   r.className = base + (mainMode === 'returns' ? act : off);
   c.className = base + (mainMode === 'receiving' ? act : off);
+  if (m) m.className = base + (mainMode === 'manage' ? act : off);
 }
 function renderView() {
   const isOrder = currentView === 'order';
   const isReturns = currentView === 'returns';
   const isReceiving = currentView === 'receiving';
-  const isMain = isOrder || isReturns || isReceiving;
+  const isManage = currentView === 'manage'; // v279
+  const isMain = isOrder || isReturns || isReceiving || isManage;
   $('searchWrap').style.display = isOrder ? '' : 'none';
   $('modeTabs').style.display = isMain ? '' : 'none';
   $('backBar').classList.toggle('hidden', isMain);
@@ -1197,6 +1201,7 @@ function renderView() {
   if (isOrder) renderOrder();
   else if (isReturns) renderReturns();
   else if (isReceiving) renderReceiving();
+  else if (isManage) renderManage();
   else if (currentView === 'settings') renderSettings();
   else if (currentView === 'contacts') renderContacts();
   else if (currentView === 'history') renderHistory();
@@ -1222,7 +1227,7 @@ function renderView() {
 }
 function updateBackBarLabel() {
   const b = $('backToOrder'); if (!b) return;
-  const txt = (currentView === 'trash' || currentView === 'health' || currentView === 'backup' || currentView === 'actionLog') ? 'חזרה להגדרות' : (mainMode === 'returns' ? 'חזרה לחזרות' : (mainMode === 'receiving' ? 'חזרה לקליטה' : 'חזרה להזמנה'));
+  const txt = (currentView === 'trash' || currentView === 'health' || currentView === 'backup' || currentView === 'actionLog') ? 'חזרה להגדרות' : (mainMode === 'returns' ? 'חזרה לחזרות' : (mainMode === 'receiving' ? 'חזרה לקליטה' : (mainMode === 'manage' ? 'חזרה לניהול' : 'חזרה להזמנה')));
   b.innerHTML = '<i class="fa-solid fa-chevron-right"></i> ' + txt;
 }
 
@@ -4868,20 +4873,32 @@ function commitQty(again) {
   if (again) { if (tgt === 'returns') openReturnsScanner(); else openReceivingScanner(); }
 }
 
+// --- v279: מסך ניהול — טאב קבוע בשורת המצבים, לצד הזמנה/חזרות/קליטה ---
+// מרכז את כלי המנהל במקום אחד קבוע, כדי שלא יצטרכו להיכנס לקליטה כדי להגיע אליהם.
+function renderManage() {
+  const btn = (role, icon, label, extra) =>
+    '<button data-role="' + role + '" class="btn-tap ' + (extra || 'border-slate-200') + ' bg-white border rounded-2xl py-4 px-3 font-black text-slate-700 text-sm flex flex-col items-center justify-center gap-2 shadow-sm"><i class="fa-solid ' + icon + ' text-2xl"></i><span>' + label + '</span></button>';
+  app.innerHTML = supplierGapBannerHtml() +
+    '<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">' +
+      '<div class="flex items-center gap-2 mb-3"><i class="fa-solid fa-screwdriver-wrench text-slate-400"></i><span class="font-black text-slate-800 text-base">ניהול</span></div>' +
+      '<div class="grid grid-cols-2 gap-2">' +
+        btn('rc-prices', 'fa-tags text-blue-600', 'מוצרים ומחירים') +
+        btn('rc-promos', 'fa-percent text-rose-600', 'מבצעים') +
+        btn('rc-history', 'fa-folder-open text-blue-600', 'תעודות') +
+        btn('rc-analysis', 'fa-chart-simple text-emerald-600', 'ניתוח מוצרים') +
+        // v276: ייבוא מוצרים חדשים ממצגת ההשקות
+        btn('rc-launches', 'fa-folder-plus text-violet-600', 'ייבוא מוצרים חדשים (השקות)', 'col-span-2 border-violet-200') +
+      '</div>' +
+    '</div>';
+}
+
 // --- מסך התעודה הנוכחית ---
 function renderReceiving() {
   const t = receiptTotals();
   const opened = receiptOpened || receiptList.length > 0;
   const banner = supplierGapBannerHtml();
-  const topButtons =
-    '<details class="bg-white border border-slate-200 rounded-xl mb-3 overflow-hidden"><summary class="btn-tap cursor-pointer px-3 py-2.5 font-black text-slate-600 text-sm flex items-center justify-between"><span><i class="fa-solid fa-screwdriver-wrench text-slate-400"></i> ניהול</span><i class="fa-solid fa-chevron-down hist-chevron"></i></summary><div class="grid grid-cols-2 gap-2 p-2 pt-0">' +
-      '<button data-role="rc-prices" class="btn-tap flex-1 bg-white border border-slate-200 rounded-xl py-2.5 font-black text-slate-700 text-xs flex items-center justify-center gap-1.5"><i class="fa-solid fa-tags text-blue-600"></i> מוצרים ומחירים</button>' +
-      '<button data-role="rc-promos" class="btn-tap flex-1 bg-white border border-slate-200 rounded-xl py-2.5 font-black text-slate-700 text-xs flex items-center justify-center gap-1.5"><i class="fa-solid fa-percent text-rose-600"></i> מבצעים</button>' +
-      '<button data-role="rc-history" class="btn-tap flex-1 bg-white border border-slate-200 rounded-xl py-2.5 font-black text-slate-700 text-xs flex items-center justify-center gap-1.5"><i class="fa-solid fa-folder-open text-blue-600"></i> תעודות</button>' +
-      '<button data-role="rc-analysis" class="btn-tap bg-white border border-slate-200 rounded-xl py-2.5 font-black text-slate-700 text-xs flex items-center justify-center gap-1.5"><i class="fa-solid fa-chart-simple text-emerald-600"></i> ניתוח מוצרים</button>' +
-      // v276: תיקייה קטנה לייבוא מוצרים חדשים ממצגת ההשקות — כאן, ליד שאר כלי הניהול
-      '<button data-role="rc-launches" class="btn-tap col-span-2 bg-white border border-violet-200 rounded-xl py-2.5 font-black text-slate-700 text-xs flex items-center justify-center gap-1.5"><i class="fa-solid fa-folder-plus text-violet-600"></i> ייבוא מוצרים חדשים (השקות)</button>' +
-    '</div></details>';
+  // v279: כלי הניהול עברו לטאב "ניהול" משלהם בשורת המצבים — מסך הקליטה נשאר נקי
+  const topButtons = '';
   if (!opened) {
     app.innerHTML = banner + topButtons +
       '<div class="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm mt-2">' +
@@ -15242,10 +15259,11 @@ $('shortCreditAmount').addEventListener('keydown', (e) => { if (e.key === 'Enter
 $('shortCreditModal').addEventListener('click', (e) => { if (e.target === $('shortCreditModal')) hideShortCreditPrompt(); });
 $('confirmOk').addEventListener('click', () => { const cb = confirmCb; hideConfirm(); if (cb) cb(); });
 $('brandHome').addEventListener('click', () => setView('order'));
-$('btnHistory').addEventListener('click', () => setView(mainMode === 'returns' ? 'returnsHistory' : (mainMode === 'receiving' ? 'receiptsHistory' : 'history')));
+$('btnHistory').addEventListener('click', () => setView(mainMode === 'returns' ? 'returnsHistory' : ((mainMode === 'receiving' || mainMode === 'manage') ? 'receiptsHistory' : 'history')));
 $('segOrder').addEventListener('click', () => setView('order'));
 $('segReturns').addEventListener('click', () => setView('returns'));
 $('segReceiving').addEventListener('click', () => setView('receiving'));
+$('segManage').addEventListener('click', () => setView('manage')); // v279
 $('btnSettings').addEventListener('click', () => setView('settings'));
 $('btnNotes').addEventListener('click', () => setView('notes'));
 // ===== ניתוח מוצרים (v235) =====
