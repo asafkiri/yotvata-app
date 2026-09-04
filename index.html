@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v282 ניתוח מוצרים — נמכר בפועל, דירוגים, השוואה לתקופה קודמת, רווח, גרף שבועי ושיתוף</title>
+    <title>הזמנות יטבתה - v283 ניתוח מוצרים בשפה פשוטה — כל מספר עם הסבר, השוואות במשפטים, "איך לקרוא את המסך"</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -111,7 +111,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v282 ניתוח מוצרים — נמכר בפועל, דירוגים, השוואה לתקופה קודמת, רווח, גרף שבועי ושיתוף</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v283 ניתוח מוצרים בשפה פשוטה — כל מספר עם הסבר, השוואות במשפטים, "איך לקרוא את המסך"</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -15083,10 +15083,10 @@ $('segReceiving').addEventListener('click', () => setView('receiving'));
 $('segManage').addEventListener('click', () => setView('manage')); // v279
 $('btnSettings').addEventListener('click', () => setView('settings'));
 $('btnNotes').addEventListener('click', () => setView('notes'));
-// ===== ניתוח מוצרים (v282) =====
+// ===== ניתוח מוצרים (v283) =====
 // מסך קריאה בלבד: אפס כתיבות לענן. הכל נגזר מתעודות הקליטה והחזרה שכבר נשמרו.
 // ציר הזמן = תאריך הנייר (docDate/date), ואם אין — היום של חותמת ההקלדה.
-// v282: "נמכר בפועל" (נקלט פחות הוחזר), דירוגים נוספים, השוואה לתקופה קודמת
+// v283: "נמכר בפועל" (נקלט פחות הוחזר), דירוגים נוספים, השוואה לתקופה קודמת
 // באותו אורך, רווח מול מחיר הקופה, גרף שבועי לכל מוצר, ושיתוף/העתקה של הסיכום.
 const AN_APP_NAME = 'יטבתה';
 let anPreset = 'd30';          // month | d30 | d90 | d180 | manual — ברירת מחדל 30 יום
@@ -15394,30 +15394,39 @@ function anRetStatusHtml(st) {
   return '<span class="text-amber-600">ממתינה לזיכוי</span>';
 }
 
-// --- השוואה לתקופה הקודמת: חץ ירוק/אדום לפי מה שטוב לחנות ---
-function anDeltaHtml(cur, prev, opts) {
-  const o = opts || {};
-  if (prev == null) return '';
-  if (!(prev > 0)) return cur > 0 ? '<span class="text-[10px] font-black text-slate-400">חדש</span>' : '';
-  const pct = Math.round((cur - prev) / prev * 100);
-  if (pct === 0) return '<span class="text-[10px] font-black text-slate-400">ללא שינוי</span>';
-  const up = pct > 0;
-  const good = o.lowerIsBetter ? !up : up;
-  return '<span class="text-[10px] font-black ' + (good ? 'text-emerald-600' : 'text-rose-600') + '"><i class="fa-solid ' + (up ? 'fa-arrow-up' : 'fa-arrow-down') + '"></i> ' + Math.abs(pct) + '%</span>';
+// ===== תצוגה (v283): שפה פשוטה, כל מספר עם תווית, השוואות במשפטים =====
+function anMoney(n) { const v = r2(n); return Math.abs(v) >= 100 ? Math.round(v).toLocaleString('he-IL') : fmtMoney(v); }
+function anNum(n) { return (Number(n) || 0).toLocaleString('he-IL'); }
+function anPlainPct(v) { return v == null ? '—' : String(v).replace(/\.0$/, '') + '%'; }
+function anPctChange(cur, prev) { if (!(prev > 0)) return null; return Math.round((cur - prev) / prev * 100); }
+
+// שורות השוואה בשפה פשוטה. money=true משווה שקלים (סיכום), אחרת יחידות (מוצר).
+function anCompareItems(cur, prev, money) {
+  const out = [];
+  const rc = anPctChange(money ? cur.recvValue : cur.recvUnits, money ? prev.recvValue : prev.recvUnits);
+  if (rc == null) out.push({ sym: '•', icon: 'fa-minus', cls: 'text-slate-400', text: 'הגיע מהספק: אין נתון מהתקופה הקודמת' });
+  else if (Math.abs(rc) < 1) out.push({ sym: '=', icon: 'fa-equals', cls: 'text-slate-500', text: 'הגיע מהספק כמו בתקופה הקודמת' });
+  else out.push({ sym: rc > 0 ? '▲' : '▼', icon: rc > 0 ? 'fa-arrow-up' : 'fa-arrow-down', cls: 'text-blue-700', text: 'הגיע מהספק ' + Math.abs(rc) + '% ' + (rc > 0 ? 'יותר' : 'פחות') });
+  if (cur.retPct != null && prev.retPct != null) {
+    const diff = Math.round((cur.retPct - prev.retPct) * 10) / 10;
+    if (Math.abs(diff) < 0.1) out.push({ sym: '=', icon: 'fa-equals', cls: 'text-slate-500', text: 'חזרות כמו קודם: ' + anPlainPct(cur.retPct) });
+    else if (diff < 0) out.push({ sym: '✓', icon: 'fa-circle-check', cls: 'text-emerald-700', text: 'פחות חזרות: ' + anPlainPct(cur.retPct) + ' במקום ' + anPlainPct(prev.retPct) });
+    else out.push({ sym: '!', icon: 'fa-triangle-exclamation', cls: 'text-rose-600', text: 'יותר חזרות: ' + anPlainPct(cur.retPct) + ' במקום ' + anPlainPct(prev.retPct) });
+  } else if (cur.retUnits > 0 || prev.retUnits > 0) {
+    const more = cur.retUnits > prev.retUnits;
+    out.push({ sym: more ? '▲' : '▼', icon: more ? 'fa-arrow-up' : 'fa-arrow-down', cls: more ? 'text-rose-600' : 'text-emerald-700', text: 'חזר לספק ' + anNum(cur.retUnits) + ' יח׳ (קודם ' + anNum(prev.retUnits) + ')' });
+  }
+  const sc = anPctChange(money ? cur.soldValue : cur.soldUnits, money ? prev.soldValue : prev.soldUnits);
+  if (sc == null) out.push({ sym: '•', icon: 'fa-minus', cls: 'text-slate-400', text: 'נמכר: אין נתון מהתקופה הקודמת' });
+  else if (Math.abs(sc) < 1) out.push({ sym: '=', icon: 'fa-equals', cls: 'text-slate-500', text: 'נמכר כמו בתקופה הקודמת' });
+  else out.push({ sym: sc > 0 ? '▲' : '▼', icon: sc > 0 ? 'fa-arrow-up' : 'fa-arrow-down', cls: sc > 0 ? 'text-emerald-700' : 'text-rose-600', text: 'נמכר ' + Math.abs(sc) + '% ' + (sc > 0 ? 'יותר' : 'פחות') });
+  return out;
 }
-function anPctDeltaHtml(curPct, prevPct) {
-  if (curPct == null || prevPct == null) return '';
-  const diff = Math.round((curPct - prevPct) * 10) / 10;
-  if (Math.abs(diff) < 0.05) return '<span class="text-[10px] font-black text-slate-400">כמו קודם</span>';
-  const up = diff > 0;
-  return '<span class="text-[10px] font-black ' + (up ? 'text-rose-600' : 'text-emerald-600') + '"><i class="fa-solid ' + (up ? 'fa-arrow-up' : 'fa-arrow-down') + '"></i> ' + String(Math.abs(diff)).replace(/\.0$/, '') + ' נק׳</span>';
+function anCompareHtml(cur, prev, money) {
+  return anCompareItems(cur, prev, money).map(x => '<div class="flex items-center gap-2 text-xs font-bold ' + x.cls + '"><i class="fa-solid ' + x.icon + ' w-4 text-center"></i><span>' + x.text + '</span></div>').join('');
 }
-function anDeltaText(cur, prev) {
-  if (!(prev > 0)) return '';
-  const pct = Math.round((cur - prev) / prev * 100);
-  if (pct === 0) return '';
-  return ' (' + (pct > 0 ? '▲' : '▼') + Math.abs(pct) + '%)';
-}
+function anCompareText(cur, prev, money) { return anCompareItems(cur, prev, money).map(x => x.sym + ' ' + x.text).join('\n'); }
+function anPrevLabel() { return anData ? ('לעומת התקופה הקודמת (' + dDisp(anData.prevFromD) + ' – ' + dDisp(anData.prevToD) + ')') : ''; }
 
 // סיכומי תקופה (בלי ארגזים)
 function anTotals(rows) {
@@ -15434,16 +15443,51 @@ function anTotals(rows) {
 }
 function anPrevTotals() { return anTotals(anData && anData.prevRows ? Array.from(anData.prevRows.values()) : []); }
 
-// --- דירוגים ---
+// אריח: תווית למעלה, מספר גדול, שורת פירוט קטנה
+function anStatTile(cls, label, big, small) {
+  return '<div class="' + cls + ' rounded-xl py-2.5 px-1 text-center">' +
+    '<div class="text-[11px] font-black opacity-80">' + label + '</div>' +
+    '<div class="text-lg font-black leading-tight mt-0.5">' + big + '</div>' +
+    '<div class="text-[10px] font-bold opacity-80 leading-tight mt-0.5">' + (small || '') + '</div></div>';
+}
+function anHelpHtml() {
+  return '<details class="mt-3 bg-slate-50 rounded-xl border border-slate-200 px-3 py-2">' +
+    '<summary class="cursor-pointer text-xs font-black text-slate-600 flex items-center gap-1.5"><i class="fa-solid fa-circle-question text-blue-500"></i> איך לקרוא את המסך?</summary>' +
+    '<div class="text-[11px] text-slate-500 font-bold leading-relaxed mt-2 space-y-1.5">' +
+      '<div><b class="text-slate-700">הגיע מהספק</b> — כל מה שנקלט לפי תעודות הקליטה. <b class="text-slate-700">חזר לספק</b> — מה שיצא בתעודות חזרה. <b class="text-slate-700">נמכר</b> — ההפרש ביניהם, בשקלים לפי מחיר הקנייה.</div>' +
+      '<div><b class="text-slate-700">ההשוואה</b> היא לתקופה באותו אורך שנגמרה יום לפני תחילת הטווח.</div>' +
+      '<div><b class="text-slate-700">רווח</b> — מחיר הקופה בלי מע״מ פחות מחיר הקנייה, על מה שנמכר. מוצר בלי מחיר קופה לא נכלל.</div>' +
+      '<div>התאריכים לפי תאריך הנייר של התעודה, ואם אין, לפי יום ההקלדה.</div>' +
+    '</div></details>';
+}
+function anTotalsHtml() {
+  if (!anData) return '';
+  const t = anTotals(anRows()), tp = anPrevTotals(), hasPrev = anHasPrev();
+  return '<div class="grid grid-cols-3 gap-2 mt-3">' +
+    anStatTile('bg-blue-50 border border-blue-100 text-blue-800', 'הגיע מהספק', '₪' + anMoney(t.recvValue), anNum(t.recvUnits) + ' יח׳') +
+    anStatTile('bg-rose-50 border border-rose-100 text-rose-800', 'חזר לספק', '₪' + anMoney(t.retValue), anNum(t.retUnits) + ' יח׳' + (t.retPct != null ? ' · ' + anPlainPct(t.retPct) + ' ממה שהגיע' : '')) +
+    anStatTile('bg-emerald-50 border border-emerald-100 text-emerald-800', 'נמכר', '₪' + anMoney(t.soldValue), anNum(t.soldUnits) + ' יח׳ · לפי מחיר קנייה') +
+  '</div>' +
+  (t.profitRows
+    ? '<div class="flex items-center justify-between gap-2 mt-2 px-1"><span class="text-xs font-black text-slate-600"><i class="fa-solid fa-coins text-emerald-600 ml-1"></i>רווח משוער בתקופה</span><span class="text-sm font-black text-emerald-700">₪' + anMoney(t.profit) + ' <span class="text-[10px] font-bold text-slate-400">· לפי ' + t.profitRows + ' מוצרים עם מחיר קופה</span></span></div>'
+    : '<div class="text-[11px] text-slate-400 font-bold mt-2 px-1"><i class="fa-solid fa-coins ml-1"></i>אין עדיין מוצרים עם מחיר קופה, לכן אין חישוב רווח.</div>') +
+  '<div class="mt-3 bg-slate-50 rounded-xl border border-slate-200 px-3 py-2">' +
+    '<div class="text-[11px] font-black text-slate-500 mb-1">' + (hasPrev ? anPrevLabel() : 'השוואה לתקופה הקודמת') + '</div>' +
+    (hasPrev ? '<div class="space-y-1">' + anCompareHtml(t, tp, true) + '</div>' : '<div class="text-xs font-bold text-slate-400">אין תעודות מ-' + dDisp(anData.prevFromD) + ' עד ' + dDisp(anData.prevToD) + ', אז אין למה להשוות.</div>') +
+  '</div>' +
+  anHelpHtml();
+}
+
+// --- דירוגים: כל דירוג עם כותרת, הסבר של משפט, ומדד עם תווית ---
 const AN_RANKS = [
-  { k: 'returns', label: 'חזרות', icon: 'fa-rotate-left', color: 'text-rose-500' },
-  { k: 'sold', label: 'הכי נמכר', icon: 'fa-cart-shopping', color: 'text-blue-600' },
-  { k: 'money', label: 'הכי הרבה כסף', icon: 'fa-sack-dollar', color: 'text-amber-600' },
-  { k: 'stars', label: 'כוכבים', icon: 'fa-star', color: 'text-amber-500' },
-  { k: 'prices', label: 'מחירים שעלו', icon: 'fa-arrow-trend-up', color: 'text-rose-600' },
-  { k: 'missing', label: 'לא הגיע', icon: 'fa-clock', color: 'text-slate-500' },
-  { k: 'profit', label: 'רווח', icon: 'fa-coins', color: 'text-emerald-600' },
-  { k: 'margin', label: 'מרווח נמוך', icon: 'fa-triangle-exclamation', color: 'text-amber-600' }
+  { k: 'returns', label: 'חזרות', title: 'הכי הרבה חזרות', icon: 'fa-rotate-left', color: 'text-rose-500', help: 'מוצרים שחלק גדול ממה שהגיע חזר לספק. אחוז גבוה = כדאי להזמין פחות.', empty: 'לא חזר שום מוצר לספק בטווח הזה' },
+  { k: 'sold', label: 'הכי נמכר', title: 'הכי נמכר', icon: 'fa-cart-shopping', color: 'text-blue-600', help: 'מה שהגיע פחות מה שחזר. אלה המוצרים שהלקוחות באמת קונים.', empty: 'אין מכירות בטווח הזה' },
+  { k: 'money', label: 'הוצאות', title: 'לאן הולך הכסף', icon: 'fa-sack-dollar', color: 'text-amber-600', help: 'על איזה מוצרים משלמים הכי הרבה לספק בתקופה.', empty: 'אין קליטות בטווח הזה' },
+  { k: 'stars', label: 'כוכבים', title: 'כוכבים: נמכר הכל', icon: 'fa-star', color: 'text-amber-500', help: 'הגיעו לפחות 4 יחידות ולא חזרה אף אחת. אפשר להעז ולהזמין יותר.', empty: 'אין מוצר שנמכר עד הסוף בלי חזרות בטווח הזה' },
+  { k: 'prices', label: 'מחירים עלו', title: 'המחירים שעלו', icon: 'fa-arrow-trend-up', color: 'text-rose-600', help: 'מחיר הקנייה בקליטה האחרונה גבוה מזה שבקליטה הראשונה בטווח.', empty: 'אף מחיר קנייה לא השתנה בטווח הזה' },
+  { k: 'missing', label: 'לא הגיע', title: 'בקטלוג אבל לא הגיע', icon: 'fa-clock', color: 'text-slate-500', help: 'מוצרים מהקטלוג שלא הופיעו באף תעודת קליטה בטווח. אולי כבר לא מזמינים אותם, או שהספק הפסיק.', empty: 'כל המוצרים בקטלוג הגיעו בטווח הזה' },
+  { k: 'profit', label: 'הכי רווחי', title: 'הכי רווחי', icon: 'fa-coins', color: 'text-emerald-600', help: 'כמה נשאר לי ממה שנמכר: מחיר הקופה בלי מע״מ פחות מחיר הקנייה. רק מוצרים עם מחיר קופה.', empty: 'אין מוצרים עם מחיר קופה שנמכרו בטווח הזה' },
+  { k: 'margin', label: 'רווח נמוך', title: 'רווח נמוך', icon: 'fa-triangle-exclamation', color: 'text-amber-600', help: 'כמה מרוויחים על כל שקל שמשלמים לספק, מהנמוך לגבוה. אדום = מוכרים בהפסד.', empty: 'אין מוצרים עם מחיר קופה בטווח הזה' }
 ];
 const anByPct = (a, b) => {
   const pa = a.retPct == null ? -1 : a.retPct, pb = b.retPct == null ? -1 : b.retPct;
@@ -15459,76 +15503,57 @@ function anRankPriceUp(rows) { return rows.filter(r => r.priceChangePct != null 
 function anRankPriceDown(rows) { return rows.filter(r => r.priceChangePct != null && r.priceChangePct < -0.5).sort((a, b) => a.priceChangePct - b.priceChangePct); }
 function anRankProfit(rows) { return rows.filter(r => r.grossProfit != null && r.soldUnits > 0).sort((a, b) => b.grossProfit - a.grossProfit); }
 function anRankMargin(rows) { return rows.filter(r => r.marginPct != null && r.recvUnits > 0).sort((a, b) => a.marginPct - b.marginPct); }
+function anUnitProfit(r) { return (r.posNet != null && r.cost != null) ? r2(r.posNet - r.cost) : null; }
 
-function anRankRowHtml(i, key, name, sub, metricHtml, badgeCls) {
-  return '<button data-role="an-pick" data-key="' + htmlEscape(key) + '" class="btn-tap w-full text-right flex items-center gap-2.5 py-2 border-b border-slate-100 last:border-0">' +
+function anRankRowHtml(i, key, name, sub, big, bigCls, label, badgeCls) {
+  return '<button data-role="an-pick" data-key="' + htmlEscape(key) + '" class="btn-tap w-full text-right flex items-center gap-2.5 py-2.5 border-b border-slate-100 last:border-0">' +
     '<span class="shrink-0 w-6 h-6 rounded-full ' + (badgeCls || 'bg-slate-100 text-slate-600') + ' text-[11px] font-black flex items-center justify-center">' + (i + 1) + '</span>' +
     '<span class="min-w-0 flex-1"><span class="block font-black text-sm text-slate-800 truncate">' + htmlEscape(name) + '</span>' +
-    '<span class="block text-[11px] text-slate-400 font-bold">' + sub + '</span></span>' +
-    '<span class="shrink-0 text-left leading-tight">' + metricHtml + '</span>' +
+    '<span class="block text-[11px] text-slate-500 font-bold leading-snug">' + sub + '</span></span>' +
+    '<span class="shrink-0 text-center min-w-[3.5rem]"><span class="block text-base font-black leading-tight ' + (bigCls || 'text-slate-800') + '" dir="ltr">' + big + '</span><span class="block text-[10px] font-bold text-slate-400 leading-tight">' + label + '</span></span>' +
   '</button>';
 }
-function anMetric(big, cls, delta) { return '<span class="block text-sm font-black ' + (cls || 'text-slate-800') + '">' + big + '</span>' + (delta ? '<span class="block">' + delta + '</span>' : ''); }
 
 function anRankingsHtml() {
   const rowsArr = anRows().filter(r => !r.crate);
-  const hasPrev = anHasPrev();
-  const prevOf = (r) => anPrev(r.key);
-  const chips = AN_RANKS.map(c => '<button data-role="an-rank" data-rank="' + c.k + '" class="btn-tap px-2.5 py-1.5 rounded-lg text-[11px] font-black border ' + (anRank === c.k ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-600') + '"><i class="fa-solid ' + c.icon + ' ' + (anRank === c.k ? '' : c.color) + '"></i> ' + c.label + '</button>').join('');
-  let title = '', body = '', note = '', empty = 'אין נתונים בטווח שנבחר';
+  const def = AN_RANKS.find(x => x.k === anRank) || AN_RANKS[0];
+  const chips = AN_RANKS.map(c => '<button data-role="an-rank" data-rank="' + c.k + '" class="btn-tap py-2 rounded-xl text-xs font-black border ' + (anRank === c.k ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-600') + '">' + c.label + '</button>').join('');
+  let body = '', note = '';
   const crateKinds = anRows().filter(r => r.crate && r.retUnits > 0).length;
-  if (anRank === 'sold') {
-    title = '<i class="fa-solid fa-cart-shopping text-blue-600 ml-1"></i>הכי נמכר <span class="text-[10px] text-slate-400">· נקלט פחות הוחזר</span>';
-    body = anRankSold(rowsArr).slice(0, 10).map((r, i) => { const p = prevOf(r); return anRankRowHtml(i, r.key, r.name, 'נקלט ' + r.recvUnits + ' · הוחזר ' + r.retUnits + ' · ₪' + fmtMoney(r.soldValue) + ' בעלות', anMetric(r.soldUnits + ' יח׳', 'text-blue-700', hasPrev ? anDeltaHtml(r.soldUnits, p ? p.soldUnits : 0) : ''), 'bg-blue-50 text-blue-700'); }).join('');
-    empty = 'אין מכירות בטווח שנבחר';
-  } else if (anRank === 'money') {
-    title = '<i class="fa-solid fa-sack-dollar text-amber-600 ml-1"></i>הכי הרבה כסף <span class="text-[10px] text-slate-400">· לפי סכום הקליטות</span>';
-    body = anRankMoney(rowsArr).slice(0, 10).map((r, i) => { const p = prevOf(r); return anRankRowHtml(i, r.key, r.name, r.recvUnits + ' יח׳ · ממוצע ₪' + fmtMoney(r.avgCost || 0) + ' ליח׳' + (r.retValue > 0 ? ' · זוכה ₪' + fmtMoney(r.retValue) : ''), anMetric('₪' + fmtMoney(r.recvValue), 'text-amber-700', hasPrev ? anDeltaHtml(r.recvValue, p ? p.recvValue : 0) : ''), 'bg-amber-50 text-amber-700'); }).join('');
-  } else if (anRank === 'stars') {
-    title = '<i class="fa-solid fa-star text-amber-500 ml-1"></i>כוכבים <span class="text-[10px] text-slate-400">· נמכר הכל, אפס חזרות</span>';
-    body = anRankStars(rowsArr).slice(0, 10).map((r, i) => { const p = prevOf(r); return anRankRowHtml(i, r.key, r.name, 'נקלט ' + r.recvUnits + ' יח׳ · ₪' + fmtMoney(r.recvValue) + ' · בלי חזרה אחת', anMetric(r.soldUnits + ' יח׳', 'text-emerald-700', hasPrev ? anDeltaHtml(r.soldUnits, p ? p.soldUnits : 0) : ''), 'bg-amber-50 text-amber-600'); }).join('');
-    note = 'מוצרים שנקלטו לפחות 4 יחידות בטווח ולא חזרה אף אחת. סימן שאפשר להזמין יותר.';
-    empty = 'אין מוצרים עם אפס חזרות בטווח שנבחר';
-  } else if (anRank === 'prices') {
-    title = '<i class="fa-solid fa-arrow-trend-up text-rose-600 ml-1"></i>המחירים שעלו <span class="text-[10px] text-slate-400">· ראשון מול אחרון בטווח</span>';
+  if (def.k === 'sold') {
+    body = anRankSold(rowsArr).slice(0, 10).map((r, i) => anRankRowHtml(i, r.key, r.name, 'הגיע ' + anNum(r.recvUnits) + ' · חזר ' + anNum(r.retUnits) + ' · ₪' + anMoney(r.soldValue) + ' לפי מחיר קנייה', anNum(r.soldUnits), 'text-blue-700', 'יח׳ נמכרו', 'bg-blue-50 text-blue-700')).join('');
+  } else if (def.k === 'money') {
+    body = anRankMoney(rowsArr).slice(0, 10).map((r, i) => anRankRowHtml(i, r.key, r.name, anNum(r.recvUnits) + ' יח׳ · ₪' + fmtMoney(r.avgCost || 0) + ' ליח׳' + (r.retValue > 0 ? ' · חזר ₪' + anMoney(r.retValue) : ''), '₪' + anMoney(r.recvValue), 'text-amber-700', 'שולם לספק', 'bg-amber-50 text-amber-700')).join('');
+  } else if (def.k === 'stars') {
+    body = anRankStars(rowsArr).slice(0, 10).map((r, i) => anRankRowHtml(i, r.key, r.name, 'הגיע ' + anNum(r.recvUnits) + ' יח׳ · ₪' + anMoney(r.recvValue) + ' · אפס חזרות', anNum(r.soldUnits), 'text-emerald-700', 'נמכרו הכל', 'bg-amber-50 text-amber-600')).join('');
+  } else if (def.k === 'prices') {
     const up = anRankPriceUp(rowsArr), down = anRankPriceDown(rowsArr);
-    body = up.slice(0, 10).map((r, i) => anRankRowHtml(i, r.key, r.name, '₪' + fmtMoney(r.priceFirst) + ' ← ₪' + fmtMoney(r.priceLast) + ' · ' + r.prices.length + ' קליטות', anMetric('+' + String(r.priceChangePct).replace(/\.0$/, '') + '%', 'text-rose-600'), 'bg-rose-50 text-rose-600')).join('');
-    if (down.length) body += '<div class="font-black text-slate-700 text-sm mt-3 mb-1"><i class="fa-solid fa-arrow-trend-down text-emerald-600 ml-1"></i>ירדו במחיר</div>' + down.slice(0, 5).map((r, i) => anRankRowHtml(i, r.key, r.name, '₪' + fmtMoney(r.priceFirst) + ' ← ₪' + fmtMoney(r.priceLast), anMetric(String(r.priceChangePct).replace(/\.0$/, '') + '%', 'text-emerald-600'), 'bg-emerald-50 text-emerald-700')).join('');
-    empty = 'אין שינויי מחיר בטווח שנבחר';
-  } else if (anRank === 'missing') {
-    title = '<i class="fa-solid fa-clock text-slate-500 ml-1"></i>בקטלוג אבל לא הגיע <span class="text-[10px] text-slate-400">· בטווח שנבחר</span>';
+    body = up.slice(0, 10).map((r, i) => anRankRowHtml(i, r.key, r.name, 'מ-₪' + fmtMoney(r.priceFirst) + ' ל-₪' + fmtMoney(r.priceLast) + ' · ' + r.prices.length + ' קליטות בטווח', '+' + anPlainPct(r.priceChangePct), 'text-rose-600', 'עלה', 'bg-rose-50 text-rose-600')).join('');
+    if (down.length) body += '<div class="font-black text-slate-700 text-sm mt-3 mb-0.5"><i class="fa-solid fa-arrow-trend-down text-emerald-600 ml-1"></i>ירדו במחיר</div>' + down.slice(0, 5).map((r, i) => anRankRowHtml(i, r.key, r.name, 'מ-₪' + fmtMoney(r.priceFirst) + ' ל-₪' + fmtMoney(r.priceLast), anPlainPct(r.priceChangePct), 'text-emerald-600', 'ירד', 'bg-emerald-50 text-emerald-700')).join('');
+  } else if (def.k === 'missing') {
     const miss = (anData && anData.missing) || [];
-    body = miss.slice(0, 20).map((m, i) => anRankRowHtml(i, m.key, m.name, m.lastD ? 'קליטה אחרונה ' + dDisp(m.lastD) : 'לא נקלט ב-' + m.windowDays + ' הימים שנבדקו', anMetric(m.days != null ? m.days + ' ימים' : 'מעל ' + m.windowDays, m.days != null && m.days < 14 ? 'text-slate-600' : 'text-rose-600'), 'bg-slate-100 text-slate-500')).join('');
+    body = miss.slice(0, 20).map((m, i) => anRankRowHtml(i, m.key, m.name, m.lastD ? 'הגיע לאחרונה ב-' + dDisp(m.lastD) : 'לא הגיע ב-' + m.windowDays + ' הימים שנבדקו', m.days != null ? anNum(m.days) : 'מעל ' + m.windowDays, m.days != null && m.days < 14 ? 'text-slate-700' : 'text-rose-600', 'ימים בלי קליטה', 'bg-slate-100 text-slate-500')).join('');
     if (miss.length > 20) note = 'ועוד ' + (miss.length - 20) + ' מוצרים.';
-    empty = 'כל המוצרים בקטלוג נקלטו בטווח שנבחר';
-  } else if (anRank === 'profit') {
-    title = '<i class="fa-solid fa-coins text-emerald-600 ml-1"></i>הכי רווחי <span class="text-[10px] text-slate-400">· רווח גולמי משוער</span>';
-    body = anRankProfit(rowsArr).slice(0, 10).map((r, i) => anRankRowHtml(i, r.key, r.name, 'נמכרו ' + r.soldUnits + ' · מרווח ' + String(r.marginPct).replace(/\.0$/, '') + '% · קופה ₪' + fmtMoney(r.posPrice), anMetric('₪' + fmtMoney(r.grossProfit), r.grossProfit >= 0 ? 'text-emerald-700' : 'text-rose-600'), 'bg-emerald-50 text-emerald-700')).join('');
+  } else if (def.k === 'profit') {
+    body = anRankProfit(rowsArr).slice(0, 10).map((r, i) => { const u = anUnitProfit(r); return anRankRowHtml(i, r.key, r.name, 'נמכרו ' + anNum(r.soldUnits) + ' יח׳' + (u != null ? ' · נשאר ₪' + fmtMoney(u) + ' על כל יחידה' : ''), '₪' + anMoney(r.grossProfit), r.grossProfit >= 0 ? 'text-emerald-700' : 'text-rose-600', 'רווח בתקופה', 'bg-emerald-50 text-emerald-700'); }).join('');
     const noPos = rowsArr.filter(r => r.soldUnits > 0 && r.posPrice == null).length;
-    note = '(מחיר קופה בלי מע״מ פחות מה ששולם לספק) × מה שנמכר.' + (noPos ? ' ' + noPos + ' מוצרים בלי מחיר קופה לא נכללים.' : '');
-    empty = 'אין מוצרים עם מחיר קופה ומכירות בטווח';
-  } else if (anRank === 'margin') {
-    title = '<i class="fa-solid fa-triangle-exclamation text-amber-600 ml-1"></i>מרווח נמוך <span class="text-[10px] text-slate-400">· מהנמוך לגבוה</span>';
-    body = anRankMargin(rowsArr).slice(0, 10).map((r, i) => anRankRowHtml(i, r.key, r.name, (r.belowCost ? '<span class="text-rose-600">מתחת לעלות!</span> · ' : '') + 'עלות ₪' + fmtMoney(r.cost) + ' · קופה ₪' + fmtMoney(r.posPrice) + ' (₪' + fmtMoney(r.posNet) + ' בלי מע״מ)', anMetric(String(r.marginPct).replace(/\.0$/, '') + '%', r.belowCost ? 'text-rose-600' : (r.marginPct < 10 ? 'text-amber-600' : 'text-slate-700')), r.belowCost ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-700')).join('');
+    if (noPos) note = noPos + ' מוצרים שנמכרו בלי מחיר קופה לא נכללים. אפשר להוסיף מחיר קופה במסך "מוצרים ומחירים".';
+  } else if (def.k === 'margin') {
+    body = anRankMargin(rowsArr).slice(0, 10).map((r, i) => { const u = anUnitProfit(r); return anRankRowHtml(i, r.key, r.name, (r.belowCost ? '<span class="text-rose-600">מוכר בהפסד!</span> · ' : '') + 'קונה ₪' + fmtMoney(r.cost) + ' · מוכר ₪' + fmtMoney(r.posPrice) + (u != null ? ' · ' + (u >= 0 ? 'נשאר ₪' + fmtMoney(u) : 'מפסיד ₪' + fmtMoney(-u)) + ' ליח׳' : ''), anPlainPct(r.marginPct), r.belowCost ? 'text-rose-600' : (r.marginPct < 10 ? 'text-amber-600' : 'text-slate-700'), 'רווח', r.belowCost ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-700'); }).join('');
     const noPos = rowsArr.filter(r => r.recvUnits > 0 && r.posPrice == null).length;
-    note = 'רווח על העלות, כמו בהגדרת "רווח מומלץ".' + (noPos ? ' ' + noPos + ' מוצרים שנקלטו בלי מחיר קופה.' : '');
-    empty = 'אין מוצרים עם מחיר קופה בטווח';
+    if (noPos) note = noPos + ' מוצרים שהגיעו בלי מחיר קופה לא נכללים.';
   } else {
-    title = '<i class="fa-solid fa-rotate-left text-rose-500 ml-1"></i>הכי הרבה חזרות <span class="text-[10px] text-slate-400">· לפי אחוז</span>';
-    body = anRankReturns(rowsArr).slice(0, 10).map((r, i) => {
-      const p = prevOf(r);
-      const sub = r.retPct == null
-        ? 'הוחזרו ' + r.retUnits + ' יח׳ · ₪' + fmtMoney(r.retValue) + ' · לא נקלט בטווח'
-        : 'הוחזרו ' + r.retUnits + ' מתוך ' + r.recvUnits + ' יח׳ שנקלטו · ₪' + fmtMoney(r.retValue);
-      return anRankRowHtml(i, r.key, r.name, sub, anMetric(anPctText(r), 'text-rose-600', hasPrev && p ? anPctDeltaHtml(r.retPct, p.retPct) : ''), 'bg-rose-50 text-rose-600');
-    }).join('');
-    if (crateKinds > 0) note = crateKinds + ' סוגי ארגזים עם חזרות בטווח — לא מדורגים, זמינים בחיפוש';
-    empty = 'אין חזרות מוצרים בטווח שנבחר';
+    body = anRankReturns(rowsArr).slice(0, 10).map((r, i) => anRankRowHtml(i, r.key, r.name,
+      r.retPct == null ? 'חזרו ' + anNum(r.retUnits) + ' יח׳ · ₪' + anMoney(r.retValue) + ' · לא הגיע בטווח הזה' : 'חזרו ' + anNum(r.retUnits) + ' מתוך ' + anNum(r.recvUnits) + ' שהגיעו · ₪' + anMoney(r.retValue),
+      anPctText(r), 'text-rose-600', 'חזר', 'bg-rose-50 text-rose-600')).join('');
+    if (crateKinds > 0) note = crateKinds + ' סוגי ארגזים עם חזרות לא מדורגים כאן (החזרה שלהם היא חלק מהשיטה). אפשר למצוא אותם בחיפוש.';
   }
   return '<div id="anRankBox" class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm mb-3">' +
-    '<div class="flex flex-wrap gap-1.5 mb-3">' + chips + '</div>' +
-    '<div class="font-black text-slate-700 text-sm mb-1">' + title + '</div>' +
-    (body || '<div class="text-center text-sm text-slate-400 font-bold py-3">' + empty + '</div>') +
+    '<div class="text-xs font-black text-slate-500 mb-2"><i class="fa-solid fa-list-ol ml-1"></i>מה רוצים לראות?</div>' +
+    '<div class="grid grid-cols-4 gap-1.5 mb-3">' + chips + '</div>' +
+    '<div class="font-black text-slate-800 text-base"><i class="fa-solid ' + def.icon + ' ' + def.color + ' ml-1"></i>' + def.title + '</div>' +
+    '<div class="text-[11px] text-slate-500 font-bold leading-relaxed mb-1">' + def.help + '</div>' +
+    (body || '<div class="text-center text-sm text-slate-400 font-bold py-4">' + def.empty + '</div>') +
     (note ? '<div class="text-[11px] text-slate-400 font-bold pt-2">' + note + '</div>' : '') +
   '</div>';
 }
@@ -15539,8 +15564,8 @@ function anSearchResultsHtml() {
   if (!res.length) return '<div class="text-center text-sm text-slate-400 font-bold py-3">לא נמצא מוצר מתאים</div>';
   return res.map(x => {
     const hint = x.row
-      ? ('נקלט ' + x.row.recvUnits + ' · הוחזר ' + x.row.retUnits + ' · נמכר ' + x.row.soldUnits + ' יח׳ בטווח')
-      : 'אין תנועה בטווח שנבחר';
+      ? ('הגיע ' + anNum(x.row.recvUnits) + ' · חזר ' + anNum(x.row.retUnits) + ' · נמכר ' + anNum(x.row.soldUnits) + ' יח׳ בטווח')
+      : 'לא הגיע ולא חזר בטווח הזה';
     return '<button data-role="an-pick" data-key="' + htmlEscape(x.key) + '" class="btn-tap w-full text-right bg-white border border-slate-200 rounded-xl px-3 py-2.5 mb-1.5 flex items-center justify-between gap-2">' +
       '<span class="min-w-0"><span class="block font-black text-sm text-slate-800 truncate">' + htmlEscape(x.name) + '</span>' +
       '<span class="block text-[11px] text-slate-400">' + hint + '</span></span>' +
@@ -15568,11 +15593,11 @@ function anPriceHistoryHtml(r) {
       '<span class="text-sm font-black text-slate-800">₪' + fmtMoney(p.unit) + ' ' + arrow + '</span>' +
     '</div>';
   }).join('');
-  return '<div class="mt-3 pt-2 border-t border-slate-100"><div class="text-xs font-black text-slate-500 mb-1"><i class="fa-solid fa-shekel-sign ml-1"></i>מחיר ליחידה בכל קליטה (לפי תאריך הנייר)</div>' + rowsHtml +
+  return '<div class="mt-3 pt-3 border-t border-slate-100"><div class="text-xs font-black text-slate-600 mb-1"><i class="fa-solid fa-shekel-sign ml-1"></i>מחיר הקנייה בכל קליטה</div>' + rowsHtml +
     (older > 0 ? '<div class="text-[11px] text-slate-400 font-bold pt-1.5">ועוד ' + older + ' קליטות קודמות בטווח</div>' : '') + '</div>';
 }
 
-// גרף שבועי: עמודה לכל שבוע (ראשון עד שבת), נקלט מול הוחזר. ציר הזמן משמאל לימין.
+// גרף שבועי: עמודה לכל שבוע (ראשון עד שבת), הגיע מול חזר. ציר הזמן משמאל לימין.
 function anWeeksInRange(fromD, toD) {
   const out = []; let k = anWeekKey(fromD); const last = anWeekKey(toD);
   let guard = 0;
@@ -15590,29 +15615,13 @@ function anWeekChartHtml(r) {
     const b = bw[w] || { recv: 0, ret: 0 };
     const bar = (v, cls) => '<div class="' + cls + ' rounded-t" style="width:40%;height:' + (v > 0 ? Math.max(3, Math.round(v / max * 100)) : 0) + '%"></div>';
     const lab = (i % every === 0 || i === weeks.length - 1) ? anShortDM(w) : '';
-    return '<div class="flex-1 min-w-0 flex flex-col items-center"><div class="w-full h-20 flex items-end justify-center gap-px" title="שבוע ' + dDisp(w) + ': נקלט ' + b.recv + ' · הוחזר ' + b.ret + '">' + bar(b.recv, 'bg-blue-500') + bar(b.ret, 'bg-rose-400') + '</div><div class="text-[9px] text-slate-400 font-bold h-3 leading-3 whitespace-nowrap">' + lab + '</div></div>';
+    return '<div class="flex-1 min-w-0 flex flex-col items-center"><div class="w-full h-20 flex items-end justify-center gap-px" title="שבוע ' + dDisp(w) + ': הגיע ' + b.recv + ' · חזר ' + b.ret + '">' + bar(b.recv, 'bg-blue-500') + bar(b.ret, 'bg-rose-400') + '</div><div class="text-[9px] text-slate-400 font-bold h-3 leading-3 whitespace-nowrap">' + lab + '</div></div>';
   }).join('');
-  return '<div class="mt-3 pt-2 border-t border-slate-100">' +
-    '<div class="flex items-center justify-between mb-1"><div class="text-xs font-black text-slate-500"><i class="fa-solid fa-chart-column ml-1"></i>לפי שבועות</div>' +
-    '<div class="text-[10px] font-bold text-slate-400"><span class="inline-block w-2 h-2 rounded-sm bg-blue-500 align-middle"></span> נקלט <span class="inline-block w-2 h-2 rounded-sm bg-rose-400 align-middle mr-1.5"></span> הוחזר</div></div>' +
-    '<div class="flex items-end gap-0.5" dir="ltr">' + cols + '</div></div>';
-}
-
-function anTileHtml(cls, big, small, delta) {
-  return '<div class="' + cls + ' rounded-xl py-2 px-1 text-center"><div class="text-lg font-black leading-tight">' + big + '</div><div class="text-[10px] font-black opacity-80 leading-tight">' + small + '</div><div class="h-3.5 leading-none mt-0.5">' + (delta || '') + '</div></div>';
-}
-function anTotalsHtml() {
-  if (!anData) return '';
-  const t = anTotals(anRows()), tp = anPrevTotals(), hasPrev = anHasPrev();
-  return '<div class="grid grid-cols-3 gap-2 mt-3">' +
-    anTileHtml('bg-blue-50 border border-blue-100 text-blue-700', '₪' + fmtMoney(t.recvValue), 'נקלט · ' + t.recvUnits + ' יח׳', hasPrev ? anDeltaHtml(t.recvValue, tp.recvValue) : '') +
-    anTileHtml('bg-rose-50 border border-rose-100 text-rose-700', (t.retPct != null ? String(t.retPct).replace(/\.0$/, '') + '%' : '—'), 'הוחזר · ' + t.retUnits + ' יח׳ · ₪' + fmtMoney(t.retValue), hasPrev ? anPctDeltaHtml(t.retPct, tp.retPct) : '') +
-    anTileHtml('bg-emerald-50 border border-emerald-100 text-emerald-700', '₪' + fmtMoney(t.soldValue), 'נמכר · ' + t.soldUnits + ' יח׳ · בעלות', hasPrev ? anDeltaHtml(t.soldValue, tp.soldValue) : '') +
-  '</div>' +
-  (t.profitRows ? '<div class="text-[11px] text-slate-500 font-bold mt-1.5"><i class="fa-solid fa-coins text-emerald-600"></i> רווח גולמי משוער: <b class="text-slate-700">₪' + fmtMoney(t.profit) + '</b> <span class="text-slate-400">· ' + t.profitRows + ' מוצרים עם מחיר קופה</span></div>' : '') +
-  (hasPrev
-    ? '<div class="text-[10px] text-slate-400 font-bold mt-1">החצים משווים ל-' + dDisp(anData.prevFromD) + ' – ' + dDisp(anData.prevToD) + ' (אותו אורך)</div>'
-    : '<div class="text-[10px] text-slate-400 font-bold mt-1">אין תעודות בתקופה הקודמת (' + dDisp(anData.prevFromD) + ' – ' + dDisp(anData.prevToD) + ') — בלי השוואה</div>');
+  return '<div class="mt-3 pt-3 border-t border-slate-100">' +
+    '<div class="flex items-center justify-between mb-1"><div class="text-xs font-black text-slate-600"><i class="fa-solid fa-chart-column ml-1"></i>שבוע אחרי שבוע</div>' +
+    '<div class="text-[10px] font-bold text-slate-500"><span class="inline-block w-2.5 h-2.5 rounded-sm bg-blue-500 align-middle"></span> הגיע <span class="inline-block w-2.5 h-2.5 rounded-sm bg-rose-400 align-middle mr-2"></span> חזר</div></div>' +
+    '<div class="flex items-end gap-0.5" dir="ltr">' + cols + '</div>' +
+    '<div class="text-[10px] text-slate-400 font-bold mt-1">כל עמודה היא שבוע (ראשון עד שבת). כחול = כמה יחידות הגיעו, אדום = כמה חזרו.</div></div>';
 }
 
 function anSelectedCardHtml() {
@@ -15626,43 +15635,44 @@ function anSelectedCardHtml() {
   } else if (!r) { return ''; }
   const prev = anPrev(anSelectedKey), hasPrev = anHasPrev();
   const crateTag = crate ? ' <span class="text-[10px] font-black text-indigo-700 bg-indigo-50 border border-indigo-200 rounded px-1.5 py-0.5 align-middle">ארגז</span>' : '';
-  const row = (label, valueHtml) => '<div class="flex items-center justify-between gap-2"><span class="text-xs font-black text-slate-500 shrink-0">' + label + '</span><span class="text-sm font-bold text-slate-800 text-left">' + valueHtml + '</span></div>';
+  const section = (icon, title, inner) => '<div class="mt-3 pt-3 border-t border-slate-100"><div class="text-xs font-black text-slate-600 mb-1.5"><i class="fa-solid ' + icon + ' ml-1"></i>' + title + '</div>' + inner + '</div>';
+  const line = (html) => '<div class="text-sm font-bold text-slate-700 leading-relaxed">' + html + '</div>';
   let stats;
   if (r) {
-    const pct = (v) => String(v).replace(/\.0$/, '');
-    const marginHtml = r.posPrice == null
-      ? '<span class="text-amber-600">אין מחיר קופה</span>'
-      : (r.belowCost
-        ? '<span class="text-rose-600">' + pct(r.marginPct) + '% · מתחת לעלות!</span>'
-        : '<span class="' + (r.marginPct < 10 ? 'text-amber-600' : 'text-emerald-700') + '">' + pct(r.marginPct) + '%</span>');
-    const priceChange = (r.priceFirst != null && r.priceLast != null && r.priceFirst !== r.priceLast)
-      ? '₪' + fmtMoney(r.priceFirst) + ' ← ₪' + fmtMoney(r.priceLast) + ' <span class="text-[11px] font-black ' + (r.priceChangePct > 0 ? 'text-rose-600' : 'text-emerald-600') + '">(' + (r.priceChangePct > 0 ? '+' : '') + pct(r.priceChangePct) + '%)</span>'
-      : (r.priceFirst != null ? '<span class="text-slate-400">ללא שינוי · ₪' + fmtMoney(r.priceFirst) + '</span>' : '—');
+    const u = anUnitProfit(r);
+    const profitTile = r.grossProfit != null
+      ? anStatTile('bg-amber-50 border border-amber-100 text-amber-800', 'רווח בתקופה', '₪' + anMoney(r.grossProfit), u != null ? '₪' + fmtMoney(u) + ' על כל יחידה' : '')
+      : anStatTile('bg-slate-50 border border-slate-200 text-slate-500', 'רווח בתקופה', '—', 'אין מחיר קופה');
+    const priceLine = (r.priceFirst != null && r.priceLast != null && r.priceFirst !== r.priceLast)
+      ? line('המחיר ' + (r.priceChangePct > 0 ? '<span class="text-rose-600">עלה</span>' : '<span class="text-emerald-700">ירד</span>') + ' מ-₪' + fmtMoney(r.priceFirst) + ' ל-₪' + fmtMoney(r.priceLast) + ' <span class="text-xs text-slate-400">(<span dir="ltr">' + (r.priceChangePct > 0 ? '+' : '') + anPlainPct(r.priceChangePct) + '</span>)</span>')
+      : (r.priceFirst != null ? line('המחיר יציב: ₪' + fmtMoney(r.priceFirst) + ' ליחידה') : '');
+    const lastRecvLine = r.lastRecv ? line('הגיע לאחרונה ב-' + dDisp(r.lastRecv.d) + ' <span class="text-xs text-slate-400">(' + anAgoText(r.lastRecv.d) + ')</span> · ' + anNum(r.lastRecv.qty) + ' יח׳ · ₪' + fmtMoney(r.lastRecv.unit) + ' ליח׳') : line('<span class="text-slate-400">לא הגיע בטווח הזה</span>');
+    const lastRetLine = r.lastRet ? line('חזר לאחרונה ב-' + dDisp(r.lastRet.d) + ' <span class="text-xs text-slate-400">(' + anAgoText(r.lastRet.d) + ')</span> · ' + anNum(r.lastRet.qty) + ' יח׳ · ' + anRetStatusHtml(r.lastRet.status)) : line('<span class="text-slate-400">לא חזר בטווח הזה</span>');
+    const profitInner = r.posPrice == null
+      ? line('<span class="text-amber-700">לא הוזן מחיר קופה למוצר, לכן אי אפשר לחשב רווח.</span> <span class="text-xs text-slate-400">אפשר להוסיף במסך "מוצרים ומחירים".</span>')
+      : line('קונה ב-₪' + fmtMoney(r.cost) + ' · מוכר ב-₪' + fmtMoney(r.posPrice) + ' <span class="text-xs text-slate-400">(₪' + fmtMoney(r.posNet) + ' בלי מע״מ)</span>') +
+        line(r.belowCost
+          ? '<span class="text-rose-600">מוכר בהפסד: מפסיד ₪' + fmtMoney(-u) + ' על כל יחידה</span>'
+          : 'נשאר <b class="' + (r.marginPct < 10 ? 'text-amber-700' : 'text-emerald-700') + '">₪' + fmtMoney(u) + '</b> על כל יחידה <span class="text-xs text-slate-400">(' + anPlainPct(r.marginPct) + ' על מחיר הקנייה)</span>') +
+        (r.grossProfit != null ? line('בתקופה הזו: <b class="' + (r.grossProfit >= 0 ? 'text-emerald-700' : 'text-rose-600') + '">₪' + anMoney(r.grossProfit) + '</b> רווח על ' + anNum(r.soldUnits) + ' יח׳ שנמכרו') : '');
     stats =
       '<div class="grid grid-cols-2 gap-2 mt-3">' +
-        anTileHtml('bg-blue-50 border border-blue-100 text-blue-700', r.recvUnits, 'נקלטו · ₪' + fmtMoney(r.recvValue), hasPrev ? anDeltaHtml(r.recvUnits, prev ? prev.recvUnits : 0) : '') +
-        anTileHtml('bg-rose-50 border border-rose-100 text-rose-700', r.retUnits, 'הוחזרו · ₪' + fmtMoney(r.retValue), hasPrev ? anDeltaHtml(r.retUnits, prev ? prev.retUnits : 0, { lowerIsBetter: true }) : '') +
-        anTileHtml('bg-emerald-50 border border-emerald-100 text-emerald-700', r.soldUnits, 'נמכרו · ₪' + fmtMoney(r.soldValue) + ' בעלות', hasPrev ? anDeltaHtml(r.soldUnits, prev ? prev.soldUnits : 0) : '') +
-        anTileHtml('bg-slate-50 border border-slate-200 text-slate-700', anPctText(r), 'אחוז חזרות', hasPrev && prev ? anPctDeltaHtml(r.retPct, prev.retPct) : '') +
+        anStatTile('bg-blue-50 border border-blue-100 text-blue-800', 'הגיע מהספק', anNum(r.recvUnits) + ' יח׳', '₪' + anMoney(r.recvValue)) +
+        anStatTile('bg-rose-50 border border-rose-100 text-rose-800', 'חזר לספק', anNum(r.retUnits) + ' יח׳', '₪' + anMoney(r.retValue) + (r.retPct != null ? ' · ' + anPlainPct(r.retPct) + ' ממה שהגיע' : '')) +
+        anStatTile('bg-emerald-50 border border-emerald-100 text-emerald-800', 'נמכר', anNum(r.soldUnits) + ' יח׳', '₪' + anMoney(r.soldValue) + ' לפי מחיר קנייה') +
+        profitTile +
       '</div>' +
-      (hasPrev ? '<div class="text-[10px] text-slate-400 font-bold mt-1 text-center">החצים משווים ל-' + dDisp(anData.prevFromD) + ' – ' + dDisp(anData.prevToD) + (prev ? '' : ' (לא היה בתקופה הקודמת)') + '</div>' : '') +
-      '<div class="mt-3 space-y-1.5">' +
-        row('קליטה אחרונה בטווח', r.lastRecv ? (dDisp(r.lastRecv.d) + ' <span class="text-[11px] text-slate-400">(' + anAgoText(r.lastRecv.d) + ')</span> · ' + r.lastRecv.qty + ' יח׳ · ₪' + fmtMoney(r.lastRecv.unit) + ' ליח׳') : '—') +
-        row('חזרה אחרונה בטווח', r.lastRet ? (dDisp(r.lastRet.d) + ' <span class="text-[11px] text-slate-400">(' + anAgoText(r.lastRet.d) + ')</span> · ' + r.lastRet.qty + ' יח׳ · ' + anRetStatusHtml(r.lastRet.status)) : '—') +
-        row('שינוי מחיר בטווח', priceChange) +
+      '<div class="mt-2 bg-slate-50 rounded-xl border border-slate-200 px-3 py-2">' +
+        '<div class="text-[11px] font-black text-slate-500 mb-1">' + (hasPrev ? anPrevLabel() : 'השוואה לתקופה הקודמת') + '</div>' +
+        (!hasPrev ? '<div class="text-xs font-bold text-slate-400">אין תעודות מהתקופה הקודמת, אז אין למה להשוות.</div>'
+          : (prev ? '<div class="space-y-1">' + anCompareHtml(r, prev, false) + '</div>' : '<div class="text-xs font-bold text-slate-400">המוצר לא הגיע ולא חזר בתקופה הקודמת.</div>')) +
       '</div>' +
-      (crate ? '' :
-      '<div class="mt-3 pt-2 border-t border-slate-100 space-y-1.5">' +
-        '<div class="text-xs font-black text-slate-500 mb-1"><i class="fa-solid fa-coins ml-1"></i>רווח מול מחיר הקופה</div>' +
-        row('עלות אחרונה', r.cost != null ? '₪' + fmtMoney(r.cost) + ' <span class="text-[11px] text-slate-400">בלי מע״מ</span>' : '—') +
-        row('מחיר קופה', r.posPrice != null ? '₪' + fmtMoney(r.posPrice) + ' <span class="text-[11px] text-slate-400">· ₪' + fmtMoney(r.posNet) + ' בלי מע״מ</span>' : '<span class="text-amber-600">אין מחיר קופה</span>') +
-        row('רווח על העלות', marginHtml) +
-        row('רווח גולמי משוער בתקופה', r.grossProfit != null ? '<span class="' + (r.grossProfit >= 0 ? 'text-emerald-700' : 'text-rose-600') + '">₪' + fmtMoney(r.grossProfit) + '</span> <span class="text-[11px] text-slate-400">· לפי ' + r.soldUnits + ' יח׳ שנמכרו</span>' : '—') +
-      '</div>') +
+      section('fa-truck-ramp-box', 'קליטות וחזרות', lastRecvLine + lastRetLine + priceLine) +
+      (crate ? '' : section('fa-coins', 'כמה אני מרוויח על המוצר', profitInner)) +
       anWeekChartHtml(r) +
       anPriceHistoryHtml(r);
   } else {
-    stats = '<div class="text-center text-sm text-slate-400 font-bold py-4">אין קליטות או חזרות למוצר הזה בטווח שנבחר</div>';
+    stats = '<div class="text-center text-sm text-slate-400 font-bold py-4">המוצר לא הגיע ולא חזר בטווח שנבחר</div>';
   }
   const shareBtns = r
     ? '<button data-role="an-share" data-what="product" class="btn-tap shrink-0 w-9 h-9 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center" title="שתף"><i class="fa-solid fa-share-nodes"></i></button>' +
@@ -15670,14 +15680,14 @@ function anSelectedCardHtml() {
     : '';
   return '<div class="bg-white rounded-2xl border-2 border-blue-200 p-4 shadow-sm mb-3">' +
     '<div class="flex items-start justify-between gap-2">' +
-      '<div class="min-w-0"><div class="font-black text-slate-800 truncate">' + htmlEscape(name) + crateTag + '</div>' +
+      '<div class="min-w-0"><div class="font-black text-slate-800 text-base truncate">' + htmlEscape(name) + crateTag + '</div>' +
       (barcode ? '<div class="text-[11px] text-slate-400" dir="ltr">' + htmlEscape(barcode) + '</div>' : '') + '</div>' +
       '<div class="flex gap-1.5 shrink-0">' + shareBtns +
-      '<button data-role="an-clear" class="btn-tap shrink-0 w-9 h-9 rounded-lg bg-slate-100 text-slate-400 flex items-center justify-center"><i class="fa-solid fa-xmark"></i></button></div>' +
+      '<button data-role="an-clear" class="btn-tap shrink-0 w-9 h-9 rounded-lg bg-slate-100 text-slate-400 flex items-center justify-center" title="סגור"><i class="fa-solid fa-xmark"></i></button></div>' +
     '</div>' + stats + '</div>';
 }
 
-// --- שיתוף / העתקה כטקסט (וואטסאפ-ידידותי) ---
+// --- שיתוף / העתקה כטקסט (וואטסאפ-ידידותי, באותה שפה פשוטה) ---
 function anRangeText() { return anData ? (dDisp(anData.fromD) + ' – ' + dDisp(anData.toD)) : ''; }
 function anSummaryText() {
   if (!anData) return '';
@@ -15686,38 +15696,38 @@ function anSummaryText() {
   const L = [];
   L.push('📊 *ניתוח מוצרים — ' + AN_APP_NAME + '*');
   L.push('📅 ' + anRangeText() + ' (' + (anDaysBetween(anData.fromD, anData.toD) + 1) + ' ימים) · ' + anData.rcCount + ' תעודות קליטה · ' + anData.retCount + ' תעודות חזרה');
-  L.push('📥 נקלט: ' + t.recvUnits + ' יח׳ · ₪' + fmtMoney(t.recvValue) + (hasPrev ? anDeltaText(t.recvValue, tp.recvValue) : ''));
-  L.push('↩️ הוחזר: ' + t.retUnits + ' יח׳ · ₪' + fmtMoney(t.retValue) + (t.retPct != null ? ' (' + t.retPct + '%)' : '') + (hasPrev && tp.retPct != null ? ' · בתקופה הקודמת ' + tp.retPct + '%' : ''));
-  L.push('🛒 נמכר: ' + t.soldUnits + ' יח׳ · ₪' + fmtMoney(t.soldValue) + ' בעלות' + (hasPrev ? anDeltaText(t.soldValue, tp.soldValue) : ''));
-  if (t.profitRows) L.push('💰 רווח גולמי משוער: ₪' + fmtMoney(t.profit) + ' (' + t.profitRows + ' מוצרים עם מחיר קופה)');
-  if (hasPrev) L.push('לעומת ' + dDisp(anData.prevFromD) + ' – ' + dDisp(anData.prevToD));
+  L.push('📥 הגיע מהספק: ₪' + anMoney(t.recvValue) + ' · ' + anNum(t.recvUnits) + ' יח׳');
+  L.push('↩️ חזר לספק: ₪' + anMoney(t.retValue) + ' · ' + anNum(t.retUnits) + ' יח׳' + (t.retPct != null ? ' (' + anPlainPct(t.retPct) + ' ממה שהגיע)' : ''));
+  L.push('🛒 נמכר: ₪' + anMoney(t.soldValue) + ' · ' + anNum(t.soldUnits) + ' יח׳ (לפי מחיר קנייה)');
+  if (t.profitRows) L.push('💰 רווח משוער: ₪' + anMoney(t.profit) + ' (לפי ' + t.profitRows + ' מוצרים עם מחיר קופה)');
+  if (hasPrev) { L.push(''); L.push(anPrevLabel() + ':'); L.push(anCompareText(t, tp, true)); }
   const top5 = (list, fmt) => list.slice(0, 5).map((r, i) => (i + 1) + '. ' + fmt(r)).join('\n');
   const ret = anRankReturns(rows);
-  if (ret.length) { L.push(''); L.push('*הכי הרבה חזרות*'); L.push(top5(ret, r => r.name + ' — ' + anPctText(r) + (r.retPct != null ? ' (' + r.retUnits + ' מתוך ' + r.recvUnits + ')' : ' (' + r.retUnits + ' יח׳)'))); }
+  if (ret.length) { L.push(''); L.push('*הכי הרבה חזרות*'); L.push(top5(ret, r => r.name + ' — ' + anPctText(r) + (r.retPct != null ? ' (חזרו ' + r.retUnits + ' מתוך ' + r.recvUnits + ')' : ' (חזרו ' + r.retUnits + ' יח׳)'))); }
   const sold = anRankSold(rows);
-  if (sold.length) { L.push(''); L.push('*הכי נמכר*'); L.push(top5(sold, r => r.name + ' — ' + r.soldUnits + ' יח׳')); }
+  if (sold.length) { L.push(''); L.push('*הכי נמכר*'); L.push(top5(sold, r => r.name + ' — ' + anNum(r.soldUnits) + ' יח׳')); }
   const up = anRankPriceUp(rows);
-  if (up.length) { L.push(''); L.push('*המחירים שעלו*'); L.push(up.slice(0, 5).map(r => '• ' + r.name + ': ₪' + fmtMoney(r.priceFirst) + ' ← ₪' + fmtMoney(r.priceLast) + ' (+' + r.priceChangePct + '%)').join('\n')); }
+  if (up.length) { L.push(''); L.push('*המחירים שעלו*'); L.push(up.slice(0, 5).map(r => '• ' + r.name + ': מ-₪' + fmtMoney(r.priceFirst) + ' ל-₪' + fmtMoney(r.priceLast) + ' (+' + anPlainPct(r.priceChangePct) + ')').join('\n')); }
   const miss = anData.missing || [];
-  if (miss.length) { L.push(''); L.push('*לא הגיע בטווח*: ' + miss.slice(0, 8).map(m => m.name).join(', ') + (miss.length > 8 ? ' ועוד ' + (miss.length - 8) : '')); }
+  if (miss.length) { L.push(''); L.push('*בקטלוג אבל לא הגיע*: ' + miss.slice(0, 8).map(m => m.name).join(', ') + (miss.length > 8 ? ' ועוד ' + (miss.length - 8) : '')); }
   return L.join('\n');
 }
 function anProductText(key) {
   const r = anRows().find(x => x.key === key);
   if (!r || !anData) return '';
-  const prev = anPrev(key), hasPrev = anHasPrev();
+  const prev = anPrev(key), hasPrev = anHasPrev(), u = anUnitProfit(r);
   const L = [];
   L.push('📊 *' + r.name + '*' + (r.barcode ? ' (' + r.barcode + ')' : ''));
   L.push('📅 ' + anRangeText() + ' · ' + AN_APP_NAME);
-  L.push('📥 נקלט ' + r.recvUnits + ' יח׳ · ₪' + fmtMoney(r.recvValue));
-  L.push('↩️ הוחזר ' + r.retUnits + ' יח׳ · ₪' + fmtMoney(r.retValue) + (r.retPct != null ? ' (' + anPctText(r) + ')' : ''));
-  L.push('🛒 נמכר ' + r.soldUnits + ' יח׳ · ₪' + fmtMoney(r.soldValue) + ' בעלות');
-  if (hasPrev) L.push('לעומת ' + dDisp(anData.prevFromD) + ' – ' + dDisp(anData.prevToD) + ': ' + (prev ? ('נמכר ' + prev.soldUnits + ' יח׳' + anDeltaText(r.soldUnits, prev.soldUnits) + (prev.retPct != null ? ' · חזרות ' + anPctText(prev) : '')) : 'לא היה בתקופה הקודמת'));
-  if (r.cost != null) L.push('💰 עלות אחרונה ₪' + fmtMoney(r.cost) + (r.posPrice != null ? ' · קופה ₪' + fmtMoney(r.posPrice) + ' · רווח ' + r.marginPct + '%' + (r.belowCost ? ' ⚠ מתחת לעלות' : '') : ' · אין מחיר קופה'));
-  if (r.grossProfit != null) L.push('📈 רווח גולמי משוער בתקופה: ₪' + fmtMoney(r.grossProfit));
-  if (r.priceFirst != null && r.priceLast != null && r.priceFirst !== r.priceLast) L.push('🏷 מחיר: ₪' + fmtMoney(r.priceFirst) + ' ← ₪' + fmtMoney(r.priceLast) + ' (' + (r.priceChangePct > 0 ? '+' : '') + r.priceChangePct + '%)');
-  if (r.lastRecv) L.push('קליטה אחרונה: ' + dDisp(r.lastRecv.d) + ' · ' + r.lastRecv.qty + ' יח׳ · ₪' + fmtMoney(r.lastRecv.unit) + ' ליח׳');
-  if (r.lastRet) L.push('חזרה אחרונה: ' + dDisp(r.lastRet.d) + ' · ' + r.lastRet.qty + ' יח׳');
+  L.push('📥 הגיע מהספק: ' + anNum(r.recvUnits) + ' יח׳ · ₪' + anMoney(r.recvValue));
+  L.push('↩️ חזר לספק: ' + anNum(r.retUnits) + ' יח׳ · ₪' + anMoney(r.retValue) + (r.retPct != null ? ' (' + anPctText(r) + ' ממה שהגיע)' : ''));
+  L.push('🛒 נמכר: ' + anNum(r.soldUnits) + ' יח׳ · ₪' + anMoney(r.soldValue) + ' (לפי מחיר קנייה)');
+  if (hasPrev) { L.push(anPrevLabel() + ':'); L.push(prev ? anCompareText(r, prev, false) : '• לא הגיע ולא חזר בתקופה הקודמת'); }
+  if (r.posPrice == null) L.push('💰 אין מחיר קופה למוצר, לכן אין חישוב רווח');
+  else L.push('💰 קונה ב-₪' + fmtMoney(r.cost) + ' · מוכר ב-₪' + fmtMoney(r.posPrice) + ' · ' + (r.belowCost ? '⚠ מוכר בהפסד: מפסיד ₪' + fmtMoney(-u) + ' ליחידה' : 'נשאר ₪' + fmtMoney(u) + ' ליחידה (' + anPlainPct(r.marginPct) + ')') + (r.grossProfit != null ? ' · רווח בתקופה ₪' + anMoney(r.grossProfit) : ''));
+  if (r.priceFirst != null && r.priceLast != null && r.priceFirst !== r.priceLast) L.push('🏷 המחיר ' + (r.priceChangePct > 0 ? 'עלה' : 'ירד') + ' מ-₪' + fmtMoney(r.priceFirst) + ' ל-₪' + fmtMoney(r.priceLast) + ' (' + (r.priceChangePct > 0 ? '+' : '') + anPlainPct(r.priceChangePct) + ')');
+  if (r.lastRecv) L.push('הגיע לאחרונה: ' + dDisp(r.lastRecv.d) + ' · ' + anNum(r.lastRecv.qty) + ' יח׳ · ₪' + fmtMoney(r.lastRecv.unit) + ' ליח׳');
+  if (r.lastRet) L.push('חזר לאחרונה: ' + dDisp(r.lastRet.d) + ' · ' + anNum(r.lastRet.qty) + ' יח׳');
   return L.join('\n');
 }
 async function anShareText(text) {
@@ -15730,7 +15740,7 @@ async function anShareText(text) {
 }
 function anCopyText(text) {
   if (!text) { showToast('אין מה להעתיק עדיין', null, null, 2200); return; }
-  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => showToast('הסיכום הועתק', null, null, 2200)).catch(() => showToast('ההעתקה נכשלה', null, null, 2200));
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => showToast('הועתק — אפשר להדביק בוואטסאפ או בהודעה', null, null, 2400)).catch(() => showToast('ההעתקה נכשלה', null, null, 2200));
   else showToast('ההעתקה אינה נתמכת בדפדפן הזה', null, null, 2400);
 }
 
@@ -15751,28 +15761,30 @@ function renderAnalysis() {
       '</div>'
     : '';
   const coverage = anData
-    ? '<div class="text-[11px] text-slate-400 font-bold mt-2">' + anRangeText() + ' · ' + anData.rcCount + ' תעודות קליטה · ' + anData.retCount + ' תעודות חזרה · לפי תאריך הנייר' + (anData.truncated ? ' · <span class="text-amber-600">הטווח גדול — נקראו 1200 התעודות האחרונות בלבד</span>' : '') + '</div>'
+    ? '<div class="text-xs text-slate-500 font-bold mt-2.5"><i class="fa-solid fa-calendar-day text-slate-400 ml-1"></i>' + anRangeText() + ' · ' + anData.rcCount + ' תעודות קליטה · ' + anData.retCount + ' תעודות חזרה' + (anData.truncated ? ' · <span class="text-amber-600">הטווח גדול — נקראו 1200 התעודות האחרונות בלבד</span>' : '') + '</div>'
     : '';
   const warn = anError ? '<div class="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs font-bold text-amber-800 mt-2">' + anError + '</div>' : '';
   const busyHtml = anBusy ? '<div class="text-center py-8 text-slate-400 font-black"><i class="fa-solid fa-circle-notch fa-spin text-2xl mb-2"></i><div>מושך היסטוריה מהענן…</div></div>' : '';
-  const emptyHtml = (!anBusy && anData && !anData.rows.length) ? '<div class="text-center py-8 text-slate-400 font-bold">אין תעודות בטווח שנבחר</div>' : '';
+  const emptyHtml = (!anBusy && anData && !anData.rows.length) ? '<div class="text-center py-8 text-slate-400 font-bold">אין תעודות קליטה או חזרה בטווח שנבחר</div>' : '';
   const shareBtns = (anData && !anBusy)
     ? '<div class="flex gap-1.5 shrink-0">' +
-        '<button data-role="an-share" data-what="summary" class="btn-tap h-9 px-3 rounded-xl bg-emerald-600 text-white text-xs font-black flex items-center gap-1.5"><i class="fa-solid fa-share-nodes"></i> שתף סיכום</button>' +
+        '<button data-role="an-share" data-what="summary" class="btn-tap h-9 px-3 rounded-xl bg-emerald-600 text-white text-xs font-black flex items-center gap-1.5"><i class="fa-solid fa-share-nodes"></i> שתף</button>' +
         '<button data-role="an-copy" data-what="summary" class="btn-tap w-9 h-9 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center" title="העתק כטקסט"><i class="fa-solid fa-copy"></i></button>' +
       '</div>'
     : '';
   app.innerHTML =
     '<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm mb-3">' +
-      '<div class="flex items-center justify-between gap-2 mb-1"><div class="flex items-center gap-2 min-w-0"><i class="fa-solid fa-chart-simple text-emerald-600"></i><div class="font-black text-slate-800">ניתוח מוצרים</div></div>' + shareBtns + '</div>' +
-      '<div class="text-[11px] text-slate-400 font-bold mb-2.5">קליטות, חזרות, מה נמכר ורווח לפי מוצר · קריאה בלבד — שום דבר כאן לא משנה נתונים</div>' +
+      '<div class="flex items-center justify-between gap-2 mb-1"><div class="flex items-center gap-2 min-w-0"><i class="fa-solid fa-chart-simple text-emerald-600"></i><div class="font-black text-slate-800 text-base">ניתוח מוצרים</div></div>' + shareBtns + '</div>' +
+      '<div class="text-xs text-slate-500 font-bold mb-3">מה הגיע מהספק, מה חזר, מה נמכר וכמה נשאר לי. רק מציג, לא משנה כלום.</div>' +
+      '<div class="text-[11px] font-black text-slate-500 mb-1.5">איזו תקופה?</div>' +
       '<div class="flex flex-wrap gap-1.5">' + chips + '</div>' + manualRow + coverage + (anBusy ? '' : anTotalsHtml()) + warn +
     '</div>' +
     (busyHtml || (
       '<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm mb-3">' +
+        '<div class="text-[11px] font-black text-slate-500 mb-1.5">מוצר מסוים?</div>' +
         '<div class="flex gap-2">' +
         '<div class="relative flex-1"><i class="fa-solid fa-magnifying-glass absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 text-sm"></i>' +
-        '<input id="anSearch" type="text" value="' + htmlEscape(anQuery) + '" placeholder="חפש מוצר — שם או ספרות מהברקוד" class="w-full border border-slate-200 rounded-xl pr-9 pl-3 py-2.5 text-sm font-bold text-slate-700 outline-none focus:border-blue-500"></div>' +
+        '<input id="anSearch" type="text" value="' + htmlEscape(anQuery) + '" placeholder="חפש לפי שם או ברקוד" class="w-full border border-slate-200 rounded-xl pr-9 pl-3 py-2.5 text-sm font-bold text-slate-700 outline-none focus:border-blue-500"></div>' +
         '<button data-role="an-scan" class="btn-tap shrink-0 bg-blue-600 text-white rounded-xl px-4 flex items-center justify-center" aria-label="סרוק ברקוד"><i class="fa-solid fa-barcode text-lg"></i></button>' +
       '</div>' +
         '<div id="anSearchResults" class="mt-2">' + anSearchResultsHtml() + '</div>' +
@@ -16117,7 +16129,7 @@ app.addEventListener('click', (e) => {
   if (role === 'an-pick') { anSelectedKey = t.dataset.key || null; anQuery = ''; renderAnalysis(); window.scrollTo({ top: 0 }); return; }
   if (role === 'an-clear') { anSelectedKey = null; renderAnalysis(); return; }
   if (role === 'an-scan') { scanPurpose = 'analysis'; openScanner(); return; }
-  // v282: בחירת דירוג, שיתוף והעתקה של הסיכום / המוצר
+  // v283: בחירת דירוג, שיתוף והעתקה של הסיכום / המוצר
   if (role === 'an-rank') { anRank = t.dataset.rank || 'returns'; const box = $('anRankBox'); if (box) box.outerHTML = anRankingsHtml(); else renderAnalysis(); return; }
   if (role === 'an-share') { anShareText(t.dataset.what === 'product' ? anProductText(anSelectedKey) : anSummaryText()); return; }
   if (role === 'an-copy') { anCopyText(t.dataset.what === 'product' ? anProductText(anSelectedKey) : anSummaryText()); return; }
