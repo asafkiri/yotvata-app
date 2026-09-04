@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v275 ייבוא השקות — כל המוצרים נפתחים מהמצגת</title>
+    <title>הזמנות יטבתה - v276 ייבוא מוצרים חדשים — תיקייה בניהול הקליטה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -109,7 +109,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v275 ייבוא השקות — כל המוצרים נפתחים מהמצגת</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v276 ייבוא מוצרים חדשים — תיקייה בניהול הקליטה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -1216,6 +1216,7 @@ function renderView() {
   else if (currentView === 'backup') renderBackup();
   else if (currentView === 'actionLog') renderActionLog();
   else if (currentView === 'analysis') renderAnalysis();
+  else if (currentView === 'launches') renderLaunches(); // v276
   updateCart();
   updateBackBarLabel();
 }
@@ -4878,6 +4879,8 @@ function renderReceiving() {
       '<button data-role="rc-promos" class="btn-tap flex-1 bg-white border border-slate-200 rounded-xl py-2.5 font-black text-slate-700 text-xs flex items-center justify-center gap-1.5"><i class="fa-solid fa-percent text-rose-600"></i> מבצעים</button>' +
       '<button data-role="rc-history" class="btn-tap flex-1 bg-white border border-slate-200 rounded-xl py-2.5 font-black text-slate-700 text-xs flex items-center justify-center gap-1.5"><i class="fa-solid fa-folder-open text-blue-600"></i> תעודות</button>' +
       '<button data-role="rc-analysis" class="btn-tap bg-white border border-slate-200 rounded-xl py-2.5 font-black text-slate-700 text-xs flex items-center justify-center gap-1.5"><i class="fa-solid fa-chart-simple text-emerald-600"></i> ניתוח מוצרים</button>' +
+      // v276: תיקייה קטנה לייבוא מוצרים חדשים ממצגת ההשקות — כאן, ליד שאר כלי הניהול
+      '<button data-role="rc-launches" class="btn-tap col-span-2 bg-white border border-violet-200 rounded-xl py-2.5 font-black text-slate-700 text-xs flex items-center justify-center gap-1.5"><i class="fa-solid fa-folder-plus text-violet-600"></i> ייבוא מוצרים חדשים (השקות)</button>' +
     '</div></details>';
   if (!opened) {
     app.innerHTML = banner + topButtons +
@@ -13696,6 +13699,32 @@ function promoImportPick() {
 // (create-if-absent לפי ברקוד), כך שכפילות שנוצרה בינתיים נתפסת ולא נדרסת.
 let launchImport = null; // { stage: 'reading'|'summary'|'error', sheet, items, error, busy }
 
+// v276: הייבוא חי בשני מקומות — במסך עריכת המוצרים ובתיקייה משלו בניהול
+// הקליטה. כל שינוי מצב מצייר מחדש את המסך שבו המשתמש נמצא בפועל.
+function launchImportRerender() {
+  if (currentView === 'settings') renderSettings();
+  else if (currentView === 'launches') renderLaunches();
+}
+function renderLaunches() {
+  app.innerHTML =
+    '<div class="flex items-center justify-between px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">ייבוא מוצרים חדשים</h2></div>' +
+    '<div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 mb-3">' +
+      '<div class="flex items-center gap-3 mb-3">' +
+        '<div class="bg-violet-100 p-3 rounded-full text-violet-600 shrink-0"><i class="fa-solid fa-rocket text-2xl"></i></div>' +
+        '<div class="min-w-0"><div class="font-black text-slate-800 text-lg leading-tight">מצגת ההשקות של הספק</div><div class="text-[11px] text-slate-400 font-bold mt-0.5">שם, ברקוד, מחיר וארגז נקראים לבד. נשאר רק לבחור קבוצה.</div></div>' +
+      '</div>' +
+      '<ol class="text-xs text-slate-600 font-bold space-y-1 mb-3 pr-4 list-decimal">' +
+        '<li>שומרים את המצגת כ-PDF (קובץ ← שמור בשם ← PDF), או מצלמים את השקופיות.</li>' +
+        '<li>לוחצים על הכפתור ובוחרים את הקובץ. הקריאה אורכת כדקה.</li>' +
+        '<li>בסיכום בודקים מחיר, בוחרים קבוצה למי שמסומן בכתום, ופותחים את כולם בלחיצה.</li>' +
+      '</ol>' +
+      '<div class="text-[10px] text-slate-400 font-bold mb-3">מוצר שכבר במאגר מדולג. מוצר עם "ברקוד זהה" למוצר קיים יורש ממנו קבוצה והגדרות הזמנה. כדאי לייבא השקות לפני ייבוא המבצעים של אותו חודש.</div>' +
+      '<button data-role="launch-import" class="btn-tap w-full bg-violet-600 text-white py-3 rounded-xl font-black flex items-center justify-center gap-2"><i class="fa-solid fa-file-import"></i> בחר PDF או צילומי שקופיות</button>' +
+      launchImportHtml() +
+    '</div>' +
+    '<button data-role="go-settings" class="btn-tap w-full bg-white border border-slate-200 p-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-black text-slate-600"><i class="fa-solid fa-sliders text-blue-600"></i> עריכת מוצרים ידנית בהגדרות</button>';
+}
+
 function launchImportPick() {
   const input = document.createElement('input');
   input.type = 'file';
@@ -13708,7 +13737,7 @@ async function launchImportStart(files) {
   if (!files || !files.length) return;
   if (!auth || !auth.currentUser) { showToast('עדיין אין חיבור מאובטח — המתן רגע ונסה שוב', null, null, 3000); return; }
   launchImport = { stage: 'reading', sheet: null, items: [], error: '' };
-  if (currentView === 'settings') renderSettings();
+  launchImportRerender();
   try {
     const list = Array.from(files);
     const pdfFile = list.find(f => f.type === 'application/pdf' || /\.pdf$/i.test(f.name || ''));
@@ -13740,7 +13769,7 @@ async function launchImportStart(files) {
   } catch (error) {
     launchImport = { stage: 'error', sheet: null, items: [], error: (error && error.message) || 'הייבוא נכשל' };
   }
-  if (currentView === 'settings') renderSettings();
+  launchImportRerender();
 }
 function launchImportPrepare(sheet) {
   return (sheet.products || []).map(src => {
@@ -13853,7 +13882,7 @@ async function launchImportCreateAll() {
   const noPrice = chosen.filter(it => !(Number(it.price) > 0)).length;
   if (noPrice) { showToast('הזן מחיר קנייה ל-' + noPrice + ' מוצרים לפני הפתיחה', null, null, 3200); return; }
   launchImport.busy = true;
-  if (currentView === 'settings') renderSettings();
+  launchImportRerender();
   let created = 0, skipped = 0, failed = 0;
   let nextIndex = (products.length ? Math.max(...products.map(p => p.orderIndex || 0)) : -1) + 1;
   for (const it of chosen) {
@@ -13895,7 +13924,7 @@ async function launchImportCreateAll() {
   saveDraftPassive();
   if (failed) showToast(created + ' מוצרים נפתחו, ' + failed + ' נכשלו — נסה שוב', null, null, 3600);
   else showToast(created + ' מוצרים נפתחו' + (skipped ? ' · ' + skipped + ' דולגו (כבר קיימים)' : ''), null, null, 3200);
-  if (currentView === 'settings') renderSettings();
+  launchImportRerender();
 }
 
 // v197: ניקוי אוטומטי — מבצע שהסתיים לפני תחילת החודש הקודם עובר לסל
@@ -15891,7 +15920,7 @@ app.addEventListener('click', (e) => {
   // v275: אחרי שער המנהל — פתיחת מוצרים ממצגת ההשקות היא הוספת מוצרים
   else if (role === 'launch-import') launchImportPick();
   else if (role === 'launch-import-create') launchImportCreateAll();
-  else if (role === 'launch-import-close') { launchImport = null; if (currentView === 'settings') renderSettings(); }
+  else if (role === 'launch-import-close') { launchImport = null; launchImportRerender(); }
   else if (role === 'pos-import-pick') posImportPick();
   else if (role === 'pos-import-apply') posImportApply();
   else if (role === 'pos-import-close') { posImport = null; if (currentView === 'prices') renderPrices(); }
@@ -16251,6 +16280,7 @@ app.addEventListener('click', (e) => {
   else if (role === 'rc-history') setView('receiptsHistory');
   else if (role === 'gap-goto') setView(t.dataset.view === 'returnsHistory' ? 'returnsHistory' : 'receiptsHistory');
   else if (role === 'rc-analysis') { anSelectedKey = null; anQuery = ''; setView('analysis'); anLoadData(); } // v235
+  else if (role === 'rc-launches') setView('launches'); // v276
   else if (role === 'rc-plus') changeReceiptQty(id, 1);
   else if (role === 'rc-minus') changeReceiptQty(id, -1);
   else if (role === 'rc-remove') removeReceiptLine(id);
