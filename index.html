@@ -567,6 +567,8 @@ let aiScanBusy = false;
 let aiScanProgressText = '';
 let aiScanResponse = null;
 let aiScanEvaluation = null;
+let aiScanReused = false;        // v272: התוצאה שמוצגת נשענת על צילום קודם, בלי סריקה חדשה
+let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
 let aiScanErrorAnchor = false;   // v250: השגיאה היא הסבר-שרת על עוגן שגוי (למשל הוקלד סכום שלפני הנחות) — מוצגת כאזהרה בולטת
 let anchorFixHint = '';          // v250: ההסבר נודד עם המשתמש לעורך הסכומים, כדי שהסכום הנכון יהיה מול העיניים בזמן התיקון
@@ -884,7 +886,54 @@ function readNoteEntry(required) {
   const units = parseInt(unitsRaw, 10) || 0;
   return { amount: r2(v), units: units > 0 ? units : null };
 }
-function saveReceiptDraft() { try { localStorage.setItem(RECEIPT_DRAFT_KEY, JSON.stringify({ items: receiptList, notes: receiptNotes, opened: receiptOpened, dw: receiptDepositWaived })); } catch (e) {} }
+// v272: קריאת הנייר נשמרת בטיוטה, הצילומים לא.
+// זו ההבחנה שמאפשרת להמשיך אחרי רענון בלי לצלם שוב: מה שיקר להשיג הוא
+// הקריאה — היא עלתה סריקה בתשלום — והיא JSON קטן. התמונות עצמן כבדות,
+// ונשארות בזיכרון בלבד כפי שהוחלט מלכתחילה. אחרי שחזור אפשר להמשיך לעבוד
+// על התוצאות; מה שיידרש צילום מחדש הוא רק סריקה חדשה של אותו נייר.
+function receiptDraftPayload(includeScan) {
+  const base = { items: receiptList, notes: receiptNotes, opened: receiptOpened, dw: receiptDepositWaived };
+  if (includeScan && aiScanResponse && aiScanResponse.scan) {
+    base.aiScan = {
+      serviceVersion: aiScanResponse.serviceVersion || null,
+      model: aiScanResponse.model || null,
+      requestId: aiScanResponse.requestId || null,
+      perDocument: aiScanResponse.perDocument || null,
+      // מונה העמודים נשמר בנפרד: בלעדיו בדיקת "כמה עמודים פוענחו מול כמה
+      // צולמו" הייתה משווה מול אפס תמונות ונועלת תעודה תקינה.
+      pageCounts: aiScanDocuments.map(doc => (doc.pages || []).length || Number(doc.restoredPageCount) || 0),
+      scan: aiScanResponse.scan
+    };
+  }
+  return base;
+}
+function saveReceiptDraft() {
+  try {
+    localStorage.setItem(RECEIPT_DRAFT_KEY, JSON.stringify(receiptDraftPayload(true)));
+  } catch (e) {
+    // קריאת הנייר לעולם לא תפיל את שמירת הטיוטה עצמה. אם אין מקום במכשיר —
+    // היא נזרקת, והפריטים והסכומים נשמרים בכל מקרה.
+    try { localStorage.setItem(RECEIPT_DRAFT_KEY, JSON.stringify(receiptDraftPayload(false))); } catch (e2) {}
+  }
+}
+function restoreDraftScan(saved) {
+  aiScanResponse = null; aiScanEvaluation = null; aiScanDocuments = []; aiScanReused = false;
+  const docs = saved && saved.scan && Array.isArray(saved.scan.documents) ? saved.scan.documents : null;
+  if (!docs || !docs.length) return false;
+  const notes = receiptNotes.length ? receiptNotes.map(normNote) : [{ amount: receiptNoteTotal, units: receiptNoteUnits }];
+  // הקריאה שייכת למספר תעודות מסוים. השתנה המספר — היא כבר אינה מתארת את
+  // מה שעל השולחן, ואסור להשתמש בה.
+  if (docs.length !== notes.length) return false;
+  const counts = Array.isArray(saved.pageCounts) ? saved.pageCounts : [];
+  const unitsAnchorOn = receiptNoteUnits != null; // v270: עוגן היחידות נכבה כולו כשחסר בתעודה אחת
+  aiScanDocuments = notes.map((note, i) => ({
+    noteIndex: i, amount: note.amount, units: unitsAnchorOn ? note.units : null, pages: [],
+    restoredPageCount: Number(counts[i]) || Number(docs[i] && docs[i].pageCount) || 0
+  }));
+  aiScanResponse = { ok: true, serviceVersion: saved.serviceVersion, model: saved.model,
+                     requestId: saved.requestId, perDocument: saved.perDocument || null, scan: saved.scan };
+  return true;
+}
 function restoreReceiptDraft() {
   try {
     const s = localStorage.getItem(RECEIPT_DRAFT_KEY); if (!s) return;
@@ -897,6 +946,8 @@ function restoreReceiptDraft() {
       receiptDepositWaived = !!o.dw; // v232
     }
     recomputeNoteTotal();
+    // v272: אחרי recomputeNoteTotal — שחזור הקריאה נשען על העוגנים המחושבים.
+    aiScanFromDraft = restoreDraftScan(o && o.aiScan);
   } catch (e) {}
 }
 
@@ -4626,6 +4677,35 @@ function addScannedToReturns(p) {
   updateScanOverlay(p.name);
   updateCart();
 }
+// v272: מוצר בלי מחיר קופה עצר את הקליטה באמצע — האזהרה שלחה למסך המחירים,
+// ושם צריך לחפש את המוצר מחדש ולחזור. עכשיו התשובה והפעולה יושבות בחלון
+// הכמות עצמו: העלות ליחידה (ללא מע״מ) מוצגת מיד, ולידה שדה להקלדת המחיר
+// שעובר בקופה. השדה נשמר בדיוק לאותו posPrice שמסך המחירים כותב אליו.
+// מכוון להשלמת מחיר חסר בלבד — כשכבר יש מחיר קופה מוצג הסכום הגדול כמו קודם,
+// ושינוי שלו נשאר במסך המחירים מאחורי PIN המנהל.
+function qtyPosMissingHtml(p) {
+  const day = todayStr();
+  const pr = promoForProduct(p.id, day);
+  const onPromo = promoTriggered(pr, day);
+  const hasCost = p.price != null && p.price !== '';
+  const costLine = hasCost
+    ? '<span class="text-xl font-black text-slate-800">₪' + fmtUnitPrice(effectivePrice(p, 1, day), onPromo) + '</span>' +
+      (onPromo ? ' <span class="text-[11px] font-black text-rose-600">· מבצע ' + (Number(pr.pct) || 0) + '%</span>' : '')
+    : '<span class="text-sm font-black text-amber-700">לא הוזן מחיר עלות</span>';
+  return '<div class="bg-amber-50 border-2 border-amber-300 rounded-2xl p-3 mt-1 text-right">' +
+      '<div class="text-[11px] font-black text-amber-700 text-center"><i class="fa-solid fa-triangle-exclamation"></i> אין מחיר קופה — אפשר להשלים כאן</div>' +
+      '<div class="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-amber-200">' +
+        '<span class="text-[11px] font-black text-slate-500">עולה לי ליח׳ (ללא מע״מ)</span>' +
+        '<span class="shrink-0">' + costLine + '</span>' +
+      '</div>' +
+      '<div class="flex items-center justify-between gap-2 mt-2">' +
+        '<label for="qtyPosInput" class="text-[11px] font-black text-sky-700 leading-tight"><i class="fa-solid fa-cash-register"></i> כמה עובר בקופה<br><span class="text-slate-400">(כולל מע״מ)</span></label>' +
+        '<div class="shrink-0 flex items-center gap-1"><span class="text-slate-400 font-bold">₪</span>' +
+          '<input id="qtyPosInput" type="text" inputmode="decimal" placeholder="0.00" class="w-24 h-11 text-center text-lg font-black border-2 border-amber-400 bg-white rounded-xl outline-none focus:border-sky-500"></div>' +
+      '</div>' +
+      '<div id="qtyPosHint" class="hidden"></div>' +
+    '</div>';
+}
 function promptQty(p, target) {
   qtyProduct = p; qtyTarget = target || 'receipt';
   closeScanner();
@@ -4638,7 +4718,7 @@ function promptQty(p, target) {
       posEl.innerHTML = '<div class="text-3xl font-black text-sky-700"><i class="fa-solid fa-cash-register text-xl"></i> בקופה: ₪' + fmtMoney(p.posPrice) + '</div>';
       posEl.classList.remove('hidden');
     } else if (qtyTarget === 'receipt') {
-      posEl.innerHTML = '<div class="text-[11px] font-black text-amber-600"><i class="fa-solid fa-triangle-exclamation"></i> אין מחיר קופה — בדוק בקופה ועדכן במסך המחירים</div>';
+      posEl.innerHTML = qtyPosMissingHtml(p);
       posEl.classList.remove('hidden');
     } else { posEl.innerHTML = ''; posEl.classList.add('hidden'); }
   }
@@ -6280,7 +6360,15 @@ function reconcileRowHtml(l) {
 }
 
 // ===== סריקת AI — מופעלת רק לאחר שההתאמה והבלש הפשוט לא פתרו =====
-function resetAiInvoiceScan() {
+// v272: הצילומים וקריאת הנייר שורדים חזרה למסך הכמויות.
+// הסיבה פשוטה: תיקון כמות משנה את מה שנספר בפועל — לא את מה שכתוב בנייר.
+// קריאת הנייר עדיין תקפה, וכל מה שנדרש הוא לחשב מחדש את ההשוואה בין השניים,
+// חישוב מקומי ומיידי בלי רשת ובלי עלות. עד כאן כל חזרה למסך הכמויות מחקה את
+// התמונות ואת הקריאה, ולכן בדיוק הרגע שבו הסריקה הוכיחה את עצמה — היא הראתה
+// למנהל את החוסרים והוא חזר לתקן — חייב אותו לצלם הכול מחדש ולשלם על סריקה
+// שנייה של אותו נייר.
+// מה שכן מחייב איפוס: שינוי במספר התעודות. תעודה חדשה היא נייר שלא צולם.
+function resetAiInvoiceScan(force) {
   aiCloseOrientationReview();
   const source = receiptNotes.length ? receiptNotes.map(normNote) : [{ amount: receiptNoteTotal, units: receiptNoteUnits }];
   // v270: די בתעודה אחת בלי סך יחידות מודפס כדי לכבות את עוגן היחידות
@@ -6289,9 +6377,36 @@ function resetAiInvoiceScan() {
   // קריאות ולא נבדקות. הכיבוי נעשה כאן, בנקודה היחידה שבונה את המסמכים,
   // כדי שלא יישאר צרכן אחד ששכח את הכלל. הסכום נשאר העוגן היחיד.
   const unitsAnchorOn = receiptNoteUnits != null;
+  // v272: קריאה ששוחזרה מהטיוטה תקפה גם בלי תמונות בזיכרון — הנייר כבר נקרא,
+  // וזה מה שיש להשוות מולו. תמונות נחוצות רק כדי לסרוק מחדש.
+  const reusable = !force && !!aiScanResponse && !aiScanBusy
+    && aiScanDocuments.length === source.length && (aiTotalPages() > 0 || aiScanFromDraft);
+  if (reusable) {
+    // העוגנים המוקלדים מתרעננים על הצילומים הקיימים: הנייר לא השתנה, אבל מה
+    // שהוקלד כן יכול היה להשתנות. ההשוואה מול העוגן נעשית שוב בהערכה עצמה,
+    // ואם הוא כבר אינו מתאים — זה ייאמר שם, בלי לאבד את מה שכבר נקרא.
+    aiScanDocuments = aiScanDocuments.map((doc, i) => Object.assign({}, doc, {
+      noteIndex: i, amount: source[i].amount, units: unitsAnchorOn ? source[i].units : null
+    }));
+    // ממצאים ישנים חושבו מול כמויות ישנות. הם נבנים מחדש מאפס — כולל אישור
+    // המשתמש, שניתן על תמונת מצב אחרת — ולעולם לא נגררים כפי שהיו.
+    reconcileAiAudit = null; aiUnknownProductCreateContext = null;
+    aiAnalyzeBusy = false; aiAnalyzeError = ''; aiAnalyzeResult = null;
+    aiScanError = ''; aiScanErrorAnchor = false;
+    try {
+      aiScanEvaluation = aiEvaluateInvoiceScan(aiScanResponse);
+      aiScanReused = true;
+      return true;
+    } catch (error) {
+      // שימוש חוזר שנכשל חוזר לאיפוס מלא. עדיף לבקש צילום מחדש מאשר להציג
+      // ממצאים שנבנו חלקית על נתונים ישנים.
+      aiScanReused = false;
+    }
+  }
   aiScanDocuments = source.map((note, i) => ({ noteIndex: i, amount: note.amount, units: unitsAnchorOn ? note.units : null, pages: [] }));
-  aiScanBusy = false; aiScanProgressText = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanErrorAnchor = false; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; reconcileAiAudit = null; aiUnknownProductCreateContext = null;
+  aiScanBusy = false; aiScanProgressText = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanReused = false; aiScanFromDraft = false; aiScanError = ''; aiScanErrorAnchor = false; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; reconcileAiAudit = null; aiUnknownProductCreateContext = null;
   aiAnalyzeBusy = false; aiAnalyzeError = ''; aiAnalyzeResult = null; // v187
+  return false;
 }
 function aiTotalPages() { return aiScanDocuments.reduce((sum, d) => sum + d.pages.length, 0); }
 function aiDataUrlBytes(dataUrl) {
@@ -8398,7 +8513,11 @@ function aiEvaluateInvoiceScan(payload) {
       missingDocuments++;
       errors.push('תעודה ' + (index + 1) + ': לא נקראה ממנה אף שורת מוצר — היא אינה משתתפת בהשוואה. צלם אותה שוב.');
     }
-    if (Number(doc.pageCount) !== inputDoc.pages.length) errors.push('תעודה ' + (index + 1) + ': מספר העמודים שפוענחו אינו זהה למספר התמונות שצולמו');
+    // v272: אחרי שחזור מטיוטה אין תמונות בזיכרון, ולכן ההשוואה נעשית מול מונה
+    // העמודים שנשמר בזמן הסריקה. בלעדיו תעודה תקינה לגמרי הייתה ננעלת עם
+    // "פוענחו 2 עמודים מול 0 שצולמו" — נעילה שנגרמת מהשחזור עצמו, לא מהנייר.
+    const capturedPages = inputDoc.pages.length || Number(inputDoc.restoredPageCount) || 0;
+    if (Number(doc.pageCount) !== capturedPages) errors.push('תעודה ' + (index + 1) + ': מספר העמודים שפוענחו אינו זהה למספר התמונות שצולמו');
     const subtotalCents = aiMoneyCents(doc.subtotalExVat);
     const expectedCents = aiMoneyCents(inputDoc.amount);
     if (subtotalCents == null) errors.push('הסכום ללא מע״מ לא נקרא בתעודה ' + (index + 1));
@@ -8974,7 +9093,7 @@ async function aiRunInvoiceScan() {
   if (!aiScanDocuments.length || aiScanDocuments.some(d => !d.pages.length)) { showToast('צלם לפחות עמוד אחד מכל תעודה', null, null, 3000); return; }
   if (!aiAllPagesOrientationConfirmed()) { showToast('אשר שכל התמונות ישרות לפני הפענוח', null, null, 3200); aiOpenNextUnconfirmedOrientation(); return; }
   if (!auth || !auth.currentUser) { showToast('עדיין אין חיבור מאובטח — המתן רגע ונסה שוב', null, null, 3000); return; }
-  aiScanBusy = true; aiScanProgressText = aiScanDocuments.length > 1 ? 'ה-AI קורא ' + aiScanDocuments.length + ' תעודות, אחת אחרי השנייה…' : 'ה-AI קורא את דפי התעודה…'; aiScanError = ''; aiScanErrorAnchor = false; aiScanResponse = null; aiScanEvaluation = null; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; renderReconcile();
+  aiScanBusy = true; aiScanProgressText = aiScanDocuments.length > 1 ? 'ה-AI קורא ' + aiScanDocuments.length + ' תעודות, אחת אחרי השנייה…' : 'ה-AI קורא את דפי התעודה…'; aiScanError = ''; aiScanErrorAnchor = false; aiScanResponse = null; aiScanEvaluation = null; aiScanReused = false; aiScanFromDraft = false; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; renderReconcile();
   try {
     const token = await auth.currentUser.getIdToken();
     // v132: כל תעודה נסרקת בבקשה משלה, במקביל. כשל בתעודה אחת אינו מפיל
@@ -9023,6 +9142,10 @@ async function aiRunInvoiceScan() {
         : { docIndex: result.docIndex, ok: false, error: result.errorMessage || '' })
     };
     aiScanEvaluation = aiEvaluateInvoiceScan(aiScanResponse);
+    // v272: הקריאה נשמרת בטיוטה ברגע שהתקבלה. זה מה שהופך אותה לעמידה בפני
+    // רענון או סגירת האפליקציה — הסריקה הזאת עלתה כסף, ואין סיבה לשלם עליה
+    // שוב רק מפני שהדפדפן נטען מחדש.
+    saveReceiptDraft();
   } catch (error) { aiScanError = error && error.message ? error.message : 'הסריקה החכמה נכשלה'; aiScanErrorAnchor = !!(error && error.anchorExplained); }
   finally {
     aiScanBusy = false; aiScanProgressText = '';
@@ -9743,6 +9866,15 @@ function aiInvoiceCaptureHtml() {
     const autoNote = Array.isArray(ev.autoResolutions) && ev.autoResolutions.length
       ? '<div class="text-[10px] font-bold text-slate-500 text-center">' + ev.autoResolutions.length + ' שורות הותאמו אוטומטית לפי שם/מחיר/כמות — מתועד ביומן.</div>'
       : '';
+    // v272: כשהתוצאה נשענת על הצילום הקודם — אומרים את זה. המנהל צריך לדעת
+    // שמה שמולו חושב מחדש מול הכמויות שתיקן, ושהנייר עצמו לא נקרא שוב.
+    const reusedNote = aiScanReused
+      ? '<div class="rounded-xl bg-slate-50 border border-slate-200 p-2 mb-2 text-[11px] font-bold text-slate-600"><i class="fa-solid fa-rotate ml-1"></i>'
+        + (aiScanFromDraft
+          ? 'קריאת הנייר שוחזרה מהתעודה הפתוחה — חושבה מחדש מול הכמויות המעודכנות, בלי סריקה נוספת. הצילומים עצמם אינם נשמרים, ולכן סריקה מחדש תדרוש לצלם שוב.'
+          : 'קריאת הנייר מהצילום הקודם — חושבה מחדש מול הכמויות המעודכנות, בלי צילום ובלי סריקה נוספת. השתנה משהו בנייר עצמו? <b>תיקון תעודה — חזרה לצילומים</b>.')
+        + '</div>'
+      : '';
     // v133: זרימת אישור וסגירה. המשתמש מאשר שאלה אכן הבעיות, ורק אז נפתחות
     // "סגור תעודה עם החוסרים" (כשהחשבון נסגר) או "תיקון תעודה".
     let actionsHtml = '';
@@ -9763,6 +9895,7 @@ function aiInvoiceCaptureHtml() {
     return '<div class="bg-white rounded-2xl border-2 ' + (ev.valid ? 'border-violet-300' : 'border-amber-300') + ' p-4 shadow-sm mb-24">' +
       '<div class="font-black text-xl text-slate-800 mb-1"><i class="fa-solid fa-wand-magic-sparkles text-violet-600"></i> תוצאות הסריקה החכמה</div>' +
       '<div class="text-xs text-slate-500 font-bold mb-3">מוצגות רק הבעיות שנמצאו. ההתאמות הוכרעו מאחורי הקלעים.</div>' +
+      reusedNote +
       '<div class="space-y-2">' + statusHtml + findingsHtml + autoNote + '</div>' + actionsHtml + '</div>';
   }
   const docCards = aiScanDocuments.map((doc, i) => {
@@ -9982,6 +10115,10 @@ function renderReconcile() {
   // קביעת השלב אוטומטית לפי המצב (פעם ראשונה)
   if (rcStep === null) {
     if (balanced) rcStep = 'balanced';
+    // v272: קריאת נייר ששרדה חזרה למסך הכמויות — חוזרים ישר לתוצאות שלה,
+    // מחושבות מחדש מול הכמויות המתוקנות. לשאול "לסרוק את התעודות?" על תעודה
+    // שכבר צולמה ונקראה זה לבקש מהמנהל לשלם פעמיים על אותו נייר.
+    else if (aiScanEvaluation) rcStep = 'ai';
     else {
       const ds = detectiveSolutions();
       rcStep = detectiveStepForResult(ds);
@@ -11201,7 +11338,7 @@ async function confirmReceipt() {
   if (!saved) return;
   hideReceiptSummary();
   aiCloseOrientationReview();
-  receiptList = []; pendingReceipt = null; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; reconcileData = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; reconcileAiAudit = null; aiScanDocuments = []; aiScanBusy = false; aiScanProgressText = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; receiptDupConfirmed = false; receiptDepositWaived = false; saveReceiptDraft();
+  receiptList = []; pendingReceipt = null; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; reconcileData = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; reconcileAiAudit = null; aiScanDocuments = []; aiScanBusy = false; aiScanProgressText = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanReused = false; aiScanFromDraft = false; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; receiptDupConfirmed = false; receiptDepositWaived = false; saveReceiptDraft();
   setView('receiptsHistory');
   const autoApplied = await autoApplyExactOffsets(); // v249: זוג מדויק מתקזז לבד
   const newOpen = receipts.filter(r => receiptDiscrepancyInfo(r).open).find(r => findOffsetMatch(r));
@@ -15043,6 +15180,31 @@ $('mr_qty').addEventListener('input', updateManualReturnTotal);
 $('qtyVal').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commitQty(false); } });
 $('qtyVal').addEventListener('input', updateQtyPackOffer);
 $('qtyPackOffer').addEventListener('click', (e) => { if (e.target.closest('[data-role="qty-pack-convert"]')) convertQtyToPack(); });
+// v272: השלמת מחיר הקופה מתוך חלון הכמות. עובר דרך savePosPrice — אותה כתיבה
+// מושהית לענן שמסך המחירים משתמש בה, כולל posPriceAt שמגן מפני דריסה בייבוא
+// דוח ישן. השדה קיים רק כשאין מחיר קופה, ולכן זו השלמה של חסר ולא שינוי מחיר.
+$('qtyModal').addEventListener('input', (e) => {
+  const t = e.target;
+  if (!t || t.id !== 'qtyPosInput') return;
+  const p = qtyProduct; if (!p) return;
+  const hint = $('qtyPosHint');
+  const setHint = (cls, html) => {
+    if (!hint) return;
+    if (!html) { hint.className = 'hidden'; hint.innerHTML = ''; return; }
+    hint.className = 'text-[11px] font-black text-center mt-2 ' + cls;
+    hint.innerHTML = html;
+  };
+  const raw = (t.value || '').toString().replace(',', '.').trim();
+  if (raw === '') { if (p.posPrice != null) savePosPrice(p.id, ''); setHint('', ''); return; }
+  const num = parseFloat(raw);
+  if (!isFinite(num) || !(num > 0)) { setHint('text-rose-600', 'הזן מחיר חיובי'); return; }
+  savePosPrice(p.id, raw);
+  const costInc = r2((Number(p.price) || 0) * (1 + VAT));
+  // מחיר קופה מתחת לעלות כולל מע״מ הוא כמעט תמיד טעות הקלדה — מסמנים מיד,
+  // אבל לא חוסמים: יש מוצרים שבאמת נמכרים בהפסד (מחיר מפוקח, מבצע רשת).
+  if (costInc > 0 && r2(num) < costInc) setHint('text-rose-600', '<i class="fa-solid fa-triangle-exclamation"></i> נמוך מהעלות כולל מע״מ (₪' + fmtMoney(costInc) + ')');
+  else setHint('text-emerald-700', '<i class="fa-solid fa-check"></i> נשמר — ₪' + fmtMoney(num) + ' בקופה');
+});
 $('prod_cancel').addEventListener('click', hideProdModal);
 $('prod_save').addEventListener('click', () => requireAdmin('שמירת מוצר/מחיר', () => saveProd(false)));
 $('prod_again').addEventListener('click', () => requireAdmin('שמירת מוצר/מחיר', () => saveProd(true)));
@@ -15351,7 +15513,7 @@ app.addEventListener('click', (e) => {
   if (role === 'promo-import-create') { promoImportCreateAll(); return; }
   if (role === 'promo-import-close') { promoImport = null; renderPromos(); return; }
   if (role === 'ai-analyze-copy') { const text = aiAnalyzeClaimsPlainText(); if (!text) return; if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => showToast('הטענות הועתקו', null, null, 2200)).catch(() => showToast('ההעתקה נכשלה', null, null, 2200)); else showToast('ההעתקה אינה נתמכת בדפדפן הזה', null, null, 2600); return; }
-  if (role === 'ai-rescan') { resetAiInvoiceScan(); rcStep = 'ai'; renderReconcile(); return; }
+  if (role === 'ai-rescan') { resetAiInvoiceScan(true); rcStep = 'ai'; renderReconcile(); return; } // force: בקשה מפורשת לסרוק מחדש
   if (role === 'ai-open-suggestion-page') { aiOpenBarcodeSuggestionPage(parseInt(t.dataset.doc, 10), parseInt(t.dataset.page, 10)); return; }
   if (role === 'ai-confirm-barcode-suggestion') { aiConfirmBarcodeSuggestion(parseInt(t.dataset.doc, 10), parseInt(t.dataset.row, 10)); return; }
   if (role === 'ai-confirm-name-candidate') { aiConfirmNameCandidate(parseInt(t.dataset.doc, 10), parseInt(t.dataset.row, 10), t.dataset.candidateId); return; }
@@ -15432,7 +15594,10 @@ app.addEventListener('click', (e) => {
   else if (role === 'clear-returns-history') showConfirm('ניקוי היסטוריה', 'למחוק את כל היסטוריית החזרות? יישמר גיבוי בסל מחזור.', 'מחק הכל', () => clearAllDocs('returns'));
   else if (role === 'rc-scan') openReceivingScanner();
   else if (role === 'rc-open') { const en = readNoteEntry(receiptNotes.length === 0); if (en === false) return; if (en) receiptNotes.push(en); recomputeNoteTotal(); receiptOpened = true; receiptDupConfirmed = false; receiptDepositWaived = false; saveReceiptDraft(); refreshReceipt(); openReceivingScanner(); }
-  else if (role === 'rc-cancel') { showConfirm('ביטול תעודה', 'לבטל את התעודה הנוכחית? כל הפריטים שנסרקו יימחקו.', 'בטל תעודה', () => { receiptList = []; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; anchorFixHint = ''; reconcileData = null; receiptDupConfirmed = false; receiptDepositWaived = false; saveReceiptDraft(); setView('receiving'); }); }
+  // v272: ביטול תעודה חייב למחוק גם את הצילומים ואת קריאת הנייר. כל עוד כל
+  // כניסה למסך ההשוואה איפסה אותם ממילא, הדילוג כאן לא הזיק; מרגע שהם שורדים
+  // בין המסכים, תעודה שבוטלה הייתה יכולה להוריש את הנייר שלה לתעודה הבאה.
+  else if (role === 'rc-cancel') { showConfirm('ביטול תעודה', 'לבטל את התעודה הנוכחית? כל הפריטים שנסרקו יימחקו.', 'בטל תעודה', () => { receiptList = []; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; anchorFixHint = ''; reconcileData = null; receiptDupConfirmed = false; receiptDepositWaived = false; resetAiInvoiceScan(true); aiScanDocuments = []; saveReceiptDraft(); setView('receiving'); }); }
   else if (role === 'rc-note-add') { const en = readNoteEntry(true); if (en === false) return; if (en) { receiptNotes.push(en); recomputeNoteTotal(); saveReceiptDraft(); } refreshReceipt(); const inp = $('rcNoteInput'); if (inp) inp.focus(); }
   else if (role === 'rc-note-remove') { const i = parseInt(t.dataset.idx, 10); if (i >= 0) { receiptNotes.splice(i, 1); recomputeNoteTotal(); saveReceiptDraft(); refreshReceipt(); } }
   else if (role === 'rc-dep-waive') { receiptDepositWaived = true; saveReceiptDraft(); buzz(12); refreshReceipt(); } // v232
@@ -15659,12 +15824,16 @@ app.addEventListener('click', (e) => {
   }
   else if (role === 'rf-add-item') receiptFixAddItem(id);
   else if (role === 'rc-digits-pick') receivingDigitsPick(id);
-  else if (role === 'rc-recon-cancel') { resetAiInvoiceScan(); reconcileData = null; setView('receiving'); }
+  // v272: יציאה למסך הכמויות אינה מוחקת את הצילומים ואת קריאת הנייר. ההכרעה
+  // אם הם עדיין שמישים נעשית בכניסה חזרה (resetAiInvoiceScan), במקום אחד.
+  else if (role === 'rc-recon-cancel') { aiCloseOrientationReview(); reconcileData = null; setView('receiving'); }
   // v250: מהאזהרה הבולטת ישר לתיקון — חזרה למסך הקליטה עם עורך הסכומים פתוח,
   // וההסבר של השרת (עם הסכום הנכון) נשאר מול העיניים בזמן ההקלדה מחדש.
   else if (role === 'ai-fix-note-amount') {
     anchorFixHint = aiScanError;
-    resetAiInvoiceScan(); reconcileData = null; editingNotes = true; setView('receiving');
+    // v272: הצילומים נשמרים גם כאן — הסכום שהוקלד משתנה, הנייר לא. אחרי
+    // התיקון ההשוואה תיבדק מחדש מול העוגן החדש, בלי צילום ובלי סריקה נוספת.
+    aiCloseOrientationReview(); reconcileData = null; editingNotes = true; setView('receiving');
     setTimeout(() => { const inp = $('rcNoteInput'); if (inp) { inp.scrollIntoView({ behavior: 'smooth', block: 'center' }); inp.focus(); } }, 150);
   }
   else if (role === 'rc-recon-save') saveReconciledReceipt();
