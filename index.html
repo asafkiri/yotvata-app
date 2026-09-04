@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v269 קיזוז אוטומטי בין כל התעודות</title>
+    <title>הזמנות יטבתה - v270 תעודה בלי סך יחידות</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -109,7 +109,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v269 קיזוז אוטומטי בין כל התעודות</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v270 תעודה בלי סך יחידות</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -843,7 +843,7 @@ function dDisp(d) { try { return new Date(d + 'T12:00:00').toLocaleDateString('h
 function noteEditorBodyHtml() {
   const chips = receiptNotes.map((raw, i) => {
     const n = normNote(raw);
-    const extras = n.units != null ? n.units + ' יח׳' : '';
+    const extras = n.units != null ? n.units + ' יח׳' : 'ללא סך יחידות';
     return '<div class="flex items-center justify-between gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 mb-1.5">' +
       '<div class="min-w-0"><span class="font-bold text-slate-700 text-sm">תעודה ' + (i + 1) + '</span>' +
       (extras ? '<span class="text-[11px] text-slate-400 font-bold"> · ' + extras + '</span>' : '') + '</div>' +
@@ -851,18 +851,20 @@ function noteEditorBodyHtml() {
       '<button data-role="rc-note-remove" data-idx="' + i + '" class="btn-tap text-red-500 px-1"><i class="fa-solid fa-xmark"></i></button></div>' +
     '</div>';
   }).join('');
+  // v270: כשעוגן היחידות כבוי אומרים זאת במפורש — העובד רואה למה מונה
+  // היחידות לא יופיע בהמשך, ושהבדיקה תרוץ על הסכום בלבד.
   const anchorsSummary = receiptNoteUnits != null
     ? '<div class="text-[11px] font-bold text-slate-400 mt-1">סה"כ יחידות: ' + receiptNoteUnits + '</div>'
-    : '';
+    : '<div class="text-[11px] font-bold text-amber-600 mt-1"><i class="fa-solid fa-circle-info"></i> עוגן היחידות כבוי — לא לכל התעודות הוקלד סך יחידות. הבדיקה תתבצע לפי הסכום בלבד</div>';
   const total = receiptNotes.length ? '<div class="flex items-center justify-between mt-2 pt-2 border-t border-slate-200"><span class="font-bold text-slate-500 text-sm">סה"כ ' + receiptNotes.length + ' תעודות</span><span class="font-black text-blue-600 text-lg">₪' + fmtMoney(noteSum()) + '</span></div>' + anchorsSummary : '';
   return chips +
-    '<div class="text-[11px] text-slate-400 font-bold mb-1.5"><i class="fa-solid fa-circle-info"></i> לכל תעודה הקלד את הסכום <b class="text-slate-600">ללא מע״מ</b> ואת סך היחידות</div>' +
+    '<div class="text-[11px] text-slate-400 font-bold mb-1.5"><i class="fa-solid fa-circle-info"></i> לכל תעודה הקלד את הסכום <b class="text-slate-600">ללא מע״מ</b>; סך היחידות הוא רשות</div>' +
     '<div class="flex gap-2 items-stretch">' +
       '<div class="flex-1 flex items-center gap-1 border-2 border-slate-200 rounded-xl px-2 focus-within:border-blue-500"><span class="text-slate-400 font-black">₪</span><input id="rcNoteInput" type="text" inputmode="decimal" placeholder="סכום ללא מע״מ" class="w-full h-11 text-center text-base font-black outline-none bg-transparent"></div>' +
       '<button data-role="rc-note-add" class="btn-tap px-4 rounded-xl font-black bg-slate-100 text-slate-700 flex items-center gap-1"><i class="fa-solid fa-plus"></i> הוסף</button>' +
     '</div>' +
-    '<input id="rcNoteUnits" type="text" inputmode="numeric" placeholder="סך יחידות בתעודה" class="w-full h-10 mt-1.5 text-center text-sm font-black border-2 border-slate-200 rounded-xl outline-none focus:border-blue-500 bg-white">' +
-    '<div class="text-[10px] text-slate-400 font-bold mt-1"><i class="fa-solid fa-wand-magic-sparkles"></i> סך היחידות מודפס בתחתית תעודת הספק ועוזר לבלש לזהות חוסרים בכמות</div>' +
+    '<input id="rcNoteUnits" type="text" inputmode="numeric" placeholder="סך יחידות בתעודה (רשות)" class="w-full h-10 mt-1.5 text-center text-sm font-black border-2 border-slate-200 rounded-xl outline-none focus:border-blue-500 bg-white">' +
+    '<div class="text-[10px] text-slate-400 font-bold mt-1"><i class="fa-solid fa-wand-magic-sparkles"></i> סך היחידות מודפס בתחתית תעודת הספק ועוזר לבלש לזהות חוסרים בכמות. אין אותו בנייר? השאר ריק — העוגן ייכבה לכל התעודות והבדיקה תרוץ לפי הסכום בלבד</div>' +
     total;
 }
 function readNoteEntry(required) {
@@ -876,13 +878,11 @@ function readNoteEntry(required) {
     if (amountInp) amountInp.focus();
     return false;
   }
+  // v270: סך היחידות הוא עוגן רשות. יש תעודות ספק שאינן מדפיסות אותו כלל
+  // (משלוח 4.9 של שטראוס), והדרישה הקשיחה חסמה קליטה של תעודה תקינה לגמרי.
+  // שדה ריק = "אין סך יחידות בנייר", ולא שגיאת הקלדה.
   const units = parseInt(unitsRaw, 10) || 0;
-  if (!(units > 0)) {
-    showToast('הזן את סך היחידות שמופיע בתחתית התעודה', null, null, 3200);
-    if (unitsInp) unitsInp.focus();
-    return false;
-  }
-  return { amount: r2(v), units: units };
+  return { amount: r2(v), units: units > 0 ? units : null };
 }
 function saveReceiptDraft() { try { localStorage.setItem(RECEIPT_DRAFT_KEY, JSON.stringify({ items: receiptList, notes: receiptNotes, opened: receiptOpened, dw: receiptDepositWaived })); } catch (e) {} }
 function restoreReceiptDraft() {
@@ -4968,15 +4968,12 @@ async function saveNewProduct() {
 // --- סיכום ואישור תעודה ---
 function finishReceipt() {
   if (!receiptList.length) return;
-  // סכום ללא מע״מ וסך יחידות הם עוגני חובה. גם טיוטה ישנה שנוצרה לפני
-  // השינוי אינה יכולה לעקוף את הבלש או להיסגר כתקינה ללא שניהם.
-  const anchorsReady = receiptNotes.length > 0 && receiptNotes.every(raw => {
-    const note = normNote(raw);
-    return note.amount > 0 && note.units != null && note.units > 0;
-  });
-  if (!anchorsReady || receiptNoteTotal == null || receiptNoteUnits == null) {
+  // הסכום ללא מע״מ הוא עוגן חובה לכל תעודה. סך היחידות הוא עוגן רשות
+  // (v270) — יש תעודות ספק שאינן מדפיסות אותו, ודרישה קשיחה חסמה אותן.
+  const anchorsReady = receiptNotes.length > 0 && receiptNotes.every(raw => normNote(raw).amount > 0);
+  if (!anchorsReady || receiptNoteTotal == null) {
     editingNotes = true;
-    showToast('לפני האישור חובה להזין לכל תעודה סכום ללא מע״מ וסך יחידות', null, null, 3800);
+    showToast('לפני האישור חובה להזין לכל תעודה סכום ללא מע״מ', null, null, 3800);
     refreshReceipt();
     return;
   }
@@ -5003,7 +5000,12 @@ function finishReceipt() {
   const unitsMismatch = receiptNoteUnits != null && scannedUnits !== receiptNoteUnits;
   // אחרי חישוב מדויק ועיגול כל שורה בסופה, נשארת רשת ביטחון של עד שתי אגורות
   // רק כשהיחידות תואמות בדיוק. פער יחידות לעולם אינו נסגר באמצעות סיבולת כספית.
-  const moneyMismatch = progressMoneyTarget != null && !receiptMoneyMatches(ex, progressMoneyTarget, !unitsMismatch);
+  // v270: "אין עוגן" אינו "היחידות תואמות" — בלי עוגן אין מה שיצדיק את הרשת,
+  // ולכן היא כבויה. זה גם מיישר קו עם reconcileMoneyBalanced ועם השמירה,
+  // שכבר דורשים עוגן קיים שנסגר; אחרת המסך הזה היה מאשר סכום שמסך
+  // ההתאמה מיד אחריו מסמן כפער.
+  const unitsAnchorMatched = receiptNoteUnits != null && !unitsMismatch;
+  const moneyMismatch = progressMoneyTarget != null && !receiptMoneyMatches(ex, progressMoneyTarget, unitsAnchorMatched);
   // v232: הפער הוא בדיוק הפיקדון שהאפליקציה הוסיפה ובנייר אין שורת פיקדון —
   // מציעים להסיר את שורות הפיקדון ולסגור לפי הנייר, עוד לפני מסך ההפרשים.
   const unbilledDep = receiptUnbilledDepositGap(ex, progressMoneyTarget);
@@ -5016,7 +5018,8 @@ function finishReceipt() {
     if (moneyMismatch && big >= 50 && big >= small * 2) { showConfirm('הפרש חריג', 'סכום התעודה שהוקלד הוא ₪' + fmtMoney(progressMoneyTarget) + ', אבל מהסריקה שוחזר ₪' + fmtMoney(ex) + '. הפרש גדול במיוחד — ייתכן שסכום התעודה הוקלד לא נכון (או שבאמת חסר הרבה). להמשיך לבדיקת ההפרשים?', 'המשך לבדיקה', openReconcile); return; }
     openReconcile(); return;
   }
-  const roundingAdjustment = progressMoneyTarget != null && !unitsMismatch && moneyDiffCents(ex, progressMoneyTarget) > 0
+  // תיקון עיגול נכתב לתעודה רק כשעוגן היחידות הוכיח שהכמויות זהות (v270).
+  const roundingAdjustment = progressMoneyTarget != null && unitsAnchorMatched && moneyDiffCents(ex, progressMoneyTarget) > 0
     ? r2(Number(progressMoneyTarget) - ex) : 0;
   const payableEx = roundingAdjustment ? r2(progressMoneyTarget) : ex;
   const listHtml = lines.map(l =>
@@ -6275,7 +6278,13 @@ function reconcileRowHtml(l) {
 function resetAiInvoiceScan() {
   aiCloseOrientationReview();
   const source = receiptNotes.length ? receiptNotes.map(normNote) : [{ amount: receiptNoteTotal, units: receiptNoteUnits }];
-  aiScanDocuments = source.map((note, i) => ({ noteIndex: i, amount: note.amount, units: note.units, pages: [] }));
+  // v270: די בתעודה אחת בלי סך יחידות מודפס כדי לכבות את עוגן היחידות
+  // כולו (receiptNoteUnits == null). מרגע זה גם היחידות שהוקלדו בתעודות
+  // האחרות אינן עוגן — הן לא נשלחות לשרת, לא נכנסות לפרומפט, לא מדרגות
+  // קריאות ולא נבדקות. הכיבוי נעשה כאן, בנקודה היחידה שבונה את המסמכים,
+  // כדי שלא יישאר צרכן אחד ששכח את הכלל. הסכום נשאר העוגן היחיד.
+  const unitsAnchorOn = receiptNoteUnits != null;
+  aiScanDocuments = source.map((note, i) => ({ noteIndex: i, amount: note.amount, units: unitsAnchorOn ? note.units : null, pages: [] }));
   aiScanBusy = false; aiScanProgressText = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanError = ''; aiScanErrorAnchor = false; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; reconcileAiAudit = null; aiUnknownProductCreateContext = null;
   aiAnalyzeBusy = false; aiAnalyzeError = ''; aiAnalyzeResult = null; // v187
 }
@@ -8288,13 +8297,16 @@ function aiResidualGroupHtml(residuals) {
 function aiFindingsClosure(evaluation, findings) {
   const rows = Array.isArray(findings) ? findings : (Array.isArray(evaluation && evaluation.findings) ? evaluation.findings : []);
   const receivedRows = Array.isArray(reconcileData) ? reconcileData : [];
-  const expectedUnits = Number(receiptNoteUnits);
+  // v270: בלי עוגן יחידות אין פער יחידות להסביר — Number(null) הוא 0,
+  // ובלי ההגנה הזאת כל היחידות שנספרו היו הופכות ל"פער" מדומה שאף ממצא
+  // לא יכול לסגור, והתעודה הייתה ננעלת. השער נשען אז על הכסף בלבד.
+  const expectedUnits = receiptNoteUnits == null ? null : Number(receiptNoteUnits);
   // v186: המקום החמישי והאחרון שבו כלל v176 ("פיקדון = כסף בלבד, לא יחידות")
   // פוספס. הסכימה כאן ספרה גם את שורת הפיקדון, ולכן היחידות שנקלטו יצאו 444
   // במקום 432 — ופער היחידות הצפוי חושב כאפס בזמן שהממצאים האמיתיים הראו 12.
   // כך ננעלה סגירה של תעודה שכל הממצאים בה נכונים.
   const receivedUnits = receivedRows.reduce((sum, line) => sum + (line && line.isDeposit ? 0 : (Number(line && line.received) || 0)), 0);
-  const expectedUnitsDelta = isFinite(expectedUnits) ? expectedUnits - receivedUnits : null;
+  const expectedUnitsDelta = expectedUnits != null && isFinite(expectedUnits) ? expectedUnits - receivedUnits : null;
   let actualUnitsDelta = 0;
   const quantityDeltaByProduct = new Map();
   rows.forEach(finding => {
@@ -8304,7 +8316,9 @@ function aiFindingsClosure(evaluation, findings) {
     const id = String(finding.productId == null ? '' : finding.productId);
     if (id) quantityDeltaByProduct.set(id, (quantityDeltaByProduct.get(id) || 0) + signedQty);
   });
-  const unitsOk = expectedUnitsDelta != null && Math.abs(actualUnitsDelta - expectedUnitsDelta) < 0.001;
+  // עוגן שאינו קיים נחשב מסופק, כמו ב-aiSingleDocScore. הוא אינו הופך
+  // לתנאי שאי אפשר לעמוד בו.
+  const unitsOk = expectedUnitsDelta == null || Math.abs(actualUnitsDelta - expectedUnitsDelta) < 0.001;
 
   const receivedAmount = reconcileReceivedInc();
   const expectedAmountDelta = r2((Number(receiptNoteTotal) || 0) - receivedAmount);
@@ -8334,7 +8348,9 @@ function aiFindingsClosure(evaluation, findings) {
   const actualAmountDelta = r2(adjustedAmount - receivedAmount + pricingDelta - supplierDiscount);
   const amountTolerance = Number(RECEIPT_ROUNDING_TOLERANCE_CENTS) || 0;
   const amountDiffCents = Math.abs(Math.round(actualAmountDelta * 100) - Math.round(expectedAmountDelta * 100));
-  const amountOk = amountDiffCents === 0 || (unitsOk && amountDiffCents <= amountTolerance);
+  // סיבולת העיגול נשענת על יחידות מוכחות, ולכן היא נשארת מותנית בעוגן
+  // שהוקלד באמת ונסגר בדיוק (v270). בלי עוגן — הכסף חייב לסגור לאגורה.
+  const amountOk = amountDiffCents === 0 || (expectedUnitsDelta != null && unitsOk && amountDiffCents <= amountTolerance);
   const ok = unitsOk && amountOk;
   const reason = ok ? '' : (!unitsOk
     ? 'הממצאים אינם סוגרים את פער היחידות: צפוי ' + expectedUnitsDelta + ', נמצא ' + actualUnitsDelta
@@ -8673,9 +8689,12 @@ function aiEvaluateInvoiceScan(payload) {
   const totalVerified = expectedTotalCents != null && extractedTotalCents === expectedTotalCents && aiScanDocuments.every((inputDoc, index) => {
     const doc = returned.get(index); return doc && aiMoneyCents(doc.subtotalExVat) === aiMoneyCents(inputDoc.amount);
   });
-  const unitsVerified = receiptNoteUnits != null && extractedUnits === Number(receiptNoteUnits) && aiScanDocuments.every((inputDoc, index) => {
+  // v270: עוגן שלא הוקלד נחשב מסופק — אותו כלל שכבר חל על ציון התעודה
+  // הבודדת (aiSingleDocScore). בלי הכלל הזה תעודה בלי סך יחידות מודפס
+  // לעולם לא הייתה יוצאת "מאומתת", ושום פענוח שלה לא היה מתקבל.
+  const unitsVerified = receiptNoteUnits == null || (extractedUnits === Number(receiptNoteUnits) && aiScanDocuments.every((inputDoc, index) => {
     const doc = returned.get(index); return doc && inputDoc.units != null && aiDocRowUnits(doc) === Number(inputDoc.units); // v179: בלי פיקדון
-  });
+  }));
   const supplierDiscount = Math.max(0, verifiedDocumentDiscountCents / 100);
   const closure = aiFindingsClosure({ aggregates, findings, supplierDiscount }, findings);
   if (findingsReady && !closure.ok) errors.push(closure.reason || 'הממצאים אינם סוגרים את פער היחידות והסכום');
@@ -8713,8 +8732,10 @@ function aiEvaluationRank(evaluation) {
     if (doc.units != null && units === Number(doc.units)) exactDocuments++;
     confidenceTotal += Number(summary.confidence) || 0;
   });
-  const expectedUnits = Number(receiptNoteUnits);
-  const unitDistance = isFinite(expectedUnits) ? Math.abs((Number(evaluation && evaluation.extractedUnits) || 0) - expectedUnits) : 0;
+  // v270: בלי עוגן יחידות אין מרחק למדוד. Number(null) הוא 0, ובלי ההגנה
+  // הדירוג היה מעדיף דווקא את הקריאה שמצאה הכי מעט יחידות.
+  const expectedUnits = receiptNoteUnits == null ? null : Number(receiptNoteUnits);
+  const unitDistance = expectedUnits != null && isFinite(expectedUnits) ? Math.abs((Number(evaluation && evaluation.extractedUnits) || 0) - expectedUnits) : 0;
   const aggregateCount = evaluation && evaluation.aggregates && typeof evaluation.aggregates.size === 'number' ? evaluation.aggregates.size : 0;
   const errorCount = evaluation && Array.isArray(evaluation.errors) ? evaluation.errors.length : 9999;
   const pendingCount = evaluation && Array.isArray(evaluation.barcodeSuggestions) ? evaluation.barcodeSuggestions.length : 9999;
@@ -9089,6 +9110,12 @@ function aiAnalyzePaperDocuments(ev) {
     };
   });
 }
+// v270: "אין עוגן יחידות" נשלח כמפתח חסר, לא כ-null. שרת עד v140 מריץ
+// Number(null) === 0 והיה מציג למודל "פער יחידות אפס" — דרישה קשוחה יותר
+// מכל עוגן אמיתי — במקום "אין דרישת יחידות". מפתח חסר יוצא NaN ומתורגם
+// ל-null בכל גרסאות השרת, ולכן האפליקציה נכונה גם לפני שהשרת החדש עלה.
+// אפס אמיתי (יחידות שנסגרו בדיוק) עובר כרגיל.
+function analyzeUnitsField(value) { return value == null ? undefined : Number(value); }
 function aiAnalyzePayload(ev) {
   const day = todayStr();
   const closure = aiFindingsClosure(ev, Array.isArray(ev && ev.findings) ? ev.findings : []);
@@ -9107,10 +9134,10 @@ function aiAnalyzePayload(ev) {
       documents: aiAnalyzePaperDocuments(ev),
       anchor: {
         totalExVat: receiptNoteTotal == null ? null : Number(receiptNoteTotal),
-        units: receiptNoteUnits == null ? null : Number(receiptNoteUnits),
-        documents: aiScanDocuments.map((d, i) => ({ doc: i + 1, amount: d.amount == null ? null : Number(d.amount), units: d.units == null ? null : Number(d.units) }))
+        units: analyzeUnitsField(receiptNoteUnits),
+        documents: aiScanDocuments.map((d, i) => ({ doc: i + 1, amount: d.amount == null ? null : Number(d.amount), units: analyzeUnitsField(d.units) }))
       },
-      gap: { units: closure.expectedUnitsDelta, amountExVat: closure.expectedAmountDelta }
+      gap: { units: analyzeUnitsField(closure.expectedUnitsDelta), amountExVat: closure.expectedAmountDelta }
     }
   };
 }
@@ -15404,8 +15431,8 @@ app.addEventListener('click', (e) => {
     const en = readNoteEntry(false); if (en === false) return;
     if (en) receiptNotes.push(en);
     recomputeNoteTotal();
-    const anchorsReady = receiptNotes.length > 0 && receiptNotes.every(raw => { const note = normNote(raw); return note.amount > 0 && note.units != null && note.units > 0; });
-    if (!anchorsReady) { showToast('חובה להשאיר לפחות תעודה אחת עם סכום וסך יחידות', null, null, 3200); refreshReceipt(); return; }
+    const anchorsReady = receiptNotes.length > 0 && receiptNotes.every(raw => normNote(raw).amount > 0); // v270: סך היחידות רשות
+    if (!anchorsReady) { showToast('חובה להשאיר לפחות תעודה אחת עם סכום ללא מע״מ', null, null, 3200); refreshReceipt(); return; }
     editingNotes = false; anchorFixHint = ''; saveReceiptDraft(); refreshReceipt();
   }
   else if (role === 'rc-recon-minus') reconcileStepNote(id, -1);
