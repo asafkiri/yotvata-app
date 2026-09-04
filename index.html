@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v277 ייבוא השקות — קובץ PowerPoint נקרא ישירות</title>
+    <title>הזמנות יטבתה - v278 ייבוא השקות — כל מוצר נפתח בכרטיס המוצר, אחד אחרי השני</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -109,7 +109,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v277 ייבוא השקות — קובץ PowerPoint נקרא ישירות</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v278 ייבוא השקות — כל מוצר נפתח בכרטיס המוצר, אחד אחרי השני</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -1589,11 +1589,11 @@ function adminClickActionName(role) {
     'pcat-down': 'עריכת קטגוריות רווחיות', 'pcat-del': 'מחיקת קטגוריה רווחית', 'promo-new': 'יצירת מבצע', 'pe-save': 'שמירת מבצע', 'pe-delete': 'מחיקת מבצע',
     'trash-delete': 'מחיקה לצמיתות מסל מחזור', 'trash-clear': 'ריקון סל מחזור', 'trash-restore': 'שחזור מסל מחזור', 'del-receipt': 'מחיקת תעודה', 'backup-import-confirm': 'ייבוא גיבוי מלא',
     'pos-import-apply': 'עדכון מחירי קופה מדוח',
-    'launch-import': 'ייבוא השקות ממצגת', 'launch-import-create': 'פתיחת מוצרים ממצגת ההשקות'
+    'launch-import': 'ייבוא השקות ממצגת', 'launch-import-next': 'פתיחת מוצר ממצגת ההשקות'
   };
   return map[role] || 'פעולה זו דורשת מנהל';
 }
-const ADMIN_CLICK_ROLES = new Set(['cfg-save','add-product','launch-import','launch-import-create','del-product','toggle-hidden','sync-local-units','del-contact','clear-history','clear-returns-history','clear-receipts','rc-fix-open','rc-fix-save','rc-date-edit','pcat-round-mode','pcat-add','pcat-up','pcat-down','pcat-del','promo-new','pe-save','pe-delete','trash-delete','trash-clear','trash-restore','del-receipt','backup-import-confirm','pos-import-apply','rc-credit-verify','rc-credit-cancel','rc-credit-defer','rc-credit-offset','rc-supplier-verify-open','rc-supplier-defer-open']);
+const ADMIN_CLICK_ROLES = new Set(['cfg-save','add-product','launch-import','launch-import-next','del-product','toggle-hidden','sync-local-units','del-contact','clear-history','clear-returns-history','clear-receipts','rc-fix-open','rc-fix-save','rc-date-edit','pcat-round-mode','pcat-add','pcat-up','pcat-down','pcat-del','promo-new','pe-save','pe-delete','trash-delete','trash-clear','trash-restore','del-receipt','backup-import-confirm','pos-import-apply','rc-credit-verify','rc-credit-cancel','rc-credit-defer','rc-credit-offset','rc-supplier-verify-open','rc-supplier-defer-open']);
 const ADMIN_INPUT_ROLES = new Set(['price-set','pos-set','pcat-name','pcat-pct','cat-set','avg','avg-set','box-set']);
 function restoreLockedAdminInput(t) {
   const role = t && t.getAttribute && t.getAttribute('data-role');
@@ -13352,6 +13352,7 @@ async function saveProd(again) {
   if (afterTarget !== 'ai_unknown') showToast(id ? 'המוצר עודכן' : 'המוצר נוסף', null, null, 1600);
   if (afterTarget === 'ai_unknown' && savedProduct) { aiCompleteUnknownProduct(savedProduct, unknownCreateContext); return; }
   if (afterTarget === 'promo_import' && savedProduct) { promoImportProductSaved(savedProduct); return; }
+  if (afterTarget === 'launch_import' && savedProduct) { launchImportProductSaved(savedProduct); return; } // v278
   if (afterTarget && savedProduct) { promptQty(savedProduct, afterTarget); return; }
   if (again) { if (wasFromScan) openPriceScanner(); else openProdModal(null, false, ''); }
 }
@@ -13697,7 +13698,7 @@ function promoImportPick() {
 // רק הקבוצה למי שאין לו ממי לרשת (השקות אינן מציינות קבוצה), ולחיצה אחת
 // על "פתח את כולם" יוצרת את המוצרים — דרך אותו שער ענן של כרטיס המוצר
 // (create-if-absent לפי ברקוד), כך שכפילות שנוצרה בינתיים נתפסת ולא נדרסת.
-let launchImport = null; // { stage: 'reading'|'summary'|'error', sheet, items, error, busy }
+let launchImport = null; // { stage: 'reading'|'summary'|'error', sheet, items, error, source }
 
 // v276: הייבוא חי בשני מקומות — במסך עריכת המוצרים ובתיקייה משלו בניהול
 // הקליטה. כל שינוי מצב מצייר מחדש את המסך שבו המשתמש נמצא בפועל.
@@ -13716,7 +13717,7 @@ function renderLaunches() {
       '<ol class="text-xs text-slate-600 font-bold space-y-1 mb-3 pr-4 list-decimal">' +
         '<li>לוחצים על הכפתור ובוחרים את קובץ המצגת כפי שהגיע מהספק (PowerPoint), או PDF, או צילומי שקופיות.</li>' +
         '<li>הקריאה אורכת עד דקה. מקובץ PowerPoint הברקודים והמחירים נלקחים מהטקסט עצמו, בלי צילום.</li>' +
-        '<li>בסיכום בודקים מחיר, בוחרים קבוצה למי שמסומן בכתום, ופותחים את כולם בלחיצה.</li>' +
+        '<li>לוחצים "התחל": כל מוצר נפתח בכרטיס המוצר הרגיל, ממולא מראש. בודקים, משלימים קבוצה, "שמור מוצר" — והבא נפתח.</li>' +
       '</ol>' +
       '<div class="text-[10px] text-slate-400 font-bold mb-3">מוצר שכבר במאגר מדולג. מוצר עם "ברקוד זהה" למוצר קיים יורש ממנו קבוצה והגדרות הזמנה. כדאי לייבא השקות לפני ייבוא המבצעים של אותו חודש.</div>' +
       '<button data-role="launch-import" class="btn-tap w-full bg-violet-600 text-white py-3 rounded-xl font-black flex items-center justify-center gap-2"><i class="fa-solid fa-file-import"></i> בחר קובץ מצגת (PowerPoint / PDF / צילומים)</button>' +
@@ -13865,26 +13866,68 @@ function launchImportPrepare(sheet) {
   return (sheet.products || []).map(src => {
     const existing = findProductByBarcode(src.barcode, null);
     const basedOn = src.replacesBarcode ? findProductByBarcode(src.replacesBarcode, null) : null;
-    return {
-      src: src,
-      existing: existing,
-      basedOn: basedOn,
-      inherited: !!(basedOn && basedOn.category),
-      include: !existing,
-      price: src.unitPriceExVat != null ? src.unitPriceExVat : null,
-      category: basedOn ? (basedOn.category || '') : ''
-    };
+    return { src: src, existing: existing, basedOn: basedOn, done: false, skipped: false, savedName: '' };
   });
 }
-function launchImportSelected() {
-  return launchImport ? launchImport.items.filter(it => it.include && !it.existing && !it.created) : [];
-}
-function launchImportCatOptions(selected) {
-  return '<option value="">בחר קבוצה…</option>' + pricingCats.map(c => '<option value="' + htmlEscape(c.id) + '"' + (selected === c.id ? ' selected' : '') + '>' + htmlEscape(c.name) + ' (' + (Number(c.pct) || 0) + '%)</option>').join('');
+// v278: המוצרים נפתחים אחד אחד בכרטיס המוצר הרגיל — לא ברשימה עם שדות קטנים.
+// הכרטיס ממולא מראש ממה שהמצגת יודעת (שם, ברקוד, מחיר קנייה, יח׳ בארגז
+// במחשבון) וממה שהמוצר המקביל יודע (קבוצה, יחידת הזמנה, כמות מומלצת),
+// והמשתמש משלים את החסר ולוחץ "שמור מוצר". השמירה עוברת את כל בדיקות
+// הכרטיס — כפילות ברקוד, קבוצה חובה, מחיר — ואז נפתח המוצר הבא.
+// "רק ארגזים שלמים" לעולם לא מסומן מראש: זו החלטה של החנות, לא של המצגת.
+function launchImportPending() {
+  return launchImport ? launchImport.items.filter(it => !it.existing && !it.done && !it.skipped) : [];
 }
 function launchImportDateLabel(iso) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || '');
   return m ? (parseInt(m[3], 10) + '.' + parseInt(m[2], 10) + '.' + m[1]) : '';
+}
+function launchImportOpenNext() {
+  if (!launchImport || launchImport.stage !== 'summary') return;
+  const pending = launchImportPending();
+  const next = pending[0];
+  if (!next) {
+    const opened = launchImport.items.filter(it => it.done).length;
+    showToast(opened ? ('כל המוצרים מהמצגת נפתחו — ' + opened + ' מוצרים') : 'אין מוצרים חדשים לפתוח מהמצגת', null, null, 3000);
+    launchImportRerender();
+    return;
+  }
+  // המאגר התעדכן מאז הקריאה (מכשיר אחר) — לא פותחים כפול, עוברים הלאה
+  const duplicate = findProductByBarcode(next.src.barcode, null);
+  if (duplicate) { next.existing = duplicate; launchImportOpenNext(); return; }
+  if (!pricingCatsLoaded) { showToast('הקבוצות עדיין נטענות — המתן רגע ונסה שוב', null, null, 3000); return; }
+  const s = next.src, base = next.basedOn;
+  openProdModal(null, false, s.barcode, 'launch_import');
+  const total = launchImport.items.filter(it => !it.existing).length;
+  const position = total - pending.length + 1;
+  $('prodTitle').textContent = 'מוצר חדש מהמצגת (' + position + '/' + total + ')';
+  $('prod_name').value = s.name || '';
+  if (Number(s.unitsPerCarton) >= 2) $('prod_cartonUnits').value = String(s.unitsPerCarton); // מחשבון בלבד — לא "רק ארגזים שלמים"
+  if (Number(s.unitPriceExVat) > 0) $('prod_price').value = s.unitPriceExVat;
+  if (base) {
+    if (base.category && pricingCats.some(c => c.id === base.category)) $('prod_category').value = base.category;
+    if (parseInt(base.average, 10) > 0) $('prod_average').value = String(parseInt(base.average, 10));
+    setProdDefaultUnit(base.defaultUnit);
+  }
+  updateProdRecHint();
+  // הדבר היחיד שבטוח חסר הוא הקבוצה — הפוקוס הולך אליה
+  const focusId = ($('prod_category').value ? 'prod_price' : 'prod_category');
+  setTimeout(() => { const el = $(focusId); if (el) el.focus(); }, 120);
+}
+function launchImportProductSaved(savedProduct) {
+  if (!launchImport) return;
+  const code = normalizeBarcode(savedProduct.barcode || '');
+  launchImport.items.forEach(it => {
+    if (!it.done && !it.existing && normalizeBarcode(it.src.barcode) === code) { it.done = true; it.savedName = savedProduct.name || ''; }
+  });
+  saveDraftPassive();
+  launchImportOpenNext();
+}
+function launchImportSkip(index) {
+  const it = launchImport && launchImport.items[index];
+  if (!it || it.done || it.existing) return;
+  it.skipped = !it.skipped;
+  launchImportRerender();
 }
 function launchImportHtml() {
   if (!launchImport) return '';
@@ -13902,119 +13945,36 @@ function launchImportHtml() {
       s.launchStatus || '',
       s.netWeight || '',
       s.unitsPerCarton ? (s.unitsPerCarton + ' יח׳ בארגז') : '',
-      s.launchDate ? ('השקה ' + launchImportDateLabel(s.launchDate)) : '',
-      s.supplierItemCode ? ('מק״ט ' + s.supplierItemCode) : ''
+      s.unitPriceExVat ? ('₪' + fmtMoney(s.unitPriceExVat)) : '',
+      s.launchDate ? ('השקה ' + launchImportDateLabel(s.launchDate)) : ''
     ].filter(Boolean).join(' · ');
     let badge;
-    if (it.created) badge = '<span class="text-emerald-600 font-black text-[10px]">נפתח ✓</span>';
+    if (it.done) badge = '<span class="text-emerald-600 font-black text-[10px]"><i class="fa-solid fa-circle-check"></i> נפתח' + (it.savedName && it.savedName !== s.name ? ' בשם "' + htmlEscape(it.savedName) + '"' : '') + '</span>';
     else if (it.existing) badge = '<span class="text-slate-400 font-black text-[10px]">כבר במאגר: ' + htmlEscape(it.existing.name || '') + '</span>';
-    else if (it.basedOn) badge = '<span class="text-violet-700 font-black text-[10px]"><i class="fa-solid fa-arrow-right-arrow-left"></i> מקביל ל: ' + htmlEscape(it.basedOn.name || '') + ' — יורש קבוצה והגדרות הזמנה</span>';
-    else badge = '<span class="text-blue-600 font-black text-[10px]">חדש</span>';
-    const editable = !it.existing && !it.created;
-    return '<div class="border-b border-slate-100 py-2">' +
-      '<label class="flex items-start gap-2">' +
-        (editable ? '<input type="checkbox" data-role="launch-include" data-idx="' + i + '"' + (it.include ? ' checked' : '') + ' class="mt-1 w-4 h-4 accent-violet-600 shrink-0">' : '<span class="w-4 shrink-0"></span>') +
-        '<div class="min-w-0 flex-1"><div class="text-sm font-black text-slate-800' + (editable && !it.include ? ' line-through opacity-50' : '') + '">' + htmlEscape(s.name) + '</div>' +
-        '<div class="text-[10px] font-bold text-slate-500">' + htmlEscape(s.barcode) + (meta ? ' · ' + htmlEscape(meta) : '') + '</div>' +
-        '<div class="mt-0.5">' + badge + '</div></div>' +
-      '</label>' +
-      (editable ? '<div class="flex gap-2 mt-1.5 pr-6">' +
-        '<div class="flex items-center gap-1 border-2 border-slate-200 rounded-lg px-2 w-24 shrink-0"><span class="text-slate-400 font-black text-xs">₪</span><input type="text" inputmode="decimal" data-role="launch-price" data-idx="' + i + '" value="' + (it.price != null ? htmlEscape(it.price) : '') + '" class="w-full py-1.5 text-center font-black text-sm outline-none bg-transparent" placeholder="מחיר"></div>' +
-        '<select data-role="launch-cat" data-idx="' + i + '" class="flex-1 min-w-0 p-1.5 rounded-lg border-2 ' + (it.category ? 'border-slate-200' : 'border-amber-300 bg-amber-50') + ' outline-none font-bold text-xs">' + launchImportCatOptions(it.category) + '</select>' +
-      '</div>' : '') +
+    else if (it.skipped) badge = '<span class="text-slate-400 font-black text-[10px]">דולג</span>';
+    else if (it.basedOn) badge = '<span class="text-violet-700 font-black text-[10px]"><i class="fa-solid fa-arrow-right-arrow-left"></i> מקביל ל: ' + htmlEscape(it.basedOn.name || '') + ' — הכרטיס יקבל ממנו קבוצה והגדרות הזמנה</span>';
+    else badge = '<span class="text-blue-600 font-black text-[10px]">חדש — הקבוצה תיבחר בכרטיס</span>';
+    const canSkip = !it.done && !it.existing;
+    return '<div class="flex items-start justify-between gap-2 border-b border-slate-100 py-2">' +
+      '<div class="min-w-0 flex-1"><div class="text-sm font-black text-slate-800' + (it.skipped ? ' line-through opacity-50' : '') + '">' + htmlEscape(s.name) + '</div>' +
+      '<div class="text-[10px] font-bold text-slate-500">' + htmlEscape(s.barcode) + (meta ? ' · ' + htmlEscape(meta) : '') + '</div>' +
+      '<div class="mt-0.5">' + badge + '</div></div>' +
+      (canSkip ? '<button data-role="launch-import-skip" data-idx="' + i + '" class="btn-tap shrink-0 text-[10px] font-black px-2 py-1 rounded-lg border ' + (it.skipped ? 'border-violet-300 text-violet-700 bg-violet-50' : 'border-slate-200 text-slate-500 bg-white') + '">' + (it.skipped ? 'החזר' : 'דלג') + '</button>' : '') +
     '</div>';
   }).join('');
-  const toCreate = launchImportSelected().length;
-  const done = st.items.some(it => it.created);
+  const pending = launchImportPending().length;
+  const opened = st.items.filter(it => it.done).length;
+  const started = opened > 0;
+  const allDone = !pending;
+  let mainBtn;
+  if (allDone) mainBtn = '<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-2.5 mt-2 text-center text-sm font-black text-emerald-800"><i class="fa-solid fa-circle-check"></i> ' + (opened ? opened + ' מוצרים נפתחו מהמצגת' : 'אין מוצרים חדשים לפתוח') + '</div>';
+  else mainBtn = '<button data-role="launch-import-next" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-3 font-black mt-2"><i class="fa-solid ' + (started ? 'fa-forward' : 'fa-play') + '"></i> ' + (started ? 'המשך למוצר הבא (נשארו ' + pending + ')' : 'התחל — ' + pending + ' מוצרים, אחד אחרי השני') + '</button>';
   return '<div class="rounded-2xl border-2 border-violet-300 bg-white p-3 mt-3 text-right">' +
-    '<div class="font-black text-violet-900"><i class="fa-solid fa-rocket ml-1"></i>' + htmlEscape(st.sheet.title || 'מצגת השקות') + ' — לאישור לפני פתיחה</div>' +
-    '<div class="text-[11px] font-bold text-slate-500 mt-0.5">' + st.items.length + ' מוצרים נקראו' + (st.source === 'pptx' ? ' מהטקסט של קובץ המצגת עצמו (ברקודים ומחירים מדויקים, לא מצילום)' : '') + ' · המחיר מהמצגת נכנס כמחיר קנייה ליחידה ללא מע״מ — בדוק אותו · לכל מוצר חדש חובה קבוצה</div>' +
-    (pricingCats.length ? '<div class="flex items-center gap-2 mt-2"><span class="text-[11px] font-black text-slate-600 shrink-0">קבוצה לכל החדשים:</span><select data-role="launch-cat-all" class="flex-1 min-w-0 p-1.5 rounded-lg border-2 border-violet-200 outline-none font-bold text-xs bg-white">' + launchImportCatOptions('') + '</select></div>' +
-      '<div class="text-[10px] text-slate-400 font-bold mt-0.5">מי שיורש קבוצה ממוצר מקביל אינו משתנה כאן — אפשר לשנות לו בשורה שלו.</div>' : '') +
+    '<div class="font-black text-violet-900"><i class="fa-solid fa-rocket ml-1"></i>' + htmlEscape(st.sheet.title || 'מצגת השקות') + '</div>' +
+    '<div class="text-[11px] font-bold text-slate-500 mt-0.5">' + st.items.length + ' מוצרים נקראו' + (st.source === 'pptx' ? ' מהטקסט של קובץ המצגת עצמו — ברקודים ומחירים מדויקים, לא מצילום' : '') + '. כל מוצר נפתח בכרטיס המוצר הרגיל, ממולא מראש: בודקים, משלימים קבוצה ולוחצים "שמור מוצר". המחיר מהמצגת נכנס כמחיר קנייה ללא מע״מ.</div>' +
     '<div class="mt-1">' + rows + '</div>' +
-    '<button data-role="launch-import-create" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-3 font-black mt-2"' + (st.busy || !toCreate ? ' disabled' : '') + '>' + (st.busy ? '<i class="fa-solid fa-spinner fa-spin"></i> פותח…' : (toCreate ? '<i class="fa-solid fa-check-double"></i> פתח ' + toCreate + ' מוצרים' : 'אין מוצרים לפתיחה')) + '</button>' +
-    '<button data-role="launch-import-close" class="btn-tap w-full bg-white border border-slate-300 text-slate-600 rounded-xl py-2 font-black text-xs mt-2">' + (done ? 'סגור' : 'בטל') + '</button></div>';
-}
-function launchImportRefreshButton() {
-  const btn = app.querySelector('[data-role="launch-import-create"]');
-  if (!btn || !launchImport || launchImport.busy) return;
-  const n = launchImportSelected().length;
-  btn.disabled = !n;
-  btn.innerHTML = n ? '<i class="fa-solid fa-check-double"></i> פתח ' + n + ' מוצרים' : 'אין מוצרים לפתיחה';
-}
-function launchImportOnChange(t) {
-  if (!launchImport || launchImport.stage !== 'summary' || launchImport.busy) return;
-  const role = t.getAttribute('data-role');
-  if (role === 'launch-cat-all') {
-    // קבוצה אחת לכל המוצרים החדשים — חוץ ממי שכבר ירש קבוצה ממוצר מקביל
-    const value = t.value || '';
-    launchImport.items.forEach((it, i) => {
-      if (it.existing || it.created || it.inherited) return;
-      it.category = value;
-      const sel = app.querySelector('select[data-role="launch-cat"][data-idx="' + i + '"]');
-      if (sel) { sel.value = value; sel.classList.toggle('border-amber-300', !value); sel.classList.toggle('bg-amber-50', !value); sel.classList.toggle('border-slate-200', !!value); }
-    });
-    return;
-  }
-  const it = launchImport.items[parseInt(t.dataset.idx, 10)];
-  if (!it) return;
-  if (role === 'launch-include') { it.include = !!t.checked; launchImportRefreshButton(); return; }
-  if (role === 'launch-price') { const n = parseFloat((t.value || '').toString().replace(',', '.')); it.price = n > 0 ? r2(n) : null; return; }
-  if (role === 'launch-cat') { it.category = t.value || ''; t.classList.toggle('border-amber-300', !it.category); t.classList.toggle('bg-amber-50', !it.category); t.classList.toggle('border-slate-200', !!it.category); }
-}
-async function launchImportCreateAll() {
-  if (!launchImport || launchImport.stage !== 'summary' || launchImport.busy) return;
-  const chosen = launchImportSelected();
-  if (!chosen.length) return;
-  if (!pricingCatsLoaded) { showToast('הקבוצות עדיין נטענות — המתן רגע ונסה שוב', null, null, 3000); return; }
-  const noCategory = pricingCats.length ? chosen.filter(it => !it.category).length : 0;
-  if (noCategory) { showToast('בחר קבוצה ל-' + noCategory + ' מוצרים חדשים לפני הפתיחה (השורות המסומנות בכתום)', null, null, 3400); return; }
-  const noPrice = chosen.filter(it => !(Number(it.price) > 0)).length;
-  if (noPrice) { showToast('הזן מחיר קנייה ל-' + noPrice + ' מוצרים לפני הפתיחה', null, null, 3200); return; }
-  launchImport.busy = true;
-  launchImportRerender();
-  let created = 0, skipped = 0, failed = 0;
-  let nextIndex = (products.length ? Math.max(...products.map(p => p.orderIndex || 0)) : -1) + 1;
-  for (const it of chosen) {
-    const s = it.src;
-    // המאגר התעדכן מאז הקריאה (מכשיר אחר, או המוצר הקודם בלולאה) — לא פותחים כפול
-    const duplicate = findProductByBarcode(s.barcode, null);
-    if (duplicate) { it.existing = duplicate; it.include = false; skipped++; continue; }
-    const base = it.basedOn;
-    const baseBox = base ? (parseInt(base.boxSize, 10) || 0) : 0;
-    // ארגז שלם: רק אם המוצר המקביל מוגדר כך — ואז עם מקדם ההפיכה של המוצר החדש
-    const boxSize = baseBox >= 2 ? (s.unitsPerCarton >= 2 ? s.unitsPerCarton : baseBox) : 0;
-    const operationId = makeOperationId('prod');
-    const docId = barcodeProductId(s.barcode) || operationId;
-    const data = {
-      name: s.name, barcode: s.barcode, price: r2(Number(it.price)),
-      posPrice: null, posPriceAt: Date.now(), creditPrice: null, deposit: null,
-      billingPackId: null, billingPackSize: 0,
-      category: it.category || null,
-      average: base ? (parseInt(base.average, 10) || 0) : 1,
-      defaultUnit: normalizeOrderUnit(base ? base.defaultUnit : 'carton'),
-      defaultUnitUpdatedAt: Date.now(),
-      boxSize: boxSize, hidden: false,
-      orderIndex: nextIndex++, operationId: operationId
-    };
-    let transactionDuplicate = null;
-    const saved = await runCloudTask('create product', {
-      op: 'create-if-absent', path: dataPath('products', docId), data, operationId: operationId
-    }, { onDuplicateBarcode: (err) => { transactionDuplicate = err && err.product ? err.product : null; } });
-    if (!saved) {
-      if (transactionDuplicate) { it.existing = transactionDuplicate; it.include = false; skipped++; }
-      else failed++;
-      continue;
-    }
-    if (!products.find(x => x.id === docId)) products.push({ id: docId, ...data });
-    it.created = true;
-    created++;
-  }
-  launchImport.busy = false;
-  saveDraftPassive();
-  if (failed) showToast(created + ' מוצרים נפתחו, ' + failed + ' נכשלו — נסה שוב', null, null, 3600);
-  else showToast(created + ' מוצרים נפתחו' + (skipped ? ' · ' + skipped + ' דולגו (כבר קיימים)' : ''), null, null, 3200);
-  launchImportRerender();
+    mainBtn +
+    '<button data-role="launch-import-close" class="btn-tap w-full bg-white border border-slate-300 text-slate-600 rounded-xl py-2 font-black text-xs mt-2">' + (started || allDone ? 'סגור' : 'בטל') + '</button></div>';
 }
 
 // v197: ניקוי אוטומטי — מבצע שהסתיים לפני תחילת החודש הקודם עובר לסל
@@ -15855,7 +15815,6 @@ app.addEventListener('change', (e) => {
     aiAddInvoiceFiles(docIndex, files);
     return;
   }
-  if (t && t.getAttribute && /^launch-(include|price|cat|cat-all)$/.test(t.getAttribute('data-role') || '')) { launchImportOnChange(t); return; } // v275
   if (t && t.getAttribute && t.getAttribute('data-role') === 'nc-promo-mark') {
     const i = parseInt(t.dataset.i, 10) || 0;
     const row = noteCheckRows[i]; if (row) row.promoMark = !!t.checked;
@@ -16009,7 +15968,8 @@ app.addEventListener('click', (e) => {
   else if (role === 'add-product') addProduct();
   // v275: אחרי שער המנהל — פתיחת מוצרים ממצגת ההשקות היא הוספת מוצרים
   else if (role === 'launch-import') launchImportPick();
-  else if (role === 'launch-import-create') launchImportCreateAll();
+  else if (role === 'launch-import-next') launchImportOpenNext(); // v278: אחד אחרי השני בכרטיס המוצר
+  else if (role === 'launch-import-skip') launchImportSkip(parseInt(t.dataset.idx, 10));
   else if (role === 'launch-import-close') { launchImport = null; launchImportRerender(); }
   else if (role === 'pos-import-pick') posImportPick();
   else if (role === 'pos-import-apply') posImportApply();
