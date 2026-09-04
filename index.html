@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v276 ייבוא מוצרים חדשים — תיקייה בניהול הקליטה</title>
+    <title>הזמנות יטבתה - v277 ייבוא השקות — קובץ PowerPoint נקרא ישירות</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -109,7 +109,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v276 ייבוא מוצרים חדשים — תיקייה בניהול הקליטה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v277 ייבוא השקות — קובץ PowerPoint נקרא ישירות</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -1718,7 +1718,7 @@ function renderSettings() {
         '<button data-role="add-product" class="btn-tap w-full bg-blue-600 text-white py-3 rounded-xl font-black flex items-center justify-center gap-2"><i class="fa-solid fa-plus"></i> הוסף מוצר חדש</button>' +
         // v275: מצגת ההשקות של הספק → כל המוצרים החדשים נפתחים בבת אחת
         '<button data-role="launch-import" class="btn-tap w-full bg-white border-2 border-violet-300 text-violet-700 py-3 rounded-xl font-black flex items-center justify-center gap-2 mt-2"><i class="fa-solid fa-rocket"></i> ייבוא השקות ממצגת הספק (AI)</button>' +
-        '<div class="text-[10px] text-slate-400 font-bold mt-1.5 text-center">PDF של המצגת או צילומי מסך של השקופיות. שם, ברקוד, מחיר וארגז נקראים לבד — נשאר רק לבחור קבוצה.</div>' +
+        '<div class="text-[10px] text-slate-400 font-bold mt-1.5 text-center">קובץ PowerPoint כפי שהגיע מהספק, PDF או צילומי שקופיות. שם, ברקוד, מחיר וארגז נקראים לבד — נשאר רק לבחור קבוצה.</div>' +
         launchImportHtml() +
       '</div>' +
       '<div id="prodList" class="p-2 space-y-2">' + rows + '</div>' +
@@ -13714,12 +13714,12 @@ function renderLaunches() {
         '<div class="min-w-0"><div class="font-black text-slate-800 text-lg leading-tight">מצגת ההשקות של הספק</div><div class="text-[11px] text-slate-400 font-bold mt-0.5">שם, ברקוד, מחיר וארגז נקראים לבד. נשאר רק לבחור קבוצה.</div></div>' +
       '</div>' +
       '<ol class="text-xs text-slate-600 font-bold space-y-1 mb-3 pr-4 list-decimal">' +
-        '<li>שומרים את המצגת כ-PDF (קובץ ← שמור בשם ← PDF), או מצלמים את השקופיות.</li>' +
-        '<li>לוחצים על הכפתור ובוחרים את הקובץ. הקריאה אורכת כדקה.</li>' +
+        '<li>לוחצים על הכפתור ובוחרים את קובץ המצגת כפי שהגיע מהספק (PowerPoint), או PDF, או צילומי שקופיות.</li>' +
+        '<li>הקריאה אורכת עד דקה. מקובץ PowerPoint הברקודים והמחירים נלקחים מהטקסט עצמו, בלי צילום.</li>' +
         '<li>בסיכום בודקים מחיר, בוחרים קבוצה למי שמסומן בכתום, ופותחים את כולם בלחיצה.</li>' +
       '</ol>' +
       '<div class="text-[10px] text-slate-400 font-bold mb-3">מוצר שכבר במאגר מדולג. מוצר עם "ברקוד זהה" למוצר קיים יורש ממנו קבוצה והגדרות הזמנה. כדאי לייבא השקות לפני ייבוא המבצעים של אותו חודש.</div>' +
-      '<button data-role="launch-import" class="btn-tap w-full bg-violet-600 text-white py-3 rounded-xl font-black flex items-center justify-center gap-2"><i class="fa-solid fa-file-import"></i> בחר PDF או צילומי שקופיות</button>' +
+      '<button data-role="launch-import" class="btn-tap w-full bg-violet-600 text-white py-3 rounded-xl font-black flex items-center justify-center gap-2"><i class="fa-solid fa-file-import"></i> בחר קובץ מצגת (PowerPoint / PDF / צילומים)</button>' +
       launchImportHtml() +
     '</div>' +
     '<button data-role="go-settings" class="btn-tap w-full bg-white border border-slate-200 p-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-black text-slate-600"><i class="fa-solid fa-sliders text-blue-600"></i> עריכת מוצרים ידנית בהגדרות</button>';
@@ -13728,10 +13728,91 @@ function renderLaunches() {
 function launchImportPick() {
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = 'image/*,application/pdf';
+  // v277: גם PowerPoint — הקובץ נפתח כאן במכשיר והטקסט שלו נשלח לקריאה
+  input.accept = 'image/*,application/pdf,.pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation';
   input.multiple = true;
   input.onchange = () => launchImportStart(input.files);
   input.click();
+}
+// ===== v277: קובץ PowerPoint נקרא ישירות =====
+// המצגת מגיעה מהספק כ-PPTX, ובאייפון אי אפשר לבחור אותו כשמבקשים רק PDF.
+// PPTX הוא ZIP של XML, ולכן הטקסט של השקופיות מחולץ כאן במכשיר (JSZip
+// נטען מה-CDN בפעם הראשונה בלבד) ונשלח לשרת כטקסט. יתרון שלא ציפינו לו:
+// הברקודים והמחירים מגיעים מדויקים מהקובץ עצמו, בלי OCR מצילום.
+async function ensureJsZip() {
+  if (window.JSZip) return;
+  try { await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'); }
+  catch (e) { await loadScript('https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js'); }
+}
+function pptxDecodeXml(s) {
+  return s.replace(/&#x([0-9a-f]+);/gi, (m, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (m, d) => String.fromCodePoint(parseInt(d, 10)))
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+}
+function pptxParagraphText(xml) {
+  const runs = xml.replace(/<a:br\b[^>]*\/?>/g, ' ').replace(/<a:t(?:\s[^>]*)?>([\s\S]*?)<\/a:t>/g, '$1 ').replace(/<[^>]+>/g, '');
+  return pptxDecodeXml(runs).replace(/\s+/g, ' ').trim();
+}
+function pptxSlideText(xml) {
+  const lines = [];
+  const blockRe = /<a:tr\b[\s\S]*?<\/a:tr>|<a:p\b[\s\S]*?<\/a:p>/g;
+  let m;
+  while ((m = blockRe.exec(xml))) {
+    const block = m[0];
+    if (block.charAt(3) === 't') { // <a:tr — שורת טבלה: תא | תא | תא
+      const cells = [];
+      const cellRe = /<a:tc\b[^>]*\/>|<a:tc\b[\s\S]*?<\/a:tc>/g;
+      let c;
+      while ((c = cellRe.exec(block))) {
+        if (/\/>$/.test(c[0])) continue; // תא ממוזג ריק
+        const paras = [];
+        const pRe = /<a:p\b[\s\S]*?<\/a:p>/g;
+        let p;
+        while ((p = pRe.exec(c[0]))) { const t = pptxParagraphText(p[0]); if (t) paras.push(t); }
+        const cell = paras.join(' ');
+        if (cell) cells.push(cell);
+      }
+      if (cells.length) lines.push(cells.join(' | '));
+    } else {
+      const t = pptxParagraphText(block);
+      if (t) lines.push(t);
+    }
+  }
+  return lines.join('\n');
+}
+async function pptxExtractSlides(file) {
+  await ensureJsZip();
+  const zip = await window.JSZip.loadAsync(file);
+  const readText = async (name) => { const f = zip.file(name); return f ? await f.async('string') : ''; };
+  const pres = await readText('ppt/presentation.xml');
+  const rels = await readText('ppt/_rels/presentation.xml.rels');
+  let paths = [];
+  if (pres && rels) {
+    // סדר השקופיות האמיתי: sldIdLst → rels → קובץ; מספר הקובץ אינו הסדר
+    const relMap = {};
+    const relRe = /<Relationship\b[^>]*>/g;
+    let r;
+    while ((r = relRe.exec(rels))) {
+      const id = /\bId="([^"]+)"/.exec(r[0]), target = /\bTarget="([^"]+)"/.exec(r[0]);
+      if (id && target && /slides\/slide\d+\.xml$/i.test(target[1])) relMap[id[1]] = 'ppt/' + target[1].replace(/^\/?ppt\//, '');
+    }
+    const idRe = /<p:sldId\b[^>]*\br:id="([^"]+)"/g;
+    let s;
+    while ((s = idRe.exec(pres))) if (relMap[s[1]]) paths.push(relMap[s[1]]);
+  }
+  if (!paths.length) {
+    paths = Object.keys(zip.files).filter(n => /^ppt\/slides\/slide\d+\.xml$/i.test(n))
+      .sort((a, b) => parseInt(a.match(/\d+/)[0], 10) - parseInt(b.match(/\d+/)[0], 10));
+  }
+  const slides = [];
+  for (const path of paths.slice(0, 40)) {
+    const text = pptxSlideText(await readText(path));
+    if (text) slides.push(text.slice(0, 6000));
+  }
+  return slides;
+}
+function launchImportIsPptx(file) {
+  return /\.pptx$/i.test(file.name || '') || /presentationml\.presentation/.test(file.type || '');
 }
 async function launchImportStart(files) {
   if (!files || !files.length) return;
@@ -13741,12 +13822,21 @@ async function launchImportStart(files) {
   try {
     const list = Array.from(files);
     const pdfFile = list.find(f => f.type === 'application/pdf' || /\.pdf$/i.test(f.name || ''));
+    const pptxFile = list.find(launchImportIsPptx);
     let requestBody;
-    if (pdfFile) {
+    if (pptxFile) {
+      // v277: PowerPoint נפתח כאן במכשיר — נשלח רק הטקסט של השקופיות
+      if (pptxFile.size > 60 * 1024 * 1024) throw new Error('קובץ המצגת גדול מדי (מעל 60MB) — שמור אותו כ-PDF במקום');
+      let slides;
+      try { slides = await pptxExtractSlides(pptxFile); }
+      catch (e) { throw new Error('לא הצלחתי לפתוח את קובץ המצגת' + (e && e.message === 'script load failed' ? ' — אין חיבור לרשת לטעינת הקורא' : '') + '. נסה לשמור אותו כ-PDF'); }
+      if (!slides.length) throw new Error('לא נמצא טקסט בשקופיות — כנראה המצגת בנויה מתמונות. שמור אותה כ-PDF או צלם את השקופיות');
+      requestBody = { mode: 'launchSheet', slides: slides };
+    } else if (pdfFile) {
       if (pdfFile.size > 15 * 1024 * 1024) throw new Error('קובץ ה-PDF גדול מדי (מעל 15MB) — צלם את השקופיות כתמונות במקום');
       requestBody = { mode: 'launchSheet', pdf: await promoImportFileRaw(pdfFile) };
     } else {
-      if (list.some(f => /\.pptx?$/i.test(f.name || ''))) throw new Error('קובץ PowerPoint אינו נקרא ישירות — שמור את המצגת כ-PDF (קובץ ← שמור בשם ← PDF) או צלם את השקופיות כתמונות');
+      if (list.some(f => /\.ppt$/i.test(f.name || ''))) throw new Error('קובץ PPT בפורמט הישן אינו נתמך — שמור אותו כ-PPTX או כ-PDF');
       const pages = [];
       for (const file of list.slice(0, 12)) pages.push(await promoImportFileToDataUrl(file));
       requestBody = { mode: 'launchSheet', pages: pages };
@@ -13765,7 +13855,7 @@ async function launchImportStart(files) {
       throw new Error('קריאת המצגת לא הצליחה. נסה שוב עם PDF של המצגת או צילום חד יותר.');
     }
     const sheet = payload.launches;
-    launchImport = { stage: 'summary', sheet: sheet, items: launchImportPrepare(sheet), error: '' };
+    launchImport = { stage: 'summary', sheet: sheet, items: launchImportPrepare(sheet), error: '', source: requestBody.slides ? 'pptx' : (requestBody.pdf ? 'pdf' : 'images') };
   } catch (error) {
     launchImport = { stage: 'error', sheet: null, items: [], error: (error && error.message) || 'הייבוא נכשל' };
   }
@@ -13838,7 +13928,7 @@ function launchImportHtml() {
   const done = st.items.some(it => it.created);
   return '<div class="rounded-2xl border-2 border-violet-300 bg-white p-3 mt-3 text-right">' +
     '<div class="font-black text-violet-900"><i class="fa-solid fa-rocket ml-1"></i>' + htmlEscape(st.sheet.title || 'מצגת השקות') + ' — לאישור לפני פתיחה</div>' +
-    '<div class="text-[11px] font-bold text-slate-500 mt-0.5">' + st.items.length + ' מוצרים נקראו · המחיר מהמצגת נכנס כמחיר קנייה ליחידה ללא מע״מ — בדוק אותו · לכל מוצר חדש חובה קבוצה</div>' +
+    '<div class="text-[11px] font-bold text-slate-500 mt-0.5">' + st.items.length + ' מוצרים נקראו' + (st.source === 'pptx' ? ' מהטקסט של קובץ המצגת עצמו (ברקודים ומחירים מדויקים, לא מצילום)' : '') + ' · המחיר מהמצגת נכנס כמחיר קנייה ליחידה ללא מע״מ — בדוק אותו · לכל מוצר חדש חובה קבוצה</div>' +
     (pricingCats.length ? '<div class="flex items-center gap-2 mt-2"><span class="text-[11px] font-black text-slate-600 shrink-0">קבוצה לכל החדשים:</span><select data-role="launch-cat-all" class="flex-1 min-w-0 p-1.5 rounded-lg border-2 border-violet-200 outline-none font-bold text-xs bg-white">' + launchImportCatOptions('') + '</select></div>' +
       '<div class="text-[10px] text-slate-400 font-bold mt-0.5">מי שיורש קבוצה ממוצר מקביל אינו משתנה כאן — אפשר לשנות לו בשורה שלו.</div>' : '') +
     '<div class="mt-1">' + rows + '</div>' +
