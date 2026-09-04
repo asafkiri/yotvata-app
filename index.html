@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v271 סיבולת אגורות גם בלי עוגן יחידות</title>
+    <title>הזמנות יטבתה - v272 מבצע נמדד על מה שחויב</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -109,7 +109,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v271 סיבולת אגורות גם בלי עוגן יחידות</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v272 מבצע נמדד על מה שחויב</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -8299,9 +8299,38 @@ function aiResidualGroupHtml(residuals) {
 // אותו כחוסר/עודף הוא חייב להסביר גם את פער היחידות וגם את פער הכסף הכולל.
 // הבדיקה משתמשת במחירי המערכת המדויקים ובתיקוני המחיר שנמצאו על הנייר,
 // ולכן אינה תלויה בשם המודפס ואינה יכולה להפוך מועמד לא פתור לחוסר אמיתי.
+// ===== v272: מינימום המבצע נמדד על מה שחויב, לא על מה ששרד את החוסר =====
+// זהו כלל v206/v214, שהמעריך כבר יישם על צד הנייר (הכמות מגיעה מ-aggregates)
+// אך אף פעם לא על צד הסחורה שהתקבלה. הסל החי מכיל רק את מה שנספר פיזית,
+// ולכן חוסר אמיתי מפיל אותו מתחת למינימום המבצע — ואז promoTriggered מתמחר
+// את מה שהתקבל במחיר מלא בזמן שהנייר חייב במחיר מבצע. הפער המדומה שנוצר
+// הוא בדיוק ההנחה, שום ממצא אמיתי אינו יכול לסגור אותו, וכל מוצר במבצע
+// נראה כ"בעיה במחיר". ומכאן גם "מלא חוסרים": הפער הזה נשלח מעצמו למנתח,
+// ובלי עוגן יחידות (v270) הכסף הוא השער היחיד — כל צירוף של חוסרים
+// מומצאים סוגר אותו בדיוק. שתי הפונקציות כאן הן הכלל היחיד, לשני הצדדים.
+function aiBilledBasketQty(pr, aggregates) {
+  if (!pr || !Array.isArray(pr.productIds) || !(aggregates instanceof Map)) return 0;
+  let total = 0;
+  aggregates.forEach(item => { if (pr.productIds.indexOf(item.product.id) !== -1) total += Number(item.qty) || 0; });
+  return total;
+}
+function aiBilledPromoTriggered(pr, aggregates, dateStr) {
+  return promoActive(pr, dateStr) && aiBilledBasketQty(pr, aggregates) >= promoMinUnitsP(pr);
+}
 function aiFindingsClosure(evaluation, findings) {
   const rows = Array.isArray(findings) ? findings : (Array.isArray(evaluation && evaluation.findings) ? evaluation.findings : []);
   const receivedRows = Array.isArray(reconcileData) ? reconcileData : [];
+  // v272: אותו מחיר בדיוק לשני צדי המשוואה. בלי התיקון הזה הנייר נמדד
+  // במחיר מבצע והסחורה שהתקבלה במחיר מלא, והפער אינו ניתן לסגירה.
+  const priceOverrides = evaluation && evaluation.receivedUnitPrices instanceof Map ? evaluation.receivedUnitPrices : null;
+  // התיקון חל רק כל עוד השורה עדיין עומדת על אותו מחיר מלא שממנו נגזר.
+  // הרגע שבו היא קיבלה מחיר אחר — מהנייר בהחלה או מהקלדה ידנית — הוא
+  // הרגע שבו המחיר הזה הוא האמת, והתיקון מסתלק מעצמו.
+  const receivedUnitPrice = line => {
+    const current = Number(line && line.price) || 0;
+    const entry = priceOverrides ? priceOverrides.get(String(line && line.productId != null ? line.productId : '')) : undefined;
+    return entry && Math.abs(current - Number(entry.base)) <= 0.005 ? Number(entry.promo) : current;
+  };
   // v270: בלי עוגן יחידות אין פער יחידות להסביר — Number(null) הוא 0,
   // ובלי ההגנה הזאת כל היחידות שנספרו היו הופכות ל"פער" מדומה שאף ממצא
   // לא יכול לסגור, והתעודה הייתה ננעלת. השער נשען אז על הכסף בלבד.
@@ -8325,7 +8354,7 @@ function aiFindingsClosure(evaluation, findings) {
   // לתנאי שאי אפשר לעמוד בו.
   const unitsOk = expectedUnitsDelta == null || Math.abs(actualUnitsDelta - expectedUnitsDelta) < 0.001;
 
-  const receivedAmount = reconcileReceivedInc();
+  const receivedAmount = r2(receivedRows.reduce((sum, line) => sum + lineTotalFromUnit(receivedUnitPrice(line), Number(line && line.received) || 0), 0));
   const expectedAmountDelta = r2((Number(receiptNoteTotal) || 0) - receivedAmount);
   let adjustedAmount = 0;
   const seen = new Set();
@@ -8333,7 +8362,7 @@ function aiFindingsClosure(evaluation, findings) {
     const id = String(line && line.productId != null ? line.productId : '');
     seen.add(id);
     const adjustedQty = Math.max(0, (Number(line && line.received) || 0) + (quantityDeltaByProduct.get(id) || 0));
-    adjustedAmount += lineTotalFromUnit(Number(line && line.price) || 0, adjustedQty);
+    adjustedAmount += lineTotalFromUnit(receivedUnitPrice(line), adjustedQty);
   });
   quantityDeltaByProduct.forEach((delta, id) => {
     if (seen.has(id) || delta <= 0) return;
@@ -8365,7 +8394,12 @@ function aiFindingsClosure(evaluation, findings) {
 function aiEvaluateInvoiceScan(payload) {
   const scan = payload && payload.scan;
   const errors = [], warnings = [], findings = [], promoCandidates = [], barcodeSuggestions = [], aggregates = new Map(), docSummaries = [], residuals = [], pendings = [], autoResolutions = [], depositRows = [];
+  const receivedUnitPrices = new Map(); // v272: productId → מחיר מבצע שהנייר מוכיח שחויב
   let unresolvedBarcodeRows = 0, unusableRows = 0;
+  // v272: תעודה בלי סך יחידות שהוקלד נספרת לפי מה שיש: עוגן מודפס שנקרא
+  // מהנייר, או שום עוגן כמות בכלל. בלי הספירה הזאת המעריך הכריז
+  // "הכמויות אומתו" גם כשאיש לא בדק אותן.
+  let unitsAnchoredDocuments = 0, unitsUnanchoredDocuments = 0;
   if (!scan || !Array.isArray(scan.documents)) return { valid: false, totalVerified: false, unitsVerified: false, extractedTotal: 0, extractedUnits: 0, errors: ['השרת לא החזיר מסמכים תקינים'], warnings, findings, barcodeSuggestions, allRowsMapped: false, aggregates, docSummaries, residuals, autoResolutions, basketComplete: false, missingDocuments: 0 };
   if (!Number.isInteger(Number(payload.serviceVersion)) || Number(payload.serviceVersion) < AI_SCAN_MIN_SERVICE_VERSION) {
     errors.push('שירות הסריקה עדיין בגרסה ישנה שאינה מוכיחה את מקור הברקוד — יש להעלות קודם את server.js החדש');
@@ -8488,7 +8522,19 @@ function aiEvaluateInvoiceScan(payload) {
       aggregates.set(product.id, old);
     });
     const printedUnits = doc.printedUnits == null || doc.printedUnits === '' ? null : Number(doc.printedUnits);
-    if (printedUnits != null && isFinite(printedUnits) && Math.round(printedUnits) !== docUnits) warnings.push('תעודה ' + (index + 1) + ': שדה היחידות המודפס נקרא אחרת מסכום השורות — נבדק מול הכמות שהוקלדה');
+    // v272: כשלא הוקלד סך יחידות לתעודה הזאת, מונה היחידות המודפס בסיכום
+    // המסמך הוא עוגן הכמות היחיד שנשאר — וההנחיה לשרת אוסרת לחשב אותו,
+    // רק להעתיק אותו כשהוא מודפס. עד כאן הוא היה אזהרה בלבד, כי הבדיקה
+    // הקשה הייתה מול הכמות שהוקלדה; מאז שסך היחידות הפך לרשות (v270) לא
+    // נשארה שום בדיקת כמות, וקריאה שסותרת את עצמה נסעה הלאה והפכה לחוסר
+    // מדומה על כל מוצר בתעודה.
+    const printedUnitsAnchor = inputDoc.units == null && printedUnits != null && isFinite(printedUnits) ? Math.round(printedUnits) : null;
+    if (printedUnitsAnchor != null) unitsAnchoredDocuments++;
+    else if (inputDoc.units == null) unitsUnanchoredDocuments++;
+    if (printedUnits != null && isFinite(printedUnits) && Math.round(printedUnits) !== docUnits) {
+      if (printedUnitsAnchor != null) errors.push('תעודה ' + (index + 1) + ': נקראו ' + docUnits + ' יחידות מול ' + printedUnitsAnchor + ' שמודפסות בסיכום התעודה — הכמויות אינן מאומתות. צלם את התעודה שוב, או הקלד את סך היחידות שבנייר כדי לקבוע מי מהם נכון.');
+      else warnings.push('תעודה ' + (index + 1) + ': שדה היחידות המודפס נקרא אחרת מסכום השורות — נבדק מול הכמות שהוקלדה');
+    }
     const printedLines = doc.printedLines == null || doc.printedLines === '' ? null : Number(doc.printedLines);
     if (printedLines != null && isFinite(printedLines) && Math.round(printedLines) !== (Array.isArray(doc.rows) ? doc.rows.length : 0)) warnings.push('תעודה ' + (index + 1) + ': שדה מספר השורות המודפס אינו תואם לשורות שנקראו — סכום וכמות השורות נבדקו בנפרד');
     if (inputDoc.units != null && docUnits !== Number(inputDoc.units)) errors.push('תעודה ' + (index + 1) + ': נקראו ' + docUnits + ' יחידות במקום ' + inputDoc.units);
@@ -8643,13 +8689,22 @@ function aiEvaluateInvoiceScan(payload) {
   const basketComplete = allRowsMapped && unusableRows === 0 && missingDocuments === 0 && returned.size === aiScanDocuments.length;
   if (aggregates.size > 0) {
     const day = todayStr();
-    const paperBasketQty = pr => {
-      if (!pr || !Array.isArray(pr.productIds)) return 0;
-      let total = 0;
-      aggregates.forEach(item => { if (pr.productIds.indexOf(item.product.id) !== -1) total += Number(item.qty) || 0; });
-      return total;
-    };
-    const paperPromoTriggered = pr => promoActive(pr, day) && paperBasketQty(pr) >= promoMinUnitsP(pr);
+    const paperPromoTriggered = pr => aiBilledPromoTriggered(pr, aggregates, day);
+    // v272: מחיר הסחורה שהתקבלה, מתוקן לפי המבצע שהנייר מוכיח שחויב. שורה
+    // שנשארה במחיר מלא רק מפני שהחוסר עצמו שחק את הסל מתומחרת מחדש כאן —
+    // אחרת aiFindingsClosure משווה נייר במחיר מבצע מול סחורה במחיר מלא,
+    // הפער המדומה הוא בדיוק ההנחה, ואף ממצא אמיתי אינו יכול לסגור אותו.
+    // מחיר שהוקלד ידנית קדוש: נוגעים רק בשורה שעדיין מתומחרת אוטומטית.
+    (reconcileData || []).forEach(line => {
+      if (!line || line.isDeposit || String(line.productId || '').indexOf('deposit-') === 0) return;
+      const product = products.find(x => x.id === line.productId);
+      if (!product) return;
+      const pr = promoForProduct(line.productId, day);
+      if (!pr || !paperPromoTriggered(pr)) return;
+      const base = r2(Number(product.price) || 0);
+      if (Math.abs((Number(line.price) || 0) - base) > 0.005) return;
+      receivedUnitPrices.set(String(line.productId), { base, promo: discountedUnitPrice(base, Number(pr.pct) || 0) });
+    });
     aggregates.forEach(a => {
     // מחיר אפקטיבי שנגזר מסכום שורת הנייר חייב להישאר בדיוק מלא.
     // עיגול כאן היה מחזיר למשל 43.04 / 24 מ-1.79333 ל-1.79 ומאבד 8 אגורות.
@@ -8678,7 +8733,12 @@ function aiEvaluateInvoiceScan(payload) {
     if (a.promotionTexts.length) findings.push({ type: 'printed_promo', productId: a.product.id, name: a.product.name, text: 'מבצע מודפס ליד ' + a.product.name + ': ' + Array.from(new Set(a.promotionTexts)).join(' · ') });
     });
     const expectedPromoDiscountCents = promoCandidates.reduce((sum, finding) => sum + Math.max(0, aiMoneyCents(finding.amount) || 0), 0);
-    if (promoCandidates.length && verifiedDocumentDiscountCents > 0 && expectedPromoDiscountCents === verifiedDocumentDiscountCents) {
+    // v272: הספק מעגל כל שורה בסופה, והחישוב כאן מעגל לכל מוצר. אגורה של
+    // הפרש הפכה עד כה החלטה אחת ("המבצעים הופיעו כהנחה כללית") לממצא נפרד
+    // על כל מוצר במבצע — בדיוק הרושם של "בעיה במחיר בכל מה שבמבצע".
+    // הסיבולת היא אגורה למוצר, ולעולם לא יותר מרשת העיגול של התעודה.
+    const promoDiscountToleranceCents = Math.min(Number(RECEIPT_ROUNDING_TOLERANCE_CENTS) || 0, promoCandidates.length);
+    if (promoCandidates.length && verifiedDocumentDiscountCents > 0 && Math.abs(expectedPromoDiscountCents - verifiedDocumentDiscountCents) <= promoDiscountToleranceCents) {
       findings.push({ type: 'printed_promo', amount: verifiedDocumentDiscountCents / 100, text: 'מבצעי המערכת מופיעים כהנחה כללית מאומתת בתעודה: ₪' + fmtMoney(verifiedDocumentDiscountCents / 100) });
     } else {
       findings.push(...promoCandidates);
@@ -8694,24 +8754,31 @@ function aiEvaluateInvoiceScan(payload) {
   const totalVerified = expectedTotalCents != null && extractedTotalCents === expectedTotalCents && aiScanDocuments.every((inputDoc, index) => {
     const doc = returned.get(index); return doc && aiMoneyCents(doc.subtotalExVat) === aiMoneyCents(inputDoc.amount);
   });
-  // v270: עוגן שלא הוקלד נחשב מסופק — אותו כלל שכבר חל על ציון התעודה
-  // הבודדת (aiSingleDocScore). בלי הכלל הזה תעודה בלי סך יחידות מודפס
-  // לעולם לא הייתה יוצאת "מאומתת", ושום פענוח שלה לא היה מתקבל.
-  const unitsVerified = receiptNoteUnits == null || (extractedUnits === Number(receiptNoteUnits) && aiScanDocuments.every((inputDoc, index) => {
-    const doc = returned.get(index); return doc && inputDoc.units != null && aiDocRowUnits(doc) === Number(inputDoc.units); // v179: בלי פיקדון
-  }));
+  // v272: "אומת" חוזר להיות אמירה על בדיקה שרצה. בלי עוגן שהוקלד הכמויות
+  // נבדקות מול מונה היחידות המודפס של כל תעודה (אי-התאמה כבר נרשמה כשגיאה
+  // למעלה); תעודה שאין בה אף עוגן — לא מוקלד ולא מודפס — אינה מאומתת.
+  // ההקלה של v270 נשמרת ב-valid למטה: כזאת עדיין ניתנת להחלה, אבל היא
+  // אינה מדווחת כמאומתת, אינה מקצרת את ניסיון הסיבוב ואינה מנפחת את הדירוג.
+  const unitsAnchorless = receiptNoteUnits == null && unitsUnanchoredDocuments > 0;
+  const unitsVerified = receiptNoteUnits == null
+    ? (!unitsAnchorless && unitsAnchoredDocuments > 0)
+    : (extractedUnits === Number(receiptNoteUnits) && aiScanDocuments.every((inputDoc, index) => {
+      const doc = returned.get(index); return doc && inputDoc.units != null && aiDocRowUnits(doc) === Number(inputDoc.units); // v179: בלי פיקדון
+    }));
   const supplierDiscount = Math.max(0, verifiedDocumentDiscountCents / 100);
-  const closure = aiFindingsClosure({ aggregates, findings, supplierDiscount }, findings);
+  const closure = aiFindingsClosure({ aggregates, findings, supplierDiscount, receivedUnitPrices }, findings);
   if (findingsReady && !closure.ok) errors.push(closure.reason || 'הממצאים אינם סוגרים את פער היחידות והסכום');
   const uniqueErrors = Array.from(new Set(errors));
   const uniqueWarnings = Array.from(new Set(warnings.concat(Array.isArray(scan.warnings) ? scan.warnings : [])));
-  return { valid: uniqueErrors.length === 0 && barcodeSuggestions.length === 0 && findingsReady && aggregates.size > 0 && totalVerified && unitsVerified && closure.ok, totalVerified, unitsVerified, closure, errors: uniqueErrors, warnings: uniqueWarnings, findings, barcodeSuggestions, allRowsMapped, findingsReady, basketComplete, missingDocuments, residuals, autoResolutions, aggregates, docSummaries, extractedTotal: extractedTotalCents / 100, extractedUnits, rowTotal: rowTotalCents / 100, supplierDiscount, depositRows };
+  // v272: unitsAnchorless הוא בדיוק ההקלה של v270 — תעודה שאין בה שום עוגן
+  // כמות עדיין ניתנת להחלה. מה שהשתנה: היא כבר לא מתחזה ל"מאומתת".
+  return { valid: uniqueErrors.length === 0 && barcodeSuggestions.length === 0 && findingsReady && aggregates.size > 0 && totalVerified && (unitsVerified || unitsAnchorless) && closure.ok, totalVerified, unitsVerified, unitsAnchorless, closure, errors: uniqueErrors, warnings: uniqueWarnings, findings, barcodeSuggestions, allRowsMapped, findingsReady, basketComplete, missingDocuments, residuals, autoResolutions, aggregates, receivedUnitPrices, docSummaries, extractedTotal: extractedTotalCents / 100, extractedUnits, rowTotal: rowTotalCents / 100, supplierDiscount, depositRows };
 }
 function aiRotationRetryDocumentIndexes(evaluation) {
   if (!evaluation || !Array.isArray(evaluation.docSummaries)) return [];
   // אם סכום הנטו וכל היחידות כבר נקראו בדיוק, סיבוב נוסף לא יכול לשפר את
   // עוגני החשבון ורק יוצר פענוח שני שעלול להחליף התאמות נכונות.
-  if (evaluation.totalVerified && evaluation.unitsVerified) return [];
+  if (evaluation.totalVerified && (evaluation.unitsVerified || evaluation.unitsAnchorless)) return []; // v272: בלי עוגן כמות אין מה לשפר בסיבוב
   const summaries = new Map(evaluation.docSummaries.map(s => [Number(s.noteIndex), s]));
   const indexes = [];
   aiScanDocuments.forEach((doc, index) => {
@@ -8896,7 +8963,11 @@ function aiSingleDocScore(returnedDoc, inputDoc) {
   const subtotalCents = returnedDoc ? aiMoneyCents(returnedDoc.subtotalExVat) : null;
   const expectedCents = aiMoneyCents(inputDoc.amount);
   // עוגן שלא הוקלד נחשב מסופק — אחרת תעודה בלי עוגן הייתה נסרקת שלוש פעמים תמיד.
-  const unitsExact = inputDoc.units == null ? 1 : (units === Number(inputDoc.units) ? 1 : 0);
+  // v272: אבל אם הקריאה עצמה החזירה את מונה היחידות המודפס, הוא העוגן —
+  // וקריאה שסוגרת עליו עדיפה על קריאה שסותרת את מה שהיא עצמה קראה.
+  const printedUnits = returnedDoc == null || returnedDoc.printedUnits == null || returnedDoc.printedUnits === '' ? null : Number(returnedDoc.printedUnits);
+  const anchorUnits = inputDoc.units != null ? Number(inputDoc.units) : (printedUnits != null && isFinite(printedUnits) ? Math.round(printedUnits) : null);
+  const unitsExact = anchorUnits == null ? 1 : (units === anchorUnits ? 1 : 0);
   const subtotalExact = expectedCents == null ? 1 : (subtotalCents != null && subtotalCents === expectedCents ? 1 : 0);
   const hasContent = rows.length > 0 && units > 0 ? 1 : 0;
   const confidence = returnedDoc && isFinite(Number(returnedDoc.confidence)) ? Number(returnedDoc.confidence) : 0;
@@ -9036,9 +9107,15 @@ async function aiRunInvoiceScan() {
     // v188: המנתח רץ מעצמו מיד אחרי הסריקה, בלי לחיצה — אבל רק כשיש מה
     // להסביר. תעודה שנסגרה נקייה אינה שולחת בקשה מיותרת.
     const ev = aiScanEvaluation;
-    if (ev && ev.findingsReady && ((Array.isArray(ev.findings) && ev.findings.some(aiIsActionableFinding)) || !(ev.closure && ev.closure.ok))) {
-      aiRunAnalyzer({ auto: true });
-    }
+    // v272: פער כסף בתעודה שאין בה שום עוגן כמות אינו נשלח מעצמו למנתח.
+    // שם הכסף הוא השער היחיד, וכל צירוף של חוסרים מומצאים סוגר אותו בדיוק —
+    // כך נולד "מלא חוסרים" מפער אחד. יש ממצאים אמיתיים להסביר? המנתח רץ
+    // כרגיל. אין? המשתמש עדיין יכול להפעיל אותו בכפתור, ביודעין.
+    const analyzerWorthRunning = ev && ev.findingsReady && (
+      (Array.isArray(ev.findings) && ev.findings.some(aiIsActionableFinding)) ||
+      (!(ev.closure && ev.closure.ok) && !ev.unitsAnchorless)
+    );
+    if (analyzerWorthRunning) aiRunAnalyzer({ auto: true });
   }
 }
 // ===== v187: המנתח — שכבת הסבר מעל הסריקה =====
@@ -9132,10 +9209,18 @@ function aiAnalyzePayload(ev) {
         name: pr.name || '', pct: Number(pr.pct) || 0, minUnits: promoMinUnitsP(pr),
         productIds: Array.isArray(pr.productIds) ? pr.productIds : []
       })),
-      scanned: (reconcileData || []).map(l => ({
-        productId: l.productId, name: l.name || '', qty: Number(l.received) || 0,
-        unitPrice: Number(l.price) || 0, isDeposit: !!l.isDeposit
-      })),
+      // v272: אותו מחיר מתוקן שהשער (aiFindingsClosure) חישב לפיו את הפער.
+      // שליחת מחיר מלא לצד פער שחושב במחיר מבצע הייתה משאירה למודל משוואה
+      // שלא נסגרת, והוא סוגר אותה בהמצאת חוסרים.
+      scanned: (reconcileData || []).map(l => {
+        const entry = ev && ev.receivedUnitPrices instanceof Map ? ev.receivedUnitPrices.get(String(l.productId)) : undefined;
+        const price = Number(l.price) || 0;
+        return {
+          productId: l.productId, name: l.name || '', qty: Number(l.received) || 0,
+          unitPrice: entry && Math.abs(price - Number(entry.base)) <= 0.005 ? Number(entry.promo) : price,
+          isDeposit: !!l.isDeposit
+        };
+      }),
       documents: aiAnalyzePaperDocuments(ev),
       anchor: {
         totalExVat: receiptNoteTotal == null ? null : Number(receiptNoteTotal),
@@ -9914,7 +9999,10 @@ function aiApplyInvoiceResult() {
   reconcilePaperEntered = true; // v178: מכאן noteQty באמת מגיע מהנייר
   ev.aggregates.forEach(a => {
     let line = (reconcileData || []).find(l => l.productId === a.product.id);
-    const base = r2(Number(a.product.price) || 0), pr = promoForProduct(a.product.id, todayStr()), on = promoTriggered(pr, todayStr()), pct = on ? (Number(pr.pct) || 0) : 0;
+    // v272: אותו כלל שהמעריך פסק לפיו — המינימום נמדד על הכמות שבנייר.
+    // promoTriggered מדד את הסל החי, ולכן חוסר שהפיל אותו מתחת למינימום
+    // סימן את השורה "בלי מבצע" בזמן שמחיר הנייר שנכתב לתוכה הוא מחיר מבצע.
+    const base = r2(Number(a.product.price) || 0), pr = promoForProduct(a.product.id, todayStr()), on = aiBilledPromoTriggered(pr, ev.aggregates, todayStr()), pct = on ? (Number(pr.pct) || 0) : 0;
     if (!line) { line = { productId: a.product.id, name: a.product.name, barcode: a.product.barcode || '', received: 0, noteQty: 0, price: a.paperUnitPrice, basePrice: base, promoPct: pct, promoOn: on, checked: true }; reconcileData.unshift(line); }
     line.noteQty = a.qty; line.price = a.paperUnitPrice; line.basePrice = base; line.promoPct = pct; line.promoOn = on; line.checked = true; line.aiPaperPriceOnly = true;
   });
@@ -9934,7 +10022,7 @@ function aiApplyInvoiceResult() {
   const safeFindings = ev.findings.map(f => ({ type: f.type, productId: f.productId || null, name: f.name || '', qty: f.qty != null ? f.qty : null, amount: f.amount != null ? f.amount : null, expectedPrice: f.expectedPrice != null ? f.expectedPrice : null, paperPrice: f.paperPrice != null ? f.paperPrice : null, text: f.text || '' }));
   const confirmedMappings = aiConfirmedMappingsAudit();
   const automaticMappings = aiAutomaticNamePriceMappingsAudit();
-  reconcileAiAudit = { version: 6, scannedAt: Date.now(), model: aiScanResponse && aiScanResponse.model || 'unknown', requestId: aiScanResponse && aiScanResponse.requestId || null, attempts: aiScanAttemptCount || 1, autoRotation: aiScanAutoRotationNote || '', totalVerified: !!ev.totalVerified, unitsVerified: !!ev.unitsVerified, documents: ev.docSummaries, confirmedMappings, automaticMappings, clientAutoResolutions: (Array.isArray(ev.autoResolutions) ? ev.autoResolutions : []).slice(0, 200), perDocument: (aiScanResponse && aiScanResponse.perDocument) || null, findings: safeFindings, hasDiscrepancy: safeFindings.some(f => ['shortage', 'surplus', 'price', 'promo_missing'].includes(f.type)) };
+  reconcileAiAudit = { version: 6, scannedAt: Date.now(), model: aiScanResponse && aiScanResponse.model || 'unknown', requestId: aiScanResponse && aiScanResponse.requestId || null, attempts: aiScanAttemptCount || 1, autoRotation: aiScanAutoRotationNote || '', totalVerified: !!ev.totalVerified, unitsVerified: !!ev.unitsVerified, unitsAnchorless: !!ev.unitsAnchorless, documents: ev.docSummaries, confirmedMappings, automaticMappings, clientAutoResolutions: (Array.isArray(ev.autoResolutions) ? ev.autoResolutions : []).slice(0, 200), perDocument: (aiScanResponse && aiScanResponse.perDocument) || null, findings: safeFindings, hasDiscrepancy: safeFindings.some(f => ['shortage', 'surplus', 'price', 'promo_missing'].includes(f.type)) };
   const exactUnits = reconcileUnitsBalanced();
   const exactMoney = reconcileMoneyBalanced();
   if (!exactMoney || !exactUnits) {
