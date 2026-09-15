@@ -34,8 +34,9 @@ for(const [name,unit,expected] of [['matching price',5,'match'],['price differen
  const data=fixture({unit}),c=create(data);c.expectedUploads=1;const html=await scan(c,data);
  assert.equal(c.run('receiptList.length'),0);assert.equal(report(c).rows[0].result,expected);assert.equal(requests(c),1);
  assert.match(html,expected==='match'?/המחירים שנבדקו תואמים/:/המחיר בתעודה שונה מהמחיר שבמאגר/);
- assert.match(html,/מחיר יחידה מודפס: <b>₪[56]\.00/);
- if(expected==='difference'){assert.match(html,/הפרש ליחידה: <b>₪1\.00/);assert.match(html,/הפרש לשורה: <b>₪10\.00/);assert.match(c.node('scanPriceNotice').textContent,/שונה/);}
+ if(expected==='difference')assert.match(html,/מחיר יחידה מודפס: <b>₪6\.00/);
+ else assert.doesNotMatch(html,/data-price-row=/);
+ if(expected==='difference'){assert.match(html,/הפרש ליחידה: <b>₪1\.00/);assert.match(html,/הפרש לשורה: <b>₪10\.00/);assert.match(c.node('scanPriceNotice').textContent,/לטיפול/);}
  assert.equal(report(c).rows.some(r=>['shortage','surplus'].includes(r.result)),false);record(name,c,html);
 });
 test(supplier+': source overwrite cannot compare catalog to itself',async()=>{
@@ -94,7 +95,7 @@ test(supplier+': quantity promotion uses paper basket, never counted basket',asy
 if(supplier!=='berman'){
  test(supplier+': one attributable summary discount derives charge once and labels it',async()=>{
   const data=fixture({unit:5,summary:10,promo:{}}),c=create(data);c.expectedUploads=1;const html=await scan(c,data);
-  const r=report(c).rows[0];assert.equal(r.originalUnitPrice,5);assert.equal(r.chargedUnitPrice,4);assert.equal(r.result,'match');assert.match(html,/פחות הנחת סיכום ₪10\.00/);assert.equal(requests(c),1);record('summary discount',c,html);
+  const r=report(c).rows[0];assert.equal(r.originalUnitPrice,5);assert.equal(r.chargedUnitPrice,4);assert.equal(r.result,'match');assert.match(r.chargeDerivation,/פחות הנחת סיכום ₪10\.00/);assert.equal(requests(c),1);record('summary discount',c,html);
  });
  test(supplier+': general discount without provable row allocation stays incomplete',async()=>{
   const data=fixture({summary:10,promo:{productIds:['milk','coffee']}}),d=data.paper.scan.documents[0];d.rows.push({...d.rows[0],code:'15',itemCode:'15',barcode:'7290000000015',barcodeObserved:'7290000000015',lineNumber:2});
@@ -214,7 +215,7 @@ if(supplier==='yotvata'){
   const data=fixture({rows:[row]}),c=create(data);
   const html=await scan(c,data,{completeDate:false});
   assert.equal(report(c).rows[0].capability,'unidentified');
-  assert.match(html,/שתי קריאות של הברקוד החזירו ספרות שונות/);
+  assert.match(html,/איזה מוצר מופיע בשורה הזו\?/);
   // Both candidates are offered by name and barcode, with the paper line beside
   // them, and neither is preselected.
   assert.match(html,/data-role="ai-confirm-name-candidate"[^>]*data-candidate-id="milk"/);
@@ -282,7 +283,7 @@ if(supplier==='yotvata'){
   // Default day is the receiving day, inside the promotion — both candidates can
   // explain a printed 8, so the app refuses to guess and asks.
   assert.equal(decision(),'undecided');
-  assert.match(view(c),/בחר לפי הנייר/);
+  assert.match(view(c),/בחר רק אם המוצר תואם לנייר/);
   // The user says the note is from 31.8, before the promotion started. The promo
   // item would have cost 10 that day, so only the plain item explains the price.
   c.run("priceAuditSetDate(0,'2026-08-31')");
@@ -325,7 +326,7 @@ if(supplier==='yotvata'){
   assert.equal(r.capability,'unidentified');
   assert.equal(r.choice.kind,'name');
   assert.match(r.reason,/השם המודפס מתאים לכמה מוצרים/);
-  assert.match(html,/הברקוד לא נקרא, והשם המודפס מתאים לכמה מוצרים/);
+  assert.match(html,/איזה מוצר מופיע בשורה הזו\?/);
   assert.match(html,/data-role="ai-confirm-name-candidate"[^>]*data-candidate-id="milk"/);
   assert.match(html,/data-role="ai-confirm-name-candidate"[^>]*data-candidate-id="coffee"/);
   // Until it is answered the scan stays invalid — that is what locked the note.
@@ -409,7 +410,8 @@ for(const [label,unit,count] of [['shortage only',5,9],['price only',6,10],['pri
    if(!c.run('!!pendingReceipt')) c.click('ai-close-receipt');
  }else c.run('aiApplyInvoiceResult();saveReconciledReceipt()');
  assert.ok(c.run('!!pendingReceipt'));const savedPending=JSON.parse(c.run('JSON.stringify(pendingReceipt)'));
- assert.equal((c.node('rsBody').innerHTML.match(/data-price-row=/g)||[]).length,1);
+ assert.equal((c.node('rsBody').innerHTML.match(/data-price-row=/g)||[]).length,0);
+ assert.equal(c.node('rsBody').innerHTML.includes('data-role="price-open-review"'),unit!==5);
  assert.equal(report(c).rows[0].originalUnitPrice,unit);assert.equal(report(c).rows[0].quantity,10);
  assert.equal(savedPending.lines[0].qty,count);assert.equal(savedPending.lines[0].noteQty??count,10);
  assert.equal(Object.hasOwn(savedPending,'priceAuditAmount'),false);
