@@ -6,7 +6,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {execFileSync} from 'node:child_process';
 import assert from 'node:assert/strict';
-const supplier='yotvata', base='e86c423df715fd526bbe8b5b41494a0e54f0b9c6';
+const supplier='yotvata', base=process.env.PRICE_FINANCE_BASE || 'e86c423df715fd526bbe8b5b41494a0e54f0b9c6';
 const repo=fileURLToPath(new URL('../',import.meta.url));
 const temp=fs.mkdtempSync(path.join(os.tmpdir(),'paper-price-baseline-'));
 const original=path.join(temp,'index.html');fs.writeFileSync(original,execFileSync('git',['show',base+':index.html'],{cwd:repo,maxBuffer:8*1024*1024}));

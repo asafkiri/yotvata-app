@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v344 רק מה שנותר לטיפול</title>
+    <title>הזמנות יטבתה - v345 זיכוי ותיקון פענוח</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v344 רק מה שנותר לטיפול</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v345 זיכוי ותיקון פענוח</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -647,6 +647,7 @@ let receiptManualInput = null; // Unsubmitted manual fields survive switching ca
 let receiptPaperScanState = '', receiptPaperScanProblems = [];
 let receiptPhotoCaptureOpen = false, receiptScanHistory = [], aiScanRunId = 0;
 let aiScanDocuments = [];        // תמונות בזיכרון בלבד — אינן נשמרות בטיוטה או בענן
+let receiptDeliveryCredits = []; // Credit papers are separate from invoice quantities and payment anchors.
 let aiScanBusy = false;
 let aiScanProgressText = '';
 let aiScanResponse = null;
@@ -1037,6 +1038,7 @@ function yotvataPaperCheck(doc, pageCount) {
 // v325: capture now, count independently, reconcile the saved paper at the end.
 function yotvataResetPhotoReceipt() {
   aiScanRunId++;
+  receiptDeliveryCredits = [];
   receiptAnalysisCache = null; aiScanEditingImages = false;
   receiptEntryMode = 'photo'; receiptAnchorSource = null;
   receiptPaperScanState = ''; receiptPaperScanProblems = [];
@@ -1097,6 +1099,7 @@ function yotvataPhotoGateHtml() {
     (aiScanError ? '<div class="bg-amber-50 text-amber-800 rounded-xl p-3 mt-2 text-sm">' + htmlEscape(aiScanError) + '</div>' : '') +
     (aiScanBusy ? '<div class="p-4 font-black text-blue-700">מכין את הצילום…</div>' : cards) +
     (!aiScanBusy && aiScanDocuments.length < 4 ? '<button data-role="rc-photo-add-doc" class="btn-tap w-full py-3 mt-2 border border-slate-300 rounded-xl text-slate-700 font-bold">+ תעודה נוספת מהנהג / הספק</button>' : '') +
+    deliveryCreditsHtml() +
     '<button data-role="rc-photo-start" ' + (ready ? '' : 'disabled') + ' class="btn-tap w-full py-4 mt-4 rounded-2xl font-black text-lg ' + (ready ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-400') + '">התחל קליטת מוצרים</button>' +
     '<button data-role="rc-photo-quantity" ' + (ready ? '' : 'disabled') + ' class="btn-tap w-full py-3 mt-2 bg-white border-2 border-emerald-300 text-emerald-800 rounded-xl font-black text-base">פענח תעודה — הכמויות נבדקות ידנית</button>' +
     '<button data-role="rc-photo-manual" ' + (aiScanBusy ? 'disabled' : '') + ' class="btn-tap w-full py-3 text-sm font-bold text-slate-500">הקלדת סכום ויחידות ידנית</button>' + receivingNoDocGateHtml() + '</div>';
@@ -1180,6 +1183,210 @@ function yotvataStoreScanResults(results) {
   });
   receiptRebuildScanResponse();
   saveReceiptDraft();
+}
+function deliveryCreditSnapshot() {
+  return receiptDeliveryCredits.map(({ pages, ...c }) => ({ ...c, pageCount: pages.length || c.pageCount || 0 }));
+}
+function deliveryCreditFind(id) { return receiptDeliveryCredits.find(c => c.id === id); }
+function deliveryCreditPaperCheck(paper, pageCount) {
+  const cents = v => typeof v === 'number' && Number.isFinite(v) ? Math.round(v * 100) : null;
+  if (!paper || !Array.isArray(paper.rows) || !paper.rows.length) return 'לא נקראו שורות הזיכוי. צלם שוב את כל התעודה.';
+  if (paper.pageCount !== pageCount) return 'חסר עמוד בפענוח הזיכוי. צלם את כל העמודים יחד.';
+  const subtotal = cents(paper.subtotalExVat);
+  if (subtotal == null || subtotal >= 0) return 'לא נקרא סכום זיכוי שלילי לפני מע״מ. ודא שצילמת את תעודת הזיכוי ולא את חשבונית המשלוח.';
+  let sum = 0, units = 0;
+  for (const row of paper.rows) {
+    const amount = cents(row.lineTotalExVat), qty = Math.abs(row.quantity);
+    if (amount == null || amount >= 0 || !Number.isSafeInteger(qty) || qty <= 0 ||
+        !Number.isInteger(row.sourcePage) || row.sourcePage < 1 || row.sourcePage > pageCount) return 'חסרה קריאה ברורה של כמות או סכום באחת משורות הזיכוי. צלם שוב.';
+    sum += amount;
+    if (!/פ.?קדון/.test(String(row.description || ''))) units += qty;
+  }
+  if (sum !== subtotal) return 'סכום שורות הזיכוי אינו תואם לסיכום המודפס. צלם שוב את הסיכום והשורות.';
+  if (paper.printedUnits != null && Math.abs(paper.printedUnits) !== units) return 'כמויות הזיכוי אינן תואמות לסך היחידות המודפס. בדוק את הצילום.';
+  if (paper.printedLines != null && paper.printedLines !== paper.rows.length) return 'מספר שורות הזיכוי אינו תואם לסיכום המודפס.';
+  if (cents(paper.vatAmount) != null && cents(paper.totalInclVat) != null && subtotal + cents(paper.vatAmount) !== cents(paper.totalInclVat)) return 'סכומי הזיכוי לפני ואחרי מע״מ אינם תואמים. בדוק את הצילום.';
+  return '';
+}
+function deliveryCreditRows(c) {
+  return (c.paper && c.paper.rows || []).map((raw, i) => {
+    const barcode = normalizeBarcode(c.barcodes && c.barcodes[i] != null ? c.barcodes[i] : raw.barcode || raw.barcodeObserved || '');
+    const matches = aiIsValidEan13(barcode) ? aiCatalogBarcodeMatches(barcode, false) : [];
+    const product = matches.length === 1 ? matches[0].product : null;
+    return { productId: product ? String(product.id) : null, barcode, name: product ? product.name : raw.description,
+      qty: Math.abs(raw.quantity), amount: Math.abs(r2(raw.lineTotalExVat)), sourceRow: i };
+  });
+}
+function deliveryCreditSignature(c) {
+  return JSON.stringify([c.number, c.paper, deliveryCreditRows(c).map(r => [r.productId, r.barcode, r.qty, r.amount])]);
+}
+function deliveryCreditDuplicate(c) {
+  const key = String(c.number || '').replace(/\s/g, '');
+  return !!key && (receiptDeliveryCredits.some(other => other !== c && String(other.number || '').replace(/\s/g, '') === key) ||
+    receipts.some(rc => rc.id !== (receiptAttachTarget && receiptAttachTarget.id) && (rc.shortCreditNotes || []).some(n => String(n.number || '').replace(/\s/g, '') === key)));
+}
+function deliveryCreditConfirm(id) {
+  const c = deliveryCreditFind(id);
+  if (!c || !['review', 'confirmed'].includes(c.status) || !c.paper) return false;
+  if (c.status === 'confirmed' && c.confirmedSignature === deliveryCreditSignature(c) && !deliveryCreditDuplicate(c)) return true;
+  const error = deliveryCreditPaperCheck(c.paper, c.pageCount);
+  if (error || !String(c.number || '').trim() || deliveryCreditDuplicate(c) || deliveryCreditRows(c).some(r => !r.productId)) {
+    showToast(error || (!String(c.number || '').trim() ? 'השלם את מספר תעודת הזיכוי שמודפס בנייר.' : deliveryCreditDuplicate(c) ? 'תעודת הזיכוי הזאת כבר צורפה. אין לרשום אותה פעמיים.' : 'השלם ברקוד תקין למוצר שלא זוהה בזיכוי.'), null, null, 4500); return false;
+  }
+  c.status = 'confirmed'; c.confirmedAt = Date.now(); c.confirmedSignature = deliveryCreditSignature(c);
+  pendingReceipt = null; saveReceiptDraft(); renderReceiving();
+  showToast('הזיכוי צורף למשלוח. בסיום הספירה נבדוק איזה חוסר הוא מכסה.', null, null, 3200); return true;
+}
+function deliveryCreditInvalidate(c) {
+  c.paper = null; c.status = 'capture'; c.error = ''; c.confirmedAt = null; c.confirmedSignature = null;
+  c.barcodes = []; pendingReceipt = null;
+}
+function deliveryCreditOpenPage(id, pageIndex) {
+  const c = deliveryCreditFind(id), page = c && c.pages[pageIndex];
+  if (!page || aiScanBusy || aiOrientationBusy || c.status === 'reading') return false;
+  aiOrientationSession = { page, reviewOnly: !!c.paper, cropMode: false };
+  $('aiOrientationModal').classList.remove('hidden'); $('aiOrientationModal').classList.add('flex');
+  aiSetOrientationBusy(false); aiPaintOrientationReview(); return true;
+}
+async function deliveryCreditAddFiles(id, files) {
+  const c = deliveryCreditFind(id);
+  if (!c || !files || !files.length || ['preparing', 'reading'].includes(c.status) || receiptFinalizing) return false;
+  const slots = 4 - c.pages.length;
+  if (slots <= 0) { showToast('עד 4 עמודים לתעודת זיכוי', null, null, 2500); return false; }
+  c.status = 'preparing'; saveReceiptDraft(); renderReceiving();
+  try {
+    const pages = [];
+    for (const file of Array.from(files).slice(0, slots)) pages.push(await aiCompressInvoiceImage(file));
+    if (deliveryCreditFind(id) !== c) return false;
+    deliveryCreditInvalidate(c); c.pages.push(...pages); c.pageCount = c.pages.length;
+    saveReceiptDraft(); renderReceiving(); aiOpenNextUnconfirmedOrientation(); return true;
+  } catch (error) {
+    if (deliveryCreditFind(id) === c) { c.status = 'error'; c.error = 'לא ניתן להכין את צילום הזיכוי. נסה שוב.'; saveReceiptDraft(); renderReceiving(); }
+    return false;
+  }
+}
+async function deliveryCreditRead(id) {
+  const c = deliveryCreditFind(id);
+  if (!c || c.paper || ['reading', 'preparing'].includes(c.status) || !c.pages.length || c.pages.some(p => !p.orientationConfirmed) || receiptFinalizing) return false;
+  if (!auth || !auth.currentUser) { showToast('המתן לחיבור המאובטח ונסה שוב', null, null, 3000); return false; }
+  c.status = 'reading'; c.error = ''; saveReceiptDraft(); renderReceiving();
+  try {
+    const token = await auth.currentUser.getIdToken();
+    if (deliveryCreditFind(id) !== c) return false;
+    // The existing OCR endpoint preserves signed paper values. Keep this result
+    // separate from invoice-only anchors, retries, product counts and pricing.
+    const result = await aiRequestSingleDocScan(token, c.pages, { amount: null, units: null });
+    if (deliveryCreditFind(id) !== c) return false;
+    const docs = result.scan && result.scan.documents || [];
+    if (docs.length !== 1) throw new Error('לא התקבלה תעודת זיכוי יחידה. צלם כל תעודת זיכוי בנפרד.');
+    c.pageCount = c.pages.length; c.paper = cloneSafe(docs[0].__pricePaper || docs[0]);
+    const problem = deliveryCreditPaperCheck(c.paper, c.pageCount);
+    if (problem) { c.paper = null; throw new Error(problem); }
+    c.number = String(c.paper.invoiceNumber || '').trim(); c.barcodes = []; c.status = 'review';
+    c.scanAudit = { requestId: result.requestId || null, model: result.model || null, scanAudit: result.scanAudit || null };
+    saveReceiptDraft(); renderReceiving(); return true;
+  } catch (error) {
+    if (deliveryCreditFind(id) === c) { c.status = 'error'; c.error = error.message || 'פענוח הזיכוי נכשל. נסה שוב.'; saveReceiptDraft(); renderReceiving(); }
+    return false;
+  }
+}
+function deliveryCreditAction(role, id, page) {
+  if (receiptFinalizing) return;
+  if (role === 'delivery-credit-add') {
+    if (receiptDeliveryCredits.length >= 4) return;
+    const c = { id: makeOperationId('delivery_credit'), pages: [], status: 'capture', pageCount: 0 };
+    receiptDeliveryCredits.push(c); saveReceiptDraft(); renderReceiving(); $('creditCam_' + c.id).click(); return;
+  }
+  const c = deliveryCreditFind(id); if (!c) return;
+  if (role === 'delivery-credit-remove') {
+    receiptDeliveryCredits = receiptDeliveryCredits.filter(x => x !== c); pendingReceipt = null;
+    if (aiOrientationSession && c.pages.includes(aiOrientationSession.page)) aiCloseOrientationReview();
+    saveReceiptDraft(); renderReceiving(); return;
+  }
+  if (role === 'delivery-credit-camera') $('creditCam_' + id).click();
+  else if (role === 'delivery-credit-gallery') $('creditFile_' + id).click();
+  else if (role === 'delivery-credit-read') return deliveryCreditRead(id);
+  else if (role === 'delivery-credit-page') deliveryCreditOpenPage(id, Number(page));
+  else if (role === 'delivery-credit-confirm') deliveryCreditConfirm(id);
+  else if (role === 'delivery-credit-edit') { c.status = 'review'; c.confirmedAt = null; c.confirmedSignature = null; pendingReceipt = null; saveReceiptDraft(); renderReceiving(); }
+}
+function deliveryCreditsHtml() {
+  if (receiptNoDoc || receiptAttachTarget) return '';
+  const cards = receiptDeliveryCredits.map(c => {
+    const busy = ['preparing', 'reading'].includes(c.status), rows = c.paper ? deliveryCreditRows(c) : [];
+    const duplicate = deliveryCreditDuplicate(c);
+    const confirmed = c.status === 'confirmed' && c.confirmedSignature === deliveryCreditSignature(c) && !duplicate;
+    const pages = c.pages.map((p, i) => '<button data-role="delivery-credit-page" data-id="' + c.id + '" data-page="' + i + '" class="btn-tap border rounded-lg p-1"><img src="' + p.dataUrl + '" alt="עמוד בזיכוי" class="w-16 h-20 object-contain"><span class="text-xs">עמוד ' + (i + 1) + '</span></button>').join('');
+    return '<article class="border-2 border-emerald-200 rounded-xl p-3 mt-3 bg-white"><div class="flex justify-between gap-2"><b>' + (confirmed ? 'זיכוי שאושר למשלוח' : 'תעודת זיכוי מהנהג') + '</b>' +
+      '<button data-role="delivery-credit-remove" data-id="' + c.id + '" class="btn-tap text-rose-700 text-sm font-bold">הסר זיכוי</button></div>' +
+      (busy ? '<p role="status" class="mt-3 text-blue-700 font-bold">' + (c.status === 'reading' ? 'מפענח את הזיכוי… אפשר להמשיך לספור מוצרים.' : 'מכין את הצילום…') + '</p>' : '') +
+      (c.error || c.status === 'interrupted' ? '<p class="mt-2 text-amber-800 font-bold">' + htmlEscape(c.error || 'פענוח הזיכוי לא הושלם. צלם אותו שוב כדי להמשיך.') + '</p>' : '') +
+      (duplicate ? '<p class="mt-2 text-amber-800 font-bold">מספר הזיכוי הזה כבר צורף. בדוק את המספר או הסר את הכפילות.</p>' : '') +
+      (c.status === 'confirmed' && !confirmed && !duplicate ? '<p class="mt-2 text-amber-800 font-bold">פרטי המוצר השתנו. בדוק את הזיכוי ואשר שוב.</p>' : '') +
+      (pages && !busy ? '<div class="flex gap-2 mt-2">' + pages + '</div>' : '') +
+      (c.paper ? (confirmed ? '<p class="mt-2 font-black text-emerald-800">זיכוי מס׳ ' + htmlEscape(c.number) + ' · ₪' + fmtMoney(Math.abs(c.paper.subtotalExVat)) + ' לפני מע״מ</p>' :
+        '<label class="block mt-3 text-sm font-bold">מספר תעודת הזיכוי<input data-role="delivery-credit-number" data-id="' + c.id + '" value="' + htmlEscape(c.number || '') + '" class="block w-full border rounded-lg p-2 mt-1" dir="ltr"></label>') +
+        rows.map((row, i) => '<div class="border-t border-slate-200 mt-3 pt-2"><div id="creditName_' + c.id + '_' + i + '" class="font-black">' + htmlEscape(row.name || 'מוצר שלא זוהה') + '</div><p>' + row.qty + ' יח׳ · זיכוי ₪' + fmtMoney(row.amount) + ' לפני מע״מ</p>' +
+          (!confirmed ? '<label class="block text-xs font-bold mt-2">' + (row.productId ? 'ברקוד — אפשר לתקן לפי הנייר' : 'המוצר לא זוהה. הקלד את הברקוד מהנייר') +
+          '<input data-role="delivery-credit-barcode" data-id="' + c.id + '" data-row="' + i + '" value="' + htmlEscape(row.barcode) + '" inputmode="numeric" class="block w-full border rounded-lg p-2 text-sm mt-1" dir="ltr"></label>' : '') + '</div>').join('') +
+        (confirmed ? '<p class="mt-2 text-sm text-slate-600">הזיכוי ייסגר מול החוסר במוצרים האלה בסיום הספירה.</p><button data-role="delivery-credit-edit" data-id="' + c.id + '" class="btn-tap text-blue-700 font-bold mt-2">תקן פרטי זיכוי</button>' :
+        '<p class="mt-3 text-sm font-bold">בדוק את מספר הזיכוי, המוצרים והכמויות מול הנייר. האם זה זיכוי על חוסר במשלוח הנוכחי?</p><button data-role="delivery-credit-confirm" data-id="' + c.id + '" class="btn-tap w-full bg-emerald-600 text-white rounded-xl py-3 mt-2 font-black">כן, צרף זיכוי של ₪' + fmtMoney(Math.abs(c.paper.subtotalExVat)) + ' למשלוח</button>') :
+        (!busy ? '<input id="creditCam_' + c.id + '" data-role="delivery-credit-file" data-id="' + c.id + '" type="file" accept="image/*" capture="environment" class="hidden">' +
+          '<input id="creditFile_' + c.id + '" data-role="delivery-credit-file" data-id="' + c.id + '" type="file" accept="image/*" multiple class="hidden">' +
+          '<button data-role="delivery-credit-camera" data-id="' + c.id + '" class="btn-tap w-full bg-emerald-50 text-emerald-800 rounded-xl py-3 mt-2 font-black">' + (c.pages.length ? 'הוסף עמוד לזיכוי' : 'צלם את תעודת הזיכוי') + '</button>' +
+          '<button data-role="delivery-credit-gallery" data-id="' + c.id + '" class="btn-tap w-full py-2 text-sm text-slate-600">בחר צילומים מהגלריה</button>' +
+          (c.pages.length && c.pages.every(p => p.orientationConfirmed) ? '<button data-role="delivery-credit-read" data-id="' + c.id + '" class="btn-tap w-full bg-blue-600 text-white rounded-xl py-3 font-black">פענח את הזיכוי</button>' : '') : '')) + '</article>';
+  }).join('');
+  return '<section id="rcDeliveryCredits" class="mb-3" dir="rtl">' + cards + (receiptDeliveryCredits.length < 4 ?
+    '<button data-role="delivery-credit-add" class="btn-tap w-full border-2 border-emerald-300 rounded-xl bg-emerald-50 text-emerald-900 py-3 mt-2 font-black"><i class="fa-solid fa-camera"></i> ' +
+    (receiptDeliveryCredits.length ? 'צלם תעודת זיכוי נוספת' : 'הנהג הביא זיכוי על חוסר? צלם כאן') + '</button>' : '') + '</section>';
+}
+function deliveryCreditReady() {
+  return receiptDeliveryCredits.every(c => c.status === 'confirmed' && c.confirmedSignature === deliveryCreditSignature(c) && !deliveryCreditDuplicate(c));
+}
+function deliveryCreditOpenWork(message) {
+  hideReceiptSummary(); pendingReceipt = null; currentView = 'receiving'; renderReceiving();
+  const host = $('rcDeliveryCredits'); if (host) host.scrollIntoView({ block: 'start' });
+  showToast(message, null, null, 6000);
+}
+function deliveryCreditNotes() {
+  return receiptDeliveryCredits.map(c => ({ id: c.id, source: 'delivery_credit_scan', number: c.number,
+    amount: Math.abs(r2(c.paper.subtotalExVat)), at: c.confirmedAt, rows: deliveryCreditRows(c), paper: c.paper, scanAudit: c.scanAudit || null }));
+}
+function deliveryCreditSummaryHtml() {
+  const p = pendingReceipt, notes = p && p.shortCreditNotes || [];
+  if (!notes.length) return '';
+  const info = receiptDiscrepancyInfo({ items: p.lines, noteParts: p.noteParts, shortCreditNotes: notes, unresolvedAmountGap: p.unresolvedAmountGap, unresolvedUnitsGap: p.unresolvedUnitsGap });
+  return '<div data-delivery-credit-summary class="rounded-xl border-2 border-emerald-300 bg-emerald-50 p-3 mb-3 text-emerald-900">' +
+    '<div class="font-black">' + (info.shortFullyCredited ? 'הזיכוי מהנהג מכסה את החוסר' : 'הזיכוי מהנהג מכסה חלק מהחוסר') + '</div>' +
+    notes.map(n => '<div class="mt-1">זיכוי מס׳ ' + htmlEscape(n.number) + ' · ₪' + fmtMoney(n.amount) + ' לפני מע״מ</div>').join('') +
+    (info.shortVal > 0 ? '<div class="font-bold text-amber-900 mt-2">עדיין ממתין לזיכוי: ₪' + fmtMoney(info.shortVal) + '</div>' : '') +
+    '<div class="text-sm mt-2">התשלום מחושב לפי הסחורה שהתקבלה. הזיכוי סוגר את החוסר שכבר הופחת.</div></div>';
+}
+// Bind photographed credits to their own missing products. Money from one
+// product never closes a different shortage, including after a receipt edit.
+function deliveryCreditCoverage(notes, shortages) {
+  const remaining = new Map();
+  shortages.forEach(s => {
+    const old = remaining.get(s.productId) || { qty: 0, cents: 0 };
+    old.qty += s.n; old.cents += Math.round(lineTotalFromUnit(s.price, s.n) * 100); remaining.set(s.productId, old);
+  });
+  let applied = 0; const invalid = [], seen = new Set();
+  for (const n of notes.filter(n => n.source === 'delivery_credit_scan')) {
+    const requested = new Map(); let cents = 0;
+    for (const r of n.rows || []) {
+      const q = requested.get(r.productId) || { qty: 0, cents: 0 };
+      q.qty += Number(r.qty) || 0; q.cents += Math.round((Number(r.amount) || 0) * 100); requested.set(r.productId, q); cents += Math.round((Number(r.amount) || 0) * 100);
+    }
+    const valid = requested.size && !seen.has(n.number) && cents > 0 && cents === Math.round(n.amount * 100) && [...requested].every(([id, req]) => {
+      const available = remaining.get(id);
+      return available && req.qty > 0 && req.cents > 0 && req.qty <= available.qty && req.cents <= Math.round(available.cents * req.qty / available.qty) + 1;
+    });
+    if (!valid) { invalid.push(n); continue; }
+    seen.add(n.number); applied += cents;
+    requested.forEach((req, id) => { const available = remaining.get(id); available.qty -= req.qty; available.cents -= req.cents; });
+  }
+  return { amount: applied / 100, invalid, remaining };
 }
 function yotvataReceiptScanAudit() {
   return { version: 1, entryMode: receiptEntryMode, anchorSource: receiptAnchorSource,
@@ -1287,13 +1494,14 @@ function receiptDraftPayload(includeScan) {
     noDoc: receiptNoDoc, attach: receiptAttachTarget, entryMode: receiptEntryMode, anchorSource: receiptAnchorSource,
     countingMode: receiptCountingMode, quantityReview: receiptQuantityReview, manualInput: receiptManualInput, photoCaptureOpen: receiptPhotoCaptureOpen,
     paperState: receiptPaperScanState, paperProblems: receiptPaperScanProblems, scanHistory: receiptScanHistory,
+    deliveryCredits: deliveryCreditSnapshot(),
     photoInputs: aiScanDocuments.map(d => ({ scanId: d.scanId, amount: d.amount, units: d.units, lines: d.lines,
       pageCount: d.pages.length || d.restoredPageCount || 0 })),
     analysisCache: includeScan ? receiptAnalysisCache : null,
     aiScan: includeScan ? scan : null };
 }
 function saveReceiptDraft() {
-  if ((receiptOpened || receiptList.length || receiptNotes.length || aiScanDocuments.some(d => d.pages.length || d.scanResult)) && !receiptDraftId) receiptDraftId = makeOperationId('receipt');
+  if ((receiptOpened || receiptList.length || receiptNotes.length || receiptDeliveryCredits.length || aiScanDocuments.some(d => d.pages.length || d.scanResult)) && !receiptDraftId) receiptDraftId = makeOperationId('receipt');
   const payload = receiptDraftPayload(true), signature = JSON.stringify(payload);
   if (signature !== receiptSyncSignature && (receiptSyncSignature !== null || receiptDraftActive(payload))) {
     receiptSync.mutationId = makeOperationId('draft_change'); receiptSync.dirty = true;
@@ -1420,7 +1628,8 @@ function restoreDraftScan(saved) {
       model: (meta && meta.model) || saved.model, requestId: (meta && meta.requestId) || saved.requestId,
       warnings: saved.scan.warnings || [], retryAudit: meta && meta.barcodeRetry };
     input.scanResult = result;
-    if (yotvataPaperCheck(paper, input.restoredPageCount).ok) input.cachedResult = result;
+    if (yotvataPaperCheck(paper, input.restoredPageCount).ok || ((paper.rows || []).some(r => r.paperValuesCorrection)
+      && yotvataPaperCheck(paper.__pricePaper, input.restoredPageCount).ok)) input.cachedResult = result;
   });
   receiptRebuildScanResponse();
   return docs.length > 0;
@@ -1431,6 +1640,8 @@ function restoreReceiptDraft(incoming) {
   try {
     const s = incoming ? null : localStorage.getItem(RECEIPT_DRAFT_KEY); if (!s && !incoming) return;
     const o = incoming || JSON.parse(s);
+    receiptDeliveryCredits = (Array.isArray(o && o.deliveryCredits) ? o.deliveryCredits : []).filter(c => c && typeof c.id === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(c.id)).slice(0, 4)
+      .map(c => ({ ...c, pages: [], status: ['preparing', 'reading'].includes(c.status) ? 'interrupted' : c.status }));
     if (Array.isArray(o)) { receiptCountingMode = 'scan'; receiptList = o; receiptOpened = o.length > 0; }
     else if (o && typeof o === 'object') {
       receiptList = Array.isArray(o.items) ? o.items : [];
@@ -1446,7 +1657,7 @@ function restoreReceiptDraft(incoming) {
       const manual = o.manualInput;
       receiptManualInput = manual && typeof manual.amount === 'string' && typeof manual.count === 'string'
         && (manual.amount.trim() || manual.count.trim()) ? { amount: manual.amount, count: manual.count } : null;
-      const emptyDraft = !receiptOpened && !receiptNotes.length && !receiptNoDoc && !o.attach
+      const emptyDraft = !receiptOpened && !receiptNotes.length && !receiptDeliveryCredits.length && !receiptNoDoc && !o.attach
         && !receiptManualInput && !o.docDate && !o.paperState && !o.aiScan
         && !(Array.isArray(o.photoInputs) && o.photoInputs.some(d => d.pageCount > 0));
       receiptEntryMode = o.entryMode === 'photo' || emptyDraft ? 'photo' : 'manual';
@@ -1480,12 +1691,12 @@ function restoreReceiptDraft(incoming) {
 // Shared receiving draft: optimistic revisions, never last-writer-wins.
 function receiptDraftActive(payload) {
   return !!(payload.opened || payload.items.length || payload.notes.length || payload.attach || payload.manualInput
-    || (payload.photoInputs || []).some(d => d.pageCount > 0));
+    || (payload.deliveryCredits || []).length || (payload.photoInputs || []).some(d => d.pageCount > 0));
 }
 function receiptEmptyDraft() {
   return { schemaVersion: 4, draftId: null, items: [], notes: [], opened: false, docDate: null,
     dw: false, uw: false, noDoc: false, attach: null, entryMode: 'photo', anchorSource: null,
-    manualInput: null, photoCaptureOpen: false, paperState: '', paperProblems: [], scanHistory: [], photoInputs: [], aiScan: null };
+    manualInput: null, photoCaptureOpen: false, paperState: '', paperProblems: [], scanHistory: [], photoInputs: [], deliveryCredits: [], aiScan: null };
 }
 async function packReceiptValue(value) {
   const json = JSON.stringify(value);
@@ -6887,6 +7098,7 @@ function receiptManualReceivingHtml() {
     '<div id="rcPaperStatus">' + status + '</div>' +
     '<div id="rcQuantityOptions">' + receiptQuantityButtonsHtml() + '</div>' +
     (!running ? '<div id="rcPriceAudit">' + receiptPriceAuditHtml() + '</div>' : '') +
+    deliveryCreditsHtml() +
     '<button data-role="rc-count-by-scan" class="btn-tap w-full py-3 text-sm font-bold text-slate-600 underline">מעבר לקליטה בסריקת מוצרים</button></section>';
 }
 function receiptQuantityButtonsHtml() {
@@ -7062,7 +7274,7 @@ function renderReceiving() {
     return;
   }
   const progress = receivingProgressHtml(t);
-  app.innerHTML = '<div id="rcDraftStatus">' + receiptDraftNoticeHtml() + '</div>' + banner + pendingReturnsBannerHtml() + topButtons + '<div id="rcPaperStatus">' + yotvataPaperStatusHtml() + '</div>' + '<div id="rcPriceAudit">' + receiptPriceAuditHtml() + '</div>' + noteBar + '<div id="rcQuantityOptions">' + receiptQuantityButtonsHtml() + '</div>' + progress +
+  app.innerHTML = '<div id="rcDraftStatus">' + receiptDraftNoticeHtml() + '</div>' + banner + pendingReturnsBannerHtml() + topButtons + '<div id="rcPaperStatus">' + yotvataPaperStatusHtml() + '</div>' + '<div id="rcPriceAudit">' + receiptPriceAuditHtml() + '</div>' + noteBar + deliveryCreditsHtml() + '<div id="rcQuantityOptions">' + receiptQuantityButtonsHtml() + '</div>' + progress +
     '<button data-role="rc-scan" class="btn-tap w-full bg-blue-600 text-white rounded-2xl py-4 font-black text-lg flex items-center justify-center gap-3 shadow-lg mb-2"><i class="fa-solid fa-barcode text-2xl"></i> סרוק פריט לתעודה</button>' +
     '<details class="bg-white rounded-2xl border border-slate-200 shadow-sm mb-4"><summary class="cursor-pointer p-3 font-black text-sm text-slate-600"><i class="fa-solid fa-circle-question text-slate-400"></i> לא מצליח לסרוק?</summary><div class="px-3 pb-3">' +
       '<div class="text-[11px] font-bold text-slate-400 mb-1.5"><i class="fa-solid fa-keyboard"></i> הסורק לא קורא? הקלד את הספרות האחרונות של הברקוד (6 מומלץ)</div>' +
@@ -7260,6 +7472,8 @@ async function saveNewProduct() {
 
 // --- סיכום ואישור תעודה ---
 function finishReceipt() {
+  if (!deliveryCreditReady()) { deliveryCreditOpenWork('לפני הסיום צריך להשלים ולאשר את תעודות הזיכוי שצורפו, או להסיר אותן.'); return; }
+  if (!paperRowEnsureBalanced()) return;
   if (!receiptList.length) return;
   if (receiptEntryMode === 'photo' && receiptPaperScanState === 'running') {
     showToast('הפענוח עדיין ברקע. אפשר להמשיך לסרוק; הבדיקה תיפתח כשהתוצאה תגיע.', null, null, 3500); return;
@@ -7323,8 +7537,8 @@ function finishReceipt() {
     showConfirm('פיקדון שלא חויב בתעודה', 'הפער ₪' + fmtMoney(unbilledDep) + ' הוא בדיוק הפיקדון שהאפליקציה הוסיפה, ובתעודות אין שורת פיקדון. להסיר את שורות הפיקדון ולסגור לפי הנייר — ₪' + fmtMoney(progressMoneyTarget) + '?', 'הסר פיקדון וסגור', function () { receiptDepositWaived = true; saveReceiptDraft(); finishReceipt(); });
     return;
   }
-  if (receiptEntryMode === 'photo' && receiptAnchorSource === 'paper' && aiScanResponse) {
-    openReconcile(); return; // Also catches same-price substitutions with equal totals.
+  if (receiptDeliveryCredits.length || (receiptEntryMode === 'photo' && receiptAnchorSource === 'paper' && aiScanResponse)) {
+    openReconcile(); return; // Also catches same-price substitutions and validates credit coverage.
   }
   if (moneyMismatch || unitsMismatch) {
     const big = Math.max(ex, progressMoneyTarget), small = Math.min(ex, progressMoneyTarget);
@@ -9104,7 +9318,15 @@ function aiOrientationLocation(page) {
     const pageIndex = aiScanDocuments[docIndex].pages.indexOf(page);
     if (pageIndex !== -1) return { docIndex, pageIndex, doc: aiScanDocuments[docIndex], page };
   }
+  for (const credit of receiptDeliveryCredits) {
+    const pageIndex = credit.pages.indexOf(page);
+    if (pageIndex !== -1) return { credit: true, doc: credit, pageIndex, page };
+  }
   return null;
+}
+function aiInvalidateOrientationLocation(location) {
+  if (location.credit) { deliveryCreditInvalidate(location.doc); saveReceiptDraft(); }
+  else { yotvataInvalidatePhotoDoc(location.doc); receiptScanChanged(); }
 }
 function aiSetOrientationBusy(busy) {
   aiOrientationBusy = !!busy;
@@ -9423,7 +9645,7 @@ function aiPaintOrientationReview() {
   if (img) img.src = location.page.dataUrl;
   const sourceRef = aiOrientationSession.sourceRow;
   const source = sourceRef && aiSourceRow(sourceRef.documentIndex, sourceRef.rowIndex);
-  if (label) label.textContent = source ? source.title + ' · ' + source.position : 'תעודה ' + (location.docIndex + 1) + ' · עמוד ' + (location.pageIndex + 1) + ((Number(location.page.rotation) || 0) ? ' · סיבוב ' + (Number(location.page.rotation) || 0) + '°' : '') + ' · ' + aiCropInfoText(location.page);
+  if (label) label.textContent = source ? source.title + ' · ' + source.position : (location.credit ? 'תעודת זיכוי מהנהג' : 'תעודה ' + (location.docIndex + 1)) + ' · עמוד ' + (location.pageIndex + 1) + ((Number(location.page.rotation) || 0) ? ' · סיבוב ' + (Number(location.page.rotation) || 0) + '°' : '') + ' · ' + aiCropInfoText(location.page);
   aiUpdateOrientationControls();
   return true;
 }
@@ -9446,6 +9668,10 @@ function aiOpenNextUnconfirmedOrientation() {
   for (let docIndex = 0; docIndex < aiScanDocuments.length; docIndex++) {
     const pageIndex = aiScanDocuments[docIndex].pages.findIndex(page => !page.orientationConfirmed);
     if (pageIndex !== -1) return aiOpenOrientationReview(docIndex, pageIndex, false);
+  }
+  for (const credit of receiptDeliveryCredits) {
+    const index = credit.pages.findIndex(p => !p.orientationConfirmed);
+    if (index !== -1) return deliveryCreditOpenPage(credit.id, index);
   }
   return false;
 }
@@ -9475,7 +9701,7 @@ async function aiRotateOrientationReview(deltaTurns) {
     page.rotation = targetTurns * 90;
     page.bytes = rendered.bytes;
     page.orientationConfirmed = false;
-    yotvataInvalidatePhotoDoc(location.doc); receiptScanChanged();
+    aiInvalidateOrientationLocation(location);
     aiPaintOrientationReview();
   } catch (error) {
     const label = $('aiOrientationLabel');
@@ -9499,9 +9725,14 @@ async function aiConfirmOrientationReview() {
     }
     aiSetOrientationBusy(false);
   }
-  yotvataInvalidatePhotoDoc(location.doc);
+  if (location.credit) deliveryCreditInvalidate(location.doc); else yotvataInvalidatePhotoDoc(location.doc);
   location.page.orientationConfirmed = true;
   aiCloseOrientationReview();
+  if (location.credit) {
+    saveReceiptDraft(); renderReceiving();
+    setTimeout(aiOpenNextUnconfirmedOrientation, 0);
+    return;
+  }
   receiptScanChanged();
   refreshScanHost();
   setTimeout(aiOpenNextUnconfirmedOrientation, 0);
@@ -9510,9 +9741,10 @@ function aiCancelOrientationReview() {
   const location = aiOrientationSession && aiOrientationLocation(aiOrientationSession.page);
   if (!location || aiOrientationBusy) return;
   if (aiOrientationSession.reviewOnly) { aiCloseOrientationReview(); return; }
-  yotvataInvalidatePhotoDoc(location.doc);
+  if (location.credit) deliveryCreditInvalidate(location.doc); else yotvataInvalidatePhotoDoc(location.doc);
   location.doc.pages.splice(location.pageIndex, 1);
   aiCloseOrientationReview();
+  if (location.credit) { location.doc.pageCount = location.doc.pages.length; saveReceiptDraft(); renderReceiving(); setTimeout(aiOpenNextUnconfirmedOrientation, 0); return; }
   receiptScanChanged();
   refreshScanHost();
   setTimeout(aiOpenNextUnconfirmedOrientation, 0);
@@ -9862,13 +10094,114 @@ function priceAuditCapture(doc) {
   doc.__priceSourceId = makeOperationId('paper_price');
 }
 function priceAuditSource(doc) {
-  if (doc.__pricePaper) return doc.__pricePaper;
+  if (doc.__pricePaper) {
+    const paper = doc.__pricePaper;
+    if (!(doc.rows || []).some(r => r.paperValuesCorrection)) return paper;
+    return { ...paper, rows: paper.rows.map((raw, i) => paperRowCorrectionValid(doc, i)
+      ? { ...raw, ...doc.rows[i].paperValuesCorrection.values } : raw) };
+  }
   if (doc.__tnuvaPaper) return doc.__tnuvaPaper;
   // Legacy Berman's printedListUnitPrice is explicitly the untouched paper cell.
   if (PRICE_AUDIT_SUPPLIER === 'berman' && doc.rows.every(r => Object.prototype.hasOwnProperty.call(r, 'printedListUnitPrice'))) {
     return { ...doc, rows: doc.rows.map(r => ({ ...r, unitPriceExVat: r.printedListUnitPrice, lineTotalExVat: null, grossLineTotalExVat: null })) };
   }
   return null;
+}
+function paperRowValues(row) {
+  return Object.fromEntries(['quantity', 'unitPriceExVat', 'grossLineTotalExVat', 'lineDiscountExVat', 'lineTotalExVat'].map(k => [k, row[k] == null ? null : row[k]]));
+}
+function paperRowCorrectionValid(doc, index) {
+  const row = doc.rows && doc.rows[index], raw = doc.__pricePaper && doc.__pricePaper.rows[index];
+  const c = row && row.paperValuesCorrection;
+  return !!(raw && c && c.sourceId === doc.__priceSourceId && c.originalEvidence === JSON.stringify(raw)
+    && c.barcode === normalizeBarcode(row.barcode || '') && c.at > 0
+    && JSON.stringify(c.values) === JSON.stringify(paperRowValues(row)));
+}
+function paperRowCorrectionProblems() {
+  const docs = aiScanResponse && aiScanResponse.scan && aiScanResponse.scan.documents || [];
+  return docs.filter(d => (d.rows || []).some(r => r.paperValuesCorrection)).flatMap(d => {
+    const source = priceAuditSource(d), input = aiScanDocuments[d.noteIndex];
+    const check = yotvataPaperCheck(source, input && (input.pages.length || input.restoredPageCount) || 0);
+    return check.ok ? [] : [{ index: d.noteIndex, number: source.invoiceNumber, problems: check.problems }];
+  });
+}
+function paperRowEnsureBalanced() {
+  if (!paperRowCorrectionProblems().length) return true;
+  hideReceiptSummary(); pendingReceipt = null; currentView = 'receiving'; renderReceiving();
+  showToast('התיקונים עדיין אינם תואמים לסכום או לכמות שבסיכום התעודה. בדוק את השורות שתיקנת לפני הסיום.', null, null, 5500);
+  return false;
+}
+function paperRowCorrectionButton(documentIndex, rowIndex) {
+  return '<button data-role="paper-row-edit" data-doc="' + documentIndex + '" data-row="' + rowIndex + '" class="btn-tap w-full rounded-xl bg-blue-600 text-white py-3 mt-3 font-black">הפענוח שגוי — תקן לפי הנייר</button>';
+}
+function paperRowCorrectionHistoryHtml() {
+  const docs = aiScanResponse && aiScanResponse.scan && aiScanResponse.scan.documents || [];
+  const rows = docs.flatMap(d => (d.rows || []).map((r, i) => ({ d, r, i })).filter(x => x.r.paperValuesCorrection));
+  if (!rows.length) return '';
+  return '<details class="mt-3 text-xs text-slate-600"><summary class="cursor-pointer py-2 font-bold">תיקונים שאישרת לפי הנייר (' + rows.length + ')</summary>' +
+    rows.map(({ d, r, i }) => {
+      const p = priceAuditIdentity(r), source = aiSourceRow(d.noteIndex, i);
+      return '<button data-role="paper-row-edit" data-doc="' + d.noteIndex + '" data-row="' + i + '" class="btn-tap w-full border rounded-lg p-2 mt-2 text-right">' +
+        htmlEscape((p && p.name) || r.description) + ' · ' + htmlEscape(source.position) + ' · ערוך תיקון</button>';
+    }).join('') + '</details>';
+}
+function openPaperRowCorrection(documentIndex, rowIndex) {
+  const source = aiSourceRow(documentIndex, rowIndex);
+  if (!source || aiScanBusy || receiptFinalizing) return false;
+  const product = priceAuditIdentity(source.mapped, source.row);
+  if (!product) { showToast('קודם זהה את המוצר שמופיע בשורה, ואז אפשר לתקן את המחיר והכמות.', null, null, 4000); return false; }
+  const response = aiScanResponse, row = source.mapped, signature = JSON.stringify(row);
+  const productId = String(product.id), barcode = normalizeBarcode(row.barcode || product.barcode || '');
+  const isCurrent = () => {
+    const fresh = aiSourceRow(documentIndex, rowIndex), resolved = fresh && priceAuditIdentity(fresh.mapped, fresh.row);
+    return !aiScanBusy && !receiptFinalizing && aiScanResponse === response && fresh && fresh.doc === source.doc && fresh.mapped === row
+      && signature === JSON.stringify(row) && resolved && String(resolved.id) === productId && normalizeBarcode(resolved.barcode || '') === barcode;
+  };
+  const previous = $('paperRowCorrectionModal'); if (previous) previous.remove();
+  const wrap = document.createElement('div'); wrap.id = 'paperRowCorrectionModal';
+  wrap.className = 'fixed inset-0 bg-slate-900/65 z-[120] flex items-center justify-center p-3';
+  const value = k => source.row[k] == null ? '' : htmlEscape(String(source.row[k]));
+  wrap.innerHTML = '<div role="dialog" aria-modal="true" aria-labelledby="paperRowTitle" dir="rtl" class="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90dvh] overflow-y-auto p-4">' +
+    '<h3 id="paperRowTitle" class="font-black text-xl">תיקון פענוח לפי הנייר</h3><div class="font-black text-lg mt-2">' + htmlEscape(product.name) + '</div>' +
+    '<p class="text-sm text-slate-600 mt-1">' + htmlEscape(source.title) + '<br>' + htmlEscape(source.position) + '</p>' +
+    '<p class="mt-3 text-sm font-bold">העתק את הנתונים מהשורה של המוצר הזה בנייר. כל הסכומים לפני מע״מ.</p>' +
+    '<label class="block mt-3 font-bold">כמות יחידות בשורה<input id="paperRowQty" type="text" inputmode="numeric" value="' + value('quantity') + '" class="block w-full border-2 rounded-xl p-3 mt-1" dir="ltr"></label>' +
+    '<label class="block mt-3 font-bold">מחיר יחידה מודפס<input id="paperRowUnit" type="text" inputmode="decimal" value="' + value('unitPriceExVat') + '" class="block w-full border-2 rounded-xl p-3 mt-1" dir="ltr"></label>' +
+    '<label class="block mt-3 font-bold">סכום השורה לתשלום, אחרי הנחה<input id="paperRowTotal" type="text" inputmode="decimal" value="' + value('lineTotalExVat') + '" class="block w-full border-2 rounded-xl p-3 mt-1" dir="ltr"></label>' +
+    '<p id="paperRowError" role="alert" class="mt-2 text-sm font-bold text-rose-700"></p>' +
+    '<button id="paperRowSave" class="btn-tap w-full bg-blue-600 text-white rounded-xl py-3 mt-3 font-black">אשר את הפרטים מהנייר</button>' +
+    '<button id="paperRowCancel" class="btn-tap w-full py-3 mt-1 font-bold text-slate-600">ביטול</button></div>';
+  document.body.appendChild(wrap);
+  $('paperRowCancel').addEventListener('click', () => wrap.remove());
+  $('paperRowSave').addEventListener('click', () => {
+    if (!isCurrent()) { $('paperRowError').textContent = 'השורה או המוצר השתנו בזמן העריכה. סגור ופתח שוב את התיקון.'; return; }
+    const parse = id => {
+      const text = $(id).value.trim().replace(/,/g, '.');
+      return /^\d+(?:\.\d{1,4})?$/.test(text) ? Number(text) : NaN;
+    };
+    const qty = parse('paperRowQty'), unit = parse('paperRowUnit'), total = parse('paperRowTotal');
+    if (!Number.isSafeInteger(qty) || qty <= 0 || !Number.isFinite(unit) || unit <= 0 || !Number.isFinite(total) || total < 0
+      || !Number.isSafeInteger(Math.round(qty * unit * 100)) || total !== r2(total) || total > r2(qty * unit) + .02) {
+      $('paperRowError').textContent = 'בדוק את הכמות, מחיר היחידה וסכום השורה. סכום השורה צריך לכלול את ההנחה שמופיעה בנייר.'; return;
+    }
+    priceAuditCapture(source.doc);
+    if (!source.doc.__priceSourceId) source.doc.__priceSourceId = makeOperationId('paper_price');
+    const raw = source.doc.__pricePaper.rows[rowIndex], gross = r2(qty * unit);
+    const values = { quantity: qty, unitPriceExVat: unit, grossLineTotalExVat: gross, lineDiscountExVat: Math.max(0, r2(gross - total)), lineTotalExVat: total };
+    Object.assign(row, values);
+    row.paperValuesCorrection = { sourceId: source.doc.__priceSourceId, originalEvidence: JSON.stringify(raw), values,
+      productId, barcode, at: Date.now(), previous: row.paperValuesCorrection ? { values: row.paperValuesCorrection.values, at: row.paperValuesCorrection.at } : null };
+    // This approval names the already identified product and the new paper
+    // values together. It never supplies a catalog price as paper evidence.
+    if (row.barcodePaperIdentityReview) row.barcodePaperIdentityReview.evidence = priceAuditIdentityEvidence(row);
+    pendingReceipt = null; reconcileData = null; reconcileAiAudit = null;
+    aiAnalyzeResult = null; aiAnalyzeError = ''; receiptAnalysisCache = null;
+    aiScanEvaluation = aiEvaluateInvoiceScan(aiScanResponse);
+    aiScanError = aiScanEvaluation.valid ? '' : 'התיקון נשמר. סכומי השורות והכמויות עדיין צריכים להתאים לסיכום התעודה.';
+    saveReceiptDraft(); wrap.remove(); currentView = 'receiving'; renderReceiving(); refreshPriceAuditViews();
+    showToast(paperRowCorrectionProblems().length ? 'התיקון נשמר. השורות המתוקנות עדיין אינן תואמות לסיכום הנייר — בדוק את ההודעה בקליטה.' : 'השורה תוקנה לפי הנייר. בדיקת המחיר והחיוב עודכנה.', null, null, 4500);
+  });
+  return true;
 }
 function priceAuditIdentity(mapped, raw) {
   if (!mapped) return null;
@@ -9975,7 +10308,7 @@ function aiSourceRow(documentIndex, rowIndex) {
 function aiSourceRowHtml(documentIndex, rowIndex, options) {
   const source = aiSourceRow(documentIndex, rowIndex);
   if (!source) return '';
-  const row = source.row, money = n => priceAuditNumber(n) == null ? 'לא נקרא' : '₪' + fmtUnitPrice(Number(n), true);
+  const row = source.row, corrected = paperRowCorrectionValid(source.doc, rowIndex), money = n => priceAuditNumber(n) == null ? 'לא נקרא' : '₪' + fmtUnitPrice(Number(n), true);
   const photo = aiBarcodeSuggestionPage({ documentIndex, sourcePage: source.page });
   const attrs = ' data-doc="' + documentIndex + '" data-row="' + rowIndex + '"';
   let preview = '<div class="mt-2 text-xs text-slate-500">צילום העמוד אינו זמין במכשיר. אפשר לאתר את הנייר לפי הסכום והשורה שמופיעים כאן.</div>';
@@ -9994,7 +10327,7 @@ function aiSourceRowHtml(documentIndex, rowIndex, options) {
     '<div class="text-xs text-slate-700 mt-2">הפענוח קרא: <b>' + htmlEscape(row.description || 'תיאור לא קריא') + '</b>' + (options && options.uncertain ? ' — ייתכן שהשם שגוי' : '') + '</div>' +
     '<div class="grid grid-cols-3 gap-2 mt-2 text-xs text-slate-600"><div>כמות בשורה<b class="block text-sm text-slate-900">' + (priceAuditNumber(row.quantity) == null ? 'לא נקראה' : Number(row.quantity) + ' יח׳') + '</b></div>' +
     '<div>מחיר ליחידה<b class="block text-sm text-slate-900">' + money(row.unitPriceExVat) + '</b></div><div>סכום שורה<b class="block text-sm text-slate-900">' + money(row.lineTotalExVat) + '</b></div></div>' +
-    '<div class="text-[10px] text-slate-500 mt-1">המחירים שנקראו מהתעודה, לפני מע״מ</div>' + preview + '</div>';
+    '<div class="text-[10px] text-slate-500 mt-1">' + (corrected ? 'כמות ומחירים שתיקנת ואישרת לפי הנייר, לפני מע״מ' : 'המחירים שנקראו מהתעודה, לפני מע״מ') + '</div>' + preview + '</div>';
 }
 function aiManualPaperBarcodeButton(documentIndex, rowIndex) {
   return '<button data-role="ai-manual-paper-barcode" data-doc="' + documentIndex + '" data-row="' + rowIndex + '" class="btn-tap w-full rounded-lg border border-slate-300 bg-white text-blue-700 font-black text-sm py-3 mt-2">המוצר לא ברשימה / הזיהוי שגוי — הקלד ברקוד</button>';
@@ -10090,6 +10423,7 @@ function receiptPriceAudit() {
       const row = { id: docId + ':' + sourceIndex, rowIndex: sourceIndex, documentId: docId, documentNumber: info.number, documentIndex: doc.noteIndex, page: raw.sourcePage ?? null, line: raw.lineNumber ?? null,
         productId: product && product.id || null, name: product && product.name || raw.description || 'מוצר לא מזוהה', code: raw.code || raw.itemCode || raw.supplierItemCode || raw.barcode || product && (product.code || product.barcode) || '',
         quantity: qty, date: day, dateAssumed: dateAssumed, originalUnitPrice: original, adaptedUnitPrice: adapted, chargedUnitPrice: null, chargeDerivation: '',
+        paperCorrection: paperRowCorrectionValid(doc, sourceIndex) ? cloneSafe(mapped.paperValuesCorrection) : null,
         catalogBasePrice: product ? priceAuditNumber(PRICE_AUDIT_SUPPLIER === 'berman' ? product.listPrice : product.price) : null,
         regularDiscountPct: PRICE_AUDIT_SUPPLIER === 'berman' && product ? priceAuditNumber(product.discountPct) : 0,
         promo: null, expectedOptions: [], comparisonPrice: null, comparisonBasis: 'ללא מע״מ; פיקדון נבדק בשורה נפרדת',
@@ -10271,9 +10605,10 @@ function priceAuditActionCardHtml(r) {
     '" class="btn-tap w-full rounded-xl border border-blue-200 bg-blue-50 text-blue-700 py-3 mt-3 font-black">' +
     (r.capability === 'missing_catalog_price' ? 'השלם מחיר במאגר' : 'עדכן מחיר במאגר') + '</button>' : '';
   let action;
-  if (difference) action = '<p class="mt-2 font-bold">בדוק אם החיוב בתעודה נכון. אם מחיר הקנייה במאגר לא מעודכן, אפשר לתקן אותו כאן.</p>' + editProduct;
+  if (difference) action = '<p class="mt-2 font-bold">האם המחיר והכמות כאן הם מה שמודפס בשורה של המוצר שבחרת?</p>' + paperRowCorrectionButton(r.documentIndex, r.rowIndex) +
+    aiManualPaperBarcodeButton(r.documentIndex, r.rowIndex) + '<details class="mt-2 text-sm"><summary class="cursor-pointer py-2 font-bold">הנתונים מהנייר נכונים, והמחיר במאגר לא מעודכן</summary>' + editProduct + '</details>';
   else if (r.capability === 'missing_catalog_price') action = '<p class="mt-2">הוסף את מחיר הקנייה ליחידה כדי שנוכל להשוות אותו למחיר בתעודה.</p>' + editProduct;
-  else action = '<p class="mt-2 font-bold">' + htmlEscape(r.reason) + '</p><p class="mt-1">בדוק את השורה בנייר. אם הקריאה חסרה או שגויה, פתח את צילומי התעודה לתיקון.</p>' + receiptBackToPhotosHtml();
+  else action = '<p class="mt-2 font-bold">' + htmlEscape(r.reason) + '</p>' + paperRowCorrectionButton(r.documentIndex, r.rowIndex) + receiptBackToPhotosHtml();
   const comparison = difference ? r.expectedOptions.map(o => '<div class="rounded-lg bg-rose-50 p-3 mt-2">' +
     '<div>מחיר בתעודה ליחידה: <b>' + money(r.comparisonPrice) + '</b></div>' +
     '<div>מחיר צפוי · ' + htmlEscape(o.label) + ': <b>' + money(o.price) + '</b></div>' +
@@ -10296,6 +10631,7 @@ function receiptPriceAuditHtml(report, { summary = false } = {}) {
   const shell = '<section data-price-audit class="rounded-xl border-2 border-amber-300 bg-white p-3 mb-3 text-sm" dir="rtl" aria-label="בדיקת מחירים ומבצעים">';
   if (a.state === 'running' || a.state === 'unsaved') return shell + '<b>' + (a.state === 'running' ? 'בדיקת המחירים תופיע אחרי השלמת הפענוח ושמירתו. אפשר להמשיך לסרוק.' : 'בדיקת המחירים ממתינה לשמירת הפענוח בהצלחה.') + '</b></section>';
   const pending = priceAuditPendingRows(a);
+  const correctionProblems = paperRowCorrectionProblems();
   const money = n => n == null ? 'לא זמין' : '₪' + fmtUnitPrice(n, true);
   const openPanel = pending.length > 0 || !a.complete;
   const title = pending.length ? (pending.length === 1 ? 'נשארה שורה אחת לטיפול' : 'נשארו ' + pending.length + ' שורות לטיפול') :
@@ -10311,9 +10647,10 @@ function receiptPriceAuditHtml(report, { summary = false } = {}) {
     (openPanel ? 'text-amber-900' : 'text-emerald-800') + '">' +
     '<span role="status" aria-live="polite">' + title + '</span><i class="fa-solid fa-chevron-down hist-chevron shrink-0"></i></summary>' +
     (pending.length ? '<p class="mt-2 text-slate-600">מוצגות רק השורות שנותרו לטיפול. לאחר זיהוי המוצר המחיר נבדק אוטומטית, ושורה תקינה יוצאת מהרשימה.</p>' : '') +
+    (correctionProblems.length ? '<div role="alert" class="rounded-xl bg-amber-50 border-2 border-amber-300 p-3 mt-3"><b>התיקון נשמר, אבל השורות עדיין אינן תואמות לסיכום החשבונית.</b><p class="mt-1">בדוק את התיקון האחרון או תקן שורות נוספות לפי הנייר.</p>' + correctionProblems.map(d => '<p class="mt-1 text-xs">תעודה ' + htmlEscape(d.number || String(d.index + 1)) + ': ' + htmlEscape(d.problems.join(' · ')) + '</p>').join('') + '</div>' : '') +
     pending.map(priceAuditActionCardHtml).join('') +
     (!pending.length && !a.complete ? '<p class="mt-2">חסרה קריאה מלאה של התעודה. פתח את הצילומים והשלם את העמודים החסרים.</p>' + receiptBackToPhotosHtml() : '') +
-    priceAuditDatesHtml(a, money) +
+    paperRowCorrectionHistoryHtml() + priceAuditDatesHtml(a, money) +
     '</details></section>';
 }
 function priceAuditSetDate(index, value) {
@@ -14178,6 +14515,8 @@ function reconcileSetPriceLive(productId, val) {
 function saveReconciledReceipt(opts) {
   opts = opts || {};
   if (!reconcileData) return;
+  if (!paperRowEnsureBalanced()) return;
+  if (!deliveryCreditReady()) { deliveryCreditOpenWork('השלם ואשר את תעודות הזיכוי שצורפו לפני סיום הקליטה.'); return; }
   if (!opts.skipChecked && reconcileCheckMode) {
     const unchecked = reconcileSaveable().filter(l => !l.checked).length;
     if (unchecked > 0) { showConfirm('לא סימנת הכל', 'נשארו ' + unchecked + ' מוצרים בלי ✓ — ייתכן שעוד לא עברת עליהם מול הנייר. להמשיך בכל זאת?', 'המשך', function () { saveReconciledReceipt({ skipChecked: true }); }); return; }
@@ -14217,9 +14556,11 @@ function saveReconciledReceipt(opts) {
   const unresolvedUnitsGap = (reconcileUnitsGap() != null && reconcileUnitsGap() !== 0) ? reconcileUnitsGap() : 0;
   const aiAudit = reconcileAiAudit ? cloneSafe(reconcileAiAudit) : null;
   const supplierCreditClaim = reconcileSupplierCreditClaim ? cloneSafe(reconcileSupplierCreditClaim) : null;
-  const effectiveInfo = receiptDiscrepancyInfo({ items: lines, noteParts: receiptNotes.slice(), unresolvedAmountGap, unresolvedUnitsGap, supplierCreditClaim, aiAudit });
+  const shortCreditNotes = deliveryCreditNotes();
+  const effectiveInfo = receiptDiscrepancyInfo({ items: lines, noteParts: receiptNotes.slice(), unresolvedAmountGap, unresolvedUnitsGap, supplierCreditClaim, aiAudit, shortCreditNotes });
+  if (effectiveInfo.deliveryCreditMismatch) { deliveryCreditOpenWork('הזיכוי אינו תואם לחוסר שנספר: בדוק את המוצר, הכמות והסכום. זיכוי על משלוח אחר צריך להסיר מהקליטה הזאת.'); return; }
   const open = effectiveInfo.open;
-  pendingReceipt = { lines, ex, calculatedEx, roundingAdjustment, grossEx, supplierDiscount, supplierPromoItems: reconcileSupplierPromoItems.slice(), supplierPromoMismatchItems: reconcilePromoMismatchItems.slice(), supplierCreditClaim, aiAudit, noteTotal: receiptNoteTotal, status: open ? 'open' : 'ok', noteParts: receiptNotes.slice(), unresolvedAmountGap, unresolvedUnitsGap };
+  pendingReceipt = { lines, ex, calculatedEx, roundingAdjustment, grossEx, supplierDiscount, supplierPromoItems: reconcileSupplierPromoItems.slice(), supplierPromoMismatchItems: reconcilePromoMismatchItems.slice(), supplierCreditClaim, aiAudit, noteTotal: receiptNoteTotal, status: open ? 'open' : 'ok', noteParts: receiptNotes.slice(), unresolvedAmountGap, unresolvedUnitsGap, shortCreditNotes };
   presentReconcileSummary(lines, ex, open, { calculatedEx, roundingAdjustment, grossEx, supplierDiscount, supplierPromoItems: reconcileSupplierPromoItems.slice(), supplierPromoMismatchItems: reconcilePromoMismatchItems.slice(), supplierCreditClaim, aiAudit, internalOffsets: effectiveInfo.priceOffsets || [] });
 }
 function presentReconcileSummary(lines, ex, open, extra) {
@@ -14255,7 +14596,7 @@ function presentReconcileSummary(lines, ex, open, extra) {
       '<div class="text-[11px] font-bold text-violet-700 mt-1">סכום התעודות והיחידות אומתו בדיוק. התמונות לא נשמרות.</div>' +
       (extra.aiAudit.findings.filter(priceAuditLegacyVisible).filter(f => ['shortage', 'surplus', 'price', 'promo_missing'].includes(f.type)).map(f => '<div class="text-xs font-black mt-1.5 ' + (f.type === 'shortage' ? 'text-rose-700' : (f.type === 'surplus' ? 'text-amber-700' : 'text-orange-800')) + '">• ' + htmlEscape(f.text || '') + '</div>').join('') || '<div class="text-xs font-black text-emerald-700 mt-1.5">לא נמצא פער נוסף.</div>') + '</div>'
     : '';
-  $('rsBody').innerHTML = '<div id="rsPriceAudit">' + receiptPriceAuditHtml(undefined, { summary: true }) + '</div>' +
+  $('rsBody').innerHTML = '<div id="rsPriceAudit">' + receiptPriceAuditHtml(undefined, { summary: true }) + '</div>' + deliveryCreditSummaryHtml() +
     (open ? '<div class="bg-rose-50 border border-rose-200 rounded-xl p-2.5 mb-3 text-xs font-bold text-rose-700"><i class="fa-solid fa-triangle-exclamation"></i> נשמר עם הפרשים — התעודה תסומן כפתוחה עד שתתוקן</div>' : '') +
     '<div class="bg-slate-50 rounded-xl p-3 max-h-56 overflow-y-auto border border-slate-100 mb-3">' + listHtml + '</div>' +
     ((Number(extra.supplierDiscount) || 0) > 0 ? '<div class="flex items-center justify-between text-slate-500 font-bold text-sm"><span>סכום שורות לפני מבצע</span><span>₪' + fmtMoney(extra.grossEx || ex) + '</span></div>' : '') +
@@ -14536,6 +14877,11 @@ function cancelReceiptAttach() {
 }
 async function confirmReceipt() {
   if (!pendingReceipt) { hideReceiptSummary(); return; }
+  if (!paperRowEnsureBalanced()) return;
+  if (!deliveryCreditReady()) { deliveryCreditOpenWork('פרטי הזיכוי השתנו. אשר אותם ובדוק שוב את סיכום הקליטה.'); return; }
+  if (receiptDeliveryCredits.length && JSON.stringify(pendingReceipt.shortCreditNotes || []) !== JSON.stringify(deliveryCreditNotes())) {
+    deliveryCreditOpenWork('פרטי הזיכוי השתנו מאז הסיכום. סיים שוב את הקליטה כדי לעדכן אותו.'); return;
+  }
   if (receiptFinalizing) return;
   saveReceiptDraft();
   receiptFinalizing = true;
@@ -14551,14 +14897,14 @@ async function confirmReceipt() {
       closedId: makeOperationId('draft_closed'), closedContent: await packReceiptValue(receiptEmptyDraft()) };
   } catch (error) { receiptEndFinalizing(); showToast(error.message, null, null, 5000); return; }
   if (receiptSync.dirty || receiptSync.mutationId !== intended) { receiptEndFinalizing(); return; }
-  const { lines, ex, calculatedEx, roundingAdjustment, grossEx, supplierDiscount, supplierPromoItems, supplierPromoMismatchItems, supplierCreditClaim, aiAudit, noteTotal, status, noDoc, noteParts, unresolvedAmountGap, unresolvedUnitsGap } = pendingReceipt;
+  const { lines, ex, calculatedEx, roundingAdjustment, grossEx, supplierDiscount, supplierPromoItems, supplierPromoMismatchItems, supplierCreditClaim, aiAudit, noteTotal, status, noDoc, noteParts, unresolvedAmountGap, unresolvedUnitsGap, shortCreditNotes } = pendingReceipt;
   // v306: צירוף נייר דורס את אותה תעודה עצמה (אותו מזהה) ואינו יוצר שנייה.
   // תאריך הקליטה המקורי נשמר — התעודה יושבת בהיסטוריה ביום שבו הסחורה
   // הגיעה, לא ביום שבו הנייר הגיע.
   const attach = receiptAttachTarget;
   const opId = (attach && attach.id) || receiptDraftId || pendingReceipt.operationId || (pendingReceipt.operationId = makeOperationId('receipt'));
   const creditClaim = supplierCreditClaim ? { ...cloneSafe(supplierCreditClaim), createdAt: supplierCreditClaim.createdAt || Date.now() } : null;
-  const data = { quantityCheck: receiptQuantityCheckAudit(), priceAudit: receiptPriceAudit(), paperScan, scanAudit: cloneSafe(yotvataReceiptScanAudit()), timestamp: (attach && Number(attach.timestamp)) || Date.now(), date: (attach && attach.date) || todayStr(), noDoc: !!(noDoc || attach), items: lines, count: lines.length, totalExVat: ex, totalIncVat: ex, calculatedExVat: (calculatedEx != null ? calculatedEx : ex), roundingAdjustment: r2(Number(roundingAdjustment) || 0), grossExVat: (grossEx != null ? grossEx : (calculatedEx != null ? calculatedEx : ex)), supplierDiscount: r2(Number(supplierDiscount) || 0), supplierPromoItems: (Array.isArray(supplierPromoItems) ? supplierPromoItems : []), supplierPromoMismatchItems: (Array.isArray(supplierPromoMismatchItems) ? supplierPromoMismatchItems : []), supplierCreditClaim: creditClaim, aiAudit: aiAudit ? cloneSafe(aiAudit) : null, noteTotalInc: (noteTotal != null ? noteTotal : null), noteParts: (Array.isArray(noteParts) ? noteParts : []), unresolvedAmountGap: r2(Number(unresolvedAmountGap) || 0), unresolvedUnitsGap: Number(unresolvedUnitsGap) || 0, status: status || 'ok', operationId: opId };
+  const data = { shortCreditNotes: cloneSafe(shortCreditNotes || []), quantityCheck: receiptQuantityCheckAudit(), priceAudit: receiptPriceAudit(), paperScan, scanAudit: cloneSafe(yotvataReceiptScanAudit()), timestamp: (attach && Number(attach.timestamp)) || Date.now(), date: (attach && attach.date) || todayStr(), noDoc: !!(noDoc || attach), items: lines, count: lines.length, totalExVat: ex, totalIncVat: ex, calculatedExVat: (calculatedEx != null ? calculatedEx : ex), roundingAdjustment: r2(Number(roundingAdjustment) || 0), grossExVat: (grossEx != null ? grossEx : (calculatedEx != null ? calculatedEx : ex)), supplierDiscount: r2(Number(supplierDiscount) || 0), supplierPromoItems: (Array.isArray(supplierPromoItems) ? supplierPromoItems : []), supplierPromoMismatchItems: (Array.isArray(supplierPromoMismatchItems) ? supplierPromoMismatchItems : []), supplierCreditClaim: creditClaim, aiAudit: aiAudit ? cloneSafe(aiAudit) : null, noteTotalInc: (noteTotal != null ? noteTotal : null), noteParts: (Array.isArray(noteParts) ? noteParts : []), unresolvedAmountGap: r2(Number(unresolvedAmountGap) || 0), unresolvedUnitsGap: Number(unresolvedUnitsGap) || 0, status: status || 'ok', operationId: opId };
   const saved = await runCloudTask('save receipt before clearing draft', { op: 'set', path: dataPath('receipts', opId), data, operationId: opId, receiptDraftGuard });
   if (!saved) { receiptEndFinalizing(); return; }
   if (receiptSync.mutationId !== intended) {
@@ -14795,7 +15141,9 @@ function receiptDiscrepancyInfo(rc, opts) {
   // לעולם לא נמחקות — רק שכבת כסף שיושבת מעליהן. כל עוד לא התקבל מלוא
   // הסכום, היתרה נשארת חוב פתוח.
   const shortCreditNotes = (Array.isArray(rc && rc.shortCreditNotes) ? rc.shortCreditNotes : []).filter(x => x && (Number(x.amount) || 0) > 0);
-  const shortCreditEx = r2(shortCreditNotes.reduce((a, x) => a + (Number(x.amount) || 0), 0));
+  const coverage = deliveryCreditCoverage(shortCreditNotes, finalShort);
+  const deliveryCreditMismatch = coverage.invalid.length > 0;
+  const shortCreditEx = r2(shortCreditNotes.filter(n => n.source !== 'delivery_credit_scan').reduce((a, x) => a + (Number(x.amount) || 0), 0) + coverage.amount);
   const shortValRaw = r2(shortVal);
   const shortFullyCredited = shortCreditEx > 0 && shortValRaw > 0 && r2(shortValRaw - shortCreditEx) <= 0.01;
   if (shortCreditEx > 0) shortVal = Math.max(0, r2(shortVal - shortCreditEx));
@@ -14812,7 +15160,7 @@ function receiptDiscrepancyInfo(rc, opts) {
   // חוסר) נבלע גם הוא בזיכוי. עודף, פער יחידות וממצאי AI אינם נסגרים בכסף.
   const shortSideOpen = (finalShort.length > 0 || (amountGapOpen && Math.round(unresolvedAmountGap * 100) > 0)) && !shortFullyCredited;
   const overSideOpen = finalOver.length > 0 || (amountGapOpen && Math.round(unresolvedAmountGap * 100) < 0);
-  return { open: !!(awaitingDoc || shortSideOpen || overSideOpen || unresolvedUnitsGap !== 0 || aiAuditOpen || creditOpen), awaitingDoc, shortItems: finalShort, overItems: finalOver, priceOffsets, externalOffsets, shortGoodsNotes, shortVal: r2(shortVal), overVal: r2(overVal), shortValRaw, shortCreditEx, shortCreditNotes, shortFullyCredited, unresolvedAmountGap, unresolvedUnitsGap, amountGapOpen, amountToleranceCents, aiAuditOpen };
+  return { open: !!(awaitingDoc || shortSideOpen || overSideOpen || unresolvedUnitsGap !== 0 || aiAuditOpen || creditOpen || deliveryCreditMismatch), deliveryCreditMismatch, awaitingDoc, shortItems: finalShort, overItems: finalOver, priceOffsets, externalOffsets, shortGoodsNotes, shortVal: r2(shortVal), overVal: r2(overVal), shortValRaw, shortCreditEx, shortCreditNotes, shortFullyCredited, unresolvedAmountGap, unresolvedUnitsGap, amountGapOpen, amountToleranceCents, aiAuditOpen };
 }
 // v268: "התקבל זיכוי בסחורה" — הספק השלים את הפריטים החסרים במשלוח מאוחר
 // יותר בלי לחייב שוב. הרישום נשמר לפי מוצר וכמות (shortGoodsNotes) ונצרך
@@ -14834,10 +15182,12 @@ function consumeShortGoodsNotes(rc, shortItems) {
 function openShortGoodsConfirm(rcId) {
   const rc = receipts.find(x => x.id === rcId); if (!rc) return;
   const di = receiptDiscrepancyInfo(rc);
-  const items = (di.shortItems || []).filter(x => (Number(x.n) || 0) > 0 && x.productId);
+  const hasDeliveryCredit = (di.shortCreditNotes || []).some(n => n.source === 'delivery_credit_scan');
+  const items = hasDeliveryCredit ? receiptOffsets(rc).filter(x => x.d > 0).map(x => ({ ...x, n: x.d }))
+    : (di.shortItems || []).filter(x => (Number(x.n) || 0) > 0 && x.productId);
   if (!items.length) { showToast('אין חוסר פתוח בתעודה הזאת', null, null, 2600); return; }
   const val = r2(items.reduce((a, x) => a + lineTotalFromUnit(x.price, x.n), 0));
-  showConfirm('התקבל זיכוי בסחורה', 'הספק השלים את הסחורה החסרה: ' + receiptSideText(items) + ' (₪' + fmtMoney(val) + '). התעודה תשולם במלואה לפי הנייר ולא יידרש זיכוי כספי. לאשר?', 'כן, הסחורה הגיעה', () => saveShortGoods(rcId, items));
+  showConfirm('התקבל זיכוי בסחורה', 'הספק השלים את הסחורה החסרה: ' + receiptSideText(items) + ' (₪' + fmtMoney(val) + '). ' + (hasDeliveryCredit ? 'הפריטים האלה יתווספו לתשלום; הזיכוי הכספי שכבר התקבל נשמר. לאשר?' : 'התעודה תשולם במלואה לפי הנייר ולא יידרש זיכוי כספי. לאשר?'), 'כן, הסחורה הגיעה', () => saveShortGoods(rcId, items));
 }
 async function saveShortGoods(rcId, items) {
   const rc = receipts.find(x => x.id === rcId); if (!rc) return;
@@ -14847,7 +15197,7 @@ async function saveShortGoods(rcId, items) {
   if (!saved) return;
   rc.shortGoodsNotes = notes;
   buzz(18);
-  showToast('החוסר הושלם בסחורה ✓ התעודה משולמת במלואה', null, null, 3000);
+  showToast((rc.shortCreditNotes || []).some(n => n.source === 'delivery_credit_scan') ? 'השלמת הסחורה נרשמה. התשלום והחוסר שנותר עודכנו.' : 'החוסר הושלם בסחורה ✓ התעודה משולמת במלואה', null, null, 3000);
   if (currentView === 'receiptsHistory') renderReceiptsHistory();
 }
 function receiptsBalance() {
@@ -14871,16 +15221,19 @@ function receiptOffsets(rc) {
   // ששוויה לא יעלה על הכסף שעוד לא זוכה; שארית שאינה יחידה שלמה נשארת
   // חוב פתוח גלוי — כסף אמת, לא עיגול נוח.
   if (!di.shortFullyCredited) {
+    const productRemainders = deliveryCreditCoverage(di.shortCreditNotes || [], di.shortItems || []).remaining;
     let remaining = (Number(di.shortCreditEx) || 0) > 0
       ? Math.max(0, r2((Number(di.shortValRaw) || 0) - (Number(di.shortCreditEx) || 0)))
       : Infinity;
     (di.shortItems || []).forEach(l => {
       const n = Number(l.n) || 0, price = Number(l.price) || 0;
-      let allow = n;
+      const productRemainder = productRemainders.get(l.productId);
+      let allow = Math.min(n, productRemainder ? productRemainder.qty : n);
       if (remaining !== Infinity) {
-        allow = price > 0 ? Math.min(n, Math.floor((remaining + 0.005) / price)) : 0;
+        allow = price > 0 ? Math.min(allow, Math.floor((remaining + 0.005) / price)) : 0;
         if (allow > 0) remaining = r2(remaining - allow * price);
       }
+      if (productRemainder) productRemainder.qty -= allow;
       if (allow > 0) out.push({ productId: l.productId, name: l.name, d: allow, price: price });
     });
   }
@@ -15594,9 +15947,9 @@ function renderReceiptsHistory() {
         ((di.shortCreditNotes || []).length ? (function () {
           const rem = Math.max(0, r2((Number(di.shortValRaw) || 0) - (Number(di.shortCreditEx) || 0)));
           return '<div class="mt-2 ' + (di.shortFullyCredited ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200') + ' border rounded-xl p-2.5 text-xs">' +
-            '<div class="font-black mb-1 ' + (di.shortFullyCredited ? 'text-emerald-800' : 'text-amber-800') + '"><i class="fa-solid fa-file-invoice-dollar"></i> ' + (di.shortFullyCredited ? 'החוסר נסגר בזיכוי מהספק ✓' : 'זיכוי חלקי מהספק — נותר חוב ₪' + fmtMoney(rem)) + '</div>' +
-            di.shortCreditNotes.map(x => '<div class="flex justify-between ' + (di.shortFullyCredited ? 'text-emerald-700' : 'text-amber-700') + '"><span>זיכוי ' + new Date(Number(x.at) || 0).toLocaleDateString('he-IL') + '</span><span>₪' + fmtMoney(x.amount) + '</span></div>').join('') +
-            '<div class="mt-1 pt-1 border-t ' + (di.shortFullyCredited ? 'border-emerald-200 text-emerald-700/80' : 'border-amber-200 text-amber-700/80') + '">החוסר המקורי (₪' + fmtMoney(di.shortValRaw) + ') נשמר למעלה בהיסטוריה; הוא נסגר בכסף, לא בהשלמת סחורה, ולא יקוזז מול תעודה עתידית.</div>' +
+            '<div class="font-black mb-1 ' + (di.shortFullyCredited ? 'text-emerald-800' : 'text-amber-800') + '"><i class="fa-solid fa-file-invoice-dollar"></i> ' + (di.deliveryCreditMismatch ? 'פרטי החוסר השתנו — יש לבדוק שוב את הזיכוי המצורף' : di.shortFullyCredited ? 'החוסר נסגר בזיכוי מהספק ✓' : 'זיכוי חלקי מהספק — נותר חוב ₪' + fmtMoney(rem)) + '</div>' +
+            di.shortCreditNotes.map(x => '<div class="flex justify-between ' + (di.shortFullyCredited ? 'text-emerald-700' : 'text-amber-700') + '"><span>זיכוי ' + (x.number ? 'מס׳ ' + htmlEscape(x.number) + ' · ' : '') + new Date(Number(x.at) || 0).toLocaleDateString('he-IL') + '</span><span>₪' + fmtMoney(x.amount) + '</span></div>').join('') +
+            '<div class="mt-1 pt-1 border-t ' + (di.shortFullyCredited ? 'border-emerald-200 text-emerald-700/80' : 'border-amber-200 text-amber-700/80') + '">' + (di.deliveryCreditMismatch ? 'הזיכוי שאינו תואם למוצרים ולכמויות החסרים אינו סוגר חוסר אחר.' : 'החוסר המקורי (₪' + fmtMoney(di.shortValRaw) + ') נשמר למעלה בהיסטוריה; הסכום שכוסה בזיכוי לא יקוזז מול תעודה עתידית.') + '</div>' +
           '</div>';
         })() : '') +
         // חוסר ועודף נשארים נפרדים עד אישור קיזוז מפורש של המשתמש.
@@ -19616,6 +19969,21 @@ $('rsBody').addEventListener('click', e => {
 });
 $('scanPriceNotice').addEventListener('click', () => { closeScanner(); renderReceiving(); const panel = app.querySelector('[data-price-panel]'); if (panel) { panel.open = true; panel.scrollIntoView({ block: 'start' }); } });
 app.addEventListener('change', (e) => {
+  if (e.target.dataset.role === 'delivery-credit-file') { const input = e.target; deliveryCreditAddFiles(input.dataset.id, Array.from(input.files || [])); input.value = ''; return; }
+  if (['delivery-credit-number', 'delivery-credit-barcode'].includes(e.target.dataset.role)) {
+    const input = e.target, c = deliveryCreditFind(input.dataset.id);
+    if (!c || !c.paper || receiptFinalizing) return;
+    if (input.dataset.role === 'delivery-credit-number') c.number = input.value.trim();
+    else {
+      const i = Number(input.dataset.row);
+      if (!Number.isInteger(i) || i < 0 || i >= c.paper.rows.length) return;
+      if (!c.barcodes) c.barcodes = []; c.barcodes[i] = input.value.trim();
+      const row = deliveryCreditRows(c)[i], name = $('creditName_' + c.id + '_' + i);
+      if (name) name.textContent = row.productId ? row.name : 'הברקוד לא זוהה — בדוק אותו מול הנייר';
+    }
+    c.status = 'review'; c.confirmedAt = null; c.confirmedSignature = null; pendingReceipt = null; saveReceiptDraft();
+    return;
+  }
   if (e.target.dataset.role === 'price-doc-date') { priceAuditSetDate(Number(e.target.dataset.doc), e.target.value); return; }
   const t = e.target;
   // v234: בסיום ההקלדה (blur/Enter) בנייה מלאה אחת — הפוקוס כבר עוזב את
@@ -19720,7 +20088,9 @@ app.addEventListener('click', (e) => {
   const unitBtn = e.target.closest('[data-role="unit"]');
   if (unitBtn) { toggleUnit(unitBtn.dataset.id, unitBtn); buzz(8); return; }
   const t = e.target.closest('[data-role]'); if (!t) return;
+  if (t.dataset.role.startsWith('delivery-credit-')) return deliveryCreditAction(t.dataset.role, t.dataset.id, t.dataset.page);
   const role = t.dataset.role, id = t.dataset.id;
+  if (role === 'paper-row-edit') { openPaperRowCorrection(Number(t.dataset.doc), Number(t.dataset.row)); return; }
   if (role === 'rc-count-by-scan') { receiptCountingMode = 'scan'; closeReceiptQuantityReview(); saveReceiptDraft(); renderReceiving(); return; }
   if (role === 'rc-quantity-all' || role === 'rc-quantity-differences') { startReceiptQuantityReview(role === 'rc-quantity-all'); return; }
   // The browser folds the element itself; this only remembers it for the next render.

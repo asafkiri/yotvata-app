@@ -17,7 +17,7 @@ const names = ['aiCompressInvoiceImage', 'aiCropInitFrame', 'aiCropResetOverlay'
   'aiReprocessFromSource', 'aiUnrotateRect', 'aiNormalizeQuarterTurns', 'aiRenderInvoiceRotation',
   'aiSetOrientationBusy', 'aiUpdateOrientationControls', 'aiToggleCropMode', 'aiRestoreOriginalImage',
   'aiCropInfoText', 'aiPaintOrientationReview', 'aiOrientationLocation', 'aiOpenOrientationReview',
-  'aiCloseOrientationReview', 'aiRotateOrientationReview', 'aiConfirmOrientationReview'];
+  'aiCloseOrientationReview', 'aiRotateOrientationReview', 'aiConfirmOrientationReview', 'aiInvalidateOrientationLocation'];
 
 // Record real canvas source/destination rectangles; no model calls or external images.
 function context() {
@@ -38,7 +38,7 @@ function context() {
   }
   const c = vm.createContext({ console, Number, Math, Array, Object, String, Promise,
     aiScanEditingImages:false,receiptScanChanged(){},aiOrientationSession: null, aiOrientationBusy: false, aiCropState: null, aiScanBusy: false,
-    aiScanDocuments: [], aiScanResponse: null, aiScanEvaluation: null, aiScanError: '',
+    aiScanDocuments: [], receiptDeliveryCredits: [], aiScanResponse: null, aiScanEvaluation: null, aiScanError: '',
     aiScanAutoRotationNote: '', aiScanAttemptCount: 0,
     $: node, setTimeout() {}, refreshScanHost() {}, aiOpenNextUnconfirmedOrientation() {},
     yotvataInvalidatePhotoDoc() {}, tnuvaInvalidatePhotoDoc() {},
