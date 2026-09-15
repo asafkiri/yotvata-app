@@ -53,6 +53,142 @@ function discrepancy(c, pending) {
   return json(c, 'receiptDiscrepancyInfo({...pendingFixture,items:pendingFixture.lines})');
 }
 
+test('a confirmed credit is folded and clears the live gap before saving', async () => {
+  const { c, data } = setup(); await readCredit(c, data);
+  await c.click('delivery-credit-confirm', 'credit-1');
+  const cards = c.run('deliveryCreditsHtml()');
+  assert.match(cards, /<details data-delivery-credit="credit-1"[^>]*><summary/);
+  assert.doesNotMatch(cards, /<details[^>]*\bopen\b/);
+  assert.match(cards, /זיכוי שאושר · ₪43\.80 לפני מע״מ · פרטים/);
+  const html = c.run('receivingProgressHtml(receiptTotals())');
+  assert.match(html, /החוסר מכוסה בזיכוי/);
+  assert.match(html, /₪50\.00 \/ ₪50\.00/);
+  assert.match(html, /10\/16 יח׳/); assert.match(html, /6 יח׳ בזיכוי/);
+  assert.doesNotMatch(html, /פער ₪43\.80/);
+  assert.equal(c.run('receiptNoteTotal'), 93.8);
+  assert.equal(c.run('receiptTotals().units'), 10);
+  assert.equal(c.run('pendingReceipt'), null);
+  c.run('finishReceipt()');
+  assert.match(c.node('app').innerHTML, /החוסר מכוסה בזיכוי — המשך/);
+  assert.doesNotMatch(c.node('app').innerHTML, /חסרות 6|חסר 6 יח׳|נתח את הפער|אלה אכן הבעיות — אשר/);
+  assert.equal(c.run('aiScanEvaluation.findings.find(f=>f.type==="shortage").qty'), 6);
+  c.run('aiApplyInvoiceResult()');
+  assert.equal(c.run('pendingReceipt.status'), 'ok');
+  assert.equal(c.run('pendingReceipt.ex'), 50);
+  assert.match(c.node('rsBody').innerHTML, /6 בזיכוי/);
+  assert.doesNotMatch(c.node('rsBody').innerHTML, /חסר 6/);
+  assert.equal(uploads(c), 1);
+});
+
+test('a partial credit shows only the three units and money still uncovered', async () => {
+  const { c, data } = setup(); await readCredit(c, data, { qty: 3, amount: 21.9 });
+  await c.click('delivery-credit-confirm', 'credit-1');
+  const html = c.run('receivingProgressHtml(receiptTotals())');
+  assert.match(html, /נותר לטיפול ₪21\.90/);
+  assert.doesNotMatch(html, /החוסר מכוסה בזיכוי ✓/);
+  c.run('finishReceipt()');
+  assert.match(c.node('app').innerHTML, /חסר ללא זיכוי: 3 יח׳ · ₪21\.90/);
+  assert.match(c.node('app').innerHTML, /חסרות ללא זיכוי: 3 יח׳/);
+  assert.doesNotMatch(c.node('app').innerHTML, /חסר 6 יח׳/);
+  const p = finish(c);
+  assert.equal(p.status, 'open'); assert.equal(p.ex, 50);
+  assert.equal(discrepancy(c, p).shortVal, 21.9);
+});
+
+test('credit coverage updates immediately with counts, editing and removal', async () => {
+  const { c, data } = setup(); await readCredit(c, data);
+  await c.click('delivery-credit-confirm', 'credit-1');
+  c.run("receiptList.push({productId:'coffee',qty:1});refreshReceiptTotals()");
+  assert.match(c.node('rcProgress').outerHTML, /הזיכוי אינו תואם לחוסר/);
+  assert.doesNotMatch(c.node('rcProgress').outerHTML, /החוסר מכוסה בזיכוי/);
+  c.run('receiptList.pop();refreshReceiptTotals()');
+  assert.match(c.node('rcProgress').outerHTML, /החוסר מכוסה בזיכוי/);
+  await c.click('delivery-credit-edit', 'credit-1');
+  assert.doesNotMatch(c.run('deliveryCreditsHtml()'), /<details data-delivery-credit/);
+  assert.match(c.run('receivingProgressHtml(receiptTotals())'), /פער ₪43\.80/);
+  await c.click('delivery-credit-confirm', 'credit-1');
+  await c.click('delivery-credit-remove', 'credit-1');
+  assert.match(c.run('receivingProgressHtml(receiptTotals())'), /פער ₪43\.80/);
+});
+
+test('one credited product never hides a different missing product', async () => {
+  const { c, data } = setup(); c.run('receiptList[0].qty=9');
+  await readCredit(c, data); await c.click('delivery-credit-confirm', 'credit-1');
+  assert.match(c.run('receivingProgressHtml(receiptTotals())'), /נותר לטיפול ₪5\.00/);
+  c.run('finishReceipt()');
+  const status = json(c, 'deliveryCreditLiveStatus()');
+  assert.equal(status.fullyCovered, false);
+  assert.deepEqual(status.findings.filter(f => f.type === 'shortage').map(f => f.productId), ['milk']);
+  assert.match(c.node('app').innerHTML, /חסרות ללא זיכוי: 1 יח׳/);
+});
+
+for (const [label, options] of [['wrong product', { product: 0 }], ['excess quantity', { qty: 7 }], ['excess money', { amount: 44 }]]) {
+  test('live status rejects ' + label + ' instead of subtracting the attached total', async () => {
+    const { c, data } = setup(); await readCredit(c, data, options);
+    await c.click('delivery-credit-confirm', 'credit-1');
+    assert.match(c.run('receivingProgressHtml(receiptTotals())'), /פער ₪43\.80/);
+    assert.match(c.run('receivingProgressHtml(receiptTotals())'), /הזיכוי אינו תואם לחוסר/);
+    c.run('finishReceipt()');
+    assert.doesNotMatch(c.node('app').innerHTML, /החוסר מכוסה בזיכוי/);
+    assert.match(c.node('app').innerHTML, /חסר 6 יח׳/);
+  });
+}
+
+test('credited quantities with insufficient money leave a visible monetary remainder', async () => {
+  const { c, data } = setup(); await readCredit(c, data, { amount: 40 });
+  await c.click('delivery-credit-confirm', 'credit-1');
+  assert.match(c.run('receivingProgressHtml(receiptTotals())'), /נותר לטיפול ₪3\.80/);
+  c.run('finishReceipt()');
+  assert.match(c.node('app').innerHTML, /יתרה ללא זיכוי · ₪3\.80/);
+  assert.doesNotMatch(c.node('app').innerHTML, /החוסר מכוסה בזיכוי — המשך/);
+});
+
+test('multiple partial credits combine in live status and draft restoration without rescanning', async () => {
+  const { c, data } = setup();
+  for (let i = 1; i <= 2; i++) {
+    await readCredit(c, data, { qty: 3, amount: 21.9, number: 'PART-' + i }, 'credit-' + i);
+    c.run(`deliveryCreditConfirm('credit-${i}')`);
+  }
+  assert.match(c.run('receivingProgressHtml(receiptTotals())'), /החוסר מכוסה בזיכוי/);
+  const restored = runtime('yotvata', { data, storage: new Map(c.storage) });
+  restored.run('restoreReceiptDraft()');
+  assert.match(restored.run('receivingProgressHtml(receiptTotals())'), /החוסר מכוסה בזיכוי/);
+  assert.equal(uploads(restored), 0);
+});
+
+test('unverified invoice data cannot declare a shortage covered from the matching total alone', async () => {
+  const { c, data } = setup(); await readCredit(c, data);
+  await c.click('delivery-credit-confirm', 'credit-1');
+  c.run('aiScanResponse.scan.documents[0].subtotalExVat=94.8');
+  const html = c.run('receivingProgressHtml(receiptTotals())');
+  assert.match(html, /פער ₪43\.80/); assert.doesNotMatch(html, /החוסר מכוסה בזיכוי/);
+  assert.match(html, /אחרי השלמת בדיקת התעודה/);
+});
+
+test('surplus and independent price issues remain actionable after a shortage credit', async () => {
+  const { c, data } = setup(); c.run('receiptList[0].qty=11');
+  await readCredit(c, data); await c.click('delivery-credit-confirm', 'credit-1');
+  c.run('finishReceipt()');
+  assert.match(c.node('app').innerHTML, /עודף 1 יח׳/);
+  assert.doesNotMatch(c.node('app').innerHTML, /החוסר מכוסה בזיכוי — המשך/);
+  const filtered = json(c, `deliveryCreditRemainingFindings([
+    {type:'shortage',productId:'coffee',qty:6},
+    {type:'price',productId:'milk',amount:10},
+    {type:'promo_missing',productId:'milk',amount:2}
+  ],deliveryCreditLiveStatus())`);
+  assert.deepEqual(filtered.map(f => f.type), ['price', 'promo_missing']);
+});
+
+test('an old accepted analysis cannot ask for the already supplied credit again', async () => {
+  const { c, data } = setup(); await readCredit(c, data);
+  await c.click('delivery-credit-confirm', 'credit-1'); c.run('finishReceipt()');
+  c.run(`aiScanEvaluation.analyzerLed=true;
+    aiAnalyzeResult={accepted:true,summary:'טענה ישנה',claims:[{kind:'shortage',productId:'coffee',quantity:6,amountExVat:43.8}],closure:{}};
+    renderReconcile()`);
+  assert.doesNotMatch(c.node('app').innerHTML, /טענה ישנה|העתק לטענות מול הספק|נתח את הפער/);
+  assert.match(c.node('app').innerHTML, /החוסר מכוסה בזיכוי — המשך/);
+});
+
 test('photograph, confirm and save a credited shortage once without reducing stock or payment twice', async () => {
   const { c, data } = setup();
   const paper = c.run('JSON.stringify(aiScanResponse)'), stock = c.run('JSON.stringify(receiptList)');
