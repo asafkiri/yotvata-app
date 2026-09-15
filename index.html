@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v346 זיכוי מקופל ופער מעודכן</title>
+    <title>הזמנות יטבתה - v347 הגנה על סנכרון הזמנות</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v346 זיכוי מקופל ופער מעודכן</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v347 הגנה על סנכרון הזמנות</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -904,7 +904,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden' && appOrdersTimer) flushAppOrdersToCloudNow();
   // v305: חזרנו לאפליקציה — אם הועתק ברקוד לפני היציאה, שואלים אם הוזמן.
   // השהיה קצרה כדי שהמסך יספיק להיצבע לפני שהחלון קופץ.
-  if (document.visibilityState === 'visible') setTimeout(maybeAskAppOrder, 400);
+  if (document.visibilityState === 'visible') { setTimeout(maybeAskAppOrder, 400); if (appOrdersChanges.length) flushAppOrdersToCloudNow(); }
 });
 window.addEventListener('pagehide', () => {
   if (returnsDraftTimer) flushReturnsDraftToCloudNow('save returns draft');
@@ -912,25 +912,115 @@ window.addEventListener('pagehide', () => {
 });
 function restoreReturnsDraft() { try { const s = localStorage.getItem(RETURNS_DRAFT_KEY); if (s) { const a = JSON.parse(s); if (Array.isArray(a)) returnsList = a; } returnsDraftLocalTs = Number(localStorage.getItem(RETURNS_DRAFT_TS_KEY)) || 0; } catch (e) {} }
 // v288: רשימת "הוזמן באפליקציה" — מסונכרנת בין המכשירים כמו טיוטת החזרות
+const APP_ORDERS_SYNC_KEY = 'yt_app_orders_changes_v1';
+const APP_ORDERS_BACKUP_KEY = 'yt_app_orders_before_sync';
+let appOrdersObserved = [], appOrdersChanges = [], appOrdersSaving = null;
+let appOrdersServerItems = [], appOrdersServerRevision = -1;
+function persistAppOrderState() {
+  try {
+    localStorage.setItem(APP_ORDERS_KEY, JSON.stringify(appOrders));
+    localStorage.setItem(APP_ORDERS_TS_KEY, String(appOrdersLocalTs));
+    localStorage.setItem(APP_ORDERS_SYNC_KEY, JSON.stringify(appOrdersChanges));
+  } catch (e) { showToast('אין מקום לשמירת הסימונים במכשיר — השאר את האפליקציה פתוחה עד הסנכרון', null, null, 6000); }
+}
+function appOrderRowSig(row) { return appOrdersSig(row ? [row] : []); }
+function applyAppOrderChanges(items, changes) {
+  const map = new Map((items || []).filter(x => x && x.key).map(x => [x.key, x]));
+  const conflicts = [];
+  for (const change of changes) {
+    const current = map.get(change.key) || null;
+    if (appOrderRowSig(current) === appOrderRowSig(change.after)) continue;
+    if (appOrderRowSig(current) !== appOrderRowSig(change.before)) { conflicts.push(change); continue; }
+    if (change.after) map.set(change.key, change.after); else map.delete(change.key);
+  }
+  return { items: [...map.values()], conflicts };
+}
 function saveAppOrders() {
-  appOrdersLocalTs = Date.now();
-  appOrderCache = null;
-  updateAppOrdersBadge();   // v318: המונה בכותרת מתעדכן בכל שינוי, מכל מסך
-  try { localStorage.setItem(APP_ORDERS_KEY, JSON.stringify(appOrders)); localStorage.setItem(APP_ORDERS_TS_KEY, String(appOrdersLocalTs)); } catch (e) {}
-  if (!db) return;
+  const before = new Map(appOrdersObserved.map(x => [x.key, x]));
+  const after = new Map(appOrders.map(x => [x.key, x]));
+  for (const key of new Set([...before.keys(), ...after.keys()])) {
+    const old = before.get(key) || null, next = after.get(key) || null;
+    if (appOrderRowSig(old) !== appOrderRowSig(next)) appOrdersChanges.push({ id: makeOperationId('app_order_change'), key, before: old ? cloneSafe(old) : null, after: next ? cloneSafe(next) : null });
+  }
+  appOrdersObserved = cloneSafe(appOrders);
+  appOrdersLocalTs = Date.now(); appOrderCache = null;
+  updateAppOrdersBadge(); persistAppOrderState();
   clearTimeout(appOrdersTimer);
-  appOrdersTimer = setTimeout(() => {
-    appOrdersTimer = null;
-    runCloudTaskSilent('save app orders', { op: 'set', path: dataPath('drafts', 'appOrders'), data: { items: appOrders, updatedAt: appOrdersLocalTs }, merge: true, operationId: 'app_orders' });
-  }, 500);
+  if (appOrdersChanges.length) appOrdersTimer = setTimeout(() => flushAppOrdersToCloudNow(), 500);
 }
 async function flushAppOrdersToCloudNow() {
-  clearTimeout(appOrdersTimer);
-  appOrdersTimer = null;
+  clearTimeout(appOrdersTimer); appOrdersTimer = null;
+  if (appOrdersSaving) return appOrdersSaving;
+  if (!appOrdersChanges.length) return true;
   if (!db) return false;
-  return runCloudTaskSilent('save app orders', { op: 'set', path: dataPath('drafts', 'appOrders'), data: { items: appOrders, updatedAt: appOrdersLocalTs || Date.now() }, merge: true, operationId: 'app_orders' });
+  appOrdersSaving = (async () => {
+    try {
+      while (appOrdersChanges.length) {
+        const changes = cloneSafe(appOrdersChanges.slice(0, 100)), ids = new Set(changes.map(x => x.id));
+        const ref = doc(db, ...dataPath('drafts', 'appOrders'));
+        const result = await runTransaction(db, async tx => {
+          const snap = await tx.get(ref), remote = snap.exists() ? snap.data() : {};
+          // Durable acknowledgements prevent an offline retry from resurrecting
+          // a mark that was successfully saved and later removed elsewhere.
+          const acknowledgements = await Promise.all(changes.map(async change => {
+            const ackRef = doc(db, ...dataPath('drafts', 'appOrderChange_' + change.id));
+            return { change, ref: ackRef, exists: (await tx.get(ackRef)).exists() };
+          }));
+          const fresh = acknowledgements.filter(x => !x.exists);
+          const merged = applyAppOrderChanges(Array.isArray(remote.items) ? remote.items : [], fresh.map(x => x.change));
+          const changed = appOrdersSig(merged.items) !== appOrdersSig(remote.items);
+          const revision = (Number(remote.syncRevision) || 0) + (changed ? 1 : 0);
+          fresh.forEach(x => tx.set(x.ref, { key: x.change.key, processedAt: Date.now() }));
+          if (changed) tx.set(ref, { ...remote, items: merged.items, updatedAt: Date.now(), syncVersion: 1, syncRevision: revision });
+          return { ...merged, revision };
+        });
+        appOrdersChanges = appOrdersChanges.filter(x => !ids.has(x.id));
+        // Keep newer edits made while this transaction was in flight.
+        if (result.revision >= appOrdersServerRevision) { appOrdersServerItems = result.items; appOrdersServerRevision = result.revision; }
+        appOrders = applyAppOrderChanges(appOrdersServerItems, appOrdersChanges).items;
+        appOrdersObserved = cloneSafe(appOrders); appOrderCache = null;
+        if (result.conflicts.length) {
+          try { localStorage.setItem(APP_ORDERS_BACKUP_KEY, JSON.stringify({ at: Date.now(), conflicts: result.conflicts })); } catch (e) {}
+          showToast('אותו מוצר השתנה במכשיר אחר. נשמר השינוי שכבר הגיע לענן — בדוק את הכמות ברשימת ההזמנות.', null, null, 7000);
+        }
+        persistAppOrderState(); updateAppOrdersBadge(); refreshAppOrderUi();
+      }
+      return true;
+    } catch (e) {
+      persistAppOrderState();
+      showToast('הסימונים שמורים במכשיר וממתינים לסנכרון. נסה שוב כשיש חיבור.', null, null, 5000);
+      return false;
+    } finally { appOrdersSaving = null; }
+  })();
+  return appOrdersSaving;
 }
-function restoreAppOrders() { try { const s = localStorage.getItem(APP_ORDERS_KEY); if (s) { const a = JSON.parse(s); if (Array.isArray(a)) appOrders = a; } appOrdersLocalTs = Number(localStorage.getItem(APP_ORDERS_TS_KEY)) || 0; } catch (e) {} }
+function receiveAppOrdersSnapshot(snap) {
+  if (snap.metadata.hasPendingWrites || snap.metadata.fromCache) return;
+  const data = snap.exists() ? snap.data() : {};
+  const revision = Number(data.syncRevision) || 0;
+  if (revision < appOrdersServerRevision) return;
+  const items = Array.isArray(data.items) ? data.items : [];
+  appOrdersServerRevision = revision; appOrdersServerItems = cloneSafe(items);
+  const merged = applyAppOrderChanges(items, appOrdersChanges).items;
+  if (appOrdersSig(merged) !== appOrdersSig(appOrders)) {
+    try { localStorage.setItem(APP_ORDERS_BACKUP_KEY, JSON.stringify({ at: Date.now(), items: appOrders })); } catch (e) {}
+  }
+  appOrders = merged; appOrdersObserved = cloneSafe(merged);
+  appOrdersLocalTs = Number(data.updatedAt) || 0; appOrderCache = null;
+  persistAppOrderState(); updateAppOrdersBadge(); refreshAppOrderUi();
+  if (appOrdersChanges.length) flushAppOrdersToCloudNow();
+}
+function restoreAppOrders() {
+  try {
+    const a = JSON.parse(localStorage.getItem(APP_ORDERS_KEY) || '[]');
+    if (Array.isArray(a)) appOrders = a;
+    const changes = JSON.parse(localStorage.getItem(APP_ORDERS_SYNC_KEY) || '[]');
+    if (Array.isArray(changes)) appOrdersChanges = changes;
+    appOrdersLocalTs = Number(localStorage.getItem(APP_ORDERS_TS_KEY)) || 0;
+  } catch (e) {}
+  appOrdersObserved = cloneSafe(appOrders);
+}
+window.addEventListener('online', () => { if (appOrdersChanges.length) flushAppOrdersToCloudNow(); });
 // חתימה יציבה לרשימה — לא תלויה בסדר השדות שהענן מחזיר
 function appOrdersSig(list) {
   return JSON.stringify((Array.isArray(list) ? list : []).map(x => [
@@ -2111,21 +2201,7 @@ function startListeners() {
 
   // v288: רשימת "הוזמן באפליקציה" — משותפת לכל המכשירים
   const aoRef = doc(db, 'artifacts', appId, 'public', 'data', 'drafts', 'appOrders');
-  onSnapshot(aoRef, (snap) => {
-    if (snap.metadata.hasPendingWrites) return;
-    const d = snap.data();
-    if (!d || !Array.isArray(d.items)) return;
-    // v290: ההשוואה חייבת להיות חסינה לסדר השדות — הענן מחזיר מפות ממוינות,
-    // ו-JSON.stringify גולמי היה מכריז "שינוי" על ההד של הכתיבה שלנו ובונה
-    // מחדש את המסך אחרי כל סימון.
-    if (appOrdersSig(d.items) === appOrdersSig(appOrders)) return;
-    if (Number(d.updatedAt) && appOrdersLocalTs && Number(d.updatedAt) < appOrdersLocalTs) { saveAppOrders(); return; }
-    appOrders = d.items;
-    appOrdersLocalTs = Number(d.updatedAt) || Date.now();
-    appOrderCache = null;
-    try { localStorage.setItem(APP_ORDERS_KEY, JSON.stringify(d.items)); localStorage.setItem(APP_ORDERS_TS_KEY, String(appOrdersLocalTs)); } catch (e) {}
-    refreshAppOrderUi();
-  }, console.error);
+  onSnapshot(aoRef, receiveAppOrdersSnapshot, console.error);
 
   const rcRef = collection(db, 'artifacts', appId, 'public', 'data', 'receipts');
   const rcQ = query(rcRef, orderBy('timestamp', 'desc'), limit(100));
@@ -5708,6 +5784,7 @@ async function performSend(contact) {
     // v240: ריקון הטיוטה בענן חייב לקרות לפני המעבר לוואטסאפ — הטיימר המושהה
     // לא שורד את היציאה מהאפליקציה, והטיוטה הישנה בענן החזירה את הרשימה.
     await flushReturnsDraftToCloudNow('clear returns draft after send');
+    if (appOrdersChanges.length) await flushAppOrdersToCloudNow();
     sendCtx = null; hideSend(); setView('returnsHistory'); window.location.href = url;
     return;
   }
@@ -6281,6 +6358,7 @@ function showCloudFailDetails() {
 }
 async function executeCloudTask(task) {
   if (!db || !task) throw new Error('אין חיבור לענן');
+  if (task.path && task.path.slice(-2).join('/') === 'drafts/appOrders') throw new Error('שמירת רשימה ישנה נחסמה כדי לא לדרוס סימונים ממכשיר אחר. יש לבדוק את רשימת ההזמנות המעודכנת.');
   if (task.receiptDraftGuard) return finalizeReceiptDraftTask(task);
   if (Array.isArray(task.tasks)) { for (const t of task.tasks) await executeCloudTask(t); return; }
   if (task.op === 'batch') {
