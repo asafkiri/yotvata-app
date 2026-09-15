@@ -1,4 +1,4 @@
-# Receiving credits and correcting paper readings — v345
+# Receiving credits and correcting paper readings — v346
 
 Drivers can supply a credit note with the delivery. Previously the receiver had
 to finish first, then find the saved receipt and enter a credit amount. Also,
@@ -61,6 +61,38 @@ approved corrections remain editable in a collapsed history. Corrections do
 not copy catalog prices onto the paper or modify the product catalog.
 
 ## Verification
+
+### v346: compact credits and live remaining discrepancies
+
+Confirmed credits now use native, closed-by-default details controls. Photos,
+line details and edit/remove actions open from a short amount summary. The
+additional-credit action also takes less space once a credit has been added.
+
+Receiving progress, reconciliation, actionable findings and checkout now apply
+the same product/quantity/money coverage matcher as final saving. A matching
+credit immediately labels the shortage as covered. Partial credits show only
+the uncovered units and money; a credit covering all units but insufficient
+money still leaves a monetary issue visible. Editing counts, credit approval,
+removal and draft restoration all recompute coverage without another OCR call.
+
+The invoice amount and units remain original, physical received counts remain
+physical, and payable amounts are not reduced twice. Unverified invoice data,
+wrong products, duplicate/overlapping credits and excessive quantities or money
+cannot produce an all-clear state. Separate shortages, surplus and price issues
+remain actionable. Original findings stay in the audit; old analyst claims
+are not displayed as outstanding claims for a credited shortage.
+
+The current suite passes 226 tests, including 41 credit scenarios. Twelve
+financial scenarios are identical to v345. Verification uses the complete
+application module with simulated browser/model/Firestore boundaries; native
+phone interaction was not tested.
+
+```sh
+node --test --test-reporter=tap tools/*.test.mjs tools/photo-first-test.mjs
+PRICE_FINANCE_BASE=03c0b147e42303f26711b195cfed0e9f16472220 node tools/price-finance-regression.mjs
+```
+
+### v345 baseline
 
 ```sh
 node --test --test-reporter=tap tools/*.test.mjs tools/photo-first-test.mjs

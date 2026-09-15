@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v345 זיכוי ותיקון פענוח</title>
+    <title>הזמנות יטבתה - v346 זיכוי מקופל ופער מעודכן</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v345 זיכוי ותיקון פענוח</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v346 זיכוי מקופל ופער מעודכן</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -1317,7 +1317,7 @@ function deliveryCreditsHtml() {
     const duplicate = deliveryCreditDuplicate(c);
     const confirmed = c.status === 'confirmed' && c.confirmedSignature === deliveryCreditSignature(c) && !duplicate;
     const pages = c.pages.map((p, i) => '<button data-role="delivery-credit-page" data-id="' + c.id + '" data-page="' + i + '" class="btn-tap border rounded-lg p-1"><img src="' + p.dataUrl + '" alt="עמוד בזיכוי" class="w-16 h-20 object-contain"><span class="text-xs">עמוד ' + (i + 1) + '</span></button>').join('');
-    return '<article class="border-2 border-emerald-200 rounded-xl p-3 mt-3 bg-white"><div class="flex justify-between gap-2"><b>' + (confirmed ? 'זיכוי שאושר למשלוח' : 'תעודת זיכוי מהנהג') + '</b>' +
+    return (confirmed ? '<details data-delivery-credit="' + c.id + '" class="border border-emerald-200 rounded-xl mt-2 bg-white"><summary class="cursor-pointer p-3 text-sm font-black text-emerald-800">זיכוי שאושר · ₪' + fmtMoney(Math.abs(c.paper.subtotalExVat)) + ' לפני מע״מ · פרטים</summary><div class="px-3 pb-3">' : '<article class="border-2 border-emerald-200 rounded-xl p-3 mt-3 bg-white">') + '<div class="flex justify-between gap-2"><b>' + (confirmed ? 'זיכוי שאושר למשלוח' : 'תעודת זיכוי מהנהג') + '</b>' +
       '<button data-role="delivery-credit-remove" data-id="' + c.id + '" class="btn-tap text-rose-700 text-sm font-bold">הסר זיכוי</button></div>' +
       (busy ? '<p role="status" class="mt-3 text-blue-700 font-bold">' + (c.status === 'reading' ? 'מפענח את הזיכוי… אפשר להמשיך לספור מוצרים.' : 'מכין את הצילום…') + '</p>' : '') +
       (c.error || c.status === 'interrupted' ? '<p class="mt-2 text-amber-800 font-bold">' + htmlEscape(c.error || 'פענוח הזיכוי לא הושלם. צלם אותו שוב כדי להמשיך.') + '</p>' : '') +
@@ -1329,16 +1329,16 @@ function deliveryCreditsHtml() {
         rows.map((row, i) => '<div class="border-t border-slate-200 mt-3 pt-2"><div id="creditName_' + c.id + '_' + i + '" class="font-black">' + htmlEscape(row.name || 'מוצר שלא זוהה') + '</div><p>' + row.qty + ' יח׳ · זיכוי ₪' + fmtMoney(row.amount) + ' לפני מע״מ</p>' +
           (!confirmed ? '<label class="block text-xs font-bold mt-2">' + (row.productId ? 'ברקוד — אפשר לתקן לפי הנייר' : 'המוצר לא זוהה. הקלד את הברקוד מהנייר') +
           '<input data-role="delivery-credit-barcode" data-id="' + c.id + '" data-row="' + i + '" value="' + htmlEscape(row.barcode) + '" inputmode="numeric" class="block w-full border rounded-lg p-2 text-sm mt-1" dir="ltr"></label>' : '') + '</div>').join('') +
-        (confirmed ? '<p class="mt-2 text-sm text-slate-600">הזיכוי ייסגר מול החוסר במוצרים האלה בסיום הספירה.</p><button data-role="delivery-credit-edit" data-id="' + c.id + '" class="btn-tap text-blue-700 font-bold mt-2">תקן פרטי זיכוי</button>' :
+        (confirmed ? '<p class="mt-2 text-sm text-slate-600">הזיכוי נבדק מול החוסר במוצרים האלה לפי הספירה הנוכחית.</p><button data-role="delivery-credit-edit" data-id="' + c.id + '" class="btn-tap text-blue-700 font-bold mt-2">תקן פרטי זיכוי</button>' :
         '<p class="mt-3 text-sm font-bold">בדוק את מספר הזיכוי, המוצרים והכמויות מול הנייר. האם זה זיכוי על חוסר במשלוח הנוכחי?</p><button data-role="delivery-credit-confirm" data-id="' + c.id + '" class="btn-tap w-full bg-emerald-600 text-white rounded-xl py-3 mt-2 font-black">כן, צרף זיכוי של ₪' + fmtMoney(Math.abs(c.paper.subtotalExVat)) + ' למשלוח</button>') :
         (!busy ? '<input id="creditCam_' + c.id + '" data-role="delivery-credit-file" data-id="' + c.id + '" type="file" accept="image/*" capture="environment" class="hidden">' +
           '<input id="creditFile_' + c.id + '" data-role="delivery-credit-file" data-id="' + c.id + '" type="file" accept="image/*" multiple class="hidden">' +
           '<button data-role="delivery-credit-camera" data-id="' + c.id + '" class="btn-tap w-full bg-emerald-50 text-emerald-800 rounded-xl py-3 mt-2 font-black">' + (c.pages.length ? 'הוסף עמוד לזיכוי' : 'צלם את תעודת הזיכוי') + '</button>' +
           '<button data-role="delivery-credit-gallery" data-id="' + c.id + '" class="btn-tap w-full py-2 text-sm text-slate-600">בחר צילומים מהגלריה</button>' +
-          (c.pages.length && c.pages.every(p => p.orientationConfirmed) ? '<button data-role="delivery-credit-read" data-id="' + c.id + '" class="btn-tap w-full bg-blue-600 text-white rounded-xl py-3 font-black">פענח את הזיכוי</button>' : '') : '')) + '</article>';
+          (c.pages.length && c.pages.every(p => p.orientationConfirmed) ? '<button data-role="delivery-credit-read" data-id="' + c.id + '" class="btn-tap w-full bg-blue-600 text-white rounded-xl py-3 font-black">פענח את הזיכוי</button>' : '') : '')) + (confirmed ? '</div></details>' : '</article>');
   }).join('');
   return '<section id="rcDeliveryCredits" class="mb-3" dir="rtl">' + cards + (receiptDeliveryCredits.length < 4 ?
-    '<button data-role="delivery-credit-add" class="btn-tap w-full border-2 border-emerald-300 rounded-xl bg-emerald-50 text-emerald-900 py-3 mt-2 font-black"><i class="fa-solid fa-camera"></i> ' +
+    '<button data-role="delivery-credit-add" class="btn-tap ' + (receiptDeliveryCredits.length ? 'text-sm text-emerald-800 py-2 px-3 mt-1 font-bold' : 'w-full border-2 border-emerald-300 rounded-xl bg-emerald-50 text-emerald-900 py-3 mt-2 font-black') + '"><i class="fa-solid fa-camera"></i> ' +
     (receiptDeliveryCredits.length ? 'צלם תעודת זיכוי נוספת' : 'הנהג הביא זיכוי על חוסר? צלם כאן') + '</button>' : '') + '</section>';
 }
 function deliveryCreditReady() {
@@ -1349,8 +1349,8 @@ function deliveryCreditOpenWork(message) {
   const host = $('rcDeliveryCredits'); if (host) host.scrollIntoView({ block: 'start' });
   showToast(message, null, null, 6000);
 }
-function deliveryCreditNotes() {
-  return receiptDeliveryCredits.map(c => ({ id: c.id, source: 'delivery_credit_scan', number: c.number,
+function deliveryCreditNotes(credits = receiptDeliveryCredits) {
+  return credits.map(c => ({ id: c.id, source: 'delivery_credit_scan', number: c.number,
     amount: Math.abs(r2(c.paper.subtotalExVat)), at: c.confirmedAt, rows: deliveryCreditRows(c), paper: c.paper, scanAudit: c.scanAudit || null }));
 }
 function deliveryCreditSummaryHtml() {
@@ -1387,6 +1387,73 @@ function deliveryCreditCoverage(notes, shortages) {
     requested.forEach((req, id) => { const available = remaining.get(id); available.qty -= req.qty; available.cents -= req.cents; });
   }
   return { amount: applied / 100, invalid, remaining };
+}
+// Live presentation uses the same product/quantity/money matching as saving.
+// Original invoice totals, physical counts and the audit findings stay intact.
+function deliveryCreditLiveStatus(receiving = false, evaluation = aiScanEvaluation) {
+  if (!receiptDeliveryCredits.length) return null;
+  const confirmed = receiptDeliveryCredits.filter(c => c.status === 'confirmed' && c.confirmedSignature === deliveryCreditSignature(c) && !deliveryCreditDuplicate(c));
+  const notes = deliveryCreditNotes(confirmed), rows = receiving ? receiptReconcileRows() : (reconcileData || []);
+  const ev = receiving && aiScanResponse ? aiEvaluateInvoiceScan(aiScanResponse, rows) : evaluation;
+  const paperEntered = !receiving && reconcilePaperEntered;
+  const verified = paperEntered ? reconcileIsBalanced() : !!(ev && ev.valid);
+  const received = new Map();
+  rows.forEach(l => { if (!l.isDeposit) received.set(l.productId, (received.get(l.productId) || 0) + (Number(l.received) || 0)); });
+  const shortages = [];
+  if (paperEntered) rows.forEach(l => {
+    const n = Number(l.noteQty) - Number(l.received);
+    if (!l.isDeposit && n > 0) shortages.push({ productId: l.productId, n, price: Number(l.price) || 0 });
+  });
+  else if (ev && ev.aggregates instanceof Map) ev.aggregates.forEach(a => {
+    const n = a.qty - (received.get(a.product.id) || 0);
+    if (n > 0) shortages.push({ productId: a.product.id, n, price: a.paperUnitPrice });
+  });
+  const coverage = deliveryCreditCoverage(verified ? notes : [], shortages);
+  const rawUnits = shortages.reduce((sum, s) => sum + s.n, 0);
+  const remainingUnits = [...coverage.remaining.values()].reduce((sum, s) => sum + s.qty, 0);
+  const units = rawUnits - remainingUnits;
+  const rawGap = receiving ? r2((receiptNoteTotal || 0) - receiptTotals().ex)
+    : r2(reconcileGap() + (paperEntered ? reconcileAssigned().sh - reconcileAssigned().ov : 0));
+  const unitGap = receiptNoteUnits == null ? null : Number(receiptNoteUnits) - [...received.values()].reduce((sum, n) => sum + n, 0);
+  const status = { ...coverage, units, verified, pending: confirmed.length !== receiptDeliveryCredits.length,
+    amountGap: r2(rawGap - coverage.amount), unitsGap: unitGap == null ? null : unitGap - units,
+    fullyCovered: false, findings: [], creditedProducts: new Set() };
+  deliveryCreditCoverage([], shortages).remaining.forEach((original, productId) => {
+    const remaining = coverage.remaining.get(productId);
+    if (remaining && remaining.qty < original.qty) status.creditedProducts.add(productId);
+  });
+  status.findings = deliveryCreditRemainingFindings(ev && ev.findings || [], status);
+  const surplus = paperEntered ? reconcileAssigned().ov > 0 : status.findings.some(f => f.type === 'surplus');
+  status.shortageCovered = status.amount > 0 && verified && remainingUnits === 0 && [...status.remaining.values()].every(s => s.cents <= 1);
+  status.fullyCovered = status.shortageCovered && !status.pending && !status.invalid.length
+    && Math.abs(status.amountGap) <= 0.02 && (status.unitsGap == null || status.unitsGap === 0)
+    && !surplus && !status.findings.filter(aiIsActionableFinding).filter(priceAuditLegacyVisible).length
+    && !priceAuditPendingRows(receiptPriceAudit()).length;
+  return status;
+}
+function deliveryCreditRemainingFindings(findings, status) {
+  if (!status || !status.amount) return findings;
+  const seen = new Set();
+  return findings.flatMap(f => {
+    if (f.type !== 'shortage' || !status.creditedProducts.has(f.productId)) return [f];
+    if (seen.has(f.productId)) return [];
+    seen.add(f.productId);
+    const left = status.remaining.get(f.productId);
+    if (!left || (left.qty === 0 && left.cents <= 1)) return [];
+    const label = left.qty > 0 ? 'חסר ללא זיכוי: ' + left.qty + ' יח׳' : 'יתרה ללא זיכוי';
+    return [{ ...f, qty: left.qty, amount: left.cents / 100,
+      creditRemainderLabel: label + ' · ₪' + fmtMoney(left.cents / 100),
+      text: f.name + ' — ' + label + ' · ₪' + fmtMoney(left.cents / 100) }];
+  });
+}
+function deliveryCreditStatusHtml(status) {
+  if (!status) return '';
+  const warning = status.invalid.length ? 'הזיכוי אינו תואם לחוסר בספירה הנוכחית — בדוק את המוצר והכמות בזיכוי.'
+    : status.pending ? 'יש זיכוי שעדיין דורש אישור או תיקון.'
+    : !status.verified ? 'הזיכוי צורף. ההתאמה לחוסר תיבדק אחרי השלמת בדיקת התעודה.' : '';
+  return (status.amount > 0 ? '<div data-credit-coverage class="rounded-xl border border-emerald-200 bg-emerald-50 p-2.5 text-sm text-emerald-800"><b>' +
+    (status.shortageCovered ? 'החוסר מכוסה בזיכוי' : 'חלק מהחוסר מכוסה בזיכוי') + '</b><div class="text-xs mt-1">' + status.units + ' יח׳ בזיכוי · ₪' + fmtMoney(status.amount) + ' לפני מע״מ</div></div>' : '') +
+    (warning ? '<div data-credit-warning class="rounded-xl border border-amber-200 bg-amber-50 p-2.5 mt-2 text-sm font-bold text-amber-900">' + warning + '</div>' : '');
 }
 function yotvataReceiptScanAudit() {
   return { version: 1, entryMode: receiptEntryMode, anchorSource: receiptAnchorSource,
@@ -7308,8 +7375,9 @@ function receiptTotalsHtml(t) {
   }
   // v175: מונה יחידות חי — כולל הפיקדון — מול העוגן שהוקלד מהנייר. ירוק
   // כשסגור בדיוק; זו ההוכחה על המסך שהפיקדון נספר גם ביחידות.
-  const unitsMatched = receiptNoteUnits != null && t.units === receiptNoteUnits;
-  const unitsLine = '<div class="flex items-center justify-between text-xs font-black mt-1 ' + (receiptNoteUnits == null ? 'text-slate-500' : (unitsMatched ? 'text-emerald-700' : 'text-amber-600')) + '"><span>יחידות' + (t.depositUnits > 0 ? ' (פיקדון בכסף בלבד, כמו בתעודה)' : '') + '</span><span>' + t.units + (receiptNoteUnits != null ? ' / ' + receiptNoteUnits : '') + ' יח׳' + (unitsMatched ? ' ✓' : '') + '</span></div>';
+  const credit = deliveryCreditLiveStatus(true);
+  const unitsMatched = receiptNoteUnits != null && t.units + (credit ? credit.units : 0) === receiptNoteUnits;
+  const unitsLine = '<div class="flex items-center justify-between text-xs font-black mt-1 ' + (receiptNoteUnits == null ? 'text-slate-500' : (unitsMatched ? 'text-emerald-700' : 'text-amber-600')) + '"><span>יחידות' + (t.depositUnits > 0 ? ' (פיקדון בכסף בלבד, כמו בתעודה)' : '') + '</span><span>' + t.units + (receiptNoteUnits != null ? ' / ' + receiptNoteUnits : '') + ' יח׳' + (credit && credit.units ? ' · ' + credit.units + ' בזיכוי' : '') + (unitsMatched ? ' ✓' : '') + '</span></div>';
   return '<div id="rcTotals" class="mt-4 mb-24 bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">' +
     '<div class="flex items-center justify-between text-slate-900 font-black text-lg"><span>סה"כ (ללא מע"מ)</span><span id="rcEx">₪' + fmtMoney(t.ex) + '</span></div>' +
     unitsLine +
@@ -7322,8 +7390,13 @@ function receiptTotalsHtml(t) {
 // בנייה מלאה באמצע הקלדה מפילה את הפוקוס מהשדה.
 function receivingProgressHtml(t) {
   const progressMoneyTarget = receiptProgressMoneyTarget();
-  const amountGap = progressMoneyTarget != null ? r2(progressMoneyTarget - t.ex) : null;
-  return '<div id="rcProgress" class="sticky top-[7.5rem] z-20 bg-slate-900 text-white rounded-2xl p-3 shadow-xl mb-3"><div class="flex items-center justify-between gap-2"><div><div class="text-xs text-slate-300 font-bold">שלב 2 · סריקת מוצרים</div><div class="font-black text-lg">₪' + fmtMoney(t.ex) + (progressMoneyTarget != null ? ' / ₪' + fmtMoney(progressMoneyTarget) : '') + '</div></div><div class="text-left"><div class="font-black">' + t.units + (receiptNoteUnits != null ? '/' + receiptNoteUnits : '') + ' יח׳</div><div class="text-xs font-bold ' + (amountGap == null || Math.abs(amountGap) <= 0.02 ? 'text-emerald-300' : 'text-amber-300') + '">' + (amountGap == null ? 'ללא יעד סכום' : (Math.abs(amountGap) <= 0.02 ? 'הסכום תואם ✓' : 'פער ₪' + fmtMoney(Math.abs(amountGap)))) + '</div></div></div>' + (receiptUnbilledDepositGap(t.ex, progressMoneyTarget) > 0 ? '<div class="mt-2 pt-2 border-t border-white/15 text-[11px] font-bold text-amber-200">הפער בדיוק בגובה הפיקדון שהאפליקציה הוסיפה (₪' + fmtMoney(receiptUnbilledDepositGap(t.ex, progressMoneyTarget)) + '). בתעודה אין שורת פיקדון? <button data-role="rc-dep-waive" class="btn-tap underline font-black text-white">הסר פיקדון מהתעודה</button></div>' : '') + '</div>';
+  const credit = deliveryCreditLiveStatus(true);
+  const targetAfterCredit = progressMoneyTarget == null ? null : r2(progressMoneyTarget - (credit ? credit.amount : 0));
+  const amountGap = targetAfterCredit != null ? r2(targetAfterCredit - t.ex) : null;
+  const gapLabel = credit && credit.fullyCovered ? 'החוסר מכוסה בזיכוי ✓'
+    : amountGap == null ? 'ללא יעד סכום' : Math.abs(amountGap) <= 0.02 ? 'הסכום תואם ✓'
+    : (credit && credit.amount ? 'נותר לטיפול ₪' : 'פער ₪') + fmtMoney(Math.abs(amountGap));
+  return '<div id="rcProgress" class="sticky top-[7.5rem] z-20 bg-slate-900 text-white rounded-2xl p-3 shadow-xl mb-3"><div class="flex items-center justify-between gap-2"><div><div class="text-xs text-slate-300 font-bold">שלב 2 · סריקת מוצרים</div><div class="font-black text-lg">₪' + fmtMoney(t.ex) + (targetAfterCredit != null ? ' / ₪' + fmtMoney(targetAfterCredit) : '') + '</div>' + (credit && credit.amount ? '<div class="text-[11px] text-emerald-300">היעד לאחר זיכוי ₪' + fmtMoney(credit.amount) + '</div>' : '') + '</div><div class="text-left"><div class="font-black">' + t.units + (receiptNoteUnits != null ? '/' + receiptNoteUnits : '') + ' יח׳</div>' + (credit && credit.units ? '<div class="text-[11px] text-emerald-300">' + credit.units + ' יח׳ בזיכוי</div>' : '') + '<div class="text-xs font-bold ' + (amountGap == null || Math.abs(amountGap) <= 0.02 ? 'text-emerald-300' : 'text-amber-300') + '">' + gapLabel + '</div></div></div>' + (credit && (credit.invalid.length || credit.pending || !credit.verified) ? deliveryCreditStatusHtml(credit) : '') + (receiptUnbilledDepositGap(t.ex, progressMoneyTarget) > 0 ? '<div class="mt-2 pt-2 border-t border-white/15 text-[11px] font-bold text-amber-200">הפער בדיוק בגובה הפיקדון שהאפליקציה הוסיפה (₪' + fmtMoney(receiptUnbilledDepositGap(t.ex, progressMoneyTarget)) + '). בתעודה אין שורת פיקדון? <button data-role="rc-dep-waive" class="btn-tap underline font-black text-white">הסר פיקדון מהתעודה</button></div>' : '') + '</div>';
 }
 function refreshReceipt() { if (currentView === 'receiving') renderReceiving(); }
 // v234 הבאג: הקלדת כמות בשדה (rc-qty) רצה על אירוע input, ולכן עדכנה רק את
@@ -7577,9 +7650,9 @@ function finishReceipt() {
 }
 function hideReceiptSummary() { const m = $('receiptSummaryModal'); m.classList.add('hidden'); m.classList.remove('flex'); }
 // ===== מסך השוואת תעודה (חוסר/עודף) =====
-function openReconcile() {
+function receiptReconcileRows() {
   const day = receiptPromoDay();
-  reconcileData = receiptList.map(it => {
+  const rows = receiptList.map(it => {
     const p = products.find(x => x.id === it.productId);
     const base = r2(Number(p && p.price) || 0);
     const pr = promoForProduct(it.productId, day);
@@ -7588,12 +7661,16 @@ function openReconcile() {
     return { productId: it.productId, name: it.name || (p ? p.name : ''), barcode: it.barcode || (p ? p.barcode : '') || '', received: Number(it.qty) || 0, noteQty: Number(it.qty) || 0, price: (on ? discountedUnitPrice(base, pct) : base), basePrice: base, promoPct: pct, promoOn: on, checked: false };
   });
   // מיון חד-פעמי בפתיחה: שורות חריגות (חסר/עודף) למעלה — לא ממוין מחדש תוך כדי עבודה
-  reconcileData.sort((a, b) => ((Number(a.noteQty) || 0) === (Number(a.received) || 0) ? 1 : 0) - ((Number(b.noteQty) || 0) === (Number(b.received) || 0) ? 1 : 0));
+  rows.sort((a, b) => ((Number(a.noteQty) || 0) === (Number(a.received) || 0) ? 1 : 0) - ((Number(b.noteQty) || 0) === (Number(b.received) || 0) ? 1 : 0));
   // v173: שורות פיקדון נגזרות — מאושרות מראש (אין מה לסרוק פיזית); אם
   // תרוץ סריקת AI, ההחלה תחליף אותן בשורות מהנייר (מסומנות isDeposit).
   receivingDepositLines().forEach(dep => {
-    reconcileData.push({ productId: 'deposit-recv-' + dep.product.id, name: dep.name, barcode: '', received: dep.qty, noteQty: dep.qty, price: dep.unit, basePrice: dep.unit, promoPct: 0, promoOn: false, checked: true, isDeposit: true });
+    rows.push({ productId: 'deposit-recv-' + dep.product.id, name: dep.name, barcode: '', received: dep.qty, noteQty: dep.qty, price: dep.unit, basePrice: dep.unit, promoPct: 0, promoOn: false, checked: true, isDeposit: true });
   });
+  return rows;
+}
+function openReconcile() {
+  reconcileData = receiptReconcileRows();
   detectiveOpen = false; noteCheckOpen = false; noteCheckAuto = false; noteCheckRows = []; noteCheckRes = null; reconcileCheckMode = false; noteCheckQtyMode = false; rcStep = null; noteCheckForceQty = false; ncPromoResult = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; manualSearchTerm = ''; manualAssigned = []; manualSearchOpen = false; manualPromoMarks = {}; reconcilePaperEntered = false;
   resetAiInvoiceScan();
   resetDetectiveQuestions();
@@ -11609,7 +11686,7 @@ function aiAutoResolvePendingRow(pending, aggregates) {
   }
   return null;
 }
-function aiBuildPendingSuggestion(pending) {
+function aiBuildPendingSuggestion(pending, receivedRows = reconcileData || []) {
   const barcodeMatch = pending.resolution;
   if (!barcodeMatch || !barcodeMatch.suggestion) return null;
   const row = pending.row;
@@ -11643,7 +11720,7 @@ function aiBuildPendingSuggestion(pending) {
       barcode: candidate.barcode
     }));
   } else {
-    const suggestedLine = (reconcileData || []).find(line => line.productId === barcodeMatch.suggestion.product.id);
+    const suggestedLine = receivedRows.find(line => line.productId === barcodeMatch.suggestion.product.id);
     const receivedQty = suggestedLine ? (Number(suggestedLine.received) || 0) : 0;
     commonSuggestion.suggestedBarcode = barcodeMatch.suggestion.barcode;
     commonSuggestion.suggestedProductId = barcodeMatch.suggestion.product.id;
@@ -11694,9 +11771,8 @@ function aiBilledBasketQty(pr, aggregates) {
 function aiBilledPromoTriggered(pr, aggregates, dateStr) {
   return promoActive(pr, dateStr) && aiBilledBasketQty(pr, aggregates) >= promoMinUnitsP(pr);
 }
-function aiFindingsClosure(evaluation, findings) {
+function aiFindingsClosure(evaluation, findings, receivedRows = reconcileData || []) {
   const rows = Array.isArray(findings) ? findings : (Array.isArray(evaluation && evaluation.findings) ? evaluation.findings : []);
-  const receivedRows = Array.isArray(reconcileData) ? reconcileData : [];
   // v272: אותו מחיר בדיוק לשני צדי המשוואה. בלי התיקון הזה הנייר נמדד
   // במחיר מבצע והסחורה שהתקבלה במחיר מלא, והפער אינו ניתן לסגירה.
   const priceOverrides = evaluation && evaluation.receivedUnitPrices instanceof Map ? evaluation.receivedUnitPrices : null;
@@ -11768,7 +11844,7 @@ function aiFindingsClosure(evaluation, findings) {
     : 'הממצאים אינם סוגרים את פער הסכום: צפוי ₪' + fmtMoney(expectedAmountDelta) + ', נמצא ₪' + fmtMoney(actualAmountDelta));
   return { ok, unitsOk, amountOk, expectedUnitsDelta, actualUnitsDelta, expectedAmountDelta, actualAmountDelta, reason };
 }
-function aiEvaluateInvoiceScan(payload) {
+function aiEvaluateInvoiceScan(payload, receivedRows = reconcileData || []) {
   const scan = payload && payload.scan;
   const errors = [], warnings = [], findings = [], promoCandidates = [], barcodeSuggestions = [], aggregates = new Map(), docSummaries = [], residuals = [], pendings = [], autoResolutions = [], depositRows = [];
   const receivedUnitPrices = new Map(); // v272: productId → מחיר מבצע שהנייר מוכיח שחויב
@@ -12009,7 +12085,7 @@ function aiEvaluateInvoiceScan(payload) {
     const stillOpen = [];
     pendingList.forEach(pending => {
       if (pending.qty == null || pending.cents == null || pending.arithmeticError) { stillOpen.push(pending); return; }
-      const options = (reconcileData || []).filter(line => {
+      const options = receivedRows.filter(line => {
         if (!line || line.isDeposit || String(line.productId || '').indexOf('deposit-') === 0) return false;
         if (aggregates.has(line.productId)) return false;
         if ((Number(line.received) || 0) !== pending.qty) return false;
@@ -12034,7 +12110,7 @@ function aiEvaluateInvoiceScan(payload) {
     if (pending.qty != null && pending.cents != null && !pending.arithmeticError) {
       residuals.push({ docNumber: pending.docIndex + 1, documentIndex: pending.docIndex, lineNumber: pending.rowNumber, sourcePage: Number(pending.row.sourcePage), rowRegion: pending.row.rowRegion || null, description: String(pending.row.description || '').trim(), qty: pending.qty, amount: pending.cents / 100, reason: pending.fallbackReason || pending.resolution.error || 'לא זוהה מוצר מתאים במאגר', raw: { unit: pending.row.unitPriceExVat, gross: pending.row.grossLineTotalExVat, discount: pending.row.lineDiscountExVat, total: pending.row.lineTotalExVat, conf: pending.row.confidence } });
     }
-    const builtSuggestion = aiBuildPendingSuggestion(pending);
+    const builtSuggestion = aiBuildPendingSuggestion(pending, receivedRows);
     if (builtSuggestion) barcodeSuggestions.push(builtSuggestion);
   });
   if (returned.size !== aiScanDocuments.length) errors.push('מספר המסמכים שחזר אינו זהה למספר התעודות שצולמו');
@@ -12057,7 +12133,7 @@ function aiEvaluateInvoiceScan(payload) {
       (Array.isArray(suggestion.candidates) ? suggestion.candidates : []).forEach(candidate => {
         const id = String(candidate.productId || '');
         const confirmedQty = aggregates.has(id) ? Number(aggregates.get(id).qty || 0) : 0;
-        const receivedLine = (reconcileData || []).find(line => String(line.productId) === id);
+        const receivedLine = receivedRows.find(line => String(line.productId) === id);
         candidate.receivedQty = receivedLine ? (Number(receivedLine.received) || 0) : 0;
         candidate.paperQtyIfChosen = confirmedQty + Number(suggestion.quantity || 0);
         candidate.quantityMatchesReceived = suggestion.quantity != null && candidate.paperQtyIfChosen === candidate.receivedQty;
@@ -12094,7 +12170,7 @@ function aiEvaluateInvoiceScan(payload) {
     // אחרת aiFindingsClosure משווה נייר במחיר מבצע מול סחורה במחיר מלא,
     // הפער המדומה הוא בדיוק ההנחה, ואף ממצא אמיתי אינו יכול לסגור אותו.
     // מחיר שהוקלד ידנית קדוש: נוגעים רק בשורה שעדיין מתומחרת אוטומטית.
-    (reconcileData || []).forEach(line => {
+    receivedRows.forEach(line => {
       if (!line || line.isDeposit || String(line.productId || '').indexOf('deposit-') === 0) return;
       const product = products.find(x => x.id === line.productId);
       if (!product) return;
@@ -12108,7 +12184,7 @@ function aiEvaluateInvoiceScan(payload) {
     // מחיר אפקטיבי שנגזר מסכום שורת הנייר חייב להישאר בדיוק מלא.
     // עיגול כאן היה מחזיר למשל 43.04 / 24 מ-1.79333 ל-1.79 ומאבד 8 אגורות.
     a.paperUnitPrice = a.qty > 0 ? (a.totalCents / 100 / a.qty) : 0;
-    const line = (reconcileData || []).find(l => l.productId === a.product.id);
+    const line = receivedRows.find(l => l.productId === a.product.id);
     const received = Number(line && line.received) || 0;
     const productPromo = promoForProduct(a.product.id, day);
     const expected = paperPromoTriggered(productPromo)
@@ -12142,7 +12218,7 @@ function aiEvaluateInvoiceScan(payload) {
     } else {
       findings.push(...promoCandidates);
     }
-    if (basketComplete) (reconcileData || []).forEach(line => {
+    if (basketComplete) receivedRows.forEach(line => {
       // v177: שורת פיקדון נגזרת אינה מוצר שנסרק — הפיקדון שבנייר מטופל
       // בנפרד (depositRows) ולכן אסור שהשורה הנגזרת תסומן "עודף".
       if (line.isDeposit || String(line.productId || '').indexOf('deposit-') === 0) return;
@@ -12165,7 +12241,7 @@ function aiEvaluateInvoiceScan(payload) {
       const doc = returned.get(index); return doc && inputDoc.units != null && aiDocRowUnits(doc) === Number(inputDoc.units); // v179: בלי פיקדון
     }));
   const supplierDiscount = Math.max(0, verifiedDocumentDiscountCents / 100);
-  const closure = aiFindingsClosure({ aggregates, findings, supplierDiscount, receivedUnitPrices }, findings);
+  const closure = aiFindingsClosure({ aggregates, findings, supplierDiscount, receivedUnitPrices }, findings, receivedRows);
   if (findingsReady && !closure.ok) errors.push(closure.reason || 'הממצאים אינם סוגרים את פער היחידות והסכום');
   const uniqueErrors = Array.from(new Set(errors));
   const uniqueWarnings = Array.from(new Set(warnings.concat(Array.isArray(scan.warnings) ? scan.warnings : [])));
@@ -12869,7 +12945,7 @@ function aiCompactFindingGroupHtml(type, title, findings, extraRowsHtml, extraCo
       const label = type === 'shortage' ? 'חסר' : 'עודף';
       return '<div class="flex items-start justify-between gap-3 py-2 border-t border-black/5 first:border-t-0">' +
         '<div class="min-w-0 text-sm font-black text-slate-800">' + htmlEscape(finding.name || '') + '</div>' +
-        '<div class="shrink-0 text-sm font-black ' + style.head + '">' + label + ' ' + Number(finding.qty || 0) + ' יח׳</div>' +
+        '<div class="shrink-0 max-w-[60%] text-sm font-black ' + style.head + '">' + (finding.creditRemainderLabel ? htmlEscape(finding.creditRemainderLabel) : label + ' ' + Number(finding.qty || 0) + ' יח׳') + '</div>' +
       '</div>';
     }
     return '<div class="py-2 border-t border-black/5 first:border-t-0 text-sm font-black text-slate-800">' + htmlEscape(tidyAiMoneyText(finding.text || '')) + '</div>';
@@ -13320,7 +13396,8 @@ function aiInvoiceCaptureHtml() {
   if (aiScanBusy) return '<div class="bg-white rounded-2xl border-2 border-violet-200 p-6 text-center mb-24"><i class="fa-solid fa-spinner fa-spin text-4xl text-violet-600"></i><div class="font-black text-lg mt-3">' + htmlEscape(aiScanProgressText || (aiScanResponse ? 'מכין את התוצאות…' : 'ה-AI קורא את כל דפי התעודות…')) + '</div><div class="text-xs text-slate-500 mt-1">אל תסגור את המסך. הקריאה והאימות עשויים לקחת כמה דקות.</div></div>';
   if (aiScanEvaluation) {
     const ev = aiScanEvaluation;
-    const actionableFindings = (Array.isArray(ev.findings) ? ev.findings : []).filter(aiIsActionableFinding);
+    const credit = deliveryCreditLiveStatus(false, ev);
+    const actionableFindings = deliveryCreditRemainingFindings(Array.isArray(ev.findings) ? ev.findings : [], credit).filter(aiIsActionableFinding);
     const residuals = Array.isArray(ev.residuals) ? ev.residuals : [];
     const unknownCards = (Array.isArray(ev.barcodeSuggestions) ? ev.barcodeSuggestions : []).filter(suggestion => suggestion && suggestion.unknownProduct === true).map(aiUnknownProductSuggestionHtml).join('');
     const confirmed = ev.userConfirmedFindings === true;
@@ -13335,14 +13412,16 @@ function aiInvoiceCaptureHtml() {
     }).join('');
     // v178: פאנל האבחון היה תלוי בקיום ממצא פעיל, ולכן נעלם בדיוק במצב
     // שבו הוא הכי נחוץ (רק שאריות, או רק שגיאות). עכשיו הוא תמיד מוצג.
-    const analyzerLed = ev.analyzerLed === true && aiAnalyzeResult && aiAnalyzeResult.accepted === true;
-    const findingsHtml = (!analyzerLed && actionableFindings.length ? aiActionableFindingsHtml(actionableFindings) : '') + residualLines + unknownCards + aiAnalyzeHtml(ev) + aiScanDiagnosticsHtml(ev);
-    const allGood = aiScanAllGood(ev);
-    const statusHtml = allGood
+    // An old analysis describes the physical shortage before the credit. Show
+    // the remaining findings, without offering to claim that credit again.
+    const analyzerLed = !(credit && credit.amount) && ev.analyzerLed === true && aiAnalyzeResult && aiAnalyzeResult.accepted === true;
+    const findingsHtml = (!analyzerLed && actionableFindings.length ? aiActionableFindingsHtml(actionableFindings) : '') + residualLines + unknownCards + (credit && credit.amount ? '' : aiAnalyzeHtml(ev)) + aiScanDiagnosticsHtml(ev);
+    const allGood = aiScanAllGood(ev) && !(credit && (credit.pending || credit.invalid.length));
+    const statusHtml = deliveryCreditStatusHtml(credit) + (allGood
       ? '<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-3 font-black text-emerald-800"><i class="fa-solid fa-circle-check ml-1"></i>הכול תואם — לא נמצאו חוסר, עודף או בעיית מחיר/מבצע.</div>'
       : (ev.valid ? '' :
         '<div class="rounded-xl bg-amber-50 border border-amber-300 p-3"><div class="font-black text-amber-900 text-sm"><i class="fa-solid fa-triangle-exclamation ml-1"></i>הסריקה לא נסגרה במלואה — סגירת התעודה נעולה עד תיקון.' + (ev.basketComplete ? '' : ' עודפים ובעיות מחיר/מבצע יוצגו כשכל השורות ייקראו.') + '</div>' +
-        (blockingReasonsHtml ? '<details class="mt-2 text-right"><summary class="cursor-pointer text-[11px] font-black text-amber-800">מה לא נסגר?</summary><ul class="list-disc pr-5 mt-2 space-y-1 text-[10px] font-bold text-amber-800">' + blockingReasonsHtml + '</ul></details>' : '') + '</div>');
+        (blockingReasonsHtml ? '<details class="mt-2 text-right"><summary class="cursor-pointer text-[11px] font-black text-amber-800">מה לא נסגר?</summary><ul class="list-disc pr-5 mt-2 space-y-1 text-[10px] font-bold text-amber-800">' + blockingReasonsHtml + '</ul></details>' : '') + '</div>'));
     const autoNote = Array.isArray(ev.autoResolutions) && ev.autoResolutions.length
       ? '<div class="text-[10px] font-bold text-slate-500 text-center">' + ev.autoResolutions.length + ' שורות הותאמו אוטומטית לפי שם/מחיר/כמות — מתועד ביומן.</div>'
       : '';
@@ -13358,7 +13437,9 @@ function aiInvoiceCaptureHtml() {
     // v133: זרימת אישור וסגירה. המשתמש מאשר שאלה אכן הבעיות, ורק אז נפתחות
     // "סגור תעודה עם החוסרים" (כשהחשבון נסגר) או "תיקון תעודה".
     let actionsHtml = '';
-    if (allGood) {
+    if (credit && credit.fullyCovered) {
+      actionsHtml = '<button data-role="ai-apply" class="btn-tap w-full bg-emerald-600 text-white rounded-xl py-3.5 font-black mt-4"><i class="fa-solid fa-check"></i> החוסר מכוסה בזיכוי — המשך</button>';
+    } else if (allGood) {
       actionsHtml = '<button data-role="ai-apply" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-3.5 font-black mt-4"><i class="fa-solid fa-check"></i> הכול תואם — המשך</button>';
     } else if (!confirmed) {
       actionsHtml = '<div class="mt-4 space-y-2">' +
@@ -13630,8 +13711,9 @@ function renderReconcile() {
 
   // סרגל סכומים תמידי
   const asgTop = reconcileAssigned();
+  const credit = deliveryCreditLiveStatus();
   const aiActionable = reconcileAiAudit && Array.isArray(reconcileAiAudit.findings)
-    ? reconcileAiAudit.findings.filter(f => ['shortage', 'surplus', 'price', 'promo_missing'].includes(f.type))
+    ? deliveryCreditRemainingFindings(reconcileAiAudit.findings, credit).filter(aiIsActionableFinding).filter(priceAuditLegacyVisible)
     : [];
   const explained = balanced && (asgTop.sh > 0.05 || asgTop.ov > 0.05 || aiActionable.length > 0);
   const discountLine = (Number(reconcileSupplierDiscount) || 0) > 0
@@ -13644,24 +13726,41 @@ function renderReconcile() {
     ? '<div class="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] font-bold text-slate-500 mt-1.5 pt-1.5 border-t border-slate-200/60">' +
       '<span>' + (reconcilePaperEntered ? 'יחידות מהנייר: ' : 'יחידות שנסרקו: ') + reconcileScannedUnits() + '/' + receiptNoteUnits + (uG ? ' <b class="text-rose-600">(' + (uG > 0 ? 'חסרות ' + uG : 'עודף ' + (-uG)) + ')</b>' : ' ✓') + '</span>' +
     '</div>' : '';
-  const summary = '<div class="rounded-2xl p-4 shadow-sm mb-3 ' + (balanced ? (explained ? 'bg-amber-50 border border-amber-200' : 'bg-emerald-50 border border-emerald-200') : 'bg-amber-50 border border-amber-200') + '">' +
+  let summary = '<div class="rounded-2xl p-4 shadow-sm mb-3 ' + (balanced ? (explained ? 'bg-amber-50 border border-amber-200' : 'bg-emerald-50 border border-emerald-200') : 'bg-amber-50 border border-amber-200') + '">' +
     '<div class="flex justify-between text-sm font-bold ' + (balanced && !explained ? 'text-emerald-900' : 'text-amber-900') + '"><span>תעודת הספק</span><span>₪' + fmtMoney(note || 0) + '</span></div>' +
     '<div class="flex justify-between text-sm font-bold mt-1 ' + (balanced && !explained ? 'text-emerald-900' : 'text-amber-900') + '"><span>' + (reconcilePaperEntered ? 'סכום הפריטים מהנייר' : 'סכום הפריטים שנסרקו') + '</span><span>₪' + fmtMoney(reconcileNoteInc()) + '</span></div>' +
     discountLine +
     '<div class="flex justify-between text-lg font-black mt-1.5 pt-1.5 border-t ' + (balanced ? (explained ? 'border-amber-200 text-amber-700' : 'border-emerald-200 text-emerald-700') : 'border-amber-200 text-rose-700') + '"><span>' + (balanced ? (explained ? 'הוסבר — הפרש פתוח' : 'מאוזן') : dir) + '</span><span>' + (balanced ? (explained ? '₪' + fmtMoney(r2(asgTop.sh - asgTop.ov > 0 ? asgTop.sh - asgTop.ov : asgTop.ov - asgTop.sh)) : '✓') : (hasMoneyGap ? '₪' + fmtMoney(absGap) : Math.abs(uG || 0) + ' יח׳')) + '</span></div>' +
     anchorsLine +
   '</div>';
+  if (credit && credit.amount > 0) {
+    const receivedUnits = reconcileData.reduce((sum, l) => sum + (l.isDeposit ? 0 : Number(l.received) || 0), 0);
+    const leftMoney = Math.max(Math.abs(credit.amountGap), [...credit.remaining.values()].reduce((sum, s) => sum + s.cents, 0) / 100);
+    summary = '<div data-credit-reconcile class="rounded-2xl p-4 shadow-sm mb-3 border ' + (credit.fullyCovered ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200') + '">' +
+      '<div class="flex justify-between text-sm font-bold"><span>תעודת הספק</span><span>₪' + fmtMoney(note || 0) + '</span></div>' +
+      '<div class="flex justify-between text-sm font-bold mt-1 text-emerald-800"><span>זיכוי על חוסר</span><span>−₪' + fmtMoney(credit.amount) + '</span></div>' +
+      '<div class="flex justify-between text-sm font-bold mt-1"><span>צפוי לאחר זיכוי</span><span>₪' + fmtMoney(r2((note || 0) - credit.amount)) + '</span></div>' +
+      '<div class="flex justify-between text-sm font-bold mt-1"><span>סכום הפריטים שהתקבלו</span><span>₪' + fmtMoney(reconcileReceivedInc()) + '</span></div>' + discountLine +
+      '<div class="flex justify-between gap-2 text-base font-black mt-2 pt-2 border-t ' + (credit.fullyCovered ? 'text-emerald-800 border-emerald-200' : 'text-rose-800 border-amber-200') + '"><span>' +
+      (credit.fullyCovered ? 'החוסר מכוסה בזיכוי' : leftMoney > 0.02 ? 'נותר לטיפול' : 'נשארו פרטים לבדיקה') + '</span><span>' + (credit.fullyCovered ? '✓' : leftMoney > 0.02 ? '₪' + fmtMoney(leftMoney) : '') + '</span></div>' +
+      '<div class="text-xs text-slate-600 mt-2">התקבלו בפועל: ' + receivedUnits + ' יח׳ · בזיכוי: ' + credit.units + ' יח׳' + (receiptNoteUnits != null ? ' · בתעודה: ' + receiptNoteUnits + ' יח׳' : '') + '</div>' +
+      (credit.unitsGap > 0 ? '<div class="text-xs font-bold text-rose-800 mt-1">חסרות ללא זיכוי: ' + credit.unitsGap + ' יח׳</div>' : '') + '</div>';
+  }
+  if (credit && (credit.invalid.length || credit.pending || !credit.verified)) summary += deliveryCreditStatusHtml(credit);
 
   let body = '';
 
   if (rcStep === 'balanced') {
     // האם ההפרש שויך לחוסרים/עודפים (תעודה פתוחה) או שבאמת הכל תואם?
     const asg = reconcileAssigned();
-    if (asg.sh > 0.05 || asg.ov > 0.05 || aiActionable.length > 0) {
+    if (!(credit && credit.fullyCovered) && (asg.sh > 0.05 || asg.ov > 0.05 || aiActionable.length > 0)) {
       const shortLines = [], overLines = [];
       (reconcileData || []).forEach(l => {
         const d = (Number(l.noteQty) || 0) - (Number(l.received) || 0);
-        if (d > 0) shortLines.push('חסר ' + d + ' × ' + l.name);
+        if (d > 0) {
+          const remaining = deliveryCreditRemainingFindings([{ type: 'shortage', productId: l.productId, name: l.name, qty: d, text: 'חסר ' + d + ' × ' + l.name }], credit);
+          shortLines.push(...remaining.map(f => f.text));
+        }
         else if (d < 0) overLines.push('עודף ' + (-d) + ' × ' + l.name);
       });
       const aiVerified = reconcileAiAudit
@@ -13682,8 +13781,8 @@ function renderReconcile() {
     } else {
       body = '<div class="bg-white rounded-2xl border-2 border-emerald-200 p-6 text-center shadow-sm mb-24">' +
         '<div class="text-5xl mb-2">✅</div>' +
-        '<div class="font-black text-xl text-emerald-700 mb-1">התעודה מאוזנת</div>' +
-        '<div class="text-sm text-slate-500">כל מה שנסרק תואם לתעודת הספק</div>' +
+        '<div class="font-black text-xl text-emerald-700 mb-1">' + (credit && credit.fullyCovered ? 'החוסר מכוסה בזיכוי' : 'התעודה מאוזנת') + '</div>' +
+        '<div class="text-sm text-slate-500">' + (credit && credit.fullyCovered ? 'אפשר לקלוט את התעודה. הכמות שנרשמת היא הכמות שהתקבלה בפועל.' : 'כל מה שנסרק תואם לתעודת הספק') + '</div>' +
         (reconcileAiAudit ? '<div class="text-xs font-black text-violet-700 mt-2"><i class="fa-solid fa-shield-halved"></i> הסכום והיחידות אומתו גם בסריקת AI</div>' : '') +
       '</div>';
     }
@@ -14565,9 +14664,13 @@ function saveReconciledReceipt(opts) {
 }
 function presentReconcileSummary(lines, ex, open, extra) {
   extra = extra || {};
+  const credit = deliveryCreditLiveStatus();
   const listHtml = lines.map(l => {
     const diff = (l.noteQty != null ? l.noteQty : l.qty) - l.qty;
-    const tag = diff > 0 ? ' · <span class="text-rose-600 font-bold">חסר ' + diff + '</span>' : (diff < 0 ? ' · <span class="text-amber-600 font-bold">עודף ' + (-diff) + '</span>' : '');
+    const remaining = credit && credit.creditedProducts.has(l.productId) && credit.remaining.get(l.productId);
+    const tag = remaining ? ' · <span class="text-emerald-700 font-bold">' + (diff - remaining.qty) + ' בזיכוי</span>' +
+      (remaining.qty > 0 || remaining.cents > 1 ? ' · <span class="text-rose-600 font-bold">נותר ללא זיכוי: ' + remaining.qty + ' יח׳ · ₪' + fmtMoney(remaining.cents / 100) + '</span>' : '')
+      : diff > 0 ? ' · <span class="text-rose-600 font-bold">חסר ' + diff + '</span>' : (diff < 0 ? ' · <span class="text-amber-600 font-bold">עודף ' + (-diff) + '</span>' : '');
     return '<div class="flex items-center justify-between gap-2 py-1.5 border-b border-slate-100 last:border-0">' +
       '<div class="min-w-0"><div class="font-bold text-slate-800 text-sm truncate">' + l.name + '</div>' +
       '<div class="text-[11px] text-slate-400">התקבל ' + l.qty + ' × ₪' + fmtUnitPrice(l.unitPrice, l.promoPct) + (l.promoPct ? ' · מבצע ' + l.promoPct + '%' : '') + tag + '</div></div>' +
@@ -14594,7 +14697,7 @@ function presentReconcileSummary(lines, ex, open, extra) {
   const aiSummary = (extra.aiAudit && Array.isArray(extra.aiAudit.findings))
     ? '<div class="mt-2 rounded-xl bg-violet-50 border-2 border-violet-200 p-3"><div class="font-black text-sm text-violet-900"><i class="fa-solid fa-shield-halved"></i> תוצאות AI שאישרת</div>' +
       '<div class="text-[11px] font-bold text-violet-700 mt-1">סכום התעודות והיחידות אומתו בדיוק. התמונות לא נשמרות.</div>' +
-      (extra.aiAudit.findings.filter(priceAuditLegacyVisible).filter(f => ['shortage', 'surplus', 'price', 'promo_missing'].includes(f.type)).map(f => '<div class="text-xs font-black mt-1.5 ' + (f.type === 'shortage' ? 'text-rose-700' : (f.type === 'surplus' ? 'text-amber-700' : 'text-orange-800')) + '">• ' + htmlEscape(f.text || '') + '</div>').join('') || '<div class="text-xs font-black text-emerald-700 mt-1.5">לא נמצא פער נוסף.</div>') + '</div>'
+      (deliveryCreditRemainingFindings(extra.aiAudit.findings, credit).filter(priceAuditLegacyVisible).filter(aiIsActionableFinding).map(f => '<div class="text-xs font-black mt-1.5 ' + (f.type === 'shortage' ? 'text-rose-700' : (f.type === 'surplus' ? 'text-amber-700' : 'text-orange-800')) + '">• ' + htmlEscape(f.text || '') + '</div>').join('') || '<div class="text-xs font-black text-emerald-700 mt-1.5">לא נמצא פער נוסף.</div>') + '</div>'
     : '';
   $('rsBody').innerHTML = '<div id="rsPriceAudit">' + receiptPriceAuditHtml(undefined, { summary: true }) + '</div>' + deliveryCreditSummaryHtml() +
     (open ? '<div class="bg-rose-50 border border-rose-200 rounded-xl p-2.5 mb-3 text-xs font-bold text-rose-700"><i class="fa-solid fa-triangle-exclamation"></i> נשמר עם הפרשים — התעודה תסומן כפתוחה עד שתתוקן</div>' : '') +
