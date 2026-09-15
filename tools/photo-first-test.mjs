@@ -15,7 +15,7 @@ function source(name) {
 }
 const names = ['receiptUsesManualQuantities','priceAuditNumber','priceAuditDate','priceAuditCapture','priceAuditSource','priceAuditIdentity','priceAuditDocumentComplete','receiptPriceAudit','dDisp','priceAuditDatesHtml','priceAuditChoiceHtml','receiptPriceAuditHtml','priceAuditLegacyVisible','refreshPriceScannerNotice','receiptRememberScanResults','receiptRebuildScanResponse','receiptScanChanged','receiptScanSnapshot','receiptStorageNotice','persistReceiptDraft','receiptDraftActive','scheduleReceiptDraftSync','refreshReceiptDraftNotice','yotvataPaperCheck', 'yotvataResetPhotoReceipt', 'yotvataCachedDoc', 'yotvataPhotoReady',
   'yotvataInvalidatePhotoDoc', 'yotvataAdoptPaperAnchors', 'yotvataStartPaperScan', 'yotvataScanMetadata',
-  'yotvataStoreScanResults', 'yotvataReceiptScanAudit', 'receiptDraftPayload', 'saveReceiptDraft',
+  'yotvataStoreScanResults', 'yotvataReceiptScanAudit', 'receiptDraftPayload', 'saveReceiptDraft', 'deliveryCreditSnapshot',
   'restoreDraftScan', 'restoreReceiptDraft', 'normNote', 'noteSum', 'noteAnchorSum', 'recomputeNoteTotal',
   'aiScanSingleDocPipeline', 'aiRunInvoiceScan', 'aiTotalPages', 'aiMoneyCents', 'aiDocRowUnits',
   'rememberReceiptManualInput', 'switchReceiptEntryMode', 'receiptBackToPhotosHtml', 'noteEditorBodyHtml', 'parseNoteVal', 'readNoteEntry',
@@ -29,7 +29,7 @@ function context(extra = {}) {
     receiptCountingMode: 'scan', receiptQuantityReview: null, receiptManualInput: null, $: () => null, htmlEscape: String, fmtMoney: String,
     receiptEntryMode: 'photo', receiptAnchorSource: null, receiptPaperScanState: '', receiptPaperScanProblems: [],
     receiptPhotoCaptureOpen: false, receiptScanHistory: [], aiScanRunId: 0, receiptOpened: false,
-    receiptNotes: [], receiptNoteTotal: null, receiptNoteUnits: null, receiptList: [], receiptDepositWaived: false,
+    receiptNotes: [], receiptDeliveryCredits: [], receiptNoteTotal: null, receiptNoteUnits: null, receiptList: [], receiptDepositWaived: false,
     receiptUnitsWaived: false, receiptNoDoc: false, receiptAttachTarget: null, editingNotes: false,
     aiScanDocuments: [], aiScanResponse: null, aiScanEvaluation: null, aiScanBusy: false,
     aiScanProgressText: '', aiScanError: '', aiScanErrorAnchor: false, aiScanReused: false, aiScanFromDraft: false,
@@ -228,7 +228,7 @@ test('equal total/units still enters actual product comparison; equal-price swap
 
 test('matching totals cannot bypass the photo review screen; applying unlocks the existing finish flow', () => {
   const c = comparisonContext();
-  appFunctions(c, ['openReconcile', 'renderReconcile']);
+  appFunctions(c, ['openReconcile', 'renderReconcile', 'priceAuditActionCardHtml']);
   c.aiCloseOrientationReview = () => {}; c.resetDetectiveQuestions = () => {};
   c.setView = view => { c.currentView = view; }; c.saveReceiptDraft = () => {};
   c.openReconcile();
