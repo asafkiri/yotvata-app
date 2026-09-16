@@ -61,17 +61,14 @@ function makeDocument() {
   };
 }
 
-const NAMES = ['aiFlattenIllumination', 'aiComputePaperCropBox', 'aiRefineCropEdges', 'aiMeasurePageQuality', 'aiPaperSpan', 'aiDetectPaperRegion'];
+const NAMES = ['aiMeasurePageQuality', 'aiTextAnchorBox', 'aiTextCropBox', 'aiDetectPaperRegion'];
 
-// סף הזרעים הוא הפרמטר היחיד שקובע כמה "מרושל" עדיין נחתך: הוא דורש
-// שאחוז מסוים מהאריחים יהיה נייר ודאי. אפשר לכוון אותו מכאן כדי לבדוק
-// את הפשרה במספרים — כמה סצנות נחתכות מול כמה חיתוכי שווא — במקום לנחש.
+// שער השטח ניתן לכוונון מכאן כדי לבדוק את הפשרה במספרים — כמה סצנות
+// נחתכות מול כמה חיתוכי שווא — במקום לנחש.
 //
-//   node tools/auto-crop-bench.mjs --seeds 0.12
+//   node tools/auto-crop-bench.mjs --min-area 0.08
 const areaArg = process.argv.indexOf('--min-area');
 const minArea = areaArg > -1 ? Number(process.argv[areaArg + 1]) : null;
-const seedsArg = process.argv.indexOf('--seeds');
-const seedThreshold = seedsArg > -1 ? Number(process.argv[seedsArg + 1]) : null;
 
 let code = NAMES.map(source).join('\n');
 // ההחלפה חייבת למצוא את הסמן; החלפת ערך בערך זהה היא תקינה ולכן
@@ -80,7 +77,6 @@ function override(text, marker, value, where) {
   assert.ok(text.includes(marker), marker + ' not found in ' + where);
   return text.replace(marker, value);
 }
-if (seedThreshold != null) code = override(code, 'tilesCount * 0.10', 'tilesCount * ' + seedThreshold, 'aiComputePaperCropBox');
 if (minArea != null) code = override(code, 'areaFraction < 0.12', 'areaFraction < ' + minArea, 'aiDetectPaperRegion');
 
 const sandbox = vm.createContext({
