@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v354 ההידוק לא מזיז את המסגרת</title>
+    <title>הזמנות יטבתה - v355 עוגן טקסט: חיתוך אגרסיבי בשני גלאים</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v354 ההידוק לא מזיז את המסגרת</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v355 עוגן טקסט: חיתוך אגרסיבי בשני גלאים</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -9030,9 +9030,17 @@ function aiReadFile(file) {
     reader.readAsDataURL(file);
   });
 }
+// הפענוח היחיד של צילום נכנס. הוא עובר דרך <img> ולא דרך createImageBitmap,
+// וזה מכוון: <img> מיישם EXIF orientation כברירת מחדל, ולכן naturalWidth
+// ו-drawImage מחזירים תמונה זקופה. aiDetectPaperRegion תלוי בכך — עוגן
+// המחזוריות סורק שורות דפוס אופקיות ואינו מזהה מסמך מסובב 90°.
+// createImageBitmap, לעומת זאת, מתעלם מ-EXIF אלא אם מבקשים במפורש
+// imageOrientation:'from-image'. מי שמחליף כאן פענוח חייב לשמור על
+// הנרמול הזה. הערך למטה הוא ברירת המחדל ונכתב במפורש כתיעוד.
 function aiLoadImage(dataUrl) {
   return new Promise((resolve, reject) => {
     const img = new Image();
+    try { img.style.imageOrientation = 'from-image'; } catch (styleError) { /* ברירת המחדל ממילא */ }
     img.onload = () => resolve(img);
     img.onerror = () => reject(new Error('image_decode_failed'));
     img.src = dataUrl;
@@ -9576,75 +9584,7 @@ function aiQualityAdvice(quality) {
 // הספים נגזרו משלושה צילומים אמיתיים: הכללה הגרועה ביותר היא 0.88 מלובן
 // הגרעין ו-1.07 ממנו, הפסילה הגרועה ביותר 0.70 ו-1.19. 0.80 ו-1.12 יושבים
 // בין השניים בשני הכיוונים.
-function aiPaperSpan(bright, rough, width, height, axis) {
-  const n = axis === 'x' ? width : height, m = axis === 'x' ? height : width;
-  if (n < 16 || m < 16) return null;
-  const p85 = new Float64Array(n), sd = new Float64Array(n);
-  const buf = new Uint8Array(Math.ceil(m / 2));
-  for (let i = 0; i < n; i++) {
-    let k = 0, sum = 0, sum2 = 0;
-    for (let j = 0; j < m; j += 2) {
-      const idx = axis === 'x' ? j * width + i : i * width + j;
-      buf[k++] = bright[idx];
-      const r = rough[idx]; sum += r; sum2 += r * r;
-    }
-    const sorted = buf.slice(0, k).sort();
-    p85[i] = sorted[Math.floor(k * 0.85)];
-    sd[i] = Math.sqrt(Math.max(0, sum2 / k - (sum / k) * (sum / k)));
-  }
-  const levels = Array.from(p85).sort((a, b) => a - b);
-  const coreBright = levels[Math.floor(n * 0.90)] * 0.80;
-  const coreSd = [];
-  for (let i = 0; i < n; i++) if (p85[i] >= coreBright) coreSd.push(sd[i]);
-  if (!coreSd.length) return null;
-  coreSd.sort((a, b) => a - b);
-  const smoothCut = coreSd[Math.floor(coreSd.length * 0.55)] * 1.25;
-  let core = null, cur = null;
-  for (let i = 0; i < n; i++) {
-    if (p85[i] >= coreBright && sd[i] <= smoothCut) { if (cur) cur.hi = i; else cur = { lo: i, hi: i }; }
-    else if (cur) { if (!core || cur.hi - cur.lo > core.hi - core.lo) core = cur; cur = null; }
-  }
-  if (cur && (!core || cur.hi - cur.lo > core.hi - core.lo)) core = cur;
-  if (!core || core.hi - core.lo < 3) return null;
-  // הצמיחה נמדדת על הבהירות הגולמית ולא על המושטחת. ההשטחה מנרמלת כל
-  // אריח אל הלובן הגלובלי, ולכן היא מושכת גם משטח כסוף בהיר אל רמת הנייר
-  // ומוחקת בדיוק את ההבדל שהגבול העליון אמור לתפוס. הגרעין דווקא צריך את
-  // המושטחת, אחרת מדרון תאורה לאורך הדף מפצל אותו לשניים.
-  const rawP85 = new Float64Array(n);
-  for (let i = 0; i < n; i++) {
-    let k = 0;
-    for (let j = 0; j < m; j += 2) buf[k++] = rough[axis === 'x' ? j * width + i : i * width + j];
-    const sorted = buf.slice(0, k).sort();
-    rawP85[i] = sorted[Math.floor(k * 0.85)];
-  }
-  const coreLevels = [];
-  for (let i = core.lo; i <= core.hi; i++) coreLevels.push(rawP85[i]);
-  coreLevels.sort((a, b) => a - b);
-  const paper = coreLevels[coreLevels.length >> 1];
-  const lo = paper * 0.80, hi = paper * 1.12;
-  // הצמיחה רק מרחיבה את הגרעין ולעולם אינה מכווצת אותו: הגרעין כבר עבר
-  // את מבחן הבהירות והחלקות, ואסור שמדרון תאורה יוריד ממנו.
-  //
-  // חספוס אינו פוסל פס בצמיחה, אבל ריצה מחוספסת ארוכה כן עוצרת אותה.
-  // ההבחנה נמדדה על צילומים אמיתיים: קמט בקבלה הוא פס מקומי של שתי
-  // עמודות, ואילו מחצלת כסופה מחוספסת לכל האורך. בלי הכלל הזה הצמיחה
-  // נמשכה לתוך המחצלת בצד שבו בהירותה יורדת בהדרגה ואין מדרגה לעצור בה.
-  const roughRun = Math.max(3, Math.round(n * 0.04));
-  const inBand = (i) => rawP85[i] >= lo && rawP85[i] <= hi;
-  let a = core.lo, b = core.hi, streak = 0;
-  while (a > 0 && inBand(a - 1)) {
-    streak = sd[a - 1] > smoothCut ? streak + 1 : 0;
-    if (streak > roughRun) break;
-    a--;
-  }
-  streak = 0;
-  while (b < n - 1 && inBand(b + 1)) {
-    streak = sd[b + 1] > smoothCut ? streak + 1 : 0;
-    if (streak > roughRun) break;
-    b++;
-  }
-  return { lo: a, hi: b };
-}
+
 // יעד ההקטנה. ה-API מקטין כל תמונה לתקציב patches לפני שהמודל רואה אותה,
 // גם ב-detail:"original" (התיעוד: "original detail can still resize images to
 // meet the model's pixel-dimension limit or resizing patch budget"). 1850px
@@ -9662,6 +9602,534 @@ const AI_CROP_PROXY_SIDE = 1500;
 // שנחתך לפני ההקטנה — כך כל תקציב הפיקסלים הולך לשורות המוצרים במקום
 // לדלפק. כל ספק מחזיר null והצינור ממשיך עם הפריים המלא: חיתוך שגוי
 // גרוע בהרבה מאי-חיתוך, ולכן ארבעת השערים כאן מעדיפים לוותר.
+function aiTextAnchorBox(luma, pw, ph) {
+  // 32 פיקסלים בפרוקסי 1500 הם כ-1.6 שורות דפוס בקבלה תרמית — מספיק
+  // לראות שורה ורווח, קטן מספיק שלא לבלוע רקע. צעד 16 נותן חפיפה, כך
+  // ששורה בודדת לא תיפול בין שני אריחים.
+  var T = 32, S = 16;
+  var nx = ((pw - T) / S | 0) + 1, ny = ((ph - T) / S | 0) + 1;
+  if (nx < 8 || ny < 8) return null;
+  // רמת הלובן של הפריים. משמשת רק כרצפה: אריח שה"נייר" שלו כהה בהרבה
+  // מהאזור הבהיר ביותר בתמונה אינו נייר אלא צל על הרקע.
+  var gh = new Int32Array(256), gn = 0, i;
+  for (i = 0; i < luma.length; i += 7) { gh[luma[i]]++; gn++; }
+  var acc = 0, bright = 255;
+  for (i = 0; i < 256; i++) { acc += gh[i]; if (acc >= gn * 0.95) { bright = i; break; } }
+  var brightFloor = bright * 0.55;
+
+  var n = nx * ny;
+  var mask = new Uint8Array(n);      // אריח דפוס מאושר
+  var cand = new Uint8Array(n);      // עבר הכל חוץ מסף הדיו
+  var gapOf = new Uint8Array(n);     // המרחק בין שיא הדיו לשיא הנייר
+  var thrOf = new Uint8Array(n);     // סף Otsu של האריח
+  var hist = new Int32Array(32), colHas = new Uint8Array(T);
+
+  for (var ty = 0; ty < ny; ty++) {
+    for (var tx = 0; tx < nx; tx++) {
+      var x0 = tx * S, y0 = ty * S, x, y, v, row;
+      for (i = 0; i < 32; i++) hist[i] = 0;
+      var sum = 0, sum2 = 0;
+      for (y = y0; y < y0 + T; y++) {
+        row = y * pw;
+        for (x = x0; x < x0 + T; x++) { v = luma[row + x]; hist[v >> 3]++; sum += v; sum2 += v * v; }
+      }
+      var N = T * T, mean = sum / N, varAll = sum2 / N - mean * mean;
+      if (varAll < 16) continue;                       // אריח חלק לגמרי — אין בו דפוס
+      // Otsu על 32 תאים: הסף שממקסם את השונות בין המחלקות.
+      var wB = 0, sB = 0, best = -1, bt = 0, wF, d, sb2;
+      for (i = 0; i < 32; i++) {
+        wB += hist[i]; if (!wB) continue;
+        wF = N - wB; if (!wF) break;
+        sB += hist[i] * (i * 8 + 4);
+        d = sB / wB - (sum - sB) / wF;
+        sb2 = wB * wF * d * d / (N * N);
+        if (sb2 > best) { best = sb2; bt = i; }
+      }
+      // η — כמה מהשונות הכוללת מוסברת בפיצול לשני שיאים. 0.55: נמדד
+      // 0.80-0.95 באריחי דפוס אמיתיים ו-0.2-0.5 ברעש מחצלת.
+      if (best / varAll < 0.55) continue;
+      var n0 = 0, s0 = 0, n1 = 0, s1 = 0, q1 = 0, c;
+      for (i = 0; i < 32; i++) {
+        c = hist[i]; if (!c) continue; v = i * 8 + 4;
+        if (i <= bt) { n0 += c; s0 += c * v; } else { n1 += c; s1 += c * v; q1 += c * v * v; }
+      }
+      if (!n0 || !n1) continue;
+      var mu0 = s0 / n0, mu1 = s1 / n1;
+      // מסת הדיו. 2.5%-45%: פחות מזה הוא רעש בודד, יותר מזה אינו דפוס על
+      // נייר אלא אריח שחצה את גבול הנייר.
+      var w0 = n0 / N;
+      if (w0 < 0.025 || w0 > 0.45) continue;
+      // פס הנייר חייב להיות צר: נייר מואר אחיד. 16 — נמדד מתחת ל-11
+      // באריחי דפוס, ומעל 20 באריח שחצה גבול אל הרקע.
+      var sd1 = q1 / n1 - mu1 * mu1; sd1 = Math.sqrt(sd1 > 0 ? sd1 : 0);
+      if (sd1 > 16) continue;
+      if (mu1 < brightFloor) continue;
+      var gap = mu1 - mu0;
+      var k = ty * nx + tx;
+      cand[k] = 1;
+      gapOf[k] = gap > 255 ? 255 : gap | 0;
+      thrOf[k] = (bt + 1) * 8;
+    }
+  }
+  // הבדיקה המבנית — יקרה יותר, ולכן רצה רק על אריחים שכבר עברו את
+  // ההיסטוגרמה. מחזירה 1 אם הדיו באריח מסודר כמו דפוס.
+  function looksPrinted(tx, ty, thr) {
+    var x0 = tx * S, y0 = ty * S, x, y, i;
+    var runs = 0, darkPix = 0, rowsInk = 0, multiRows = 0, r, prev, cnt, row;
+    for (i = 0; i < T; i++) colHas[i] = 0;
+    for (y = y0; y < y0 + T; y++) {
+      row = y * pw; prev = 0; cnt = 0; r = 0;
+      for (x = x0; x < x0 + T; x++) {
+        if (luma[row + x] < thr) { darkPix++; cnt++; colHas[x - x0] = 1; if (!prev) { runs++; r++; } prev = 1; }
+        else prev = 0;
+      }
+      if (cnt) { rowsInk++; if (r >= 2) multiRows++; }
+    }
+    if (!runs) return 0;
+    var colsInk = 0;
+    for (i = 0; i < T; i++) colsInk += colHas[i];
+    if (darkPix / runs > 5) return 0;                        // רצף אופקי ארוך = קו או כתם, לא אות
+    if (rowsInk < T * 0.22 || rowsInk > T * 0.88) return 0;   // אין דפוס / קו אנכי רצוף
+    if (colsInk < T * 0.35) return 0;                        // הדיו מרוכז בעמודה אחת
+    if (multiRows < rowsInk * 0.45) return 0;                // סימן אחד בשורה = קו, לא טקסט
+    return 1;
+  }
+  // מעבר ראשון: סף דיו מוחלט 34. בשמונה הצילומים האמיתיים נמדד 63-107
+  // באריחי הפנים, כלומר יש כאן מרווח של פי שניים לפני שדהייה נוגעת בו.
+  var textTiles = 0, kk;
+  for (kk = 0; kk < n; kk++) {
+    if (cand[kk] && gapOf[kk] >= 34 && looksPrinted(kk % nx, (kk / nx) | 0, thrOf[kk])) { mask[kk] = 1; textTiles++; }
+  }
+  // פחות מ-20 אריחי דפוס בכל הפריים: אין כאן תעודה. סירוב, לא ניחוש.
+  if (textTiles < 20) return null;
+
+  // ---- מהמסכה לגבולות ----
+  // פרופיל הספירה לכל ציר, ואז הריצה הרציפה בעלת המסה הגדולה ביותר.
+  // אליה מצורפת כל ריצה נוספת שצפיפותה לפחות רבע מצפיפות הגרעין — כך
+  // חוזרות פנימה שורת מספר החשבונית שמנותקת מהגוף (c06bbb23) וכותרת
+  // תחתונה בתחתית הדף (05da7569), ואילו ריצה דלילה כמו עמודת שריטות על
+  // מסילת מתכת (4bd948cd) נדחית.
+  function spanOf(counts, len) {
+    var nz = [], i;
+    for (i = 0; i < len; i++) if (counts[i] > 0) nz.push(counts[i]);
+    if (!nz.length) return null;
+    nz.sort(function (a, b) { return a - b; });
+    var peak = nz[Math.floor(nz.length * 0.90)];
+    var cut = Math.max(2, peak * 0.12);
+    var runs = [], cur = null, gap = 0;
+    for (i = 0; i < len; i++) {
+      if (counts[i] >= cut) { if (cur) { cur.hi = i; cur.mass += counts[i]; gap = 0; } else cur = { lo: i, hi: i, mass: counts[i] }; }
+      else if (cur) { gap++; if (gap > 2) { runs.push(cur); cur = null; gap = 0; } }
+    }
+    if (cur) runs.push(cur);
+    if (!runs.length) return null;
+    var core = runs[0];
+    for (i = 0; i < runs.length; i++) if (runs[i].mass > core.mass) core = runs[i];
+    var dens = core.mass / (core.hi - core.lo + 1);
+    var lo = core.lo, hi = core.hi, changed = true, r, dist;
+    while (changed) {
+      changed = false;
+      for (i = 0; i < runs.length; i++) {
+        r = runs[i];
+        if (r.hi >= lo && r.lo <= hi) continue;
+        if (r.mass < 5) continue;
+        if (r.mass / (r.hi - r.lo + 1) < dens * 0.25) continue;
+        dist = r.hi < lo ? lo - r.hi : r.lo - hi;
+        if (dist > 20) continue;                   // 20 אריחים = 320px בפרוקסי
+        if (r.lo < lo) lo = r.lo;
+        if (r.hi > hi) hi = r.hi;
+        changed = true;
+      }
+    }
+    return { lo: lo, hi: hi };
+  }
+  // שלוש איטרציות: כל ציר נמדד רק בתוך התחום שהציר השני כבר אישר, ולכן
+  // אריחי שווא מחוץ למלבן נושרים מהפרופיל במקום להרחיב אותו.
+  var cx = new Int32Array(nx), ry = new Int32Array(ny), sx = null, sy = null, jx, jy;
+  function solve(seedY) {
+    var ax = null, ay = seedY;
+    for (var q = 0; q < 3; q++) {
+      for (jx = 0; jx < nx; jx++) cx[jx] = 0;
+      for (jy = ay.lo; jy <= ay.hi; jy++) for (jx = 0; jx < nx; jx++) if (mask[jy * nx + jx]) cx[jx]++;
+      ax = spanOf(cx, nx); if (!ax) return null;
+      for (jy = 0; jy < ny; jy++) ry[jy] = 0;
+      for (jy = 0; jy < ny; jy++) for (jx = ax.lo; jx <= ax.hi; jx++) if (mask[jy * nx + jx]) ry[jy]++;
+      ay = spanOf(ry, ny); if (!ay) return null;
+    }
+    return { sx: ax, sy: ay };
+  }
+  var sol = solve({ lo: 0, hi: ny - 1 });
+  if (!sol) return null;
+  sx = sol.sx; sy = sol.sy;
+
+  // ---- מעבר שני: סף הדיו של המסמך עצמו ----
+  // הסף המוחלט 34 נגזר מקבלות בניגודיות רגילה. כשהדיו דוהה, האריחים
+  // הדלילים — כותרת, שורות סיכום — נופלים ראשונים, והמסגרת מתכווצת אל
+  // גוש הטקסט הצפוף ו**חותכת טקסט בלי להתריע**. זה נמדד: בהחלשת הדיו
+  // ל-50% מהניגודיות ב-70af7737 נחתך כל בלוק הסיכום התחתון.
+  // לכן הרף נקבע כאן מחדש לפי חציון הניגודיות שנמדדה במסמך הזה. בצילומים
+  // בריאים החציון הוא 86-107, 0.45 ממנו הוא 39-48 — גבוה מ-34, כלומר
+  // המעבר הזה אינו משנה דבר. במסמך דהוי הרף יורד איתו.
+  var gaps = [];
+  for (kk = 0; kk < n; kk++) if (mask[kk]) gaps.push(gapOf[kk]);
+  gaps.sort(function (a, b) { return a - b; });
+  var relaxed = Math.max(14, gaps[gaps.length >> 1] * 0.45);
+  if (relaxed < 34) {
+    // הרחבה מותרת רק בתוך עמודת המסמך שכבר נמצאה (בתוספת שני אריחים),
+    // אחרת סף נמוך היה מזמין רעש רקע פנימה.
+    var lox = sx.lo > 2 ? sx.lo - 2 : 0, hix = sx.hi + 2 < nx ? sx.hi + 2 : nx - 1;
+    var added = 0;
+    for (jy = 0; jy < ny; jy++) {
+      for (jx = lox; jx <= hix; jx++) {
+        kk = jy * nx + jx;
+        if (mask[kk] || !cand[kk] || gapOf[kk] < relaxed) continue;
+        if (looksPrinted(jx, jy, thrOf[kk])) { mask[kk] = 1; added++; }
+      }
+    }
+    if (added) { sol = solve(sy); if (sol) { sx = sol.sx; sy = sol.sy; } }
+  }
+
+  // שוליים של אריח וחצי. אריח מסומן מבטיח דיו בתוכו, אבל אריח שכן שנפסל
+  // עדיין רשאי להחזיק עד 2.5% דיו — סוף שורה, ספרה בודדת. 48 פיקסלים הם
+  // מה שהחזיר את "0086832700" בקצה השמאלי של 8c444cb0.
+  var pad = 48;
+  var bx0 = sx.lo * S - pad, by0 = sy.lo * S - pad;
+  var bx1 = sx.hi * S + T + pad, by1 = sy.hi * S + T + pad;
+  if (bx0 < 0) bx0 = 0; if (by0 < 0) by0 = 0;
+  if (bx1 > pw) bx1 = pw; if (by1 > ph) by1 = ph;
+  return { x: bx0, y: by0, width: bx1 - bx0, height: by1 - by0, tiles: textTiles };
+}
+function aiTextCropBox(luma, w, h) {
+  const S = Math.max(w, h) / 1500;
+  const BAND  = Math.max(6,  Math.round(12 * S));
+  const STEP  = Math.max(3,  Math.round(6  * S));
+  const BLOCK = Math.max(48, Math.round(128 * S));
+  const BSTEP = Math.max(12, Math.round(32 * S));
+  const PMIN  = Math.max(5,  Math.round(9  * S));
+  const PMAX  = Math.max(12, Math.round(46 * S));
+  if (w < BAND * 8 || h < BLOCK * 2) return null;
+  const nb = Math.floor((w - BAND) / STEP) + 1;
+  const nk = Math.floor((h - BLOCK) / BSTEP) + 1;
+  if (nb < 8 || nk < 3) return null;
+
+  // ---- 1. פרופילים אנכיים לפסי עמודות ----
+  // ממוצע על BAND עמודות מדלל נקודה בודדת (נקבוביות מחצלת) ומשמר שורת
+  // דפוס, שהיא מבנה אופקי ארוך. פס צר מספיק כדי שנטייה של 3 מעלות תזיז
+  // את השורות בפחות מפיקסל בתוך הפס.
+  const prof = new Float32Array(nb * h);
+  {
+    const acc = new Float64Array(w + 1);
+    for (let y = 0; y < h; y++) {
+      const row = y * w; acc[0] = 0;
+      for (let x = 0; x < w; x++) acc[x + 1] = acc[x] + luma[row + x];
+      for (let b = 0; b < nb; b++) { const x0 = b * STEP; prof[b * h + y] = (acc[x0 + BAND] - acc[x0]) / BAND; }
+    }
+  }
+  const sm = new Float64Array(BLOCK), srt = new Float64Array(BLOCK), z = new Float64Array(BLOCK);
+  function cell(b, k) {
+    const base = b * h + k * BSTEP;
+    for (let i = 0; i < BLOCK; i++) {
+      const a = prof[base + (i > 0 ? i - 1 : 0)], c0 = prof[base + i], c1 = prof[base + (i < BLOCK - 1 ? i + 1 : BLOCK - 1)];
+      sm[i] = (a + 2 * c0 + c1) / 4;
+    }
+    srt.set(sm); srt.sort();
+    const W = srt[Math.floor(BLOCK * 0.92)], amp = W - srt[Math.floor(BLOCK * 0.04)];
+    // z = "עומק דיו": כמה כל שורה כהה מתחת ללובן המקומי. על נייר מודפס
+    // זו רכבת פולסים צרים; על מחצלת מנוקבת (נקודות בהירות על רקע כהה)
+    // כמעט כל שורה כהה, וזה מה ש-duty מודד.
+    let dmax = 0, dsum = 0;
+    for (let i = 0; i < BLOCK; i++) { const v = W - sm[i]; z[i] = v > 0 ? v : 0; if (z[i] > dmax) dmax = z[i]; dsum += z[i]; }
+    if (dmax < 1) return null;
+    let duty = 0; for (let i = 0; i < BLOCK; i++) if (z[i] > 0.30 * dmax) duty++;
+    duty /= BLOCK;
+    const mu = dsum / BLOCK; let e0 = 0;
+    for (let i = 0; i < BLOCK; i++) { z[i] -= mu; e0 += z[i] * z[i]; }
+    if (e0 <= 0) return null;
+    return { W, amp, duty, e0 };
+  }
+  // DUTYCUT: איזה חלק מהשורות בתא מותר שיהיו "דיו". דפוס אמיתי: 0.09
+  // באחוזון 10 ו-0.52 באחוזון 75. מחצלת מנוקבת הפוכה בקוטביות, ולכן
+  // חציון ה-duty שלה 0.64. 0.55 מכניס 406 תאי טקסט אמיתיים לעומת 282
+  // ב-0.45, ומשלם ב-8 תאי שווא מתוך 5644 תאי רקע — כולם מבודדים
+  // ונופלים באשכול של שלב 4. הסצנות הסינתטיות הן גל מרובע בדיוק 50%,
+  // ולכן 0.45 פסל אותן לגמרי.
+  const DUTYCUT = 0.55;
+  const corr = (lag) => { let c = 0; for (let i = 0; i + lag < BLOCK; i++) c += z[i] * z[i + lag]; return c; };
+
+  // ---- 2. מרווח שורות דומיננטי ----
+  // אוטוקורלציה מצטברת על רשת דלילה. הצבירה מנקה רעש: תא בודד עלול
+  // להצביע על ההרמוניה 2P, אבל בסכום הפסגה ב-P מופיעה בכל התאים.
+  const agg = new Float64Array(PMAX + 1), r = new Float64Array(PMAX + 1);
+  let aggN = 0;
+  for (let b = 0; b < nb; b += 3) for (let k = 0; k < nk; k += 2) {
+    const c = cell(b, k); if (!c || c.amp < 12 || c.duty > DUTYCUT) continue;
+    let rmax = -1;
+    for (let lag = 2; lag <= PMAX; lag++) { r[lag] = corr(lag) / c.e0; if (lag >= PMIN && r[lag] > rmax) rmax = r[lag]; }
+    if (rmax < 0.35) continue;
+    for (let lag = 2; lag <= PMAX; lag++) agg[lag] += r[lag];
+    aggN++;
+  }
+  if (aggN < 5) return { reason: 'no_periodic_cells' };
+  let amax = -1;
+  for (let lag = PMIN; lag <= PMAX; lag++) if (agg[lag] / aggN > amax) amax = agg[lag] / aggN;
+  // היסוד ולא ההרמוניה: הפסגה המקומית הראשונה שמגיעה ל-55% מהמקסימום.
+  let P = 0;
+  for (let lag = PMIN + 1; lag < PMAX; lag++) {
+    const v = agg[lag] / aggN;
+    if (v >= 0.55 * amax && v >= agg[lag - 1] / aggN && v >= agg[lag + 1] / aggN) { P = lag; break; }
+  }
+  if (!P) return { reason: 'no_pitch' };
+  const HP = Math.max(2, Math.round(P / 2));
+
+  // ---- 3. ציון עדין במרווח שנמצא ----
+  // בדיקת השהיה אחת רגישה בהרבה מחיפוש מקסימום, והיא עדיין ספציפית:
+  // הרקע אינו חולק את מרווח השורות של המסמך. הפרש פסגה-שפל (rp - rh)
+  // דורש תנודה אמיתית ולא רק אות שמשתנה לאט.
+  const grid = new Uint8Array(nb * nk), gW = new Float32Array(nb * nk), gA = new Float32Array(nb * nk);
+  for (let b = 0; b < nb; b++) for (let k = 0; k < nk; k++) {
+    const c = cell(b, k); if (!c || c.amp < 10 || c.duty > DUTYCUT) continue;
+    const rp = corr(P) / c.e0, rh = corr(HP) / c.e0;
+    if (rp - rh >= 0.45 && rp > 0.15) { const i = b * nk + k; grid[i] = 1; gW[i] = c.W; gA[i] = c.amp; }
+  }
+
+  // ---- 4. אשכול לפי מרווחים: מסירים פסים מבודדים (נקודה על מחצלת) ----
+  const colHit = new Int32Array(nb), rowHit = new Int32Array(nk);
+  let total = 0;
+  for (let b = 0; b < nb; b++) for (let k = 0; k < nk; k++) if (grid[b * nk + k]) { colHit[b]++; rowHit[k]++; total++; }
+  if (total < 8) return { reason: 'few_text_cells' };
+  // GAPB: פער של 90px בפרוקסי — רחב יותר מכל רווח בין עמודות במסמך,
+  // צר יותר מהמרחק בין המסמך לכתם מבודד ברקע (נמדד: 200px+).
+  const GAPB = Math.max(4, Math.round(90 * S / STEP));
+  const GAPK = Math.max(2, Math.round(260 * S / BSTEP));
+  function cluster(hits, n, gap) {
+    let best = null, cur = null, last = -1e9;
+    for (let i = 0; i < n; i++) {
+      if (!hits[i]) continue;
+      if (i - last > gap) { if (cur && (!best || cur.n > best.n)) best = cur; cur = { lo: i, hi: i, n: 0 }; }
+      cur.hi = i; cur.n += hits[i]; last = i;
+    }
+    if (cur && (!best || cur.n > best.n)) best = cur;
+    return best;
+  }
+  const cb = cluster(colHit, nb, GAPB), ck = cluster(rowHit, nk, GAPK);
+  if (!cb || !ck) return { reason: 'few_text_cells' };
+  const core = {
+    x0: cb.lo * STEP, x1: Math.min(w, cb.hi * STEP + BAND),
+    y0: ck.lo * BSTEP, y1: Math.min(h, ck.hi * BSTEP + BLOCK),
+  };
+  // לובן הנייר ועומק הדיו — נמדדים אך ורק על תאים שעברו את מבחן הטקסט.
+  const Ws = [], As = [];
+  for (let b = cb.lo; b <= cb.hi; b++) for (let k = ck.lo; k <= ck.hi; k++) {
+    const i = b * nk + k; if (grid[i]) { Ws.push(gW[i]); As.push(gA[i]); }
+  }
+  // שער גודל האשכול. נמדד: מסמך אמיתי נותן 36..259 תאי טקסט הפרושים על
+  // 20..101 פסי עמודות ו-21..42 בלוקי שורות. מרקם רקע שהצליח לייצר
+  // מחזוריות מזויפת (מחצלת כסופה מרוצפת, בניסוי אדוורסרי עם PMIN=12)
+  // נתן 11 תאים על 3 בלוקי שורות בלבד. הפער הוא פי 1.8 בתאים ופי 7
+  // בגובה, ולכן השער אינו כיול עדין.
+  if (Ws.length < 20 || (ck.hi - ck.lo + 1) < 6 || (cb.hi - cb.lo + 1) < 6) return { reason: 'few_text_cells' };
+  Ws.sort((a, b2) => a - b2); As.sort((a, b2) => a - b2);
+  const W0 = Ws[Ws.length >> 1], A0 = As[As.length >> 1];
+
+  // ---- 5. הציר האופקי: נעילת פאזה על סורג השורות של המסמך עצמו.
+  // כאן אין בהירות בכלל. שורות הדפוס יושבות באותם y לאורך כל רוחב
+  // המסמך, ולכן פרופיל הדיו של פס ששייך למסמך מתואם עם "מסרק" הייחוס
+  // שנמדד בגרעין. מחצלת, מסילה ושריטות אינן מתואמות איתו — לא משנה כמה
+  // הן בהירות — וצל קצה הנייר הוא קבוע, ולכן אחרי חיסור הממוצע התיאום
+  // שלו אפס.
+  const cy0 = core.y0, cy1 = core.y1, CH = cy1 - cy0;
+  const K = Math.max(3, Math.round(2.5 * P) | 1), KH = K >> 1;
+  const dt = new Float32Array(nb * CH);
+  for (let b = 0; b < nb; b++) {
+    const base = b * h, o = b * CH;
+    let run = 0;
+    for (let i2 = 0; i2 < K && i2 < CH; i2++) run += prof[base + cy0 + i2];
+    for (let y = 0; y < CH; y++) {
+      const lo = y - KH, hi = y + KH;
+      if (lo > 0 && hi < CH) run += prof[base + cy0 + hi] - prof[base + cy0 + lo - 1];
+      const avg = run / Math.min(K, CH);  // חלון קבוע; בקצוות הוא נצמד
+      const v = avg - prof[base + cy0 + y];
+      dt[o + y] = v > 0 ? v : 0;
+    }
+  }
+  function norm(o) { let mu = 0; for (let y = 0; y < CH; y++) mu += dt[o + y]; mu /= CH;
+    let e = 0; for (let y = 0; y < CH; y++) { const v = dt[o + y] - mu; e += v * v; } return { mu, e: Math.sqrt(e) }; }
+  const ref = new Float64Array(CH);
+  let nref = 0;
+  for (let b = cb.lo; b <= cb.hi; b++) {
+    let any = 0; for (let k = ck.lo; k <= ck.hi; k++) if (grid[b * nk + k]) any = 1;
+    if (!any) continue;
+    const { mu, e } = norm(b * CH); if (e <= 0) continue;
+    for (let y = 0; y < CH; y++) ref[y] += (dt[b * CH + y] - mu) / e;
+    nref++;
+  }
+  if (nref < 2) return { reason: 'few_text_cells' };
+  let rmu = 0; for (let y = 0; y < CH; y++) rmu += ref[y]; rmu /= CH;
+  let re = 0; for (let y = 0; y < CH; y++) { ref[y] -= rmu; re += ref[y] * ref[y]; } re = Math.sqrt(re);
+  if (re <= 0) return { reason: 'few_text_cells' };
+  // SH: חלון ההסטה המותר בין פס לשכנו. מסמך נטוי מזיז את השורות בהדרגה
+  // (3 מעלות על 600px = 31px), ולכן ההסטה נצברת פס-אחר-פס ואינה מוגבלת
+  // גלובלית — כך נסבלת נטייה שרירותית בלי לוותר על הספציפיות.
+  const SH = 2;
+  function bandScore(b, shift) {
+    const o = b * CH; const { mu, e } = norm(o); if (e <= 0) return null;
+    let best = -1, bs = shift;
+    for (let sVal = shift - SH; sVal <= shift + SH; sVal++) {
+      let c = 0;
+      const y0 = Math.max(0, -sVal), y1 = Math.min(CH, CH - sVal);
+      for (let y = y0; y < y1; y++) c += (dt[o + y] - mu) * ref[y + sVal];
+      const rr = c / (e * re) * (CH / Math.max(1, y1 - y0));
+      if (rr > best) { best = rr; bs = sVal; }
+    }
+    return { r: best, shift: bs };
+  }
+  // CORRCUT: 0.18. נמדד — פסי מסמך: 0.25..0.9; מחצלת, מסילה וצל קצה: <0.10.
+  const CORRCUT = 0.18;
+  const bmid = (cb.lo + cb.hi) >> 1;
+  let tb0 = cb.lo, tb1 = cb.hi, sh = 0, miss = 0;
+  for (let b = bmid; b >= 0; b--) { const r2 = bandScore(b, sh);
+    if (r2 && r2.r >= CORRCUT) { tb0 = b; sh = r2.shift; miss = 0; } else if (++miss > 6) break; }
+  sh = 0; miss = 0;
+  for (let b = bmid; b < nb; b++) { const r2 = bandScore(b, sh);
+    if (r2 && r2.r >= CORRCUT) { tb1 = b; sh = r2.shift; miss = 0; } else if (++miss > 6) break; }
+  const px0 = tb0 * STEP, px1 = Math.min(w, tb1 * STEP + BAND);
+
+  // ---- 6. גבול הנייר — גבול חיצוני בלבד, לא תוצאה. הוא קיים כדי
+  // שגלאי הדיו בשלב 7 לא ייצא אל הרקע, ששם שריטות על מתכת נראות כמו
+  // דיו. זה המקום היחיד שבו בהירות משמשת, והיא מכוילת ללובן שנמדד על
+  // תאי טקסט מאומתים — לא סף גלובלי. הרקע הבהיר ביותר שנמדד בשמונת
+  // הצילומים הוא 0.70 מלובן הגרעין, ולכן 0.78 פוסל אותו.
+  const REL = 0.78, ADAPT = 0.02, HYST = Math.max(4, Math.round(8 * S));
+  const med = (arr) => { arr.sort((a, b2) => a - b2); return arr[arr.length >> 1]; };
+  const colMed = (x) => { const v = []; for (let y = cy0; y < cy1; y += 3) v.push(luma[y * w + x]); return med(v); };
+  function growFixed(from, to, sample) {
+    const dir = to > from ? 1 : -1; let edge = from, miss2 = 0;
+    for (let i2 = from; dir > 0 ? i2 < to : i2 >= to; i2 += dir) {
+      if (sample(i2) >= REL * W0) { edge = i2; miss2 = 0; } else if (++miss2 > HYST) break;
+    }
+    return edge;
+  }
+  const qx0 = growFixed(px0 - 1, -1, colMed), qx1 = growFixed(px1, w, colMed) + 1;
+  // הציר האנכי נמדד על החצי האמצעי של הנייר: מסמך נטוי מסיט את שוליו.
+  // העוגן כאן **נודד**, כי קבלה ארוכה מקבלת פחות אור בקצה הרחוק
+  // (70af7737: 181 בגרעין, 139 בתחתית — ירידה הדרגתית), בעוד שקצה דף
+  // הוא מדרגה (05da7569: 159→70 בתוך 25 פיקסלים). רצפת 0.85 מונעת
+  // מהעוגן להיסחף על פני מדרון ארוך אל תוך הרקע. על הציר האופקי עוגן
+  // נודד נסחף לרוחב כל הפריים (נמדד), ולכן שם הסף קבוע.
+  const mx0 = qx0 + ((qx1 - qx0) >> 2), mx1 = qx1 - ((qx1 - qx0) >> 2);
+  const rowMed = (y) => { const v = []; const row = y * w; for (let x = mx0; x < mx1; x += 3) v.push(luma[row + x]); return med(v); };
+  function growV(from, to) {
+    const dir = to > from ? 1 : -1, floor = 0.85 * W0;
+    let refv = W0, edge = from, miss2 = 0;
+    for (let i2 = from; dir > 0 ? i2 < to : i2 >= to; i2 += dir) {
+      const m = rowMed(i2);
+      if (m >= REL * refv) { edge = i2; miss2 = 0; refv += (m - refv) * ADAPT;
+        if (refv > W0) refv = W0; else if (refv < floor) refv = floor; }
+      else if (++miss2 > HYST) break;
+    }
+    return edge;
+  }
+  const qy0 = growV(cy0 - 1, -1), qy1 = growV(cy1, h) + 1;
+  if (qx1 - qx0 < 24 || qy1 - qy0 < 24) return { reason: 'tiny' };
+
+  // ---- 7. דיו מכויל, בתוך הנייר בלבד. גלאי הדיו הנאיבי נכשל כי רץ על
+  // כל הפריים; כאן הוא רץ רק בתוך תיבה שכבר אומתה בטקסט, ושם אין
+  // שריטות. הלובן נמדד באריחי 24px, כך שמדרון תאורה או צל קמט אינם
+  // נספרים כדיו, והסף הוא 0.40 מעומק הדיו שנמדד בגרעין — לא מספר קבוע.
+  const TS = Math.max(8, Math.round(24 * S));
+  const tnx = Math.ceil((qx1 - qx0) / TS), tny = Math.ceil((qy1 - qy0) / TS);
+  const tileW = new Float32Array(tnx * tny);
+  {
+    const hist = new Int32Array(256);
+    for (let ty = 0; ty < tny; ty++) for (let tx = 0; tx < tnx; tx++) {
+      hist.fill(0);
+      const y0 = qy0 + ty * TS, y1 = Math.min(qy1, y0 + TS);
+      const x0 = qx0 + tx * TS, x1 = Math.min(qx1, x0 + TS);
+      let n = 0;
+      for (let y = y0; y < y1; y++) { const row = y * w; for (let x = x0; x < x1; x++) { hist[luma[row + x]]++; n++; } }
+      let acc = 0, v = 255; const want = n * 0.90;
+      for (let i2 = 0; i2 < 256; i2++) { acc += hist[i2]; if (acc >= want) { v = i2; break; } }
+      tileW[ty * tnx + tx] = v;
+    }
+  }
+  const localW = (x, y) => {
+    const fx = (x - qx0) / TS - 0.5, fy = (y - qy0) / TS - 0.5;
+    const ix = Math.max(0, Math.min(tnx - 1, Math.floor(fx))), iy = Math.max(0, Math.min(tny - 1, Math.floor(fy)));
+    const jx = Math.min(tnx - 1, ix + 1), jy = Math.min(tny - 1, iy + 1);
+    const ax = Math.max(0, Math.min(1, fx - ix)), ay = Math.max(0, Math.min(1, fy - iy));
+    const a = tileW[iy * tnx + ix], b2 = tileW[iy * tnx + jx], c = tileW[jy * tnx + ix], d = tileW[jy * tnx + jx];
+    return (a * (1 - ax) + b2 * ax) * (1 - ay) + (c * (1 - ax) + d * ax) * ay;
+  };
+  const T = Math.max(14, 0.40 * A0);
+  const isInk = (x, y) => luma[y * w + x] < localW(x, y) - T;
+
+  // 7א. היקף אנכי: שורות דיו בתוך עמודות הטקסט שננעלו בשלב 5.
+  const minRow = Math.max(4, Math.round(0.015 * (px1 - px0)));
+  // GAPY: פער אנכי מותר. תעודת A4 מכילה 255px ריקים בין פסקת הסיום
+  // לשורת הכותרת התחתונה של הדפדפן — שתיהן טקסט מודפס. 0.18 נתן 246px
+  // והספיק בקושי; 0.22 משאיר מרווח. הפער חסום ממילא בתיבת הנייר.
+  const GAPY = Math.max(4 * P, Math.round(0.22 * (qy1 - qy0)));
+  const ymid = (cy0 + cy1) >> 1;
+  let ty0 = ymid, ty1 = ymid, miss3 = 0;
+  const rowInk = (y) => { let n = 0; for (let x = px0; x < px1; x++) if (isInk(x, y)) n++; return n; };
+  for (let y = ymid; y >= qy0; y--) { if (rowInk(y) >= minRow) { ty0 = y; miss3 = 0; } else if (++miss3 > GAPY) break; }
+  miss3 = 0;
+  for (let y = ymid + 1; y < qy1; y++) { if (rowInk(y) >= minRow) { ty1 = y; miss3 = 0; } else if (++miss3 > GAPY) break; }
+
+  // 7ב. הרחבה אופקית: טקסט שאינו מחזורי — לוגו, כותרת, שורת חתימה —
+  // יושב מחוץ לעמודות שנעל שלב 5. הוא נאסף עכשיו, אבל רק בהמשכיות
+  // מהן: פער ריק רחב עוצר, וזה מה שמפריד בין שולי המסמך לרקע.
+  // DUTYMAX פוסל עמודה שכמעט כולה "דיו" — כך נראה צל קצה הנייר (נמדד
+  // 0.49..0.71), ולא שום עמודת טקסט (הצפופה ביותר שנמדדה: 0.35).
+  const TH2 = ty1 - ty0 + 1;
+  // 0.035: בשולי נייר ריקים נמדדו 0..2.4% פיקסלי "דיו" (רעש JPEG מתחת
+  // ללובן האריח), ובעמודת טקסט 7..20%. 3.5% יושב בין השניים.
+  const minCol = Math.max(6, Math.round(0.035 * TH2)), DUTYMAX = 0.45 * TH2;
+  const GAPX = Math.max(2 * P, Math.round(0.035 * (qx1 - qx0)));
+  const colInk = (x) => { let n = 0; for (let y = ty0; y <= ty1; y++) if (isInk(x, y)) n++; return n; };
+  let ex0 = px0, ex1 = px1, miss4 = 0;
+  for (let x = px0 - 1; x >= qx0; x--) { const n = colInk(x);
+    if (n >= minCol && n <= DUTYMAX) { ex0 = x; miss4 = 0; } else if (++miss4 > GAPX) break; }
+  miss4 = 0;
+  for (let x = px1; x < qx1; x++) { const n = colInk(x);
+    if (n >= minCol && n <= DUTYMAX) { ex1 = x + 1; miss4 = 0; } else if (++miss4 > GAPX) break; }
+
+  // שוליים: שני מחזורי שורות. נמדד — נעילת הפאזה מאתרת את עמודת הטקסט
+  // הקיצונית אך מפסידה עד 25px מקצה הספרה הראשונה, ו-2P מכסה זאת.
+  const pad = Math.max(2 * P, Math.round(0.012 * Math.max(w, h)));
+  // חריגה מתיבת הנייר מותרת רק בצד שבו הדיו הגיע עד גבולה — שם יש עדות
+  // שהטקסט נמשך. תיבת הנייר היא מלבן ישר ומסמך נטוי מוציא את פינותיו
+  // ממנה: ב-05da7569 תאריך ההדפסה בפינה הימנית-תחתונה נחתך בדיוק כך.
+  const fx0 = Math.max(ex0 <= qx0 ? qx0 - pad : qx0, ex0 - pad);
+  const fx1 = Math.min(ex1 >= qx1 ? qx1 + pad : qx1, ex1 + pad);
+  const fy0 = Math.max(ty0 <= qy0 ? qy0 - pad : qy0, ty0 - pad);
+  const fy1 = Math.min(ty1 + 1 >= qy1 ? qy1 + pad : qy1, ty1 + 1 + pad);
+  const bx = Math.max(0, fx0), by = Math.max(0, fy0);
+  const box = { x: bx, y: by, width: Math.min(w, fx1) - bx, height: Math.min(h, fy1) - by };
+  return { box, paper: { x: qx0, y: qy0, width: qx1 - qx0, height: qy1 - qy0 },
+           core, P, W0, A0, cells: total, reason: 'text_anchored' };
+}
+// v181: זיהוי הנייר עבר מבהירות+חלקות לעוגן טקסט.
+//
+// מה שנכשל: הגלאי הקודם חיפש "הרצף הארוך ביותר של פסים בהירים וחלקים".
+// על מחצלת כסופה הרקע בהיר מנייר, חלק מנייר וגדול מנייר, ולכן הגרעין ננעל
+// עליו. מדידה: על אותו צילום חמישה גרעיני הקטנה נתנו חמש תשובות שונות,
+// פיזור 699px, ואף אחת לא הייתה הקבלה. שלושה כיולי סף נפלו באותו אופן.
+//
+// מה שעובד: טקסט. אריח שחוצה דפוס נותן היסטוגרמת לומה דו-שיאית — שיא
+// נייר ושיא דיו עם עמק ביניהם. מחצלת, מסילה, דלפק ובד נותנים שיא אחד,
+// בהירים ככל שיהיו. זה מה ש-aiTextAnchorBox מודד.
+//
+// ושער הסכמה: aiTextCropBox מודד את אותו דבר בדרך אחרת לגמרי — מחזוריות
+// של שורות דפוס. כששני העוגנים אינם מסכימים, לא חותכים. במדידה על 88
+// הרצות עם דיו מדעיך, השער ביטל את מחלקת הכשל היחידה שנותרה: מסגרת
+// שקורסת לחצי תעודה ועוברת את כל שערי הצורה בלי שאיש יידע. על שמונת
+// הצילומים האמיתיים ההסכמה היא 0.89..0.98 — מרווח של 0.14 מהסף.
+//
+// תנאי מוקדם: img חייב להיות זקוף. עוגן המחזוריות סורק שורות דפוס
+// אופקיות, ולכן מסמך מסובב 90° אינו נותן לו פסגה. זה אינו כשל שקט —
+// העוגן הדו-שיאי כן מוצא את המסגרת, השניים אינם מסכימים, ושער ההסכמה
+// מחזיר no_text ומשאיר פריים מלא. הנרמול מגיע מ-aiLoadImage (ראה שם).
 function aiDetectPaperRegion(img, sourceWidth, sourceHeight, report) {
   const proxyScale = Math.min(1, AI_CROP_PROXY_SIDE / Math.max(sourceWidth, sourceHeight));
   const pw = Math.max(1, Math.round(sourceWidth * proxyScale));
@@ -9673,69 +10141,41 @@ function aiDetectPaperRegion(img, sourceWidth, sourceHeight, report) {
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, pw, ph);
   ctx.drawImage(img, 0, 0, pw, ph);
   const pixels = ctx.getImageData(0, 0, pw, ph);
-  // צילום לומה לפני ההשטחה: מדד החדות חייב למדוד את הפיקסלים כפי שיצאו
-  // מהמצלמה. Uint8Array בודד (1.7MB בפרוקסי 1500px) ולא עותק RGBA מלא.
   const luma = new Uint8Array(pw * ph);
   for (let i = 0, p = 0; p < luma.length; p++, i += 4) {
     luma[p] = ((pixels.data[i] * 299 + pixels.data[i + 1] * 587 + pixels.data[i + 2] * 114) / 1000) | 0;
   }
-  const analysis = {};
-  // ההשטחה משנה את חוצץ הפרוקסי הזמני בלבד. אין putImageData, ולכן אף
-  // פיקסל שנשלח למודל אינו נוגע בה — הזיהוי לא משנה את התמונה.
-  aiFlattenIllumination(pixels.data, pw, ph, analysis);
-  let box = aiComputePaperCropBox(analysis, pw, ph, report);
-  // ההידוק אינו רשאי להמציא נייר: הוא רץ רק כשמנוע האריחים כבר מצא מסגרת,
-  // או כשהוא ויתר עם box_97 — שפירושו "יש נייר, הוא פשוט ממלא את הפריים",
-  // וזה בדיוק המצב שבו רקע בהיר נבלע. סירוב few_seeds פירושו "לא נמצא
-  // נייר", ושם ההידוק היה נועל על כתם בהיר ובודה מסגרת.
-  if (box || report.reason === 'box_97') {
-    const flat = new Uint8Array(pw * ph);
-    for (let i = 0, p = 0; p < flat.length; p++, i += 4) flat[p] = pixels.data[i];
-    const spanX = aiPaperSpan(flat, luma, pw, ph, 'x');
-    const spanY = aiPaperSpan(flat, luma, pw, ph, 'y');
-    if (spanX && spanY) {
-      const tight = { x: spanX.lo, y: spanY.lo, width: spanX.hi - spanX.lo + 1, height: spanY.hi - spanY.lo + 1 };
-      const area = (tight.width * tight.height) / (pw * ph);
-      // ההידוק רשאי רק **להדק** את מה שמנוע האריחים מצא, לעולם לא להזיז
-      // את המסגרת למקום אחר. בלי הבדיקה הזו, בצילום על מחצלת כסופה הגרעין
-      // ננעל על אזור חלק ובהיר של המחצלת — ארוך יותר מהקבלה — והמסגרת
-      // יצאה בקצה הפריים עם אפס טקסט בתוכה. שער השטח לבדו לא תפס את זה,
-      // כי המסגרת השגויה הייתה קטנה וזה נראה לו כמו הידוק מוצלח.
-      const inside = box
-        && tight.x >= box.x - 2 && tight.y >= box.y - 2
-        && tight.x + tight.width <= box.x + box.width + 2
-        && tight.y + tight.height <= box.y + box.height + 2;
-      if (area >= 0.10 && inside) {
-        box = tight;
-        report.reason = 'cropped';
-      }
-    }
+  // אין השטחת תאורה כאן. הדו-שיאיות נמדדת בתוך אריח 32x32 ומדרון תאורה
+  // על פני אריח כזה זניח, ואילו ההשטחה מושכת רקע בהיר אל רמת הנייר
+  // ומוחקת בדיוק את ההבדל שצריך למדוד.
+  const boxC = aiTextAnchorBox(luma, pw, ph);
+  const resultA = aiTextCropBox(luma, pw, ph);
+  const boxA = resultA && resultA.box ? resultA.box : null;
+  if (!boxC || !boxA) {
+    report.reason = 'no_text';
+    report.quality = aiMeasurePageQuality(luma, pw, ph, boxC || boxA || null);
+    return null;
   }
+  const ix = Math.max(0, Math.min(boxA.x + boxA.width, boxC.x + boxC.width) - Math.max(boxA.x, boxC.x));
+  const iy = Math.max(0, Math.min(boxA.y + boxA.height, boxC.y + boxC.height) - Math.max(boxA.y, boxC.y));
+  const inter = ix * iy;
+  const union = boxA.width * boxA.height + boxC.width * boxC.height - inter;
+  if (!union || inter / union < 0.75) {
+    report.reason = 'anchors_disagree';
+    report.value = Math.round(100 * (union ? inter / union : 0));
+    report.quality = aiMeasurePageQuality(luma, pw, ph, boxC);
+    return null;
+  }
+  const box = boxC;
   report.quality = aiMeasurePageQuality(luma, pw, ph, box);
-  if (!box) return null;
-  // שוליים 2.5% מעבר למה שזוהה: עיגול לאריח או צל על הקצה לא יוכלו
-  // להפיל שורת טקסט שיושבת בשולי הדף.
-  const pad = Math.round(0.025 * Math.max(box.width, box.height));
-  const x0 = Math.max(0, box.x - pad), y0 = Math.max(0, box.y - pad);
-  const x1 = Math.min(pw, box.x + box.width + pad), y1 = Math.min(ph, box.y + box.height + pad);
+  const x0 = box.x, y0 = box.y, x1 = box.x + box.width, y1 = box.y + box.height;
   const w = x1 - x0, h = y1 - y0;
   const areaFraction = (w * h) / (pw * ph);
   const aspect = w / Math.max(1, h);
   const edges = (x0 <= 1 ? 1 : 0) + (y0 <= 1 ? 1 : 0) + (x1 >= pw - 1 ? 1 : 0) + (y1 >= ph - 1 ? 1 : 0);
-  // 0.12 ולא 0.30: תעודה שתופסת רבע מהפריים היא בדיוק המקרה שהחיתוך
-  // נועד לו, ופסילתה מוותרת על הרווח הגדול ביותר. מה שמגן מפני חיתוך
-  // אל תוך כתם בהיר הוא שער הזרעים שמעליו, לא שער השטח.
-  // 0.12: ההידוק לפי פרופיל מדויק על צילומים אמיתיים, אבל בסצנה שבה הנייר
-  // תופס 12% מהפריים הוא חתך לתוך הדף ואיבד 70,110 פיקסלי דיו. השער הזה
-  // הוא מה שעצר את זה, ולכן הוא נשאר: עדיף לא לחתוך מאשר לחתוך שורת מוצר.
   if (areaFraction < 0.12) { report.reason = 'too_small'; report.value = Math.round(areaFraction * 100); return null; }
   if (areaFraction > 0.97) { report.reason = 'box_97'; report.value = Math.round(areaFraction * 100); return null; }
-  // 0.15..6.5 ולא 0.3..3.4: קבלה תרמית ארוכה היא לגיטימית ביחס 1:5 ואף צר
-  // מזה, והשער הקודם פסל אותה. הוא נבנה להגן מפני רצועה צרה ובהירה כמו
-  // מסילת מתכת — ואת זה עושה עכשיו קריטריון החלקות בגרעין של aiPaperSpan.
   if (aspect < 0.15 || aspect > 6.5) { report.reason = 'aspect'; report.value = Math.round(aspect * 100) / 100; return null; }
-  // נגיעה בשלושה קצוות ומעלה: הנייר חורג מהפריים, ומה שמחוץ לתמונה חסר
-  // ממילא. חיתוך כזה רק יוריד עוד טקסט.
   if (edges >= 3) { report.reason = 'overflow'; report.value = edges; return null; }
   const back = 1 / proxyScale;
   const region = {
@@ -9749,7 +10189,6 @@ function aiDetectPaperRegion(img, sourceWidth, sourceHeight, report) {
   if (region.width < 64 || region.height < 64) { report.reason = 'tiny'; return null; }
   report.reason = 'cropped';
   report.value = Math.round(100 * (1 - areaFraction));
-  // ארבעה מספרים מנורמלים למסך האישור. לא נשמרת תמונה נוספת.
   report.kept = { x: x0 / pw, y: y0 / ph, w: w / pw, h: h / ph };
   return region;
 }
