@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v352 חיתוך אגרסיבי לפי פרופיל</title>
+    <title>הזמנות יטבתה - v353 עצירת צמיחה בחספוס מתמשך</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v352 חיתוך אגרסיבי לפי פרופיל</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v353 עצירת צמיחה בחספוס מתמשך</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -9624,9 +9624,25 @@ function aiPaperSpan(bright, rough, width, height, axis) {
   const lo = paper * 0.80, hi = paper * 1.12;
   // הצמיחה רק מרחיבה את הגרעין ולעולם אינה מכווצת אותו: הגרעין כבר עבר
   // את מבחן הבהירות והחלקות, ואסור שמדרון תאורה יוריד ממנו.
-  let a = core.lo, b = core.hi;
-  while (a > 0 && rawP85[a - 1] >= lo && rawP85[a - 1] <= hi) a--;
-  while (b < n - 1 && rawP85[b + 1] >= lo && rawP85[b + 1] <= hi) b++;
+  //
+  // חספוס אינו פוסל פס בצמיחה, אבל ריצה מחוספסת ארוכה כן עוצרת אותה.
+  // ההבחנה נמדדה על צילומים אמיתיים: קמט בקבלה הוא פס מקומי של שתי
+  // עמודות, ואילו מחצלת כסופה מחוספסת לכל האורך. בלי הכלל הזה הצמיחה
+  // נמשכה לתוך המחצלת בצד שבו בהירותה יורדת בהדרגה ואין מדרגה לעצור בה.
+  const roughRun = Math.max(3, Math.round(n * 0.04));
+  const inBand = (i) => rawP85[i] >= lo && rawP85[i] <= hi;
+  let a = core.lo, b = core.hi, streak = 0;
+  while (a > 0 && inBand(a - 1)) {
+    streak = sd[a - 1] > smoothCut ? streak + 1 : 0;
+    if (streak > roughRun) break;
+    a--;
+  }
+  streak = 0;
+  while (b < n - 1 && inBand(b + 1)) {
+    streak = sd[b + 1] > smoothCut ? streak + 1 : 0;
+    if (streak > roughRun) break;
+    b++;
+  }
   return { lo: a, hi: b };
 }
 // יעד ההקטנה. ה-API מקטין כל תמונה לתקציב patches לפני שהמודל רואה אותה,

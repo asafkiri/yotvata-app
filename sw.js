@@ -2,7 +2,7 @@
 // מאפשר התקנה כאפליקציה (PWA) באנדרואיד + עבודה בסיסית גם ללא אינטרנט.
 // בעת עדכון index.html — שנה את המספר ב-CACHE_NAME (למשל yotvata-v2) כדי לרענן.
 
-const CACHE_NAME = 'yotvata-v352';
+const CACHE_NAME = 'yotvata-v353';
 const APP_SHELL = [
   './',
   './index.html',
