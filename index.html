@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v349 חיתוך אוטומטי של התעודה</title>
+    <title>הזמנות יטבתה - v350 מדידת איכות הצילום</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v349 חיתוך אוטומטי של התעודה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v350 מדידת איכות הצילום</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -9465,7 +9465,82 @@ function aiScanPageAudit(docIndex) {
   const pages = (doc && doc.pages) || [];
   if (!pages.length) return {};
   return { pageCount: pages.length,
-    cropReasons: pages.map(page => (page && page.cropInfo && page.cropInfo.reason) || '?') };
+    cropReasons: pages.map(page => (page && page.cropInfo && page.cropInfo.reason) || '?'),
+    photoQuality: pages.map(page => (page && page.quality) || null),
+    qualityAdvice: pages.map(page => (page && page.qualityAdvice && page.qualityAdvice.code) || 'ok') };
+}
+// מדדי איכות על אזור הנייר, מחושבים מהפרוקסי שכבר בזיכרון — אפס
+// פענוחים נוספים, אפס בתים נוספים ואפס פיקסלים שמשתנים. הפונקציה קוראת
+// בלבד.
+//
+// חשוב: זו **מדידה בלבד**. שום כפתור אינו נחסם וכלום אינו נפסל. הספים
+// שיחסמו בעתיד חייבים לבוא מהתפלגות של צילומים אמיתיים מהחנות, לא
+// מסצנות מסונתזות — ולכן המספרים נשמרים עם הקליטה ונשלחים לאודיט, וההחלטה
+// לחסום תתקבל רק כשיהיה על מה. ראו tools/quality-bench.mjs.
+function aiMeasurePageQuality(luma, width, height, box) {
+  if (!luma || !width || !height) return null;
+  const b = box || { x: 0, y: 0, width: width, height: height };
+  const x0 = Math.max(1, Math.round(b.x)), y0 = Math.max(1, Math.round(b.y));
+  const x1 = Math.min(width - 2, Math.round(b.x + b.width));
+  const y1 = Math.min(height - 2, Math.round(b.y + b.height));
+  if (x1 - x0 < 8 || y1 - y0 < 8) return null;
+  const hist = new Uint32Array(256);
+  let e1 = 0, e2 = 0, bright = 0, dark = 0, n = 0;
+  for (let y = y0; y < y1 - 2; y += 2) {
+    const row = y * width;
+    for (let x = x0; x < x1 - 2; x += 2) {
+      const i = row + x, v = luma[i];
+      // שני צעדים: שכן צמוד ושכן במרחק 2.
+      e1 += Math.abs(v - luma[i + 1]) + Math.abs(v - luma[i + width]);
+      e2 += Math.abs(v - luma[i + 2]) + Math.abs(v - luma[i + 2 * width]);
+      hist[v]++;
+      if (v >= 254) bright++;
+      if (v <= 40) dark++;
+      n++;
+    }
+  }
+  if (!n || e2 <= 0) return null;
+  // חדות = היחס בין אנרגיית הצעד הקצר לארוך. בקצה חד שני הצעדים תופסים
+  // את אותה מדרגה והיחס גבוה; בקצה מרוח הצעד הקצר תופס רק חלק ממנה.
+  // היחס אינו תלוי בניגודיות — ולכן תעודה תרמית דהויה אך חדה נמדדת בדיוק
+  // כמו תעודה שחורה וחדה, וזה ההבדל שמדד גרדיאנט גולמי מפספס.
+  // נמדד (tools/quality-bench.mjs): חד 1.61-1.80 גם ברעש ISO 1600,
+  // מטושטש 0.52-0.96. הרעש דוחף מטושטש כלפי מעלה, ולכן הסף רחוק משניהם.
+  const sharpness = e1 / e2;
+  let cum = 0, p10 = 0, p90 = 255;
+  for (let v = 0; v < 256; v++) { cum += hist[v]; if (cum >= n * 0.10) { p10 = v; break; } }
+  cum = 0;
+  for (let v = 0; v < 256; v++) { cum += hist[v]; if (cum >= n * 0.90) { p90 = v; break; } }
+  return {
+    v: 1,
+    // יחידה: שטח מתוך שטח הפריים. null כשלא זוהתה מסגרת נייר.
+    paperFill: box ? Math.round(1000 * (b.width * b.height) / (width * height)) / 1000 : null,
+    // חלק הצלע הארוכה של הנייר מתוך הצלע הארוכה של הפריים. null כשלא
+    // זוהתה מסגרת. paperPx נגזר ממנו ב-aiCompressInvoiceImage, כשגודל
+    // הפלט כבר ידוע.
+    paperLongFrac: box ? Math.round(1000 * Math.max(b.width, b.height) / Math.max(width, height)) / 1000 : null,
+    paperPx: null,
+    sharpness: Math.round(sharpness * 1000) / 1000,
+    contrast: p90 - p10,
+    glarePct: Math.round(1000 * bright / n) / 10,
+    darkPct: Math.round(1000 * dark / n) / 10,
+    // אחוזון 90 בתוך המסגרת — הלובן של הנייר עצמו. זה המדד שמבדיל צילום
+    // חשוך מתעודה מודפסת היטב; darkPct גבוה בשתיהן, כי הדיו כהה בשתיהן.
+    paperLuma: p90,
+  };
+}
+// הערה מייעצת לעובד. היא נכתבת למסך ולאודיט ואינה חוסמת דבר — הספים כאן
+// הם נקודת פתיחה שכוילה על סצנות מסונתזות (tools/quality-bench.mjs), ולכן
+// הם עשויים לטעות. הערה שגויה עולה בהצקה קטנה; חסימה שגויה בשש בבוקר
+// עולה בתעודה שלא נקלטת, ולכן החסימה מחכה לנתוני שדה.
+function aiQualityAdvice(quality) {
+  if (!quality) return null;
+  if (quality.paperPx != null && quality.paperPx < 900) return { code: 'too_far', text: 'התעודה קטנה בפריים — צילום מקרוב ייקרא טוב יותר' };
+  if (quality.sharpness < 1.20) return { code: 'blurry', text: 'התמונה נראית מטושטשת — הנח את היד על הדלפק וצלם שוב' };
+  if (quality.glarePct > 10) return { code: 'glare', text: 'יש בוהק על הנייר — הזז אותו מתחת לתאורה' };
+  if (quality.contrast < 35) return { code: 'faint', text: 'הדפוס חיוור מאוד — נסה תאורה חזקה יותר' };
+  if (quality.paperLuma != null && quality.paperLuma < 110) return { code: 'dark', text: 'הצילום כהה — הדלק אור או התרחק מהצל' };
+  return null;
 }
 // יעד ההקטנה. ה-API מקטין כל תמונה לתקציב patches לפני שהמודל רואה אותה,
 // גם ב-detail:"original" (התיעוד: "original detail can still resize images to
@@ -9495,11 +9570,20 @@ function aiDetectPaperRegion(img, sourceWidth, sourceHeight, report) {
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, pw, ph);
   ctx.drawImage(img, 0, 0, pw, ph);
   const pixels = ctx.getImageData(0, 0, pw, ph);
+  // צילום לומה לפני ההשטחה: מדד החדות חייב למדוד את הפיקסלים כפי שיצאו
+  // מהמצלמה. Uint8Array בודד (1.7MB בפרוקסי 1500px) ולא עותק RGBA מלא.
+  const luma = new Uint8Array(pw * ph);
+  for (let i = 0, p = 0; p < luma.length; p++, i += 4) {
+    luma[p] = ((pixels.data[i] * 299 + pixels.data[i + 1] * 587 + pixels.data[i + 2] * 114) / 1000) | 0;
+  }
   const analysis = {};
   // ההשטחה משנה את חוצץ הפרוקסי הזמני בלבד. אין putImageData, ולכן אף
   // פיקסל שנשלח למודל אינו נוגע בה — הזיהוי לא משנה את התמונה.
   aiFlattenIllumination(pixels.data, pw, ph, analysis);
   const box = aiComputePaperCropBox(analysis, pw, ph, report);
+  // המדידה רצה בכל מקרה. דווקא הצילומים שהזיהוי מוותר עליהם הם אלה
+  // שמעניין לדעת עליהם משהו, ובלי זה הנתונים מוטים לטובה.
+  report.quality = aiMeasurePageQuality(luma, pw, ph, box);
   if (!box) return null;
   // שוליים 2.5% מעבר למה שזוהה: עיגול לאריח או צל על הקצה לא יוכלו
   // להפיל שורת טקסט שיושבת בשולי הדף.
@@ -9547,6 +9631,7 @@ async function aiCompressInvoiceImage(file, forceFullFrame) {
   const cropInfo = { v: 180, reason: 'full_image' };
   let region = { x: 0, y: 0, width: sourceWidth, height: sourceHeight };
   let autoCropped = false;
+  let quality = null;
   if (!forceFullFrame) {
     try {
       const report = {};
@@ -9554,6 +9639,7 @@ async function aiCompressInvoiceImage(file, forceFullFrame) {
       if (report.reason) cropInfo.reason = report.reason;
       if (report.value != null) cropInfo.value = report.value;
       if (detected) { region = detected; autoCropped = true; cropInfo.kept = report.kept; }
+      quality = report.quality || null;
     } catch (error) {
       // כשל זיהוי לעולם אינו מפיל צילום — ממשיכים עם הפריים המלא.
       cropInfo.reason = 'error'; cropInfo.value = (error && error.message) || '';
@@ -9572,13 +9658,20 @@ async function aiCompressInvoiceImage(file, forceFullFrame) {
     const pixels = ctx.getImageData(0, 0, width, height);
     if (aiEnhanceDocumentPixels(pixels.data, width, height)) ctx.putImageData(pixels, 0, 0);
   } catch (enhanceError) { /* התמונה המקורית נשארת */ }
+  // הצלע הארוכה של הנייר בתמונה שנשלחת בפועל — המספר שמתרגם ישירות
+  // לפיקסלים לאות, ולכן היחיד שאפשר להשוות בין צילומים שונים. כשנחתך,
+  // הנייר ממלא את הפלט; אחרת הוא חלקו לפי מה שנמדד בפרוקסי.
+  if (quality) {
+    quality.paperPx = autoCropped ? Math.max(width, height)
+      : (quality.paperLongFrac != null ? Math.round(quality.paperLongFrac * Math.max(width, height)) : null);
+  }
   const encoded = aiCanvasToInvoiceJpeg(canvas, 0.92);
   // v155: הקובץ המקורי והגיאומטריה נשמרים על העמוד, כדי שחיתוך ידני
   // יוכל לרוץ מהמקור הגולמי דרך כל הצינור — סטטיסטיקה נקייה, 3000px מלאים.
   // originalImage נשאר null כשנחתך אוטומטית: הוא אמור להחזיק את הפריים
   // המלא, ו-encoded.dataUrl הוא כעת התמונה החתוכה. השחזור עובר דרך
   // sourceBlob עם forceFullFrame, ולכן אין צורך בקידוד שני של הפריים המלא.
-  return { dataUrl: encoded.dataUrl, baseDataUrl: encoded.dataUrl, rotation: 0, orientationConfirmed: false, cropped: autoCropped, autoCropped: autoCropped, cropInfo: cropInfo, originalImage: autoCropped ? null : { dataUrl: encoded.dataUrl, region: { ...region }, scale: scale, rotationOffset: 0 }, sourceBlob: file, sourceRegion: { x: region.x, y: region.y, width: region.width, height: region.height }, processScale: scale, name: file.name || ('עמוד-' + Date.now() + '.jpg'), bytes: encoded.bytes };
+  return { dataUrl: encoded.dataUrl, baseDataUrl: encoded.dataUrl, rotation: 0, orientationConfirmed: false, cropped: autoCropped, autoCropped: autoCropped, cropInfo: cropInfo, quality: quality, qualityAdvice: aiQualityAdvice(quality), originalImage: autoCropped ? null : { dataUrl: encoded.dataUrl, region: { ...region }, scale: scale, rotationOffset: 0 }, sourceBlob: file, sourceRegion: { x: region.x, y: region.y, width: region.width, height: region.height }, processScale: scale, name: file.name || ('עמוד-' + Date.now() + '.jpg'), bytes: encoded.bytes };
 }
 function aiOrientationLocation(page) {
   for (let docIndex = 0; docIndex < aiScanDocuments.length; docIndex++) {
@@ -9886,6 +9979,10 @@ function aiUpdateOrientationControls() {
   if (title) title.textContent = reviewOnly ? 'צילום העמוד' : cropMode ? 'חיתוך התמונה' : 'בדיקת התמונה';
   if (hint) hint.textContent = reviewOnly ? 'צפייה בתמונה ששימשה לפענוח.' : cropMode ? 'גרור את הפינות רק אם צריך. השאר את כל הטקסט והסיכומים בתוך המסגרת.' : session.page.autoCropped ? 'השוליים נחתכו אוטומטית. בתרשים: האזור הבהיר הוא מה שנשלח — ודא שכל הטקסט והסיכומים בתוכו.' : session.page.cropped ? 'מוצגת תמונה חתוכה. אפשר לחזור לתמונה המקורית.' : 'התמונה נשמרת בשלמותה. ודא שהכותרת למעלה ושהטקסט ישר.';
   aiDrawCropMap(cropMode ? null : session.page);
+  // הערת האיכות מתווספת להנחיה ואינה מחליפה אותה, ואינה נוגעת בכפתור
+  // האישור: היום זו מדידה בלבד.
+  const advice = !reviewOnly && !cropMode && session.page.qualityAdvice;
+  if (hint && advice) hint.textContent = advice.text + ' · ' + hint.textContent;
   ['aiOrientationCancel', 'aiOrientationRotateRow', 'aiOrientationCropRow'].forEach(id => { const node = $(id); if (node) node.classList.toggle('hidden', reviewOnly); });
   if (crop) crop.innerHTML = cropMode ? 'בטל חיתוך' : '<i class="fa-solid fa-crop-simple ml-1"></i> חתוך תמונה';
   const canRestore = !!((cropMode || session.page.cropped) && (session.page.originalImage || session.page.sourceBlob));
