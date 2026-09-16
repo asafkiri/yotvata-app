@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v351 ללא הערת טשטוש</title>
+    <title>הזמנות יטבתה - v352 חיתוך אגרסיבי לפי פרופיל</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v351 ללא הערת טשטוש</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v352 חיתוך אגרסיבי לפי פרופיל</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -9556,6 +9556,79 @@ function aiQualityAdvice(quality) {
   if (quality.paperLuma != null && quality.paperLuma < 110) return { code: 'dark', text: 'הצילום כהה — הדלק אור או התרחק מהצל' };
   return null;
 }
+// הידוק המסגרת לפי פרופיל עמודות ושורות.
+//
+// מנוע האריחים מוצא נייר לפי בהירות בלבד, ולכן הוא בולע כל רקע בהיר:
+// מסילת מתכת, משטח כסוף, מגש. בשדה הוא שמר 77% מהפריים כשהנייר תפס 45%,
+// ולעיתים ויתר לגמרי (box_97) כשהרקע היה בהיר כמו הנייר.
+//
+// הגישה כאן בשני שלבים, וההפרדה ביניהם היא כל העניין:
+//
+// 1. **גרעין** — הרצף הארוך ביותר של פסים שהם גם בהירים וגם חלקים. חלקות
+//    משמשת רק כאן, כדי לפסול רקע בהיר שאינו נייר: מתכת משופשפת ומרקם
+//    מחורר מרועשים בהרבה מדפוס על נייר.
+// 2. **צמיחה** — מהגרעין החוצה, לפי בהירות בלבד, כל עוד הפס נמצא בתוך פס
+//    דו-צדדי סביב לובן הגרעין. כאן חלקות **אסורה**: קבלה מקומטת מרוקמת
+//    מאוד באזור הקמט, ובניסיון קודם היא סווגה כרקע ועמודת שמות המוצרים
+//    נחתכה. הגבול העליון הוא שמציל את המקרה ההפוך — משטח כסוף בהיר יותר
+//    מהנייר, ולכן הוא נופל מחוץ לפס מלמעלה.
+//
+// הספים נגזרו משלושה צילומים אמיתיים: הכללה הגרועה ביותר היא 0.88 מלובן
+// הגרעין ו-1.07 ממנו, הפסילה הגרועה ביותר 0.70 ו-1.19. 0.80 ו-1.12 יושבים
+// בין השניים בשני הכיוונים.
+function aiPaperSpan(bright, rough, width, height, axis) {
+  const n = axis === 'x' ? width : height, m = axis === 'x' ? height : width;
+  if (n < 16 || m < 16) return null;
+  const p85 = new Float64Array(n), sd = new Float64Array(n);
+  const buf = new Uint8Array(Math.ceil(m / 2));
+  for (let i = 0; i < n; i++) {
+    let k = 0, sum = 0, sum2 = 0;
+    for (let j = 0; j < m; j += 2) {
+      const idx = axis === 'x' ? j * width + i : i * width + j;
+      buf[k++] = bright[idx];
+      const r = rough[idx]; sum += r; sum2 += r * r;
+    }
+    const sorted = buf.slice(0, k).sort();
+    p85[i] = sorted[Math.floor(k * 0.85)];
+    sd[i] = Math.sqrt(Math.max(0, sum2 / k - (sum / k) * (sum / k)));
+  }
+  const levels = Array.from(p85).sort((a, b) => a - b);
+  const coreBright = levels[Math.floor(n * 0.90)] * 0.80;
+  const coreSd = [];
+  for (let i = 0; i < n; i++) if (p85[i] >= coreBright) coreSd.push(sd[i]);
+  if (!coreSd.length) return null;
+  coreSd.sort((a, b) => a - b);
+  const smoothCut = coreSd[Math.floor(coreSd.length * 0.55)] * 1.25;
+  let core = null, cur = null;
+  for (let i = 0; i < n; i++) {
+    if (p85[i] >= coreBright && sd[i] <= smoothCut) { if (cur) cur.hi = i; else cur = { lo: i, hi: i }; }
+    else if (cur) { if (!core || cur.hi - cur.lo > core.hi - core.lo) core = cur; cur = null; }
+  }
+  if (cur && (!core || cur.hi - cur.lo > core.hi - core.lo)) core = cur;
+  if (!core || core.hi - core.lo < 3) return null;
+  // הצמיחה נמדדת על הבהירות הגולמית ולא על המושטחת. ההשטחה מנרמלת כל
+  // אריח אל הלובן הגלובלי, ולכן היא מושכת גם משטח כסוף בהיר אל רמת הנייר
+  // ומוחקת בדיוק את ההבדל שהגבול העליון אמור לתפוס. הגרעין דווקא צריך את
+  // המושטחת, אחרת מדרון תאורה לאורך הדף מפצל אותו לשניים.
+  const rawP85 = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    let k = 0;
+    for (let j = 0; j < m; j += 2) buf[k++] = rough[axis === 'x' ? j * width + i : i * width + j];
+    const sorted = buf.slice(0, k).sort();
+    rawP85[i] = sorted[Math.floor(k * 0.85)];
+  }
+  const coreLevels = [];
+  for (let i = core.lo; i <= core.hi; i++) coreLevels.push(rawP85[i]);
+  coreLevels.sort((a, b) => a - b);
+  const paper = coreLevels[coreLevels.length >> 1];
+  const lo = paper * 0.80, hi = paper * 1.12;
+  // הצמיחה רק מרחיבה את הגרעין ולעולם אינה מכווצת אותו: הגרעין כבר עבר
+  // את מבחן הבהירות והחלקות, ואסור שמדרון תאורה יוריד ממנו.
+  let a = core.lo, b = core.hi;
+  while (a > 0 && rawP85[a - 1] >= lo && rawP85[a - 1] <= hi) a--;
+  while (b < n - 1 && rawP85[b + 1] >= lo && rawP85[b + 1] <= hi) b++;
+  return { lo: a, hi: b };
+}
 // יעד ההקטנה. ה-API מקטין כל תמונה לתקציב patches לפני שהמודל רואה אותה,
 // גם ב-detail:"original" (התיעוד: "original detail can still resize images to
 // meet the model's pixel-dimension limit or resizing patch budget"). 1850px
@@ -9594,9 +9667,25 @@ function aiDetectPaperRegion(img, sourceWidth, sourceHeight, report) {
   // ההשטחה משנה את חוצץ הפרוקסי הזמני בלבד. אין putImageData, ולכן אף
   // פיקסל שנשלח למודל אינו נוגע בה — הזיהוי לא משנה את התמונה.
   aiFlattenIllumination(pixels.data, pw, ph, analysis);
-  const box = aiComputePaperCropBox(analysis, pw, ph, report);
-  // המדידה רצה בכל מקרה. דווקא הצילומים שהזיהוי מוותר עליהם הם אלה
-  // שמעניין לדעת עליהם משהו, ובלי זה הנתונים מוטים לטובה.
+  let box = aiComputePaperCropBox(analysis, pw, ph, report);
+  // ההידוק אינו רשאי להמציא נייר: הוא רץ רק כשמנוע האריחים כבר מצא מסגרת,
+  // או כשהוא ויתר עם box_97 — שפירושו "יש נייר, הוא פשוט ממלא את הפריים",
+  // וזה בדיוק המצב שבו רקע בהיר נבלע. סירוב few_seeds פירושו "לא נמצא
+  // נייר", ושם ההידוק היה נועל על כתם בהיר ובודה מסגרת.
+  if (box || report.reason === 'box_97') {
+    const flat = new Uint8Array(pw * ph);
+    for (let i = 0, p = 0; p < flat.length; p++, i += 4) flat[p] = pixels.data[i];
+    const spanX = aiPaperSpan(flat, luma, pw, ph, 'x');
+    const spanY = aiPaperSpan(flat, luma, pw, ph, 'y');
+    if (spanX && spanY) {
+      const tight = { x: spanX.lo, y: spanY.lo, width: spanX.hi - spanX.lo + 1, height: spanY.hi - spanY.lo + 1 };
+      const area = (tight.width * tight.height) / (pw * ph);
+      if (area >= 0.10 && (!box || area <= (box.width * box.height) / (pw * ph))) {
+        box = tight;
+        report.reason = 'cropped';
+      }
+    }
+  }
   report.quality = aiMeasurePageQuality(luma, pw, ph, box);
   if (!box) return null;
   // שוליים 2.5% מעבר למה שזוהה: עיגול לאריח או צל על הקצה לא יוכלו
@@ -9611,9 +9700,15 @@ function aiDetectPaperRegion(img, sourceWidth, sourceHeight, report) {
   // 0.12 ולא 0.30: תעודה שתופסת רבע מהפריים היא בדיוק המקרה שהחיתוך
   // נועד לו, ופסילתה מוותרת על הרווח הגדול ביותר. מה שמגן מפני חיתוך
   // אל תוך כתם בהיר הוא שער הזרעים שמעליו, לא שער השטח.
+  // 0.12: ההידוק לפי פרופיל מדויק על צילומים אמיתיים, אבל בסצנה שבה הנייר
+  // תופס 12% מהפריים הוא חתך לתוך הדף ואיבד 70,110 פיקסלי דיו. השער הזה
+  // הוא מה שעצר את זה, ולכן הוא נשאר: עדיף לא לחתוך מאשר לחתוך שורת מוצר.
   if (areaFraction < 0.12) { report.reason = 'too_small'; report.value = Math.round(areaFraction * 100); return null; }
   if (areaFraction > 0.97) { report.reason = 'box_97'; report.value = Math.round(areaFraction * 100); return null; }
-  if (aspect < 0.3 || aspect > 3.4) { report.reason = 'aspect'; report.value = Math.round(aspect * 100) / 100; return null; }
+  // 0.15..6.5 ולא 0.3..3.4: קבלה תרמית ארוכה היא לגיטימית ביחס 1:5 ואף צר
+  // מזה, והשער הקודם פסל אותה. הוא נבנה להגן מפני רצועה צרה ובהירה כמו
+  // מסילת מתכת — ואת זה עושה עכשיו קריטריון החלקות בגרעין של aiPaperSpan.
+  if (aspect < 0.15 || aspect > 6.5) { report.reason = 'aspect'; report.value = Math.round(aspect * 100) / 100; return null; }
   // נגיעה בשלושה קצוות ומעלה: הנייר חורג מהפריים, ומה שמחוץ לתמונה חסר
   // ממילא. חיתוך כזה רק יוריד עוד טקסט.
   if (edges >= 3) { report.reason = 'overflow'; report.value = edges; return null; }

@@ -11,7 +11,7 @@ function source(name) {
   const end = html.slice(m.index, eol).trimEnd().endsWith('}') ? eol : html.indexOf('\n}', eol) + 2;
   return html.slice(m.index, end);
 }
-const names = ['aiCompressInvoiceImage', 'aiDetectPaperRegion', 'aiMeasurePageQuality', 'aiQualityAdvice', 'aiDrawCropMap', 'aiCropInitFrame', 'aiCropResetOverlay', 'aiCropDraw',
+const names = ['aiCompressInvoiceImage', 'aiDetectPaperRegion', 'aiPaperSpan', 'aiMeasurePageQuality', 'aiQualityAdvice', 'aiDrawCropMap', 'aiCropInitFrame', 'aiCropResetOverlay', 'aiCropDraw',
   'aiCropSyncCanvasBox', 'aiCropContainRect', 'aiCropFit', 'aiCropHitTest', 'aiCropPointerPosition',
   'aiCropPointerDown', 'aiCropPointerMove', 'aiCropPointerUp', 'aiApplyCropIfMoved',
   'aiReprocessFromSource', 'aiUnrotateRect', 'aiNormalizeQuarterTurns', 'aiRenderInvoiceRotation',
@@ -244,7 +244,8 @@ test('every refusal falls back to the exact full frame and names its reason', as
   const refusals = [
     [null, 'box_97'],
     [{ x: 700, y: 520, width: 90, height: 70 }, 'too_small'],
-    [{ x: 60, y: 300, width: 1300, height: 320 }, 'aspect'],
+    // רחב ושטוח: יחס 7.95, מעל השער שהורחב ל-6.5 עבור קבלות ארוכות.
+    [{ x: 50, y: 500, width: 1400, height: 150 }, 'aspect'],
     [{ x: 0, y: 0, width: 1500, height: 1000 }, 'overflow'],
   ];
   for (const [plan, reason] of refusals) {
