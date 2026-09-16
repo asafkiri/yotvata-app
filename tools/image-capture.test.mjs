@@ -11,7 +11,7 @@ function source(name) {
   const end = html.slice(m.index, eol).trimEnd().endsWith('}') ? eol : html.indexOf('\n}', eol) + 2;
   return html.slice(m.index, end);
 }
-const names = ['aiCompressInvoiceImage', 'aiDetectPaperRegion', 'aiDrawCropMap', 'aiCropInitFrame', 'aiCropResetOverlay', 'aiCropDraw',
+const names = ['aiCompressInvoiceImage', 'aiDetectPaperRegion', 'aiMeasurePageQuality', 'aiQualityAdvice', 'aiDrawCropMap', 'aiCropInitFrame', 'aiCropResetOverlay', 'aiCropDraw',
   'aiCropSyncCanvasBox', 'aiCropContainRect', 'aiCropFit', 'aiCropHitTest', 'aiCropPointerPosition',
   'aiCropPointerDown', 'aiCropPointerMove', 'aiCropPointerUp', 'aiApplyCropIfMoved',
   'aiReprocessFromSource', 'aiUnrotateRect', 'aiNormalizeQuarterTurns', 'aiRenderInvoiceRotation',
@@ -49,7 +49,7 @@ function context() {
     aiReadFile: async () => 'source', aiLoadImage: async url => { assert.ok(images.has(url), url); return images.get(url); },
     aiEnhanceDocumentPixels: () => false,
     AI_INVOICE_MAX_SIDE: 1850, AI_CROP_PROXY_SIDE: 1500,
-    Uint8ClampedArray,
+    Uint8ClampedArray, Uint8Array, Uint32Array,
     aiFlattenIllumination: (data, width, height, analysis) => { if (analysis) analysis.ready = true; return true; },
     // v180: האינווריאנט הישן היה "חיתוך אוטומטי לעולם לא רץ". הוא הוחלף
     // בשניים חזקים ממנו, שנבדקים למטה: חיתוך לעולם אינו חורג מגבולות המקור,
@@ -282,4 +282,45 @@ test('an automatic crop is undone in one tap back to the full frame', async () =
   assert.equal(page.cropped, false);
   assert.deepEqual(plain(page.sourceRegion), { x: 0, y: 0, width: 4000, height: 3000 },
     'restoring must recover every source edge');
+});
+
+test('quality measurement is recorded but never blocks confirmation', async () => {
+  const ctx = context(), { c, node } = ctx;
+  const page = await capture(ctx);
+  // המדידה היא שדה על העמוד, לא שער. הרתמה אינה מספקת פיקסלים אמיתיים
+  // ולכן quality יוצא null — וזה בדיוק המסלול שחייב להישאר בלתי חוסם.
+  assert.ok('quality' in page, 'the page must carry a quality field');
+  assert.ok('qualityAdvice' in page, 'the page must carry an advice field');
+  assert.equal(node('aiOrientationConfirm').disabled, false, 'measurement must never disable confirmation');
+  await c.aiConfirmOrientationReview();
+  assert.equal(page.orientationConfirmed, true, 'measurement must never block a confirmed page');
+});
+
+test('a blurry or dark measurement still advises rather than blocks', async () => {
+  const ctx = context(), { c, node } = ctx;
+  const page = await capture(ctx);
+  // מזריקים מדידה שנכשלת בכל אחד מהספים בתורו. כל עוד השלב הוא מדידה
+  // בלבד, אף אחד מהם אינו רשאי לחסום. הבדיקה הזו היא השומר: מי שיוסיף
+  // חסימה בעתיד חייב לעדכן אותה במפורש ולא בטעות.
+  for (const quality of [
+    { v: 1, paperPx: 400, sharpness: 1.9, contrast: 150, glarePct: 0, paperLuma: 240 },
+    { v: 1, paperPx: 1800, sharpness: 0.6, contrast: 150, glarePct: 0, paperLuma: 240 },
+    { v: 1, paperPx: 1800, sharpness: 1.9, contrast: 150, glarePct: 40, paperLuma: 240 },
+    { v: 1, paperPx: 1800, sharpness: 1.9, contrast: 150, glarePct: 0, paperLuma: 60 },
+  ]) {
+    page.quality = quality;
+    page.qualityAdvice = c.aiQualityAdvice(quality);
+    page.orientationConfirmed = false;
+    assert.ok(page.qualityAdvice, 'each failing metric must produce an advice');
+    c.aiOpenOrientationReview(0, 0, true);
+    assert.equal(node('aiOrientationConfirm').disabled, false, quality.paperPx + ' must not disable confirmation');
+    await c.aiConfirmOrientationReview();
+    assert.equal(page.orientationConfirmed, true, 'advice must never block');
+  }
+});
+
+test('a sharp well-lit measurement produces no advice at all', () => {
+  const ctx = context();
+  assert.equal(ctx.c.aiQualityAdvice({ v: 1, paperPx: 1800, sharpness: 1.7, contrast: 150, glarePct: 2, paperLuma: 243 }), null);
+  assert.equal(ctx.c.aiQualityAdvice(null), null);
 });

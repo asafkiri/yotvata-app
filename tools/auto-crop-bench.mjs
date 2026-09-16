@@ -61,7 +61,7 @@ function makeDocument() {
   };
 }
 
-const NAMES = ['aiFlattenIllumination', 'aiComputePaperCropBox', 'aiRefineCropEdges', 'aiDetectPaperRegion'];
+const NAMES = ['aiFlattenIllumination', 'aiComputePaperCropBox', 'aiRefineCropEdges', 'aiMeasurePageQuality', 'aiDetectPaperRegion'];
 
 // סף הזרעים הוא הפרמטר היחיד שקובע כמה "מרושל" עדיין נחתך: הוא דורש
 // שאחוז מסוים מהאריחים יהיה נייר ודאי. אפשר לכוון אותו מכאן כדי לבדוק
