@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v353 עצירת צמיחה בחספוס מתמשך</title>
+    <title>הזמנות יטבתה - v354 ההידוק לא מזיז את המסגרת</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v353 עצירת צמיחה בחספוס מתמשך</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v354 ההידוק לא מזיז את המסגרת</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -9696,7 +9696,16 @@ function aiDetectPaperRegion(img, sourceWidth, sourceHeight, report) {
     if (spanX && spanY) {
       const tight = { x: spanX.lo, y: spanY.lo, width: spanX.hi - spanX.lo + 1, height: spanY.hi - spanY.lo + 1 };
       const area = (tight.width * tight.height) / (pw * ph);
-      if (area >= 0.10 && (!box || area <= (box.width * box.height) / (pw * ph))) {
+      // ההידוק רשאי רק **להדק** את מה שמנוע האריחים מצא, לעולם לא להזיז
+      // את המסגרת למקום אחר. בלי הבדיקה הזו, בצילום על מחצלת כסופה הגרעין
+      // ננעל על אזור חלק ובהיר של המחצלת — ארוך יותר מהקבלה — והמסגרת
+      // יצאה בקצה הפריים עם אפס טקסט בתוכה. שער השטח לבדו לא תפס את זה,
+      // כי המסגרת השגויה הייתה קטנה וזה נראה לו כמו הידוק מוצלח.
+      const inside = box
+        && tight.x >= box.x - 2 && tight.y >= box.y - 2
+        && tight.x + tight.width <= box.x + box.width + 2
+        && tight.y + tight.height <= box.y + box.height + 2;
+      if (area >= 0.10 && inside) {
         box = tight;
         report.reason = 'cropped';
       }
