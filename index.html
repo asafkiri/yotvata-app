@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v350 מדידת איכות הצילום</title>
+    <title>הזמנות יטבתה - v351 ללא הערת טשטוש</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v350 מדידת איכות הצילום</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v351 ללא הערת טשטוש</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -9536,7 +9536,21 @@ function aiMeasurePageQuality(luma, width, height, box) {
 function aiQualityAdvice(quality) {
   if (!quality) return null;
   if (quality.paperPx != null && quality.paperPx < 900) return { code: 'too_far', text: 'התעודה קטנה בפריים — צילום מקרוב ייקרא טוב יותר' };
-  if (quality.sharpness < 1.20) return { code: 'blurry', text: 'התמונה נראית מטושטשת — הנח את היד על הדלפק וצלם שוב' };
+  // הערת הטשטוש הוסרה אחרי בדיקת שדה. המדד sharpness ממשיך להישמר, אבל
+  // הוא אינו ראוי להצגה ולא לחסימה, ולכן אינו מייצר הערה:
+  //
+  //   תעודה חדה ב-4032px           1.321
+  //   אותה תעודה מוקטנת ל-1500px   0.918   (מתחת לכל סף סביר)
+  //   תעודה מטושטשת באמת, מוקטנת   0.986   (גבוה מהחדה)
+  //
+  // ההקטנה עצמה היא מסנן נמוך-תדר, ולכן היא מוחקת את ההבדל בין חד למטושטש
+  // עוד לפני שיש מה למדוד. וגם ברזולוציה מקורית היחס מתהפך תחת רעש חיישן:
+  // ככל שהתמונה מטושטשת יותר יש בה פחות אות, הרעש דומיננטי יותר, והיחס
+  // נוטה ל-1 — כלומר מטושטש נמדד כחד יותר מחד. ברעש sigma=8 מדדתי 0.997
+  // למטושטש מול 0.761 לחד.
+  //
+  // מדידת פוקוס אמינה בצילום טלפון דורשת כיול מול צילומים אמיתיים מתויגים.
+  // עד שיהיו — עדיף לשתוק מלצעוק על כל צילום.
   if (quality.glarePct > 10) return { code: 'glare', text: 'יש בוהק על הנייר — הזז אותו מתחת לתאורה' };
   if (quality.contrast < 35) return { code: 'faint', text: 'הדפוס חיוור מאוד — נסה תאורה חזקה יותר' };
   if (quality.paperLuma != null && quality.paperLuma < 110) return { code: 'dark', text: 'הצילום כהה — הדלק אור או התרחק מהצל' };

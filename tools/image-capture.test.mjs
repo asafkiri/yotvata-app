@@ -296,7 +296,7 @@ test('quality measurement is recorded but never blocks confirmation', async () =
   assert.equal(page.orientationConfirmed, true, 'measurement must never block a confirmed page');
 });
 
-test('a blurry or dark measurement still advises rather than blocks', async () => {
+test('a failing measurement still advises rather than blocks', async () => {
   const ctx = context(), { c, node } = ctx;
   const page = await capture(ctx);
   // מזריקים מדידה שנכשלת בכל אחד מהספים בתורו. כל עוד השלב הוא מדידה
@@ -304,7 +304,7 @@ test('a blurry or dark measurement still advises rather than blocks', async () =
   // חסימה בעתיד חייב לעדכן אותה במפורש ולא בטעות.
   for (const quality of [
     { v: 1, paperPx: 400, sharpness: 1.9, contrast: 150, glarePct: 0, paperLuma: 240 },
-    { v: 1, paperPx: 1800, sharpness: 0.6, contrast: 150, glarePct: 0, paperLuma: 240 },
+    { v: 1, paperPx: 1800, sharpness: 1.9, contrast: 150, glarePct: 0, paperLuma: 90 },
     { v: 1, paperPx: 1800, sharpness: 1.9, contrast: 150, glarePct: 40, paperLuma: 240 },
     { v: 1, paperPx: 1800, sharpness: 1.9, contrast: 150, glarePct: 0, paperLuma: 60 },
   ]) {
@@ -323,4 +323,9 @@ test('a sharp well-lit measurement produces no advice at all', () => {
   const ctx = context();
   assert.equal(ctx.c.aiQualityAdvice({ v: 1, paperPx: 1800, sharpness: 1.7, contrast: 150, glarePct: 2, paperLuma: 243 }), null);
   assert.equal(ctx.c.aiQualityAdvice(null), null);
+  // חדות נמדדת ונשמרת, אך אינה מייצרת הערה: בבדיקת שדה היא סימנה כל צילום
+  // כמטושטש, וברעש חיישן היא מדרגת מטושטש כחד יותר מחד. מי שיחזיר הערה
+  // על סמך המדד הזה חייב קודם לכייל אותו מול צילומים אמיתיים מתויגים.
+  assert.equal(ctx.c.aiQualityAdvice({ v: 1, paperPx: 1800, sharpness: 0.1, contrast: 150, glarePct: 2, paperLuma: 243 }), null,
+    'sharpness alone must never raise an advice until it is calibrated on real photos');
 });
