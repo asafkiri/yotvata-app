@@ -153,12 +153,13 @@ let failed = 0;
 const sharpRows = rows.filter(r => r.isSharp), blurRows = rows.filter(r => !r.isSharp);
 const worstSharp = Math.min(...sharpRows.map(r => r.q.sharpness));
 const bestBlur = Math.max(...blurRows.map(r => r.q.sharpness));
-for (const r of sharpRows) {
-  if (r.advice && r.advice.code === 'blurry') { console.log(`כשל: "${r.name}" סומן כמטושטש והוא חד.`); failed++; }
-}
-for (const r of blurRows) {
-  if (!r.advice || r.advice.code !== 'blurry') { console.log(`כשל: "${r.name}" לא סומן כמטושטש.`); failed++; }
-}
+// כאן ישבה פעם טענה שהסף מפריד חד ממטושטש. היא עברה על הסצנות האלה
+// ונפלה בשדה, ולכן היא הוסרה יחד עם הערת הטשטוש. הסיבה: הסצנות כאן
+// נבנות ישירות בגודל היעד, ואילו צילום אמיתי מוקטן מ-4032px — וההקטנה
+// היא עצמה מסנן שמוחק את ההבדל. מדדתי תעודה חדה: 1.321 ב-4032px מול
+// 0.918 אחרי הקטנה ל-1500, בעוד תעודה מטושטשת באמת קיבלה 0.986.
+// המסקנה שנשארה: אי אפשר לכייל מדד פוקוס על סצנות מסונתזות.
+// המדד עדיין מודפס למטה כדי שיהיה אפשר לעקוב, אך שום דבר אינו נטען עליו.
 // בוהק ותאורה עמומה נבדלים בפחות מהטשטוש, ולכן הציפייה מקובעת במפורש:
 // רעש ISO גבוה על נייר לבן דוחף פיקסלים מעל 254 ונראה כמו בוהק.
 for (const r of rows.filter(x => x.expect)) {
@@ -169,6 +170,5 @@ for (const r of rows.filter(x => x.isSharp && !x.expect)) {
   if (r.advice) { console.log(`כשל: "${r.name}" קיבל הערה "${r.advice.code}" והוא תקין.`); failed++; }
 }
 console.log(`הצילום החד הגרוע ביותר: ${worstSharp.toFixed(3)} · המטושטש הטוב ביותר: ${bestBlur.toFixed(3)} · הסף: ${SHARP_THRESHOLD}`);
-if (worstSharp <= bestBlur) { console.log('כשל: הקבוצות חופפות — אין סף שמפריד ביניהן.'); failed++; }
 if (failed) { console.log(''); process.exit(1); }
-console.log(`מרווח: ${(worstSharp - bestBlur).toFixed(3)}. הסף רחוק משתי הקבוצות.\n`);
+console.log('הערת הטשטוש מנוטרלת; המספרים נשמרים לכיול עתידי מצילומים אמיתיים.\n');
