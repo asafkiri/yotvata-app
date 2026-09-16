@@ -11,7 +11,7 @@ function source(name) {
   const end = html.slice(m.index, eol).trimEnd().endsWith('}') ? eol : html.indexOf('\n}', eol) + 2;
   return html.slice(m.index, end);
 }
-const names = ['aiCompressInvoiceImage', 'aiCropInitFrame', 'aiCropResetOverlay', 'aiCropDraw',
+const names = ['aiCompressInvoiceImage', 'aiDetectPaperRegion', 'aiDrawCropMap', 'aiCropInitFrame', 'aiCropResetOverlay', 'aiCropDraw',
   'aiCropSyncCanvasBox', 'aiCropContainRect', 'aiCropFit', 'aiCropHitTest', 'aiCropPointerPosition',
   'aiCropPointerDown', 'aiCropPointerMove', 'aiCropPointerUp', 'aiApplyCropIfMoved',
   'aiReprocessFromSource', 'aiUnrotateRect', 'aiNormalizeQuarterTurns', 'aiRenderInvoiceRotation',
@@ -23,6 +23,9 @@ const names = ['aiCompressInvoiceImage', 'aiCropInitFrame', 'aiCropResetOverlay'
 function context() {
   const images = new Map([['source', { naturalWidth: 4000, naturalHeight: 3000 }]]);
   const draws = [], rotations = [], nodes = new Map();
+  // null = מנוע הזיהוי לא מצא נייר. אובייקט = המסגרת שיחזיר, בקואורדינטות
+  // הפרוקסי (1500x1125 עבור מקור 4000x3000).
+  let cropPlan = null;
   let seq = 0;
   function node(id) {
     if (nodes.has(id)) return nodes.get(id);
@@ -45,7 +48,17 @@ function context() {
     showToast: message => { c.lastToast = message; },
     aiReadFile: async () => 'source', aiLoadImage: async url => { assert.ok(images.has(url), url); return images.get(url); },
     aiEnhanceDocumentPixels: () => false,
-    aiComputePaperCropBox: () => { throw new Error('Automatic crop must never run during capture'); },
+    AI_INVOICE_MAX_SIDE: 1850, AI_CROP_PROXY_SIDE: 1500,
+    Uint8ClampedArray,
+    aiFlattenIllumination: (data, width, height, analysis) => { if (analysis) analysis.ready = true; return true; },
+    // v180: האינווריאנט הישן היה "חיתוך אוטומטי לעולם לא רץ". הוא הוחלף
+    // בשניים חזקים ממנו, שנבדקים למטה: חיתוך לעולם אינו חורג מגבולות המקור,
+    // וכל סירוב נופל בדיוק על הפריים המלא ומדווח את סיבתו.
+    aiComputePaperCropBox: (analysis, width, height, debug) => {
+      if (!cropPlan) { debug.reason = 'box_97'; debug.value = 98; return null; }
+      debug.reason = 'cropped';
+      return { x: cropPlan.x, y: cropPlan.y, width: cropPlan.width, height: cropPlan.height };
+    },
     aiCanvasToInvoiceJpeg: canvas => {
       const dataUrl = 'encoded-' + (++seq); images.set(dataUrl, { naturalWidth: canvas.width, naturalHeight: canvas.height });
       return { dataUrl, bytes: 100 };
@@ -65,7 +78,7 @@ function context() {
     const img = images.get(url); if (img) { this.naturalWidth = img.naturalWidth; this.naturalHeight = img.naturalHeight; }
     c.aiCropInitFrame(); // The actual image load handler.
   } });
-  return { c, node, images, draws, rotations };
+  return { c, node, images, draws, rotations, setCropPlan: (plan) => { cropPlan = plan; } };
 }
 async function capture(ctx) {
   const page = await ctx.c.aiCompressInvoiceImage({ name: 'fixture.jpg' });
@@ -74,19 +87,30 @@ async function capture(ctx) {
   return page;
 }
 const plain = value => JSON.parse(JSON.stringify(value));
+// ציור הזיהוי לקנבס הפרוקסי הוא drawImage בן 5 ארגומנטים; ציור הפלט הוא
+// בן 9. טענות על מה שנשלח מסתכלות רק על האחרון.
+const output = draws => draws.filter(d => d.args.length === 9);
+// מיפוי מסגרת מהתצוגה חזרה לקואורדינטות המקור מעגל לפי סקאלת ההקטנה,
+// ולכן סטייה של פיקסל בודד היא התנהגות תקינה ולא רגרסיה.
+const near = (actual, expected, slack = 2) => {
+  for (const key of Object.keys(expected)) {
+    assert.ok(Math.abs(actual[key] - expected[key]) <= slack,
+      key + ': ' + actual[key] + ' is not within ' + slack + ' of ' + expected[key]);
+  }
+};
 
 test('camera/gallery preparation and quick confirmation keep every source edge without an overlay', async () => {
   const ctx = context(), { c, node, draws } = ctx;
   const page = await capture(ctx), before = page.dataUrl;
   assert.equal(page.cropped, false);
   assert.deepEqual(plain(page.sourceRegion), { x: 0, y: 0, width: 4000, height: 3000 });
-  assert.deepEqual(draws[0].args.slice(1), [0, 0, 4000, 3000, 0, 0, 3000, 2250]);
+  assert.deepEqual(output(draws)[0].args.slice(1), [0, 0, 4000, 3000, 0, 0, 1850, 1388]);
   assert.equal(c.aiCropState, null);
   assert.equal(node('aiCropCanvas').classList.contains('hidden'), true);
   assert.match(node('aiOrientationConfirm').innerHTML, /אשר תמונה מלאה/);
   await c.aiConfirmOrientationReview();
   assert.equal(page.dataUrl, before);
-  assert.equal(draws.length, 1, 'Confirmation must not reencode or crop');
+  assert.equal(output(draws).length, 1, 'Confirmation must not reencode or crop');
   assert.equal(page.orientationConfirmed, true);
 });
 
@@ -94,7 +118,7 @@ test('explicit crop starts on the full image; cancelling or confirming untouched
   const ctx = context(), { c, node } = ctx;
   const page = await capture(ctx), before = page.dataUrl;
   c.aiToggleCropMode();
-  assert.deepEqual(plain(c.aiCropState.rect), { x: 0, y: 0, w: 3000, h: 2250 });
+  assert.deepEqual(plain(c.aiCropState.rect), { x: 0, y: 0, w: 1850, h: 1388 });
   assert.equal(node('aiCropCanvas').classList.contains('hidden'), false);
   c.aiCropState.rect = { x: 300, y: 225, w: 2400, h: 1800 }; c.aiCropState.moved = true;
   c.aiToggleCropMode();
@@ -122,7 +146,7 @@ test('crop then restore recovers all original edges at each orientation without 
     state.rect = { x: state.w * .1, y: state.h * .1, w: state.w * .8, h: state.h * .8 }; state.moved = true;
     await c.aiConfirmOrientationReview();
     assert.equal(page.cropped, true);
-    assert.deepEqual(plain(page.sourceRegion), { x: 400, y: 300, width: 3200, height: 2400 });
+    near(page.sourceRegion, { x: 400, y: 300, width: 3200, height: 2400 });
     c.aiOpenOrientationReview(0, 0, true);
     assert.equal(node('aiOrientationRestore').classList.contains('hidden'), false);
     c.aiReadFile = () => { throw new Error('Use the saved original'); };
@@ -188,4 +212,74 @@ test('crop controls are wired outside the app container and disabled during imag
   c.aiSetOrientationBusy(true); c.aiToggleCropMode(); await c.aiRestoreOriginalImage();
   assert.equal(c.aiCropState, null);
   assert.equal(node('aiOrientationCrop').disabled, true); assert.equal(node('aiOrientationRestore').disabled, true);
+});
+
+test('a detected paper frame crops from the source before the downscale and reports what it removed', async () => {
+  const ctx = context(), { c, draws } = ctx;
+  // מסגרת במרכז הפרוקסי, הרחק מארבעת הקצוות.
+  ctx.setCropPlan({ x: 150, y: 112, width: 1200, height: 900 });
+  const page = await capture(ctx);
+  assert.equal(page.autoCropped, true, 'a confident frame must actually crop');
+  assert.equal(page.cropped, true);
+  assert.equal(page.cropInfo.reason, 'cropped');
+  assert.ok(page.cropInfo.value > 0 && page.cropInfo.value < 70, 'removed share must be reported');
+  // מה שדווח הוא בדיוק מה שצויר: אין פער בין הטענה לפיקסלים.
+  const drawn = output(draws)[0].args;
+  assert.deepEqual(drawn.slice(1, 5), [page.sourceRegion.x, page.sourceRegion.y, page.sourceRegion.width, page.sourceRegion.height]);
+  // החיתוך לעולם אינו חורג מגבולות המקור.
+  assert.ok(page.sourceRegion.x >= 0 && page.sourceRegion.y >= 0);
+  assert.ok(page.sourceRegion.x + page.sourceRegion.width <= 4000);
+  assert.ok(page.sourceRegion.y + page.sourceRegion.height <= 3000);
+  assert.ok(page.sourceRegion.width < 4000, 'a crop must be smaller than the full frame');
+  // הקטנה אחת בלבד, אל יעד ה-patches.
+  assert.equal(Math.max(drawn[7], drawn[8]), 1850);
+  assert.equal(output(draws).length, 1, 'exactly one resample reaches the model');
+  // התרשים מקבל ארבעה מספרים מנורמלים כדי להראות מה הוסר.
+  const kept = page.cropInfo.kept;
+  assert.ok(kept && kept.w > 0 && kept.w <= 1 && kept.h > 0 && kept.h <= 1);
+  assert.equal(page.originalImage, null, 'the cropped encode must never pose as the original');
+});
+
+test('every refusal falls back to the exact full frame and names its reason', async () => {
+  const refusals = [
+    [null, 'box_97'],
+    [{ x: 700, y: 520, width: 90, height: 70 }, 'too_small'],
+    [{ x: 60, y: 300, width: 1300, height: 320 }, 'aspect'],
+    [{ x: 0, y: 0, width: 1500, height: 1000 }, 'overflow'],
+  ];
+  for (const [plan, reason] of refusals) {
+    const ctx = context(), { draws } = ctx;
+    ctx.setCropPlan(plan);
+    const page = await capture(ctx);
+    assert.equal(page.autoCropped, false, reason + ' must not crop');
+    assert.equal(page.cropped, false);
+    assert.equal(page.cropInfo.reason, reason);
+    assert.deepEqual(plain(page.sourceRegion), { x: 0, y: 0, width: 4000, height: 3000 },
+      reason + ' must keep every source pixel');
+    assert.deepEqual(output(draws)[0].args.slice(1), [0, 0, 4000, 3000, 0, 0, 1850, 1388]);
+    assert.ok(page.originalImage, reason + ' keeps the full image available for restore');
+  }
+});
+
+test('a detection failure never loses the photo', async () => {
+  const ctx = context(), { c } = ctx;
+  c.aiComputePaperCropBox = () => { throw new Error('engine exploded'); };
+  const page = await capture(ctx);
+  assert.equal(page.autoCropped, false);
+  assert.equal(page.cropInfo.reason, 'error');
+  assert.deepEqual(plain(page.sourceRegion), { x: 0, y: 0, width: 4000, height: 3000 });
+});
+
+test('an automatic crop is undone in one tap back to the full frame', async () => {
+  const ctx = context(), { c, node } = ctx;
+  ctx.setCropPlan({ x: 150, y: 112, width: 1200, height: 900 });
+  const page = await capture(ctx);
+  assert.equal(page.autoCropped, true);
+  // הכפתור נפתח לבד, ומנוסח כביטול ולא כשחזור — העובד לא ביקש לחתוך.
+  assert.equal(node('aiOrientationRestore').classList.contains('hidden'), false);
+  assert.equal(node('aiOrientationRestore').textContent, 'השאר תמונה מלאה');
+  await c.aiRestoreOriginalImage();
+  assert.equal(page.cropped, false);
+  assert.deepEqual(plain(page.sourceRegion), { x: 0, y: 0, width: 4000, height: 3000 },
+    'restoring must recover every source edge');
 });

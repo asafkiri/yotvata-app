@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v347 הגנה על סנכרון הזמנות</title>
+    <title>הזמנות יטבתה - v349 חיתוך אוטומטי של התעודה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v347 הגנה על סנכרון הזמנות</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v349 חיתוך אוטומטי של התעודה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -240,8 +240,11 @@
           </div>
           <button id="aiOrientationCancel" type="button" class="btn-tap h-11 shrink-0 rounded-xl bg-rose-500/20 border border-rose-300/30 text-rose-100 px-3 flex items-center justify-center gap-1.5 font-black text-sm" aria-label="מחק את הצילום"><i class="fa-solid fa-trash-can"></i> מחק צילום</button>
         </div>
-        <div id="aiOrientationHint" class="mt-2 rounded-xl bg-amber-400/15 border border-amber-300/30 px-3 py-2 text-sm font-black text-amber-100">
+        <div class="mt-2 flex items-stretch gap-2">
+        <canvas id="aiOrientationCropMap" width="84" height="63" class="hidden shrink-0 self-center rounded-lg border border-white/20"></canvas>
+        <div id="aiOrientationHint" class="flex-1 rounded-xl bg-amber-400/15 border border-amber-300/30 px-3 py-2 text-sm font-black text-amber-100">
           התמונה נשמרת בשלמותה. ודא שהכותרת למעלה ושהטקסט ישר.
+        </div>
         </div>
       </div>
       <div class="relative flex-1 min-h-0 p-3 flex items-center justify-center overflow-hidden">
@@ -1257,6 +1260,7 @@ async function yotvataStartPaperScan(opts = {}) {
 }
 function yotvataScanMetadata(result) {
   return { docIndex: result.docIndex, ok: !!result.ok, attempts: result.attempts || 1,
+    ...aiScanPageAudit(result.docIndex),
     serviceVersion: result.serviceVersion || null, requestId: result.requestId || null,
     model: result.model || null, usage: result.usage || null,
     barcodeRetry: result.retryAudit || null, scanAudit: result.scanAudit || null,
@@ -9197,7 +9201,11 @@ function aiComputePaperCropBox(analysis, width, height, debug) {
     if (paperLike && paperRaw[t] >= globalHigh * 0.45) growOk[t] = 1;
     if (paperRaw[t] >= globalHigh * 0.62) brightTiles[t] = 1;
   }
-  if (seedCount < tilesCount * 0.18) return note('few_seeds', Math.round(100 * seedCount / tilesCount));
+  // v180: הסף היה 0.18 — ונייר שתופס 35% מהפריים, בדיוק הצילום המרושל
+  // שהחיתוך אמור להציל, לא הגיע אליו. 0.10 נמדד כנקודה שבה אותו צילום
+  // נחתך ברווח x2.41 בלי שאף סצנת שמירה (דלפק ריק, מגבת בהירה, תווית
+  // קטנה) מתחילה להיחתך. ראו tools/auto-crop-bench.mjs.
+  if (seedCount < tilesCount * 0.10) return note('few_seeds', Math.round(100 * seedCount / tilesCount));
   const dilated = new Uint8Array(tilesCount);
   for (let ty = 0; ty < tilesY; ty++) for (let tx = 0; tx < tilesX; tx++) {
     const t = ty * tilesX + tx;
@@ -9352,7 +9360,7 @@ function aiRefineCropEdges(data, width, height, box, analysis) {
 // לכן גם שולחן כהה בתוך הפריים אינו גונב את הניגודיות. אין חיתוך ואין
 // יישור: הכול נשאר בתמונה (רקע כהה פשוט נצבע שחור), ומסך אישור הכיוון
 // מציג את התוצאה לפני שנשלח דבר. תמונה שכבר חדה — לא נוגעים בה.
-function aiInkAnchorContrast(data, width, height) {
+function aiInkAnchorContrast(data, width, height, afterFlatten) {
   if (!width || !height || data.length < width * height * 4) return false;
   const x0 = Math.floor(width * 0.15), x1 = Math.ceil(width * 0.85);
   const y0 = Math.floor(height * 0.10), y1 = Math.ceil(height * 0.90);
@@ -9361,7 +9369,12 @@ function aiInkAnchorContrast(data, width, height) {
   for (let y = y0; y < y1; y++) {
     let i = (y * width + x0) * 4;
     for (let x = x0; x < x1; x++, i += 4) {
-      hist[((data[i] * 299 + data[i + 1] * 587 + data[i + 2] * 114) / 1000) | 0]++;
+      const v = ((data[i] * 299 + data[i + 1] * 587 + data[i + 2] * 114) / 1000) | 0;
+      // אחרי השטחת התאורה, 255 הוא ברובו תוצר קטימה ולא לובן אמיתי. ספירתו
+      // מושכת את אחוזון ה-99 כלפי מעלה, וה-LUT שנגזר ממנו מחשיך את הנייר —
+      // בדיוק מה שההבטחה למטה ("הנייר לעולם אינו מוחשך") שוללת.
+      if (afterFlatten && v >= 255) continue;
+      hist[v]++;
       total++;
     }
   }
@@ -9386,7 +9399,10 @@ function aiInkAnchorContrast(data, width, height) {
   for (let v = cut; v < 256; v++) { cum += hist[v]; if (cum >= lowTarget) { low = v; break; } }
   const span = high - low;
   if (span < 8) return false;
-  const slope = Math.min(3.0, 233 / span);
+  // על פיקסלים שכבר הושטחו, שיפוע 3.0 מרחיב את רצועת ההשחרה המוחלטת ובולע
+  // דיו פחמן דהוי. 1.8 נמדד כנקודה שבה ההפרדה דיו/נייר הגבוהה ביותר מושגת
+  // בלי להחשיך את הנייר. המסלול העצמאי (כשההשטחה ויתרה) נשאר כשהיה.
+  const slope = Math.min(afterFlatten ? 1.8 : 3.0, 233 / span);
   // עיגון על הלבן: הנייר תמיד ממופה ל-243, והדיו מוכהה לפי המרחק ממנו.
   // כך גם כשהשיפוע מוגבל, הנייר לעולם אינו מוחשך.
   const lut = new Uint8ClampedArray(256);
@@ -9403,7 +9419,7 @@ function aiInkAnchorContrast(data, width, height) {
 // נתפסת ב־try/catch שב־aiCompressInvoiceImage וממשיכים עם המקור.
 function aiEnhanceDocumentPixels(data, width, height) {
   const flattened = aiFlattenIllumination(data, width, height);
-  const anchored = aiInkAnchorContrast(data, width, height);
+  const anchored = aiInkAnchorContrast(data, width, height, flattened);
   return flattened || anchored;
 }
 function aiCanvasToInvoiceJpeg(canvas, startQuality) {
@@ -9440,17 +9456,110 @@ async function aiRenderInvoiceRotation(sourceDataUrl, quarterTurns) {
   ctx.drawImage(img, -sourceWidth / 2, -sourceHeight / 2, sourceWidth, sourceHeight);
   return aiCanvasToInvoiceJpeg(canvas, 0.92);
 }
-// Full-image capture is the default. Resize/enhance without removing edges;
-// cropping is an explicit choice in the review screen, with a way back to the original.
-async function aiCompressInvoiceImage(file) {
+// מספר העמודים ותוצאת החיתוך נשמרים עם הקליטה. בלי מספר העמודים אי אפשר
+// לגזור מהגיבוי כמה טוקנים עולה תמונה בודדת (tools/scan-token-report.mjs),
+// ובלי סיבות החיתוך אי אפשר לדעת כמה פעמים הזיהוי בכלל פועל בשטח ולא רק
+// על סצנות מסונתזות.
+function aiScanPageAudit(docIndex) {
+  const doc = aiScanDocuments[docIndex];
+  const pages = (doc && doc.pages) || [];
+  if (!pages.length) return {};
+  return { pageCount: pages.length,
+    cropReasons: pages.map(page => (page && page.cropInfo && page.cropInfo.reason) || '?') };
+}
+// יעד ההקטנה. ה-API מקטין כל תמונה לתקציב patches לפני שהמודל רואה אותה,
+// גם ב-detail:"original" (התיעוד: "original detail can still resize images to
+// meet the model's pixel-dimension limit or resizing patch budget"). 1850px
+// בצלע הארוכה הוא הגבול של תקציב 2500-patches; אם התקציב בפועל הוא 1536,
+// OpenAI תקטין משם ל-~1450 — בדיוק כפי שהיא מקטינה היום מ-3000, כלומר
+// לעולם לא גרוע מהמצב הקיים. מעל 1850 משלמים בבתים ובזמן העלאה על
+// פיקסלים שנזרקים בצד השני. כשיהיה מספר מדוד (tools/scan-token-report.mjs)
+// אפשר יהיה להדק ל-1450 ולחסוך הקטנה שנייה.
+const AI_INVOICE_MAX_SIDE = 1850;
+// העותק שעליו מזוהה הנייר: גדול מספיק שאריח יהיה משמעותי, קטן מספיק
+// ש-getImageData לא יפיל מכשיר ישן.
+const AI_CROP_PROXY_SIDE = 1500;
+
+// זיהוי מלבן הנייר על עותק מוקטן. המחזיר הוא אזור בקואורדינטות המקור,
+// שנחתך לפני ההקטנה — כך כל תקציב הפיקסלים הולך לשורות המוצרים במקום
+// לדלפק. כל ספק מחזיר null והצינור ממשיך עם הפריים המלא: חיתוך שגוי
+// גרוע בהרבה מאי-חיתוך, ולכן ארבעת השערים כאן מעדיפים לוותר.
+function aiDetectPaperRegion(img, sourceWidth, sourceHeight, report) {
+  const proxyScale = Math.min(1, AI_CROP_PROXY_SIDE / Math.max(sourceWidth, sourceHeight));
+  const pw = Math.max(1, Math.round(sourceWidth * proxyScale));
+  const ph = Math.max(1, Math.round(sourceHeight * proxyScale));
+  const proxy = document.createElement('canvas');
+  proxy.width = pw; proxy.height = ph;
+  const ctx = proxy.getContext('2d', { alpha: false });
+  if (!ctx) { report.reason = 'no_analysis'; return null; }
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, pw, ph);
+  ctx.drawImage(img, 0, 0, pw, ph);
+  const pixels = ctx.getImageData(0, 0, pw, ph);
+  const analysis = {};
+  // ההשטחה משנה את חוצץ הפרוקסי הזמני בלבד. אין putImageData, ולכן אף
+  // פיקסל שנשלח למודל אינו נוגע בה — הזיהוי לא משנה את התמונה.
+  aiFlattenIllumination(pixels.data, pw, ph, analysis);
+  const box = aiComputePaperCropBox(analysis, pw, ph, report);
+  if (!box) return null;
+  // שוליים 2.5% מעבר למה שזוהה: עיגול לאריח או צל על הקצה לא יוכלו
+  // להפיל שורת טקסט שיושבת בשולי הדף.
+  const pad = Math.round(0.025 * Math.max(box.width, box.height));
+  const x0 = Math.max(0, box.x - pad), y0 = Math.max(0, box.y - pad);
+  const x1 = Math.min(pw, box.x + box.width + pad), y1 = Math.min(ph, box.y + box.height + pad);
+  const w = x1 - x0, h = y1 - y0;
+  const areaFraction = (w * h) / (pw * ph);
+  const aspect = w / Math.max(1, h);
+  const edges = (x0 <= 1 ? 1 : 0) + (y0 <= 1 ? 1 : 0) + (x1 >= pw - 1 ? 1 : 0) + (y1 >= ph - 1 ? 1 : 0);
+  // 0.12 ולא 0.30: תעודה שתופסת רבע מהפריים היא בדיוק המקרה שהחיתוך
+  // נועד לו, ופסילתה מוותרת על הרווח הגדול ביותר. מה שמגן מפני חיתוך
+  // אל תוך כתם בהיר הוא שער הזרעים שמעליו, לא שער השטח.
+  if (areaFraction < 0.12) { report.reason = 'too_small'; report.value = Math.round(areaFraction * 100); return null; }
+  if (areaFraction > 0.97) { report.reason = 'box_97'; report.value = Math.round(areaFraction * 100); return null; }
+  if (aspect < 0.3 || aspect > 3.4) { report.reason = 'aspect'; report.value = Math.round(aspect * 100) / 100; return null; }
+  // נגיעה בשלושה קצוות ומעלה: הנייר חורג מהפריים, ומה שמחוץ לתמונה חסר
+  // ממילא. חיתוך כזה רק יוריד עוד טקסט.
+  if (edges >= 3) { report.reason = 'overflow'; report.value = edges; return null; }
+  const back = 1 / proxyScale;
+  const region = {
+    x: Math.max(0, Math.floor(x0 * back)),
+    y: Math.max(0, Math.floor(y0 * back)),
+    width: Math.ceil(w * back),
+    height: Math.ceil(h * back),
+  };
+  region.width = Math.min(region.width, sourceWidth - region.x);
+  region.height = Math.min(region.height, sourceHeight - region.y);
+  if (region.width < 64 || region.height < 64) { report.reason = 'tiny'; return null; }
+  report.reason = 'cropped';
+  report.value = Math.round(100 * (1 - areaFraction));
+  // ארבעה מספרים מנורמלים למסך האישור. לא נשמרת תמונה נוספת.
+  report.kept = { x: x0 / pw, y: y0 / ph, w: w / pw, h: h / ph };
+  return region;
+}
+// v180: החיתוך האוטומטי חוזר, אבל הפעם הוא מדווח על עצמו ומסיג לאחור
+// בנגיעה אחת. ההסרה ב-v179 נומקה ב"קשה לדעת אם שולי התעודה נשמרו" —
+// ולכן כאן מגיעים גם cropInfo.kept (תרשים במסך האישור) וגם כפתור
+// "השאר תמונה מלאה". forceFullFrame הוא מסלול השחזור: הוא מדלג על
+// הזיהוי כדי שאפשר יהיה לחזור לפריים המלא מאותו קובץ מקור.
+async function aiCompressInvoiceImage(file, forceFullFrame) {
   const raw = await aiReadFile(file);
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
-  const cropInfo = { v: 178, reason: 'full_image' };
-  const region = { x: 0, y: 0, width: sourceWidth, height: sourceHeight };
-  // מסמכי ספק צפופים זקוקים ליותר פרטים. v134: עד 3000px (~250 DPI על A4) —
-  // ‎~56% יותר פיקסלים לכל אות לעומת 2400px, ומורידים איכות רק אם חייבים.
-  const maxSide = 3000;
+  const cropInfo = { v: 180, reason: 'full_image' };
+  let region = { x: 0, y: 0, width: sourceWidth, height: sourceHeight };
+  let autoCropped = false;
+  if (!forceFullFrame) {
+    try {
+      const report = {};
+      const detected = aiDetectPaperRegion(img, sourceWidth, sourceHeight, report);
+      if (report.reason) cropInfo.reason = report.reason;
+      if (report.value != null) cropInfo.value = report.value;
+      if (detected) { region = detected; autoCropped = true; cropInfo.kept = report.kept; }
+    } catch (error) {
+      // כשל זיהוי לעולם אינו מפיל צילום — ממשיכים עם הפריים המלא.
+      cropInfo.reason = 'error'; cropInfo.value = (error && error.message) || '';
+    }
+  }
+  const maxSide = AI_INVOICE_MAX_SIDE;
   const scale = Math.min(1, maxSide / Math.max(region.width, region.height));
   const width = Math.max(1, Math.round(region.width * scale)), height = Math.max(1, Math.round(region.height * scale));
   const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
@@ -9466,7 +9575,10 @@ async function aiCompressInvoiceImage(file) {
   const encoded = aiCanvasToInvoiceJpeg(canvas, 0.92);
   // v155: הקובץ המקורי והגיאומטריה נשמרים על העמוד, כדי שחיתוך ידני
   // יוכל לרוץ מהמקור הגולמי דרך כל הצינור — סטטיסטיקה נקייה, 3000px מלאים.
-  return { dataUrl: encoded.dataUrl, baseDataUrl: encoded.dataUrl, rotation: 0, orientationConfirmed: false, cropped: false, cropInfo: cropInfo, originalImage: { dataUrl: encoded.dataUrl, region: { ...region }, scale: scale, rotationOffset: 0 }, sourceBlob: file, sourceRegion: { x: region.x, y: region.y, width: region.width, height: region.height }, processScale: scale, name: file.name || ('עמוד-' + Date.now() + '.jpg'), bytes: encoded.bytes };
+  // originalImage נשאר null כשנחתך אוטומטית: הוא אמור להחזיק את הפריים
+  // המלא, ו-encoded.dataUrl הוא כעת התמונה החתוכה. השחזור עובר דרך
+  // sourceBlob עם forceFullFrame, ולכן אין צורך בקידוד שני של הפריים המלא.
+  return { dataUrl: encoded.dataUrl, baseDataUrl: encoded.dataUrl, rotation: 0, orientationConfirmed: false, cropped: autoCropped, autoCropped: autoCropped, cropInfo: cropInfo, originalImage: autoCropped ? null : { dataUrl: encoded.dataUrl, region: { ...region }, scale: scale, rotationOffset: 0 }, sourceBlob: file, sourceRegion: { x: region.x, y: region.y, width: region.width, height: region.height }, processScale: scale, name: file.name || ('עמוד-' + Date.now() + '.jpg'), bytes: encoded.bytes };
 }
 function aiOrientationLocation(page) {
   for (let docIndex = 0; docIndex < aiScanDocuments.length; docIndex++) {
@@ -9647,7 +9759,7 @@ async function aiReprocessFromSource(page, originalRect) {
   let y = Math.max(0, Math.min(sourceHeight - 64, Math.round(originalRect.y)));
   const w = Math.max(64, Math.min(sourceWidth - x, Math.round(originalRect.w)));
   const h = Math.max(64, Math.min(sourceHeight - y, Math.round(originalRect.h)));
-  const maxSide = 3000;
+  const maxSide = AI_INVOICE_MAX_SIDE;
   const outScale = Math.min(1, maxSide / Math.max(w, h));
   const width = Math.max(1, Math.round(w * outScale)), height = Math.max(1, Math.round(h * outScale));
   const canvas = document.createElement('canvas');
@@ -9737,7 +9849,11 @@ function aiCropInfoText(page) {
   if (!info || !info.v) return 'צילום שמור';
   if (info.reason === 'full_image') return 'תמונה מלאה · ללא חיתוך';
   const version = 'v' + info.v;
+  if (page.autoCropped) return version + ' · חיתוך אוטומטי · הוסרו ' + (info.value != null ? info.value : '?') + '% מהשוליים';
   if (page.cropped) return version + ' · נחתך' + (info.value != null ? ' ' + info.value + '%' : '');
+  if (info.reason === 'too_small') return version + ' · ללא חיתוך: הנייר קטן מדי בפריים' + (info.value != null ? ' (' + info.value + '%)' : '');
+  if (info.reason === 'aspect') return version + ' · ללא חיתוך: יחס צלעות חריג';
+  if (info.reason === 'overflow') return version + ' · ללא חיתוך: התעודה חורגת מהפריים';
   if (info.reason === 'box_97') return version + ' · ללא חיתוך: המסגרת ' + (info.value != null ? info.value + '% ' : '') + 'מהתמונה';
   if (info.reason === 'few_seeds') return version + ' · ללא חיתוך: זוהה מעט מדי נייר' + (info.value != null ? ' (' + info.value + '%)' : '');
   if (info.reason === 'tiny') return version + ' · ללא חיתוך: מסגרת קטנה מדי';
@@ -9745,16 +9861,39 @@ function aiCropInfoText(page) {
   if (info.reason === 'error') return version + ' · ללא חיתוך: שגיאה — ' + (info.value || '');
   return version + ' · ללא חיתוך';
 }
+// תרשים החיתוך: מסגרת כהה = הצילום כפי שיצא מהמצלמה, מלבן בהיר = מה
+// שנשלח למודל. זו התשובה ל"קשה לדעת אם שולי התעודה נשמרו" — ארבעה
+// מספרים מנורמלים מ-cropInfo.kept, בלי לאחסן תמונה נוספת בטיוטה.
+function aiDrawCropMap(page) {
+  const canvas = $('aiOrientationCropMap');
+  if (!canvas) return;
+  const kept = page && page.autoCropped && page.cropInfo && page.cropInfo.kept;
+  canvas.classList.toggle('hidden', !kept);
+  if (!kept) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const w = canvas.width, h = canvas.height;
+  ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = '#f8fafc';
+  ctx.fillRect(kept.x * w, kept.y * h, kept.w * w, kept.h * h);
+  ctx.strokeStyle = '#34d399'; ctx.lineWidth = 2;
+  ctx.strokeRect(kept.x * w + 1, kept.y * h + 1, Math.max(1, kept.w * w - 2), Math.max(1, kept.h * h - 2));
+}
 function aiUpdateOrientationControls() {
   const session = aiOrientationSession; if (!session) return;
   const reviewOnly = !!session.reviewOnly, cropMode = !!session.cropMode;
   const title = $('aiOrientationTitle'), hint = $('aiOrientationHint'), crop = $('aiOrientationCrop'), restore = $('aiOrientationRestore'), confirm = $('aiOrientationConfirm');
   if (title) title.textContent = reviewOnly ? 'צילום העמוד' : cropMode ? 'חיתוך התמונה' : 'בדיקת התמונה';
-  if (hint) hint.textContent = reviewOnly ? 'צפייה בתמונה ששימשה לפענוח.' : cropMode ? 'גרור את הפינות רק אם צריך. השאר את כל הטקסט והסיכומים בתוך המסגרת.' : session.page.cropped ? 'מוצגת תמונה חתוכה. אפשר לחזור לתמונה המקורית.' : 'התמונה נשמרת בשלמותה. ודא שהכותרת למעלה ושהטקסט ישר.';
+  if (hint) hint.textContent = reviewOnly ? 'צפייה בתמונה ששימשה לפענוח.' : cropMode ? 'גרור את הפינות רק אם צריך. השאר את כל הטקסט והסיכומים בתוך המסגרת.' : session.page.autoCropped ? 'השוליים נחתכו אוטומטית. בתרשים: האזור הבהיר הוא מה שנשלח — ודא שכל הטקסט והסיכומים בתוכו.' : session.page.cropped ? 'מוצגת תמונה חתוכה. אפשר לחזור לתמונה המקורית.' : 'התמונה נשמרת בשלמותה. ודא שהכותרת למעלה ושהטקסט ישר.';
+  aiDrawCropMap(cropMode ? null : session.page);
   ['aiOrientationCancel', 'aiOrientationRotateRow', 'aiOrientationCropRow'].forEach(id => { const node = $(id); if (node) node.classList.toggle('hidden', reviewOnly); });
   if (crop) crop.innerHTML = cropMode ? 'בטל חיתוך' : '<i class="fa-solid fa-crop-simple ml-1"></i> חתוך תמונה';
   const canRestore = !!((cropMode || session.page.cropped) && (session.page.originalImage || session.page.sourceBlob));
-  if (restore) restore.classList.toggle('hidden', !canRestore);
+  if (restore) {
+    restore.classList.toggle('hidden', !canRestore);
+    // בחיתוך אוטומטי העובד לא ביקש דבר, ולכן הכפתור מנוסח כביטול ולא כשחזור.
+    restore.textContent = session.page.autoCropped && !cropMode ? 'השאר תמונה מלאה' : 'חזור לתמונה המקורית';
+  }
   if (crop) crop.classList.toggle('col-span-2', !canRestore);
   if (confirm) confirm.innerHTML = '<i class="fa-solid ' + (reviewOnly ? 'fa-xmark' : 'fa-check') + ' ml-1"></i> ' + (reviewOnly ? 'סגור וחזור לתוצאות' : cropMode ? 'אשר חיתוך והמשך' : session.page.cropped ? 'אשר תמונה חתוכה' : 'אשר תמונה מלאה');
 }
@@ -9776,7 +9915,9 @@ async function aiRestoreOriginalImage() {
   aiSetOrientationBusy(true);
   try {
     // New captures reuse the saved full image. Older in-memory pages can recover from the source file.
-    const original = page.originalImage || (await aiCompressInvoiceImage(page.sourceBlob)).originalImage;
+    // forceFullFrame=true, אחרת הזיהוי היה חותך שוב ו"חזרה לתמונה המלאה"
+    // הייתה מחזירה את אותה תמונה חתוכה.
+    const original = page.originalImage || (await aiCompressInvoiceImage(page.sourceBlob, true)).originalImage;
     const turns = aiNormalizeQuarterTurns((Number(page.rotation) || 0) / 90 + (original.rotationOffset || 0));
     const rendered = await aiRenderInvoiceRotation(original.dataUrl, turns);
     if (aiOrientationSession !== session || !aiOrientationLocation(page)) return;
