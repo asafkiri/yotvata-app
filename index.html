@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v355 עוגן טקסט: חיתוך אגרסיבי בשני גלאים</title>
+    <title>הזמנות יטבתה - v356 אימות זיכוי: הכרעה לכל מוצר, פער נשאר פתוח</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v355 עוגן טקסט: חיתוך אגרסיבי בשני גלאים</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v356 אימות זיכוי: הכרעה לכל מוצר, פער נשאר פתוח</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5168,62 +5168,96 @@ function openReturnVerify(id, presetNoteTotal) {
   returnVerify = {
     id: r.id,
     noteTotal: (presetNoteTotal != null ? presetNoteTotal : (r.creditNoteTotal != null ? r.creditNoteTotal : null)),
-    items: (r.items || []).map(l => ({ name: l.name, barcode: l.barcode || '', qty: Number(l.qty) || 0, noteQty: (l.noteQty != null ? Number(l.noteQty) : (Number(l.qty) || 0)), unitPrice: r2(Number(l.unitPrice) || 0), checked: false }))
+    // checked = "הכרעתי על השורה הזאת". תעודה שכבר אומתה חוזרת עם ההכרעות הקודמות.
+    items: (r.items || []).map(l => ({ name: l.name, barcode: l.barcode || '', qty: Number(l.qty) || 0, noteQty: (l.noteQty != null ? Number(l.noteQty) : (Number(l.qty) || 0)), unitPrice: r2(Number(l.unitPrice) || 0), checked: !!(r.credited || l.noteQty != null) }))
   };
   rvOrigin = (currentView === 'receiptsHistory') ? 'receiptsHistory' : 'returnsHistory';
   setView('returnReconcile');
 }
 function rvNoteEx() { let ex = 0; (returnVerify.items || []).forEach(l => ex += (Number(l.unitPrice) || 0) * (Number(l.noteQty) || 0)); return r2(ex); }
 function rvGap() { return r2((Number(returnVerify.noteTotal) || 0) - rvNoteEx()); }
+const RV_GAP_LINE_CLS = 'flex justify-between text-lg font-black mt-1.5 pt-1.5 border-t border-amber-200 ';
+const RV_PROGRESS_CLS = 'mt-2 pt-2 border-t border-amber-200 text-xs font-black ';
+function rvDecidedCount() { return (returnVerify.items || []).filter(l => l.checked).length; }
+function rvAllDecided() { const n = (returnVerify.items || []).length; return n > 0 && rvDecidedCount() === n; }
 function rvProgressHtml() {
-  const lines = (returnVerify.items || []);
-  const done = lines.filter(l => l.checked).length, total = lines.length;
-  const allDone = total > 0 && done === total;
-  return '<i class="fa-solid ' + (allDone ? 'fa-circle-check' : 'fa-list-check') + '"></i> סומנו ' + done + ' מתוך ' + total + ' מוצרים' + (allDone ? ' ✓' : '');
+  const total = (returnVerify.items || []).length, done = rvDecidedCount(), allDone = rvAllDecided();
+  return '<i class="fa-solid ' + (allDone ? 'fa-circle-check' : 'fa-list-check') + '"></i> הוכרעו ' + done + ' מתוך ' + total + ' מוצרים' + (allDone ? ' ✓' : '');
 }
 function refreshRvHeader() {
   const g = rvGap();
   const rn = $('rvReconNote'); if (rn) rn.textContent = '₪' + fmtMoney(rvNoteEx());
   const gp = $('rvGap'); if (gp) gp.textContent = (g > 0 ? 'חסר ' : (g < 0 ? 'עודף ' : '')) + '₪' + fmtMoney(Math.abs(g));
+  const gl = $('rvGapLine'); if (gl) gl.className = RV_GAP_LINE_CLS + (Math.abs(g) <= 1 ? 'text-emerald-700' : 'text-rose-700');
+  const pc = $('rvProgress'); if (pc) { pc.innerHTML = rvProgressHtml(); pc.className = RV_PROGRESS_CLS + (rvAllDecided() ? 'text-emerald-700' : 'text-amber-900/70'); }
 }
-function rvToggleCheck(idx) {
+function rvRefreshRow(idx) {
   const l = (returnVerify.items || [])[idx]; if (!l) return;
-  l.checked = !l.checked;
   const card = document.querySelector('#app [data-rvcard="' + idx + '"]');
   if (card) card.outerHTML = rvRowHtml(l, idx);
-  const pc = $('rvProgress'); if (pc) { pc.innerHTML = rvProgressHtml(); const all = returnVerify.items || []; const done = all.length > 0 && all.filter(x => x.checked).length === all.length; pc.className = 'mt-2 pt-2 border-t border-amber-200 text-xs font-black ' + (done ? 'text-emerald-700' : 'text-amber-900/70'); }
+  refreshRvHeader();
+}
+// v356: ההכרעה על השורה היא מה שהספק זיכה בפועל — "הכל", "לא זוכה", או כמות
+// באמצע. אין יותר ✓ נפרד שרק סימן "עברתי כאן" ולא נשמר בשום מקום; כל נגיעה
+// בשורה היא הכרעה, וההפרש למעלה מתעדכן איתה מיד.
+function rvDecide(idx, mode) {
+  const l = (returnVerify.items || [])[idx]; if (!l) return;
+  l.noteQty = (mode === 'none') ? 0 : (Number(l.qty) || 0);
+  l.checked = true;
+  buzz(mode === 'none' ? 14 : 8);
+  rvRefreshRow(idx);
+}
+function rvDecideAll() {
+  (returnVerify.items || []).forEach(l => { l.noteQty = Number(l.qty) || 0; l.checked = true; });
+  buzz(18);
+  renderReturnReconcile();
 }
 function rvStepNote(idx, delta) {
   const l = (returnVerify.items || [])[idx]; if (!l) return;
-  l.noteQty = Math.max(0, (Number(l.noteQty) || 0) + delta); renderReturnReconcile();
+  l.noteQty = Math.max(0, (Number(l.noteQty) || 0) + delta); l.checked = true;
+  rvRefreshRow(idx);
 }
 function rvSetNoteLive(idx, val) {
   const l = (returnVerify.items || [])[idx]; if (!l) return;
   let q = parseInt((val || '').toString().replace(/[^0-9]/g, ''), 10); if (isNaN(q) || q < 0) q = 0;
-  l.noteQty = q; refreshRvHeader();
+  l.noteQty = q; l.checked = true; refreshRvHeader();
 }
 function rvSetPriceLive(idx, val) {
   const l = (returnVerify.items || [])[idx]; if (!l) return;
   const n = parseFloat((val || '').toString().replace(',', '.').replace(/[^0-9.]/g, '')); l.unitPrice = isFinite(n) && n >= 0 ? r2(n) : 0; refreshRvHeader();
 }
-function rvRowHtml(l, idx) {
+// ארבעה מצבים לשורה: טרם הוכרעה, זוכה במלואה, לא זוכה כלל, זוכה חלקית.
+function rvRowState(l) {
   const sent = Number(l.qty) || 0, noteQty = Number(l.noteQty) || 0;
-  const diff = noteQty - sent;
-  let tag = '<span class="text-emerald-600 text-[11px] font-bold">תואם</span>';
-  if (diff < 0) tag = '<span class="text-rose-600 font-black text-[11px]">זוכה חסר ' + (-diff) + '</span>';
-  else if (diff > 0) tag = '<span class="text-amber-600 font-black text-[11px]">זוכה יתר ' + diff + '</span>';
-  const checkBtn = '<button data-role="rv-check" data-id="' + idx + '" class="btn-tap shrink-0 w-7 h-7 rounded-full flex items-center justify-center ' + (l.checked ? 'bg-emerald-500 text-white' : 'border-2 border-slate-300 text-transparent') + '"><i class="fa-solid fa-check text-xs"></i></button>';
-  return '<div data-rvcard="' + idx + '" class="' + (l.checked ? 'bg-emerald-50' : 'bg-white') + ' rounded-2xl border ' + (diff !== 0 ? 'border-rose-200' : 'border-slate-200') + ' p-3 shadow-sm">' +
-    '<div class="flex items-center justify-between gap-2 mb-2"><div class="flex items-center gap-2 min-w-0">' + checkBtn + '<div class="min-w-0"><div class="font-black text-slate-800 text-sm truncate">' + l.name + '</div>' +
-      '<div class="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">₪<input data-role="rv-price" data-id="' + idx + '" type="text" inputmode="decimal" value="' + priceFieldVal(l.unitPrice) + '" class="w-14 text-center border border-slate-200 rounded px-1 py-0.5 outline-none focus:border-blue-500"> ליח׳</div>' +
-    '</div></div>' + tag + '</div>' +
-    '<div class="flex items-center justify-between gap-2">' +
-      '<div class="text-sm text-slate-500 font-bold">הוחזר: <span class="text-slate-800 font-black">' + sent + '</span></div>' +
-      '<div class="flex items-center gap-1.5"><span class="text-slate-500 font-bold text-xs">בתעודה:</span>' +
-        '<button data-role="rv-minus" data-id="' + idx + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-minus text-xs"></i></button>' +
-        '<input data-role="rv-note" data-id="' + idx + '" type="text" inputmode="numeric" value="' + noteQty + '" class="w-12 h-8 text-center font-black border-2 ' + (diff !== 0 ? 'border-rose-300' : 'border-slate-200') + ' rounded-lg outline-none focus:border-blue-500">' +
-        '<button data-role="rv-plus" data-id="' + idx + '" class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center"><i class="fa-solid fa-plus text-xs"></i></button>' +
+  if (!l.checked) return 'todo';
+  if (noteQty === sent) return 'full';
+  if (noteQty === 0) return 'none';
+  return 'partial';
+}
+function rvRowHtml(l, idx) {
+  const sent = Number(l.qty) || 0, noteQty = Number(l.noteQty) || 0, st = rvRowState(l);
+  const card = st === 'full' ? 'bg-emerald-50 border-emerald-200' : (st === 'none' ? 'bg-rose-50 border-rose-300' : (st === 'partial' ? 'bg-amber-50 border-amber-300' : 'bg-white border-slate-200'));
+  const tag = st === 'full' ? '<span class="text-emerald-700 font-black text-[11px] shrink-0">זוכה במלואו ✓</span>'
+    : st === 'none' ? '<span class="text-rose-600 font-black text-[11px] shrink-0">לא זוכה</span>'
+    : st === 'partial' ? '<span class="text-amber-700 font-black text-[11px] shrink-0">' + (noteQty > sent ? 'זוכה יתר ' + (noteQty - sent) : 'זוכה ' + noteQty + ' מתוך ' + sent) + '</span>'
+    : '<span class="text-slate-400 font-bold text-[11px] shrink-0">ממתין להכרעה</span>';
+  const noCls = st === 'none' ? 'bg-rose-500 text-white border-2 border-rose-500' : 'bg-white text-slate-500 border-2 border-slate-200';
+  const yesCls = st === 'full' ? 'bg-emerald-500 text-white border-2 border-emerald-500' : 'bg-white text-slate-500 border-2 border-slate-200';
+  const inpCls = st === 'none' ? 'border-rose-300' : (st === 'partial' ? 'border-amber-400' : (st === 'full' ? 'border-emerald-300' : 'border-slate-200'));
+  return '<div data-rvcard="' + idx + '" class="' + card + ' rounded-2xl border p-3 shadow-sm">' +
+    '<div class="flex items-start justify-between gap-2 mb-2">' +
+      '<div class="min-w-0"><div class="font-black text-slate-800 text-sm truncate">' + retEditEsc(l.name) + '</div>' +
+        '<div class="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">הוחזר <b class="text-slate-600">' + sent + '</b> · ₪<input data-role="rv-price" data-id="' + idx + '" type="text" inputmode="decimal" value="' + priceFieldVal(l.unitPrice) + '" class="w-14 text-center border border-slate-200 rounded px-1 py-0.5 outline-none focus:border-blue-500 bg-white"> ליח׳</div>' +
+      '</div>' + tag +
+    '</div>' +
+    '<div class="flex items-center gap-2">' +
+      '<button data-role="rv-no" data-id="' + idx + '" class="btn-tap flex-1 h-10 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 ' + noCls + '"><i class="fa-solid fa-xmark"></i> לא זוכה</button>' +
+      '<div class="flex items-center gap-1 shrink-0">' +
+        '<button data-role="rv-minus" data-id="' + idx + '" class="btn-tap w-8 h-10 rounded-lg bg-white border-2 border-slate-200 text-slate-600 flex items-center justify-center"><i class="fa-solid fa-minus text-[10px]"></i></button>' +
+        '<input data-role="rv-note" data-id="' + idx + '" type="text" inputmode="numeric" value="' + noteQty + '" class="w-11 h-10 text-center font-black border-2 ' + inpCls + ' rounded-lg outline-none focus:border-blue-500 bg-white">' +
+        '<button data-role="rv-plus" data-id="' + idx + '" class="btn-tap w-8 h-10 rounded-lg bg-white border-2 border-slate-200 text-slate-600 flex items-center justify-center"><i class="fa-solid fa-plus text-[10px]"></i></button>' +
       '</div>' +
+      '<button data-role="rv-yes" data-id="' + idx + '" class="btn-tap flex-1 h-10 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 ' + yesCls + '"><i class="fa-solid fa-check"></i> זוכה הכל</button>' +
     '</div>' +
   '</div>';
 }
@@ -5232,12 +5266,13 @@ function renderReturnReconcile() {
   const note = returnVerify.noteTotal;
   const gap = rvGap();
   app.innerHTML =
-    '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">אימות זיכוי</h2><div class="text-xs text-slate-400 mt-0.5">עבור מוצר-מוצר, סמן ✓ מה שבדקת, ותקן כמות/מחיר בשורות חריגות</div></div>' +
+    '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">אימות זיכוי</h2><div class="text-xs text-slate-400 mt-0.5">הכרע לכל מוצר מה הספק זיכה — <b class="text-emerald-600">הכל</b>, <b class="text-rose-500">לא זוכה</b>, או כמות באמצע. ההפרש בכרטיס הצהוב יתאפס כשההכרעות יתאימו לתעודה</div></div>' +
     '<div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-sm mb-3">' +
       '<div class="flex justify-between text-sm font-bold text-amber-900"><span>תעודת הזיכוי (ללא מע״מ)</span><span>₪' + fmtMoney(note || 0) + '</span></div>' +
       '<div class="flex justify-between text-sm font-bold text-amber-900 mt-1"><span>שוחזר מהשורות</span><span id="rvReconNote">₪' + fmtMoney(rvNoteEx()) + '</span></div>' +
-      '<div class="flex justify-between text-lg font-black mt-1.5 pt-1.5 border-t border-amber-200 ' + (Math.abs(gap) <= 1 ? 'text-emerald-700' : 'text-rose-700') + '"><span>הפרש שנותר</span><span id="rvGap">' + (gap > 0 ? 'חסר ' : (gap < 0 ? 'עודף ' : '')) + '₪' + fmtMoney(Math.abs(gap)) + '</span></div>' +
-      '<div id="rvProgress" class="mt-2 pt-2 border-t border-amber-200 text-xs font-black text-amber-900/70">' + rvProgressHtml() + '</div>' +
+      '<div id="rvGapLine" class="' + RV_GAP_LINE_CLS + (Math.abs(gap) <= 1 ? 'text-emerald-700' : 'text-rose-700') + '"><span>הפרש שנותר</span><span id="rvGap">' + (gap > 0 ? 'חסר ' : (gap < 0 ? 'עודף ' : '')) + '₪' + fmtMoney(Math.abs(gap)) + '</span></div>' +
+      '<div id="rvProgress" class="' + RV_PROGRESS_CLS + (rvAllDecided() ? 'text-emerald-700' : 'text-amber-900/70') + '">' + rvProgressHtml() + '</div>' +
+      '<button data-role="rv-all-yes" class="btn-tap mt-2 w-full py-2 rounded-xl font-black text-xs bg-white border-2 border-emerald-300 text-emerald-700 flex items-center justify-center gap-1.5"><i class="fa-solid fa-check-double"></i> הספק זיכה הכל — הכרע את כל השורות</button>' +
     '</div>' +
     '<div class="space-y-2 mb-24">' + (returnVerify.items || []).map(rvRowHtml).join('') + '</div>' +
     '<div class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 p-3 flex gap-2 z-40">' +
@@ -5268,11 +5303,11 @@ async function saveReturnVerify(opts) {
   const items = returnVerify.items || [];
   if (!opts.skipChecked) {
     const unchecked = items.filter(l => !l.checked).length;
-    if (unchecked > 0) { showConfirm('לא סימנת הכל', 'לא סימנת ' + unchecked + ' מוצרים כ"נבדק". ייתכן ששכחת לבדוק אותם — להמשיך בכל זאת?', 'המשך', function () { saveReturnVerify({ skipChecked: true }); }); return; }
+    if (unchecked > 0) { showConfirm('נשארו שורות בלי הכרעה', 'לא הכרעת ב-' + unchecked + ' מוצרים. מה שלא הוכרע ייחשב כאילו הספק זיכה אותו במלואו — להמשיך?', 'המשך', function () { saveReturnVerify({ skipChecked: true }); }); return; }
   }
   if (!opts.skipGap && returnVerify.noteTotal != null) {
     const g = rvGap();
-    if (Math.abs(g) > 1) { showConfirm('הפרש לא מוסבר', 'עדיין נשאר הפרש של ₪' + fmtMoney(Math.abs(g)) + ' בין תעודת הזיכוי למה ששוחזר מהשורות. לשמור בכל זאת?', 'שמור בכל זאת', function () { saveReturnVerify({ skipChecked: true, skipGap: true }); }); return; }
+    if (Math.abs(g) > 1) { showConfirm('הפרש לא מוסבר', 'עדיין נשאר הפרש של ₪' + fmtMoney(Math.abs(g)) + ' בין תעודת הזיכוי למה ששוחזר מהשורות. התעודה תישמר כפתוחה, לא תיצבע בירוק, והפער יישאר רשום כחוב של הספק. לשמור כך?', 'שמור כפתוחה', function () { saveReturnVerify({ skipChecked: true, skipGap: true }); }); return; }
   }
   const outItems = items.map(l => {
     const line = { name: l.name, barcode: l.barcode || '', qty: Number(l.qty) || 0, unitPrice: r2(Number(l.unitPrice) || 0), lineTotal: r2((Number(l.unitPrice) || 0) * (Number(l.qty) || 0)) };
@@ -5281,8 +5316,13 @@ async function saveReturnVerify(opts) {
   });
   // הזיכוי שמגיע לך = מה שהחזרת בפועל (לפי הכמות שסרקת), לא מה שהספק רשם בתעודה
   const sentEx = r2(items.reduce((a, l) => a + (Number(l.unitPrice) || 0) * (Number(l.qty) || 0), 0));
-  const open = outItems.some(l => l.noteQty != null && l.noteQty !== l.qty);
   const id = returnVerify.id, noteTotal = returnVerify.noteTotal;
+  // v356: פער כספי בלבד — בלי אף שורה שהכמות בה שונה — הוא פער לכל דבר.
+  // בלעדיו "שמור כפתוחה" סגר את התעודה בירוק והכסף שהספק עוד חייב נעלם
+  // מהכרטיס. זו בדיוק אותה בדיקה שכבר קיימת בעריכת שורות התעודה.
+  const lineGap = outItems.some(l => l.noteQty != null && l.noteQty !== l.qty);
+  const moneyGap = noteTotal != null && Math.abs(rvGap()) > 1;
+  const open = lineGap || moneyGap;
   const updateData = { items: outItems, totalExVat: sentEx, totalIncVat: sentEx, creditNoteTotal: noteTotal, creditStatus: open ? 'open' : 'ok', credited: true, creditedAt: Date.now() };
   const opId = makeOperationId('return_verify');
   const saved = await runCloudTask('save return verification', { op: 'update', path: dataPath('returns', id), data: updateData, operationId: opId });
@@ -21228,7 +21268,9 @@ app.addEventListener('click', (e) => {
   else if (role === 'rv-verify-inline') { const inp = $('rvNote_' + id); const v = inp ? parseNoteVal(inp.value) : null; if (v == null) { showToast('הקלד את סכום תעודת הזיכוי', null, null, 2000); return; } const rr = returns.find(x => x.id === id); if (!rr) return; const sentEx = returnTotals(rr).ex; if (Math.abs(v - sentEx) <= 1) markReturnVerified(id, v); else openReturnVerify(id, v); }
   else if (role === 'rv-add-note') { const inp = $('rvAdd_' + id); const v = inp ? parseNoteVal(inp.value) : null; if (v == null) { showToast('הקלד את סכום תעודת הזיכוי המשלימה', null, null, 2200); return; } addCreditNote(id, v); }
   else if (role === 'rv-open') openReturnVerify(id, null);
-  else if (role === 'rv-check') rvToggleCheck(parseInt(id, 10));
+  else if (role === 'rv-yes') rvDecide(parseInt(id, 10), 'full');
+  else if (role === 'rv-no') rvDecide(parseInt(id, 10), 'none');
+  else if (role === 'rv-all-yes') rvDecideAll();
   else if (role === 'rv-minus') rvStepNote(parseInt(id, 10), -1);
   else if (role === 'rv-plus') rvStepNote(parseInt(id, 10), 1);
   else if (role === 'rv-cancel') { returnVerify = null; setView(rvOrigin); }
