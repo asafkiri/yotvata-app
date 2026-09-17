@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v356 אימות זיכוי: הכרעה לכל מוצר, פער נשאר פתוח</title>
+    <title>הזמנות יטבתה - v357 פותר הפער: מוצא אילו מוצרים לא זוכו</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v356 אימות זיכוי: הכרעה לכל מוצר, פער נשאר פתוח</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v357 פותר הפער: מוצא אילו מוצרים לא זוכו</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5172,6 +5172,7 @@ function openReturnVerify(id, presetNoteTotal) {
     items: (r.items || []).map(l => ({ name: l.name, barcode: l.barcode || '', qty: Number(l.qty) || 0, noteQty: (l.noteQty != null ? Number(l.noteQty) : (Number(l.qty) || 0)), unitPrice: r2(Number(l.unitPrice) || 0), checked: !!(r.credited || l.noteQty != null) }))
   };
   rvOrigin = (currentView === 'receiptsHistory') ? 'receiptsHistory' : 'returnsHistory';
+  rvSolveCache = null;
   setView('returnReconcile');
 }
 function rvNoteEx() { let ex = 0; (returnVerify.items || []).forEach(l => ex += (Number(l.unitPrice) || 0) * (Number(l.noteQty) || 0)); return r2(ex); }
@@ -5184,12 +5185,138 @@ function rvProgressHtml() {
   const total = (returnVerify.items || []).length, done = rvDecidedCount(), allDone = rvAllDecided();
   return '<i class="fa-solid ' + (allDone ? 'fa-circle-check' : 'fa-list-check') + '"></i> הוכרעו ' + done + ' מתוך ' + total + ' מוצרים' + (allDone ? ' ✓' : '');
 }
+// v357: הכיוון נאמר במונחי הספק — "עודף/חסר" ביחס לשחזור מהשורות נקרא הפוך
+// ממה שהמשתמש שואל, שזה תמיד "מי חייב למי".
+function rvGapLabel(g) { return g < -1 ? 'הספק זיכה פחות' : (g > 1 ? 'הספק זיכה יותר' : 'הפרש שנותר'); }
 function refreshRvHeader() {
   const g = rvGap();
   const rn = $('rvReconNote'); if (rn) rn.textContent = '₪' + fmtMoney(rvNoteEx());
-  const gp = $('rvGap'); if (gp) gp.textContent = (g > 0 ? 'חסר ' : (g < 0 ? 'עודף ' : '')) + '₪' + fmtMoney(Math.abs(g));
+  const gt = $('rvGapLabel'); if (gt) gt.textContent = rvGapLabel(g);
+  const gp = $('rvGap'); if (gp) gp.textContent = '₪' + fmtMoney(Math.abs(g));
   const gl = $('rvGapLine'); if (gl) gl.className = RV_GAP_LINE_CLS + (Math.abs(g) <= 1 ? 'text-emerald-700' : 'text-rose-700');
   const pc = $('rvProgress'); if (pc) { pc.innerHTML = rvProgressHtml(); pc.className = RV_PROGRESS_CLS + (rvAllDecided() ? 'text-emerald-700' : 'text-amber-900/70'); }
+  const sb = $('rvSolveBox'); if (sb) sb.innerHTML = rvSolveBoxHtml();
+}
+// ===== v357: פותר הפער =====
+// מחירי השורות מגיעים מהקטלוג שלנו, לא מתעודת הספק, ולכן פער כמו ₪87.75
+// מתפזר על 18 שורות ואי אפשר למצוא ביד איזה צירוף מסביר אותו. הפותר עושה
+// את זה: תרמיל חסום על אגורות שמחפש אילו מוצרים, ובאיזו כמות, מסתכמים
+// בדיוק בפער. מעדיף את מספר השורות הקטן ביותר — ההסבר הפשוט הוא כמעט תמיד
+// הנכון. זו הצעה לאישור, לא קביעה: הכמויות נכנסות רק בהקשה מפורשת.
+const RV_SOLVE_BUDGET = 3e6; // תקרת עבודה — שומרת על המסך חלק גם בהקלדה חיה
+let rvSolveCache = null;
+function rvSolveSignature() {
+  return (returnVerify.items || []).map(l => (Number(l.unitPrice) || 0) + ':' + (Number(l.qty) || 0) + ':' + (Number(l.noteQty) || 0)).join(',') + '|' + returnVerify.noteTotal;
+}
+function rvGapSolution() {
+  if (!returnVerify) return null;
+  const sig = rvSolveSignature();
+  if (rvSolveCache && rvSolveCache.sig === sig) return rvSolveCache.sol;
+  const sol = rvComputeGapSolution();
+  rvSolveCache = { sig: sig, sol: sol };
+  return sol;
+}
+// תרמיל חסום עם מספר השורות המינימלי, וספירת דרכים (עד 2) כדי לדעת אם
+// ההסבר יחיד. wholeOnly = שורה נלקחת רק במלואה.
+function rvKnapsack(cand, target, wholeOnly) {
+  if (!cand.length) return null;
+  const INF = 0x3fffffff;
+  let cost = new Int32Array(target + 1).fill(INF), ways = new Uint8Array(target + 1);
+  cost[0] = 0; ways[0] = 1;
+  const picks = [];
+  for (let ci = 0; ci < cand.length; ci++) {
+    const c = cand[ci], nc = cost.slice(), nw = ways.slice(), pick = new Uint8Array(target + 1);
+    // מהכמות הגדולה לקטנה: שורה שלמה מנצחת פיצול חלקי באותו מספר שורות
+    for (let k = c.room; k >= (wholeOnly ? c.room : 1); k--) {
+      const add = k * c.unit;
+      if (add > target) continue;
+      for (let s = target; s >= add; s--) {
+        const pc = cost[s - add];
+        if (pc >= INF) continue;
+        if (pc + 1 < nc[s]) { nc[s] = pc + 1; nw[s] = ways[s - add]; pick[s] = k; }
+        else if (pc + 1 === nc[s]) { nw[s] = Math.min(255, nw[s] + ways[s - add]); }
+      }
+    }
+    picks.push(pick); cost = nc; ways = nw;
+  }
+  if (cost[target] >= INF) return null;
+  const lines = []; let s = target;
+  for (let ci = cand.length - 1; ci >= 0; ci--) {
+    const k = picks[ci][s];
+    if (k > 0) { lines.push({ idx: cand[ci].i, units: k }); s -= k * cand[ci].unit; }
+  }
+  if (s !== 0 || !lines.length) return null;
+  lines.reverse();
+  return { lines: lines, unique: ways[target] === 1 };
+}
+function rvComputeGapSolution() {
+  const gapAg = Math.round(rvGap() * 100);
+  if (Math.abs(gapAg) <= 100) return null;
+  // פער שלילי: השורות גדולות מהתעודה — צריך להוריד יחידות שהספק לא זיכה.
+  // פער חיובי: התעודה גדולה — צריך להחזיר יחידות שהורדנו יותר מדי.
+  const removing = gapAg < 0, target = Math.abs(gapAg);
+  const items = returnVerify.items || [], cand = [];
+  let work = 0;
+  items.forEach((l, i) => {
+    const unit = Math.round((Number(l.unitPrice) || 0) * 100);
+    const qty = Number(l.qty) || 0, note = Number(l.noteQty) || 0;
+    const maxRoom = Math.min(removing ? note : Math.max(0, qty - note), 255);
+    if (!(unit > 0) || !(maxRoom > 0) || unit > target) return;
+    const room = Math.min(maxRoom, Math.floor(target / unit));
+    if (room < 1) return;
+    cand.push({ i: i, unit: unit, room: room, full: room === maxRoom });
+    work += target * room;
+  });
+  if (!cand.length || work > RV_SOLVE_BUDGET) return null;
+  // מעבר ראשון — שורות שלמות בלבד: "הספק פשוט לא זיכה את המוצרים האלה".
+  // זה ההסבר האמיתי ברוב המקרים, וגם היחיד שאפשר לאמת בעין מול הנייר.
+  const whole = rvKnapsack(cand.filter(c => c.full), target, true);
+  if (whole && whole.lines.length <= 8) return { removing: removing, lines: whole.lines, unique: whole.unique, whole: true, value: r2(target / 100) };
+  // מעבר שני, חלקי. עם 18 שורות כמעט כל סכום מתקבל באיזשהו צירוף, ולכן צירוף
+  // חלקי ארוך הוא רעש ולא הסבר — מציעים רק צירוף קצר, ומסומן כניחוש.
+  const part = rvKnapsack(cand, target, false);
+  if (part && part.lines.length <= 2) return { removing: removing, lines: part.lines, unique: part.unique, whole: false, value: r2(target / 100) };
+  return null;
+}
+function rvSolveBoxHtml() {
+  if (!returnVerify) return '';
+  const g = rvGap();
+  if (Math.abs(g) <= 1) return '';
+  const wrap = '<div class="mt-2 pt-2 border-t border-amber-200">';
+  const sol = rvGapSolution();
+  if (sol) {
+    const names = sol.lines.map(x => retEditEsc(((returnVerify.items || [])[x.idx] || {}).name || '') + ' ×' + x.units).join(' · ');
+    // הניסוח נאמן לוודאות: צירוף שורות שלמות ויחיד הוא הסבר, צירוף חלקי
+    // או כזה שיש לו חלופות הוא ניחוש שצריך לאמת מול הנייר.
+    const lead = !sol.whole
+      ? '<i class="fa-solid fa-circle-question"></i> יש צירוף חלקי שמסתכם בדיוק בהפרש, אבל הוא ניחוש — ודא מול הנייר:'
+      : (sol.unique
+        ? '<i class="fa-solid fa-lightbulb"></i> ' + (sol.removing ? 'רק המוצרים האלה מסבירים את ההפרש, אין צירוף אחר:' : 'רק היחידות האלה סוגרות את ההפרש:')
+        : '<i class="fa-solid fa-lightbulb"></i> ' + (sol.removing ? 'ייתכן שאלה המוצרים שלא זוכו (יש גם צירופים אחרים):' : 'ייתכן שאלה היחידות שכן זוכו (יש גם צירופים אחרים):'));
+    return wrap +
+      '<div class="text-[11px] font-black text-amber-900/80 mb-1.5">' + lead + ' <span class="text-amber-900">' + names + '</span></div>' +
+      '<button data-role="rv-apply-solve" class="btn-tap w-full py-2 rounded-xl font-black text-xs text-white flex items-center justify-center gap-1.5 ' + (sol.removing ? 'bg-rose-500' : 'bg-emerald-600') + '"><i class="fa-solid fa-wand-magic-sparkles"></i> ' + (sol.whole && sol.removing ? 'סמן אותם כלא זוכים' : 'עדכן את התעודה לפי זה') + '</button>' +
+    '</div>';
+  }
+  // סכום שהוקלד כולל מע״מ הוא הטעות הנפוצה כשהתעודה גדולה מהשורות
+  const ex = r2((Number(returnVerify.noteTotal) || 0) / (1 + VAT));
+  if (g > 1 && Math.abs(ex - rvNoteEx()) <= 1) {
+    return wrap + '<div class="text-[11px] font-black text-amber-900/80"><i class="fa-solid fa-triangle-exclamation"></i> נראה שהוקלד סכום <b>כולל מע״מ</b>. ללא מע״מ הוא ₪' + fmtMoney(ex) + ' — תקן את הסכום בכרטיס התעודה.</div>' + '</div>';
+  }
+  return wrap + '<div class="text-[11px] font-black text-amber-900/80"><i class="fa-solid fa-circle-question"></i> אין צירוף מוצרים שמסתכם בדיוק בהפרש. סביר שהספק זיכה ב<b>מחיר</b> אחר מהקטלוג שלנו — תקן את המחיר בשורה. אם לא, שמור: הפער יירשם כחוב של הספק.</div>' + '</div>';
+}
+function rvApplyGapSolution() {
+  const sol = rvGapSolution(); if (!sol) return;
+  sol.lines.forEach(x => {
+    const l = (returnVerify.items || [])[x.idx]; if (!l) return;
+    l.noteQty = Math.max(0, (Number(l.noteQty) || 0) + (sol.removing ? -x.units : x.units));
+  });
+  // ההצעה מסבירה את כל ההפרש, ולכן כל שאר השורות זוכו כפי שהן — הן הוכרעו
+  // באותה הקשה. אחרת היינו שואלים על שורות שכבר ענינו עליהן.
+  (returnVerify.items || []).forEach(l => { l.checked = true; });
+  buzz(18);
+  renderReturnReconcile();
+  showToast('ההפרש שובץ למוצרים — ודא מול הנייר שזה באמת מה שקרה', null, null, 3600);
 }
 function rvRefreshRow(idx) {
   const l = (returnVerify.items || [])[idx]; if (!l) return;
@@ -5247,7 +5374,7 @@ function rvRowHtml(l, idx) {
   return '<div data-rvcard="' + idx + '" class="' + card + ' rounded-2xl border p-3 shadow-sm">' +
     '<div class="flex items-start justify-between gap-2 mb-2">' +
       '<div class="min-w-0"><div class="font-black text-slate-800 text-sm truncate">' + retEditEsc(l.name) + '</div>' +
-        '<div class="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">הוחזר <b class="text-slate-600">' + sent + '</b> · ₪<input data-role="rv-price" data-id="' + idx + '" type="text" inputmode="decimal" value="' + priceFieldVal(l.unitPrice) + '" class="w-14 text-center border border-slate-200 rounded px-1 py-0.5 outline-none focus:border-blue-500 bg-white"> ליח׳</div>' +
+        '<div class="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">הוחזר <b class="text-slate-600">' + sent + '</b> · מחיר ₪<input data-role="rv-price" data-id="' + idx + '" type="text" inputmode="decimal" value="' + priceFieldVal(l.unitPrice) + '" class="w-14 text-center border border-slate-300 rounded px-1 py-0.5 outline-none focus:border-blue-500 bg-white"></div>' +
       '</div>' + tag +
     '</div>' +
     '<div class="flex items-center gap-2">' +
@@ -5270,7 +5397,8 @@ function renderReturnReconcile() {
     '<div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-sm mb-3">' +
       '<div class="flex justify-between text-sm font-bold text-amber-900"><span>תעודת הזיכוי (ללא מע״מ)</span><span>₪' + fmtMoney(note || 0) + '</span></div>' +
       '<div class="flex justify-between text-sm font-bold text-amber-900 mt-1"><span>שוחזר מהשורות</span><span id="rvReconNote">₪' + fmtMoney(rvNoteEx()) + '</span></div>' +
-      '<div id="rvGapLine" class="' + RV_GAP_LINE_CLS + (Math.abs(gap) <= 1 ? 'text-emerald-700' : 'text-rose-700') + '"><span>הפרש שנותר</span><span id="rvGap">' + (gap > 0 ? 'חסר ' : (gap < 0 ? 'עודף ' : '')) + '₪' + fmtMoney(Math.abs(gap)) + '</span></div>' +
+      '<div id="rvGapLine" class="' + RV_GAP_LINE_CLS + (Math.abs(gap) <= 1 ? 'text-emerald-700' : 'text-rose-700') + '"><span id="rvGapLabel">' + rvGapLabel(gap) + '</span><span id="rvGap">₪' + fmtMoney(Math.abs(gap)) + '</span></div>' +
+      '<div id="rvSolveBox">' + rvSolveBoxHtml() + '</div>' +
       '<div id="rvProgress" class="' + RV_PROGRESS_CLS + (rvAllDecided() ? 'text-emerald-700' : 'text-amber-900/70') + '">' + rvProgressHtml() + '</div>' +
       '<button data-role="rv-all-yes" class="btn-tap mt-2 w-full py-2 rounded-xl font-black text-xs bg-white border-2 border-emerald-300 text-emerald-700 flex items-center justify-center gap-1.5"><i class="fa-solid fa-check-double"></i> הספק זיכה הכל — הכרע את כל השורות</button>' +
     '</div>' +
@@ -5307,7 +5435,16 @@ async function saveReturnVerify(opts) {
   }
   if (!opts.skipGap && returnVerify.noteTotal != null) {
     const g = rvGap();
-    if (Math.abs(g) > 1) { showConfirm('הפרש לא מוסבר', 'עדיין נשאר הפרש של ₪' + fmtMoney(Math.abs(g)) + ' בין תעודת הזיכוי למה ששוחזר מהשורות. התעודה תישמר כפתוחה, לא תיצבע בירוק, והפער יישאר רשום כחוב של הספק. לשמור כך?', 'שמור כפתוחה', function () { saveReturnVerify({ skipChecked: true, skipGap: true }); }); return; }
+    if (Math.abs(g) > 1) {
+      const less = g < 0;
+      showConfirm(
+        less ? 'הספק זיכה ₪' + fmtMoney(-g) + ' פחות' : 'הספק זיכה ₪' + fmtMoney(g) + ' יותר',
+        less
+          ? 'לא שייכת את כל ההפרש למוצרים מסוימים, וזה בסדר — לא תמיד אפשר. התעודה תישמר כפתוחה והפער יירשם כחוב של הספק; אפשר לתבוע אותו בתעודה הבאה מכפתור "העבר לחזרות" בכרטיס.'
+          : 'תעודת הזיכוי גדולה ממה שרשום בשורות. התעודה תישמר כפתוחה עד שיובהר מאיפה ההפרש — בדוק אם הוקלד סכום כולל מע״מ, או אם חסר מוצר ברשימה.',
+        'שמור כפתוחה', function () { saveReturnVerify({ skipChecked: true, skipGap: true }); });
+      return;
+    }
   }
   const outItems = items.map(l => {
     const line = { name: l.name, barcode: l.barcode || '', qty: Number(l.qty) || 0, unitPrice: r2(Number(l.unitPrice) || 0), lineTotal: r2((Number(l.unitPrice) || 0) * (Number(l.qty) || 0)) };
@@ -21271,6 +21408,7 @@ app.addEventListener('click', (e) => {
   else if (role === 'rv-yes') rvDecide(parseInt(id, 10), 'full');
   else if (role === 'rv-no') rvDecide(parseInt(id, 10), 'none');
   else if (role === 'rv-all-yes') rvDecideAll();
+  else if (role === 'rv-apply-solve') rvApplyGapSolution();
   else if (role === 'rv-minus') rvStepNote(parseInt(id, 10), -1);
   else if (role === 'rv-plus') rvStepNote(parseInt(id, 10), 1);
   else if (role === 'rv-cancel') { returnVerify = null; setView(rvOrigin); }
