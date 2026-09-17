@@ -59,7 +59,7 @@ node tools/order-paste-test.js תיקייה           # פענוח דף הזמנ
 node tools/ask-qty-test.js                      # שאלת הכמות בסימון "הוזמן באפליקציה" (v320)
 node tools/promo-sku-test.js                    # קליטת מק"טים מדף המבצעים (v317)
 node tools/past-chips-test.js גיבוי.json        # צ׳יפים של "סימנת בעבר" (v318)
-node --test tools/return-credit-gap.test.mjs    # פער בתעודת זיכוי נשאר פתוח (v356)
+node --test tools/return-credit-gap.test.mjs    # הכרעת זיכוי לכל מוצר + פער שנשאר פתוח (v356)
 ```
 
 שתי בדיקות צריכות נתונים אמיתיים שאינם בריפו (גיבוי החנות ודפי הזמנה
