@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v355 עוגן טקסט: חיתוך אגרסיבי בשני גלאים</title>
+    <title>הזמנות יטבתה - v356 פער בזיכוי משאיר את התעודה פתוחה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v355 עוגן טקסט: חיתוך אגרסיבי בשני גלאים</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v356 פער בזיכוי משאיר את התעודה פתוחה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5232,7 +5232,7 @@ function renderReturnReconcile() {
   const note = returnVerify.noteTotal;
   const gap = rvGap();
   app.innerHTML =
-    '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">אימות זיכוי</h2><div class="text-xs text-slate-400 mt-0.5">עבור מוצר-מוצר, סמן ✓ מה שבדקת, ותקן כמות/מחיר בשורות חריגות</div></div>' +
+    '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">אימות זיכוי</h2><div class="text-xs text-slate-400 mt-0.5">ה-✓ אומר "עברתי על השורה". מה שהספק זיכה בפועל נקבע בשדה <b class="text-slate-600">בתעודה</b> — מוצר שלא זוכה כלל, אפס אותו</div></div>' +
     '<div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-sm mb-3">' +
       '<div class="flex justify-between text-sm font-bold text-amber-900"><span>תעודת הזיכוי (ללא מע״מ)</span><span>₪' + fmtMoney(note || 0) + '</span></div>' +
       '<div class="flex justify-between text-sm font-bold text-amber-900 mt-1"><span>שוחזר מהשורות</span><span id="rvReconNote">₪' + fmtMoney(rvNoteEx()) + '</span></div>' +
@@ -5272,7 +5272,7 @@ async function saveReturnVerify(opts) {
   }
   if (!opts.skipGap && returnVerify.noteTotal != null) {
     const g = rvGap();
-    if (Math.abs(g) > 1) { showConfirm('הפרש לא מוסבר', 'עדיין נשאר הפרש של ₪' + fmtMoney(Math.abs(g)) + ' בין תעודת הזיכוי למה ששוחזר מהשורות. לשמור בכל זאת?', 'שמור בכל זאת', function () { saveReturnVerify({ skipChecked: true, skipGap: true }); }); return; }
+    if (Math.abs(g) > 1) { showConfirm('הפרש לא מוסבר', 'עדיין נשאר הפרש של ₪' + fmtMoney(Math.abs(g)) + ' בין תעודת הזיכוי למה ששוחזר מהשורות. התעודה תישמר כפתוחה, לא תיצבע בירוק, והפער יישאר רשום כחוב של הספק. לשמור כך?', 'שמור כפתוחה', function () { saveReturnVerify({ skipChecked: true, skipGap: true }); }); return; }
   }
   const outItems = items.map(l => {
     const line = { name: l.name, barcode: l.barcode || '', qty: Number(l.qty) || 0, unitPrice: r2(Number(l.unitPrice) || 0), lineTotal: r2((Number(l.unitPrice) || 0) * (Number(l.qty) || 0)) };
@@ -5281,8 +5281,13 @@ async function saveReturnVerify(opts) {
   });
   // הזיכוי שמגיע לך = מה שהחזרת בפועל (לפי הכמות שסרקת), לא מה שהספק רשם בתעודה
   const sentEx = r2(items.reduce((a, l) => a + (Number(l.unitPrice) || 0) * (Number(l.qty) || 0), 0));
-  const open = outItems.some(l => l.noteQty != null && l.noteQty !== l.qty);
   const id = returnVerify.id, noteTotal = returnVerify.noteTotal;
+  // v356: פער כספי בלבד — בלי אף שורה שהכמות בה שונה — הוא פער לכל דבר.
+  // בלעדיו "שמור כפתוחה" סגר את התעודה בירוק והכסף שהספק עוד חייב נעלם
+  // מהכרטיס. זו בדיוק אותה בדיקה שכבר קיימת בעריכת שורות התעודה.
+  const lineGap = outItems.some(l => l.noteQty != null && l.noteQty !== l.qty);
+  const moneyGap = noteTotal != null && Math.abs(rvGap()) > 1;
+  const open = lineGap || moneyGap;
   const updateData = { items: outItems, totalExVat: sentEx, totalIncVat: sentEx, creditNoteTotal: noteTotal, creditStatus: open ? 'open' : 'ok', credited: true, creditedAt: Date.now() };
   const opId = makeOperationId('return_verify');
   const saved = await runCloudTask('save return verification', { op: 'update', path: dataPath('returns', id), data: updateData, operationId: opId });
