@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v361 מבצע ללא מינימום מיחידה אחת</title>
+    <title>הזמנות יטבתה - v362 הסבר ברור להנחה חסרה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v361 מבצע ללא מינימום מיחידה אחת</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v362 הסבר ברור להנחה חסרה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -12029,6 +12029,17 @@ function priceAuditActionCardHtml(r) {
     return shell + confirm + aiManualPaperBarcodeButton(r.documentIndex, r.rowIndex) + '</article>';
   }
   const difference = r.result === 'difference';
+  const promoGap = difference && r.promo && r.promo.pct > 0 && r.expectedOptions.length === 1 && r.expectedOptions[0].unitDifference > 0;
+  const missingPromo = promoGap && Math.abs(r.comparisonPrice - r.catalogBasePrice) <= .020000001;
+  const gapTitle = promoGap ? (missingPromo ? 'הנחת המבצע לא ניתנה בתעודה' : 'ההנחה בתעודה נמוכה מהמבצע שהוגדר') : 'המחיר בתעודה שונה מהמחיר שבמאגר';
+  const promoExplanation = promoGap ? '<div class="mt-3 rounded-lg bg-rose-50 p-3">' +
+    '<p>לפי המבצע שהוגדר באפליקציה, מגיעה הנחה של <b>' + htmlEscape(r.promo.pct) + '%</b> על מוצר זה.</p>' +
+    '<p class="mt-1">מבצע: <b>' + htmlEscape(r.promo.name || 'מבצע בתוקף') + '</b></p>' +
+    '<p class="mt-2">' + (missingPromo ? 'בתעודה חויבת במחיר מלא, ללא הנחת המבצע.' : 'החיוב בתעודה גבוה מהמחיר לאחר הנחת המבצע.') + '</p>' +
+    '<div class="mt-2">חיוב בתעודה עבור ' + htmlEscape(r.quantity) + ' יח׳: <b>₪' + fmtMoney(r.comparisonPrice * r.quantity) + '</b></div>' +
+    '<div>חיוב לפי המבצע: <b>₪' + fmtMoney(r.expectedOptions[0].price * r.quantity) + '</b></div>' +
+    '<p class="mt-2 font-black">חויבת יותר ב־₪' + fmtMoney(r.expectedOptions[0].lineDifference) + ' בשורה הזאת</p>' +
+    '<p class="text-xs mt-1">כל הסכומים לפני מע״מ.</p></div>' : '';
   const editProduct = r.productId ? '<button data-role="edit-prod" data-id="' + htmlEscape(r.productId) +
     '" class="btn-tap w-full rounded-xl border border-blue-200 bg-blue-50 text-blue-700 py-3 mt-3 font-black">' +
     (r.capability === 'missing_catalog_price' ? 'השלם מחיר במאגר' : 'עדכן מחיר במאגר') + '</button>' : '';
@@ -12036,8 +12047,8 @@ function priceAuditActionCardHtml(r) {
   const source = aiSourceRow(r.documentIndex, r.rowIndex);
   if (r.modelReviewIssues && priceAuditCanConfirmValues(source)) action = '<p class="mt-2 font-bold">בדוק את הכמות, מחיר היחידה וסכום השורה מול הנייר.</p>' +
     '<button data-role="price-confirm-values" data-doc="' + r.documentIndex + '" data-row="' + r.rowIndex + '" data-review-token="' + htmlEscape(priceAuditValuesReviewToken(source)) + '" class="btn-tap w-full rounded-xl bg-emerald-700 text-white py-3 mt-3 font-black">כן, הכמות והמחיר נכונים לפי הנייר</button>' + paperRowCorrectionButton(r.documentIndex, r.rowIndex);
-  else if (difference) action = '<p class="mt-2 font-bold">האם המחיר והכמות כאן הם מה שמודפס בשורה של המוצר שבחרת?</p>' +
-    '<button data-role="price-confirm-paper" data-doc="' + r.documentIndex + '" data-row="' + r.rowIndex + '" data-review-token="' + htmlEscape(priceAuditPaperReviewToken(r)) + '" class="btn-tap w-full rounded-xl bg-emerald-700 text-white py-3 mt-3 font-black">כן, כך כתוב בתעודה — שמור את הפער</button>' + paperRowCorrectionButton(r.documentIndex, r.rowIndex) +
+  else if (difference) action = '<p class="mt-2 font-bold">' + (promoGap ? 'בדוק בתעודה: האם זה הסכום שהספק חייב בפועל?' : 'האם המחיר והכמות כאן הם מה שמודפס בשורה של המוצר שבחרת?') + '</p>' +
+    '<button data-role="price-confirm-paper" data-doc="' + r.documentIndex + '" data-row="' + r.rowIndex + '" data-review-token="' + htmlEscape(priceAuditPaperReviewToken(r)) + '" class="btn-tap w-full rounded-xl bg-emerald-700 text-white py-3 mt-3 font-black">' + (promoGap ? 'כן — שמור את ההנחה החסרה לטיפול מול הספק' : 'כן, כך כתוב בתעודה — שמור את הפער') + '</button>' + (promoGap ? '<p class="text-xs text-slate-600 mt-2">האישור שומר את הפער ואינו משנה את סכום התעודה או מאשר שהתקבל זיכוי.</p>' : '') + paperRowCorrectionButton(r.documentIndex, r.rowIndex) +
     aiManualPaperBarcodeButton(r.documentIndex, r.rowIndex) + '<details class="mt-2 text-sm"><summary class="cursor-pointer py-2 font-bold">הנתונים מהנייר נכונים, והמחיר במאגר לא מעודכן</summary>' + editProduct + '</details>';
   else if (r.capability === 'missing_catalog_price') action = '<p class="mt-2">הוסף את מחיר הקנייה ליחידה כדי שנוכל להשוות אותו למחיר בתעודה.</p>' + editProduct;
   else if (r.missingCartonPromoIds && r.missingCartonPromoIds.length) action = '<p class="mt-2 font-bold">חסר מספר יחידות בארגז בהגדרת המבצע.</p>' +
@@ -12045,7 +12056,7 @@ function priceAuditActionCardHtml(r) {
   else if (r.conflictingPromoIds && r.conflictingPromoIds.length) action = '<p class="mt-2 font-bold">' + htmlEscape(r.reason) + '</p>' +
     r.conflictingPromoIds.map(id => '<button data-role="promo-open" data-id="' + htmlEscape(id) + '" class="btn-tap w-full rounded-xl border border-blue-200 py-3 mt-2 font-black">ערוך ' + htmlEscape((promos.find(p => p.id === id) || {}).name || 'מבצע') + '</button>').join('');
   else action = '<p class="mt-2 font-bold">' + htmlEscape(r.reason) + '</p>' + paperRowCorrectionButton(r.documentIndex, r.rowIndex) + receiptBackToPhotosHtml();
-  const comparison = difference ? r.expectedOptions.map(o => '<div class="rounded-lg bg-rose-50 p-3 mt-2">' +
+  const comparison = promoGap ? promoExplanation : difference ? r.expectedOptions.map(o => '<div class="rounded-lg bg-rose-50 p-3 mt-2">' +
     '<div>מחיר בתעודה ליחידה: <b>' + money(r.comparisonPrice) + '</b></div>' +
     '<div>מחיר צפוי · ' + htmlEscape(o.label) + ': <b>' + money(o.price) + '</b></div>' +
     '<div>הפרש ליחידה: <b>' + money(o.unitDifference) + '</b> · הפרש לשורה: <b>' + money(o.lineDifference) + '</b></div></div>').join('') : '';
@@ -12057,7 +12068,7 @@ function priceAuditActionCardHtml(r) {
     (r.promo ? '<div>מבצע: ' + htmlEscape(r.promo.name) + ' · ' + htmlEscape(r.promo.start) + ' עד ' + htmlEscape(r.promo.end) + ' · מינימום ' + r.promo.minUnits + '</div>' : '') +
     (r.monthlyStatus ? '<div>' + htmlEscape(r.monthlyStatus) + '</div>' : '') + '</details>' : '';
   return shell + '<div class="font-black text-base ' + (difference ? 'text-rose-800' : 'text-amber-900') + '">' +
-    (difference ? 'המחיר בתעודה שונה מהמחיר שבמאגר' : r.capability === 'missing_catalog_price' ? 'צריך להשלים מחיר למוצר' : 'צריך להשלים את הבדיקה') +
+    (difference ? gapTitle : r.capability === 'missing_catalog_price' ? 'צריך להשלים מחיר למוצר' : 'צריך להשלים את הבדיקה') +
     '</div><div class="font-black text-lg mt-2">' + htmlEscape(r.name) + '</div>' + comparison +
     aiSourceRowHtml(r.documentIndex, r.rowIndex, { uncertain: !r.productId }) + action + calculation + '</article>';
 }
