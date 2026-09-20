@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v359 אישור ברור של נתוני התעודה</title>
+    <title>הזמנות יטבתה - v360 התאמת מוצר לפי מחיר מאומת</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v359 אישור ברור של נתוני התעודה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v360 התאמת מוצר לפי מחיר מאומת</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -11356,13 +11356,14 @@ function openPaperRowCorrection(documentIndex, rowIndex) {
 }
 function priceAuditIdentity(mapped, raw) {
   if (!mapped) return null;
-  // Price-assisted identity repairs cannot independently prove a price.
+  // A catalog price alone cannot prove its own reading. The verified-price
+  // rule below already has two independent OCR reads before using the catalog.
   if (/repair|name_price/.test(String(mapped.barcodeMatchMethod || ''))) return null;
   const resolved = aiResolveInvoiceBarcode(mapped);
   // אותו כלל חל על הכרעת קונפליקט ברקוד שנשענה על המחיר: זהות שנבחרה לפי
-  // המחיר אינה יכולה לשמש כדי לאשר את אותו מחיר. הכרעה שנשענה על ספרות
-  // או על השם המודפס אינה מסומנת כך, ולכן היא כן נבדקת.
-  if (resolved && resolved.priceAssisted === true) return null;
+  // המחיר לבדו אינה יכולה לשמש כדי לאשר את אותו מחיר. מחיר שכבר אומת
+  // בשתי קריאות עצמאיות יכול לשמש לשיוך לפי הכלל שהמשתמש ביקש.
+  if (resolved && resolved.priceAssisted === true && resolved.verifiedPrice !== true) return null;
   return resolved && resolved.product || null;
 }
 function aiModelReviewIssues(row) {
@@ -11372,7 +11373,8 @@ function aiModelReviewIssues(row) {
   const corrected = doc && paperRowCorrectionValid(doc, doc.rows.indexOf(row));
   const source = doc && aiSourceRow(doc.noteIndex, doc.rows.indexOf(row));
   const approved = source && row.paperValuesReview && row.paperValuesReview.at > 0 && row.paperValuesReview.token === priceAuditValuesReviewToken(source);
-  const identityConfirmed = row.barcodeMatchMethod === 'user_confirmed' && !!aiResolveInvoiceBarcode(row).product;
+  const resolution = aiResolveInvoiceBarcode(row);
+  const identityConfirmed = !!resolution.product && (row.barcodeMatchMethod === 'user_confirmed' || resolution.verifiedPrice === true);
   const financialFields = ['quantity', 'unitPriceExVat', 'grossLineTotalExVat', 'lineDiscountExVat', 'lineTotalExVat'];
   const issues = (proof.issues || []).filter(f => !(f === 'identity' && identityConfirmed) && !(financialFields.includes(f) && (corrected || approved)));
   if (!corrected && !approved && proof.evidence) for (const key of financialFields) {
@@ -11391,11 +11393,12 @@ function priceAuditConsensusConfirmed(row) {
   const resolution = row && aiResolveInvoiceBarcode(row);
   const identityReviewed = resolution && resolution.product && row.barcodeMatchMethod === 'user_confirmed'
     && (proof && proof.issues || []).every(f => f === 'identity');
-  return !!(proof && proof.version === 1 && (['agreed', 'verified'].includes(proof.status) || identityReviewed)
+  const priceMatched = resolution && resolution.verifiedPrice === true;
+  return !!(proof && proof.version === 1 && (['agreed', 'verified'].includes(proof.status) || identityReviewed || priceMatched)
     && proof.evidence && !aiModelReviewIssues(row).length
     && ['quantity', 'unitPriceExVat', 'grossLineTotalExVat', 'lineDiscountExVat', 'lineTotalExVat']
       .every(key => JSON.stringify(proof.evidence[key] ?? null) === JSON.stringify(row[key] ?? null))
-    && (resolution.method === 'model_consensus' || identityReviewed));
+    && (resolution.method === 'model_consensus' || identityReviewed || priceMatched));
 }
 function priceAuditDocumentReviewNeeded(doc) {
   if (!doc || !doc.modelVerification || !(doc.modelVerification.issues || []).length) return false;
@@ -11422,7 +11425,10 @@ function priceAuditPriceAssistedIdentity(mapped) {
 // המועמדים שמוצגים למשתמש לבחירה בשורה. שורת קונפליקט ברקוד גוזרת אותם
 // מהקריאות עצמן; שורת שם עמום גוזרת אותם מרשימת המועמדים של השרת.
 function aiRowChoiceCandidates(row) {
-  if (row && row.modelVerification && row.modelVerification.version === 1 && (row.modelVerification.issues || []).includes('identity')) return aiModelIdentityCandidates(row);
+  if (row && row.modelVerification && row.modelVerification.version === 1 && (row.modelVerification.issues || []).includes('identity')) {
+    const candidates = aiModelIdentityCandidates(row), automatic = aiModelPriceResolution(row, candidates);
+    return automatic ? [...new Map([...automatic.candidates, ...candidates].map(c => [String(c.product.id), c])).values()] : candidates;
+  }
   return aiConflictChoiceRow(row) ? aiConflictReadCandidates(row) : aiLocalSuggestedNameCandidates(row);
 }
 function aiModelIdentityCandidates(row) {
@@ -11445,6 +11451,70 @@ function aiModelIdentityCandidates(row) {
     if (product) add(product.id, product.barcode);
   }
   return candidates;
+}
+// The user's rule separates reading the price from choosing the catalog name.
+// Two independent reads prove the printed price; the catalog then selects the
+// closest name at exactly that price. The OCR row and its votes stay untouched.
+function aiModelPriceAgreement(row) {
+  const proof = row && row.modelVerification, evidence = proof && proof.evidence;
+  const unit = priceAuditNumber(row && row.unitPriceExVat);
+  if (!proof || proof.version !== 1 || ![0, 1, 2].includes(proof.selectedRead) || !(unit > 0)
+      || !evidence || (proof.issues || []).includes('unitPriceExVat')) return null;
+  const boundFields = ['barcode', 'barcodeReadType', 'catalogHintId', 'catalogCandidateHintIds', 'description', 'sourcePage', 'lineNumber',
+    'quantity', 'unitPriceExVat', 'grossLineTotalExVat', 'lineDiscountExVat', 'lineTotalExVat'];
+  if (!boundFields.every(key => JSON.stringify(evidence[key] ?? null) === JSON.stringify(row[key] ?? null))) return null;
+  const readings = Array.isArray(proof.readings) ? proof.readings : [];
+  if (new Set(readings.map(r => r.read)).size !== readings.length) return null;
+  const matches = readings.filter(r => [0, 1, 2].includes(r.read) && r.values
+    && r.values.sourcePage === row.sourcePage && priceAuditNumber(r.values.unitPriceExVat) === unit);
+  if (!matches.some(r => r.read === proof.selectedRead)) return null;
+  const support = proof.fieldSupport && proof.fieldSupport.unitPriceExVat || [];
+  const peers = matches.filter(r => r.read !== proof.selectedRead && support.includes(r.read));
+  if (!peers.length) return null;
+  return { unitPrice: unit, selectedRead: proof.selectedRead, supportingReads: peers.map(r => r.read),
+    readings: matches.filter(r => r.read === proof.selectedRead || peers.includes(r)) };
+}
+function aiModelPriceNameScore(description, name) {
+  const left = aiNameTokens(String(description || '').toLowerCase()), right = aiNameTokens(String(name || '').toLowerCase());
+  if (!left.length || !right.length) return 0;
+  const generic = new Set(['גרם', 'מל', 'מ״ל', 'ליטר', 'יחידות', 'מארז']);
+  if (!left.some(a => !generic.has(a) && /[א-תa-z]/.test(a) && right.some(b => aiNameTokenMatches(a, b)))) return 0;
+  const coverage = (a, b) => a.reduce((sum, token) => sum + (b.includes(token) ? 1 : b.some(other => aiNameTokenMatches(token, other)) ? .8 : 0), 0);
+  return (coverage(left, right) + coverage(right, left)) / (left.length + right.length);
+}
+function aiModelPriceResolution(row, hinted = aiModelIdentityCandidates(row)) {
+  const agreement = aiModelPriceAgreement(row);
+  if (!agreement || !(row.modelVerification.issues || []).includes('identity')) return null;
+  const day = receiptPromoDay(row), hintedIds = new Set(hinted.map(c => String(c.product.id)));
+  const strong = agreement.readings.find(r => r.read === 2), candidates = [];
+  for (const product of products) {
+    const base = priceAuditNumber(product.price);
+    let basis = base === agreement.unitPrice ? 'catalog_base' : null;
+    if (!basis && base > 0) {
+      const active = promos.filter(pr => pr && pr.type !== 'monthEnd' && (pr.productIds || []).includes(product.id) && promoActive(pr, day));
+      const pr = active.length === 1 && active[0];
+      // Ignore only binary multiplication noise; never round unit prices to cents.
+      const samePromoPrice = pr && Math.abs(discountedUnitPrice(base, pr.pct) - agreement.unitPrice) <= Number.EPSILON * Math.max(1, base) * 4;
+      if (pr && (pr.minUnit !== 'carton' || priceAuditNumber(pr.cartonSize) > 0)
+          && Number(row.quantity) >= promoMinUnitsP(pr) && samePromoPrice) basis = 'active_promotion';
+    }
+    if (!basis) continue;
+    const scores = agreement.readings.map(r => aiModelPriceNameScore(r.values.description, product.name));
+    const score = Math.max(0, ...scores);
+    if (!score && !hintedIds.has(String(product.id))) continue;
+    const barcode = normalizeBarcode(product.barcode || ''), matches = aiCatalogBarcodeMatches(barcode, false);
+    if (!aiIsValidRetailBarcode(barcode) || matches.length !== 1 || String(matches[0].product.id) !== String(product.id)) continue;
+    candidates.push({ product, barcode, score, basis, strong: !!(strong && strong.identity && String(strong.identity.productId) === String(product.id)), hinted: hintedIds.has(String(product.id)) });
+  }
+  candidates.sort((a, b) => b.score - a.score || Number(b.strong) - Number(a.strong) || Number(b.hinted) - Number(a.hinted)
+    || String(a.product.id).localeCompare(String(b.product.id)));
+  const winner = candidates[0];
+  if (!winner) return null;
+  return { product: winner.product, barcode: winner.barcode, method: 'verified_price_name',
+    observed: aiNormalizeBarcodePattern(row.barcodeObserved) || 'לא נקרא', priceAssisted: true, verifiedPrice: true, candidates,
+    identityEvidence: { proofModel: 'verified_price_name', candidateIds: candidates.map(c => String(c.product.id)),
+      priceBasis: winner.basis, nameScore: winner.score, priceVerification: {
+        selectedRead: agreement.selectedRead, supportingReads: agreement.supportingReads, unitPrice: agreement.unitPrice } } };
 }
 // An unresolved choice and a single proposed identity are different actions.
 // Neither becomes independent price evidence until the user checks the paper.
@@ -11924,13 +11994,13 @@ function priceAuditReviewedHtml(rows) {
 function priceAuditAutomaticChoicesHtml(rows) {
   const automatic = rows.filter(r => {
     const source = aiSourceRow(r.documentIndex, r.rowIndex);
-    return source && aiResolveInvoiceBarcode(source.mapped).method === 'verified_equal_price_name';
+    return source && ['verified_equal_price_name', 'verified_price_name'].includes(aiResolveInvoiceBarcode(source.mapped).method);
   });
   if (!automatic.length) return '';
-  return '<details data-price-automatic class="mt-3 text-sm"><summary class="cursor-pointer font-bold text-slate-600">התאמות אוטומטיות בין מוצרים באותו מחיר (' + automatic.length + ')</summary>' +
+  return '<details data-price-automatic class="mt-3 text-sm"><summary class="cursor-pointer font-bold text-slate-600">התאמות אוטומטיות לפי מחיר ושם (' + automatic.length + ')</summary>' +
     automatic.map(r => {
       const source = aiSourceRow(r.documentIndex, r.rowIndex);
-      const choice = { docIndex: r.documentIndex, rowIndex: r.rowIndex, candidates: aiLocalSuggestedNameCandidates(source.mapped).map(c => ({ productId: c.product.id, productName: c.product.name, barcode: c.barcode })) };
+      const choice = { docIndex: r.documentIndex, rowIndex: r.rowIndex, candidates: aiRowChoiceCandidates(source.mapped).map(c => ({ productId: c.product.id, productName: c.product.name, barcode: c.barcode })) };
       return '<div class="border rounded-xl p-3 mt-2"><b>' + htmlEscape(r.name) + '</b><details class="mt-2"><summary class="cursor-pointer text-blue-700">שנה מוצר אם צריך</summary>' + priceAuditChoiceHtml({ choice }) + '</details></div>';
     }).join('') + '</details>';
 }
@@ -12626,6 +12696,8 @@ function aiResolveInvoiceBarcode(row) {
   const resolved = normalizeBarcode(row && row.barcode != null ? row.barcode : '');
   if (row && row.modelVerification && row.modelVerification.version === 1 && (row.modelVerification.issues || []).includes('identity') && method !== 'user_confirmed') {
     const candidates = aiModelIdentityCandidates(row);
+    const automatic = aiModelPriceResolution(row, candidates);
+    if (automatic) return automatic;
     return { error: 'צריך לאשר איזה מוצר מופיע בשורה', suggestion: candidates.length > 1
       ? { candidates, multipleName: true, nameOnly: true, method: 'model_identity_review', printedDescription: row.description, observed }
       : candidates.length === 1 ? { ...candidates[0], method: 'model_identity_review', observed, printedDescription: row.description } : null };
@@ -14868,7 +14940,7 @@ function aiAutomaticNamePriceMappingsAudit() {
       // הכרעת קונפליקט בין שתי קריאות ברקוד היא החלטת זהות שנעשתה במכשיר
       // ולא נקראה מהנייר, ולכן היא נכנסת לאותו תיעוד עם המועמדים שנשקלו.
       const conflictMethod = automaticMethod.indexOf('conflict_') === 0;
-      const nameChoiceMethod = ['verified_equal_price_name', 'model_consensus'].includes(automaticMethod);
+      const nameChoiceMethod = ['verified_equal_price_name', 'verified_price_name', 'model_consensus'].includes(automaticMethod);
       if (!resolution || (!partialBarcodeMethod && !conflictMethod && !nameChoiceMethod && automaticMethod !== 'verified_name_price') || !resolution.product || !resolution.barcode || !resolution.identityEvidence) return;
       const proof = resolution.identityEvidence;
       output.push({
@@ -14883,6 +14955,8 @@ function aiAutomaticNamePriceMappingsAudit() {
         candidateIds: Array.isArray(proof.candidateIds) ? proof.candidateIds : null,
         conflictCandidates: Array.isArray(proof.conflictCandidates) ? proof.conflictCandidates.slice(0, 8) : null,
         priceAssisted: resolution.priceAssisted === true,
+        priceVerification: proof.priceVerification || null,
+        priceBasis: proof.priceBasis || null,
         confirmationSource: automaticMethod,
         catalogHintId: String(row.catalogHintId == null ? '' : row.catalogHintId).slice(0, 160) || null,
         printedDescription: String(row.description || '').slice(0, 160),
