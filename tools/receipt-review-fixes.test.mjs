@@ -5,8 +5,10 @@ import { runtime, fixture } from './receipt-scan-harness.mjs';
 const json = (c, expr) => JSON.parse(c.run('JSON.stringify(' + expr + ')'));
 const report = c => json(c, 'receiptPriceAudit()');
 const html = c => c.run('receiptPriceAuditHtml()');
-function setup({ gap = false, consensus = false, issues = [], carton = false } = {}) {
+function setup({ gap = false, consensus = false, issues = [], carton = false, barcode = null, missingDiscount = false } = {}) {
   const data = fixture('yotvata'), d = data.paper.scan.documents[0], r = d.rows[0];
+  if (barcode) { data.products[0].barcode = r.barcode = r.barcodeObserved = data.items[0].barcode = barcode; }
+  if (missingDiscount) r.lineDiscountExVat = null;
   if (gap) { r.unitPriceExVat = 6; r.grossLineTotalExVat = r.lineTotalExVat = 60; d.subtotalExVat = 60; }
   if (carton) data.promos = [{ id: 'p1', name: 'מבצע חלב', productIds: ['milk'], pct: 20, start: '2026-09-01', end: '2026-09-30', minQty: 1, minUnit: 'carton', cartonSize: null }];
   if (consensus) {
@@ -169,4 +171,89 @@ test('acknowledged price discrepancy reaches the final saved audit without chang
   assert.equal(saved.totalExVat, 54);
   assert.equal(saved.priceAudit.rows[0].result, 'difference');
   assert.equal(saved.priceAudit.rows[0].paperConfirmed, true);
+});
+
+test('EAN-8 consensus needs no user approval and survives draft restoration', () => {
+  const {c,data}=setup({consensus:true,barcode:'72940754'});
+  assert.equal(report(c).rows[0].result,'match');
+  assert.equal(c.run('priceAuditPendingRows(receiptPriceAudit()).length'),0);
+  assert.equal(c.run("aiEvaluateInvoiceScan(aiScanResponse).aggregates.get('milk').qty"),10);
+  assert.equal(report(runtime('yotvata',{data,storage:c.storage})).rows[0].result,'match');
+});
+
+test('saved v146 identity disputes show a working product approval for EAN-8 and EAN-13, with no price question', async () => {
+  for (const barcode of ['72940754','7290000000008']) {
+    const {c,data}=setup({consensus:true,issues:['identity'],barcode});
+    c.run("aiScanResponse.scan.documents[0].rows[0].barcodeMatchMethod='exact_full'");
+    const before=c.run('JSON.stringify(paperRowValues(aiSourceRow(0,0).row))');
+    assert.equal(report(c).rows[0].capability,'unidentified');
+    assert.match(html(c),/data-role="price-confirm-identity"/);
+    assert.doesNotMatch(html(c),/data-role="paper-row-edit"/);
+    const candidate=report(c).rows[0].identityConfirmation;c.context.candidate=candidate;
+    const token=c.run('priceAuditIdentityReviewToken(aiSourceRow(0,0),candidate)');
+    await c.click('price-confirm-identity','',{doc:'0',row:'0',candidateId:candidate.productId,candidateBarcode:barcode,reviewToken:token});
+    assert.equal(c.run('priceAuditPendingRows(receiptPriceAudit()).length'),0);
+    assert.equal(c.run('JSON.stringify(paperRowValues(aiSourceRow(0,0).row))'),before);
+    assert.equal(report(runtime('yotvata',{data,storage:c.storage})).rows[0].result,'match');
+    assert.equal(c.requests.length,0);
+  }
+});
+
+test('a candidate from another scan remains selectable even when missing from the chosen name hints', async () => {
+  const {c}=setup({consensus:true,issues:['identity']});
+  c.run("Object.assign(aiScanResponse.scan.documents[0].rows[0],{barcode:null,barcodeMatchMethod:'suggested_name_multiple',catalogHintId:null,catalogCandidateHintIds:['coffee'],barcodeSuggestedCandidates:[]});aiScanResponse.scan.documents[0].rows[0].modelVerification.candidates=[{productId:'coffee',barcode:'7290000000015'}]");
+  const choices=report(c).rows[0].choice.candidates;
+  assert.deepEqual(choices.map(x=>x.productId),['coffee','milk']);
+  await c.click('ai-confirm-name-candidate','',{doc:'0',row:'0',candidateId:'coffee'});
+  assert.equal(report(c).rows[0].productId,'coffee');
+  assert.equal(c.run('priceAuditPendingRows(receiptPriceAudit()).length'),0);
+});
+
+test('unresolved paper values can be confirmed as-is without rewriting null discounts or losing a genuine price gap', async () => {
+  const {c,data}=setup({consensus:true,gap:true,issues:['lineDiscountExVat'],missingDiscount:true});
+  const before=c.run('JSON.stringify(paperRowValues(aiSourceRow(0,0).mapped))');
+  assert.match(html(c),/data-role="price-confirm-values"/);
+  const token=c.run('priceAuditValuesReviewToken(aiSourceRow(0,0))');
+  await c.click('price-confirm-values','',{doc:'0',row:'0',reviewToken:token});
+  assert.equal(c.run('JSON.stringify(paperRowValues(aiSourceRow(0,0).mapped))'),before);
+  assert.equal(c.run('aiScanEvaluation.valid'),true);
+  assert.equal(report(c).rows[0].result,'difference');
+  assert.equal(report(c).rows[0].expectedOptions[0].lineDifference,10);
+  assert.ok(report(c).rows[0].paperValuesReview);
+  assert.equal(c.run('priceAuditPendingRows(receiptPriceAudit()).length'),0);
+  c.run("const proof=aiSourceRow(0,0).mapped.modelVerification;proof.evidence=Object.fromEntries(Object.entries(proof.evidence).reverse());saveReceiptDraft()");
+  const restored=runtime('yotvata',{data,storage:c.storage});
+  assert.equal(restored.run('priceAuditPendingRows(receiptPriceAudit()).length'),0);
+  assert.equal(c.requests.length,0);
+});
+
+test('a stale paper-values click cannot clear changed data, and edited values invalidate a saved approval', async () => {
+  const {c}=setup({consensus:true,issues:['unitPriceExVat']});
+  const token=c.run('priceAuditValuesReviewToken(aiSourceRow(0,0))');
+  c.run("aiScanResponse.scan.documents[0].rows[0].description='changed'");
+  await c.click('price-confirm-values','',{doc:'0',row:'0',reviewToken:token});
+  assert.equal(c.run('aiSourceRow(0,0).mapped.paperValuesReview'),undefined);
+  const {c:valid}=setup({consensus:true,issues:['unitPriceExVat']});
+  await valid.click('price-confirm-values','',{doc:'0',row:'0',reviewToken:valid.run('priceAuditValuesReviewToken(aiSourceRow(0,0))')});
+  valid.run('aiSourceRow(0,0).mapped.unitPriceExVat=5.01');
+  assert.ok(valid.run("aiModelReviewIssues(aiSourceRow(0,0).mapped).includes('unitPriceExVat')"));
+});
+
+test('manual paper barcode entry accepts valid eight-digit codes and keeps them approved after reload', async () => {
+  const {c,data}=setup({consensus:true,issues:['identity'],barcode:'72940754'});
+  c.run("showInputModal=async()=> '72940754';showConfirm=(a,b,label,fn)=>fn()");
+  await c.click('ai-manual-paper-barcode','',{doc:'0',row:'0'});
+  // The delegated click starts an async handler; flush its input promise.
+  await Promise.resolve();
+  assert.equal(c.run('aiSourceRow(0,0).mapped.barcodeMatchMethod'),'user_confirmed');
+  assert.equal(report(runtime('yotvata',{data,storage:c.storage})).rows[0].result,'match');
+});
+
+test('missing or contradictory numbers do not expose an approve-as-is action', () => {
+  for (const change of ['unitPriceExVat=null','grossLineTotalExVat=99']) {
+    const {c}=setup({consensus:true,issues:['unitPriceExVat']});
+    c.run('aiSourceRow(0,0).mapped.'+change+';aiSourceRow(0,0).doc.__pricePaper.rows[0].'+change);
+    assert.doesNotMatch(html(c),/data-role="price-confirm-values"/);
+    assert.equal(c.run('priceAuditCanConfirmValues(aiSourceRow(0,0))'),false);
+  }
 });
