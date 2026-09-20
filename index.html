@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v358 אימות סריקות וטיפול בפערים</title>
+    <title>הזמנות יטבתה - v359 אישור ברור של נתוני התעודה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v358 אימות סריקות וטיפול בפערים</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v359 אישור ברור של נתוני התעודה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -11370,10 +11370,12 @@ function aiModelReviewIssues(row) {
   if (!proof || proof.version !== 1) return [];
   const doc = aiScanResponse && aiScanResponse.scan && aiScanResponse.scan.documents.find(d => (d.rows || []).includes(row));
   const corrected = doc && paperRowCorrectionValid(doc, doc.rows.indexOf(row));
+  const source = doc && aiSourceRow(doc.noteIndex, doc.rows.indexOf(row));
+  const approved = source && row.paperValuesReview && row.paperValuesReview.at > 0 && row.paperValuesReview.token === priceAuditValuesReviewToken(source);
   const identityConfirmed = row.barcodeMatchMethod === 'user_confirmed' && !!aiResolveInvoiceBarcode(row).product;
   const financialFields = ['quantity', 'unitPriceExVat', 'grossLineTotalExVat', 'lineDiscountExVat', 'lineTotalExVat'];
-  const issues = (proof.issues || []).filter(f => !(f === 'identity' && identityConfirmed) && !(financialFields.includes(f) && corrected));
-  if (!corrected && proof.evidence) for (const key of financialFields) {
+  const issues = (proof.issues || []).filter(f => !(f === 'identity' && identityConfirmed) && !(financialFields.includes(f) && (corrected || approved)));
+  if (!corrected && !approved && proof.evidence) for (const key of financialFields) {
     if (JSON.stringify(proof.evidence[key] ?? null) !== JSON.stringify(row[key] ?? null) && !issues.includes(key)) issues.push(key);
   }
   return issues;
@@ -11386,11 +11388,14 @@ function priceAuditDocumentReviewToken(doc) {
 }
 function priceAuditConsensusConfirmed(row) {
   const proof = row && row.modelVerification;
-  return !!(proof && proof.version === 1 && ['agreed', 'verified'].includes(proof.status)
+  const resolution = row && aiResolveInvoiceBarcode(row);
+  const identityReviewed = resolution && resolution.product && row.barcodeMatchMethod === 'user_confirmed'
+    && (proof && proof.issues || []).every(f => f === 'identity');
+  return !!(proof && proof.version === 1 && (['agreed', 'verified'].includes(proof.status) || identityReviewed)
     && proof.evidence && !aiModelReviewIssues(row).length
     && ['quantity', 'unitPriceExVat', 'grossLineTotalExVat', 'lineDiscountExVat', 'lineTotalExVat']
       .every(key => JSON.stringify(proof.evidence[key] ?? null) === JSON.stringify(row[key] ?? null))
-    && aiResolveInvoiceBarcode(row).method === 'model_consensus');
+    && (resolution.method === 'model_consensus' || identityReviewed));
 }
 function priceAuditDocumentReviewNeeded(doc) {
   if (!doc || !doc.modelVerification || !(doc.modelVerification.issues || []).length) return false;
@@ -11417,7 +11422,29 @@ function priceAuditPriceAssistedIdentity(mapped) {
 // המועמדים שמוצגים למשתמש לבחירה בשורה. שורת קונפליקט ברקוד גוזרת אותם
 // מהקריאות עצמן; שורת שם עמום גוזרת אותם מרשימת המועמדים של השרת.
 function aiRowChoiceCandidates(row) {
+  if (row && row.modelVerification && row.modelVerification.version === 1 && (row.modelVerification.issues || []).includes('identity')) return aiModelIdentityCandidates(row);
   return aiConflictChoiceRow(row) ? aiConflictReadCandidates(row) : aiLocalSuggestedNameCandidates(row);
+}
+function aiModelIdentityCandidates(row) {
+  const proof = row && row.modelVerification;
+  if (!proof || proof.version !== 1) return [];
+  const candidates = [], seen = new Set();
+  const add = (id, barcode) => {
+    const matches = aiCatalogBarcodeMatches(normalizeBarcode(barcode || ''), false);
+    if (matches.length !== 1 || (id != null && String(matches[0].product.id) !== String(id)) || seen.has(String(matches[0].product.id))) return;
+    seen.add(String(matches[0].product.id)); candidates.push(matches[0]);
+  };
+  // Keep alternatives actually read by the other models, not just the selected
+  // model's ambiguous name hints. These are options for a person, never votes.
+  for (const candidate of proof.candidates || []) add(candidate.productId, candidate.barcode);
+  if (proof.evidence && row.barcodeReadType === 'full') add(null, proof.evidence.barcode);
+  if (row.barcodeReadType === 'full') add(null, row.barcodeObserved);
+  for (const candidate of aiLocalSuggestedNameCandidates(row)) add(candidate.product.id, candidate.barcode);
+  for (const id of [row.catalogHintId, row.barcodeSuggestedProductId]) {
+    const product = products.find(p => String(p.id) === String(id));
+    if (product) add(product.id, product.barcode);
+  }
+  return candidates;
 }
 // An unresolved choice and a single proposed identity are different actions.
 // Neither becomes independent price evidence until the user checks the paper.
@@ -11457,7 +11484,7 @@ function priceAuditIdentityCandidate(row) {
     if (id && ids.every(value => value === id) && String(row.description || '').trim() &&
         aiSuggestedProductIdValue(row) === id && matches.length === 1 && String(matches[0].product.id) === id) candidate = matches[0];
   }
-  if (!candidate || !candidate.product || !aiIsValidEan13(candidate.barcode)) return null;
+  if (!candidate || !candidate.product || !aiIsValidRetailBarcode(candidate.barcode)) return null;
   const matches = aiCatalogBarcodeMatches(candidate.barcode, false);
   if (matches.length !== 1 || String(matches[0].product.id) !== String(candidate.product.id)) return null;
   return { productId: String(matches[0].product.id), productName: String(matches[0].product.name || ''), barcode: matches[0].barcode };
@@ -11617,6 +11644,8 @@ function receiptPriceAudit() {
         productId: product && product.id || null, name: product && product.name || raw.description || 'מוצר לא מזוהה', code: raw.code || raw.itemCode || raw.supplierItemCode || raw.barcode || product && (product.code || product.barcode) || '',
         quantity: qty, date: day, dateAssumed: dateAssumed, originalUnitPrice: original, adaptedUnitPrice: adapted, chargedUnitPrice: null, chargeDerivation: '',
         paperCorrection: paperRowCorrectionValid(doc, sourceIndex) ? cloneSafe(mapped.paperValuesCorrection) : null,
+        paperValuesReview: mapped && mapped.paperValuesReview && mapped.paperValuesReview.at > 0
+          && mapped.paperValuesReview.token === priceAuditValuesReviewToken(aiSourceRow(doc.noteIndex, sourceIndex)) ? cloneSafe(mapped.paperValuesReview) : null,
         catalogBasePrice: product ? priceAuditNumber(PRICE_AUDIT_SUPPLIER === 'berman' ? product.listPrice : product.price) : null,
         regularDiscountPct: PRICE_AUDIT_SUPPLIER === 'berman' && product ? priceAuditNumber(product.discountPct) : 0,
         promo: null, expectedOptions: [], comparisonPrice: null, comparisonBasis: 'ללא מע״מ; פיקדון נבדק בשורה נפרדת',
@@ -11650,6 +11679,7 @@ function receiptPriceAudit() {
       }
       if (row.capability === 'checkable' && (raw.priceIncludesVat === true || raw.priceIncludesDeposit === true)) { row.capability = 'partial'; row.reason = 'חסר פירוט להפרדת מע״מ או פיקדון ממחיר השורה'; }
       if (row.capability === 'checkable' && aiModelReviewIssues(mapped).length) {
+        row.modelReviewIssues = aiModelReviewIssues(mapped);
         row.capability = 'partial'; row.reason = 'הסריקות לא הסכימו על נתוני השורה. בדוק ואשר את הכמות והמחיר לפי הנייר';
       }
       return { row, raw, mapped, product };
@@ -11801,6 +11831,34 @@ function receiptInvalidateReviewCalculation() {
   pendingReceipt = null; reconcileAiAudit = null;
   aiAnalyzeResult = null; aiAnalyzeError = ''; receiptAnalysisCache = null;
 }
+function priceAuditValuesReviewToken(source) {
+  const product = priceAuditIdentity(source.mapped, source.row);
+  const proof = source.mapped.modelVerification || {}, evidence = proof.evidence || {};
+  return JSON.stringify([source.doc.__priceSourceId, source.documentIndex, source.rowIndex, product && product.id,
+    product && product.barcode, priceAuditIdentityEvidence(source.mapped), paperRowValues(source.row), paperRowValues(source.mapped),
+    [proof.version, proof.status, proof.selectedRead, proof.identity && proof.identity.productId, proof.identity && proof.identity.barcode,
+      (proof.issues || []).slice().sort(), (proof.identitySupport || []).slice().sort(), Object.keys(evidence).sort().map(key => [key, evidence[key]])]]);
+}
+function priceAuditCanConfirmValues(source) {
+  if (!source || !priceAuditIdentity(source.mapped, source.row)) return false;
+  const row = source.row, qty = priceAuditNumber(row.quantity), unit = priceAuditNumber(row.unitPriceExVat), total = priceAuditNumber(row.lineTotalExVat);
+  const issues = aiModelReviewIssues(source.mapped);
+  return issues.some(f => f !== 'identity') && !issues.includes('identity') && Number.isSafeInteger(qty) && qty > 0
+    && unit > 0 && total != null && total >= 0 && !aiRowArithmeticError(row, qty);
+}
+function priceAuditConfirmValues(documentIndex, rowIndex, token) {
+  const source = aiSourceRow(documentIndex, rowIndex);
+  if (aiScanBusy || receiptFinalizing || !priceAuditCanConfirmValues(source) || token !== priceAuditValuesReviewToken(source)) return false;
+  source.mapped.paperValuesReview = { token, at: Date.now(), values: paperRowValues(source.row) };
+  receiptInvalidateReviewCalculation(); aiScanEvaluation = aiEvaluateInvoiceScan(aiScanResponse);
+  const checked = receiptPriceAudit().rows.find(r => r.documentIndex === documentIndex && r.rowIndex === rowIndex);
+  if (checked && checked.capability === 'checkable' && checked.result === 'difference') {
+    source.mapped.paperPriceReview = { token: priceAuditPaperReviewToken(checked), at: Date.now() };
+  }
+  saveReceiptDraft(); refreshPriceAuditViews();
+  showToast('הנתונים אושרו לפי הנייר. בדיקת המחיר עודכנה.', null, null, 3000);
+  return true;
+}
 function priceAuditConfirmPaper(documentIndex, rowIndex, token) {
   if (aiScanBusy || receiptFinalizing) return false;
   const row = receiptPriceAudit().rows.find(r => r.documentIndex === documentIndex && r.rowIndex === rowIndex);
@@ -11898,7 +11956,10 @@ function priceAuditActionCardHtml(r) {
     '" class="btn-tap w-full rounded-xl border border-blue-200 bg-blue-50 text-blue-700 py-3 mt-3 font-black">' +
     (r.capability === 'missing_catalog_price' ? 'השלם מחיר במאגר' : 'עדכן מחיר במאגר') + '</button>' : '';
   let action;
-  if (difference) action = '<p class="mt-2 font-bold">האם המחיר והכמות כאן הם מה שמודפס בשורה של המוצר שבחרת?</p>' +
+  const source = aiSourceRow(r.documentIndex, r.rowIndex);
+  if (r.modelReviewIssues && priceAuditCanConfirmValues(source)) action = '<p class="mt-2 font-bold">בדוק את הכמות, מחיר היחידה וסכום השורה מול הנייר.</p>' +
+    '<button data-role="price-confirm-values" data-doc="' + r.documentIndex + '" data-row="' + r.rowIndex + '" data-review-token="' + htmlEscape(priceAuditValuesReviewToken(source)) + '" class="btn-tap w-full rounded-xl bg-emerald-700 text-white py-3 mt-3 font-black">כן, הכמות והמחיר נכונים לפי הנייר</button>' + paperRowCorrectionButton(r.documentIndex, r.rowIndex);
+  else if (difference) action = '<p class="mt-2 font-bold">האם המחיר והכמות כאן הם מה שמודפס בשורה של המוצר שבחרת?</p>' +
     '<button data-role="price-confirm-paper" data-doc="' + r.documentIndex + '" data-row="' + r.rowIndex + '" data-review-token="' + htmlEscape(priceAuditPaperReviewToken(r)) + '" class="btn-tap w-full rounded-xl bg-emerald-700 text-white py-3 mt-3 font-black">כן, כך כתוב בתעודה — שמור את הפער</button>' + paperRowCorrectionButton(r.documentIndex, r.rowIndex) +
     aiManualPaperBarcodeButton(r.documentIndex, r.rowIndex) + '<details class="mt-2 text-sm"><summary class="cursor-pointer py-2 font-bold">הנתונים מהנייר נכונים, והמחיר במאגר לא מעודכן</summary>' + editProduct + '</details>';
   else if (r.capability === 'missing_catalog_price') action = '<p class="mt-2">הוסף את מחיר הקנייה ליחידה כדי שנוכל להשוות אותו למחיר בתעודה.</p>' + editProduct;
@@ -12097,6 +12158,14 @@ function aiIsValidEan13(value) {
   let sum = 0;
   for (let i = 0; i < 12; i++) sum += Number(barcode[i]) * (i % 2 === 0 ? 1 : 3);
   return (10 - (sum % 10)) % 10 === Number(barcode[12]);
+}
+function aiIsValidRetailBarcode(value) {
+  const barcode = normalizeBarcode(value);
+  if (aiIsValidEan13(barcode)) return true;
+  if (!/^\d{8}$/.test(barcode)) return false;
+  let sum = 0;
+  for (let i = 0; i < 7; i++) sum += Number(barcode[i]) * (i % 2 === 0 ? 3 : 1);
+  return (10 - sum % 10) % 10 === Number(barcode[7]);
 }
 function aiCatalogBarcodeIsSafe(value) {
   const barcode = normalizeBarcode(value);
@@ -12555,6 +12624,12 @@ function aiResolveInvoiceBarcode(row) {
   const observed = normalizeBarcode(observedRaw);
   const observedPattern = aiNormalizeBarcodePattern(observedRaw);
   const resolved = normalizeBarcode(row && row.barcode != null ? row.barcode : '');
+  if (row && row.modelVerification && row.modelVerification.version === 1 && (row.modelVerification.issues || []).includes('identity') && method !== 'user_confirmed') {
+    const candidates = aiModelIdentityCandidates(row);
+    return { error: 'צריך לאשר איזה מוצר מופיע בשורה', suggestion: candidates.length > 1
+      ? { candidates, multipleName: true, nameOnly: true, method: 'model_identity_review', printedDescription: row.description, observed }
+      : candidates.length === 1 ? { ...candidates[0], method: 'model_identity_review', observed, printedDescription: row.description } : null };
+  }
   if (method === 'model_consensus') {
     const proof = row.modelVerification, identity = proof && proof.identity;
     const evidence = proof && proof.evidence;
@@ -12563,7 +12638,7 @@ function aiResolveInvoiceBarcode(row) {
     const supported = proof && proof.version === 1 && [0, 1, 2].includes(proof.selectedRead)
       && Array.isArray(proof.identitySupport) && proof.identitySupport.some(i => [0, 1, 2].includes(i) && i !== proof.selectedRead);
     const matches = identity && aiCatalogBarcodeMatches(identity.barcode, false);
-    if (!bound || !supported || !identity || resolved !== identity.barcode || !aiIsValidEan13(resolved)
+    if (!bound || !supported || !identity || resolved !== identity.barcode || !aiIsValidRetailBarcode(resolved)
         || matches.length !== 1 || String(matches[0].product.id) !== identity.productId) return { error: 'זהות המוצר השתנתה מאז אימות הסריקות — אשר אותה לפי הנייר' };
     return { product: matches[0].product, barcode: resolved, observed, method,
       identityEvidence: { proofModel: 'model_consensus', selectedRead: proof.selectedRead, identitySupport: proof.identitySupport } };
@@ -12706,7 +12781,7 @@ function aiResolveInvoiceBarcode(row) {
       }
     } else if (sourceMethod === 'paper_identity_review') {
       const proof = row.barcodePaperIdentityReview;
-      if (!proof || !aiIsValidEan13(resolved) || proof.barcode !== resolved ||
+      if (!proof || !aiIsValidRetailBarcode(resolved) || proof.barcode !== resolved ||
           proof.productId !== String(matches[0].product.id) || String(row.barcodeUserConfirmedFromCatalogHintId || '') !== proof.productId ||
           proof.evidence !== priceAuditIdentityEvidence(row)) {
         return { error: 'המוצר או השורה השתנו מאז האישור מול הנייר' };
@@ -12714,7 +12789,7 @@ function aiResolveInvoiceBarcode(row) {
     } else if (sourceMethod === 'manual_paper_barcode') {
       // Keep the human reading separate from both OCR attempts. Revalidate the
       // exact product/barcode pair whenever the saved confirmation is replayed.
-      if (!aiIsValidEan13(resolved) || row.barcodeUserEntered !== resolved || String(row.barcodeUserConfirmedFromCatalogHintId || '') !== String(matches[0].product.id)) {
+      if (!aiIsValidRetailBarcode(resolved) || row.barcodeUserEntered !== resolved || String(row.barcodeUserConfirmedFromCatalogHintId || '') !== String(matches[0].product.id)) {
         return { error: 'הברקוד שהוקלד מהנייר אינו תואם למוצר שאושר' };
       }
     } else if (sourceMethod === 'verified_unknown_full') {
@@ -14437,7 +14512,7 @@ function aiPendingChoiceGroupHtml(suggestions) {
 }
 function priceAuditConfirmIdentity(documentIndex, rowIndex, productId, barcode, reviewToken) {
   const source = aiSourceRow(documentIndex, rowIndex);
-  if (!source || aiScanBusy || priceAuditIdentity(source.mapped, source.row)) return false;
+  if (!source || aiScanBusy || receiptFinalizing || priceAuditIdentity(source.mapped, source.row)) return false;
   const candidate = priceAuditIdentityCandidate(source.mapped);
   if (!candidate || candidate.productId !== String(productId) || candidate.barcode !== barcode ||
       reviewToken !== priceAuditIdentityReviewToken(source, candidate)) {
@@ -14476,11 +14551,11 @@ async function aiEnterPrintedBarcode(documentIndex, rowIndex) {
     return !aiScanBusy && aiScanResponse === response && now && now.doc === source.doc && now.mapped === source.mapped && JSON.stringify(now.mapped) === signature;
   };
   const entered = await showInputModal({ title: 'הקלדת ברקוד מהתעודה',
-    msg: source.title + '\n' + source.position + '\nהקלד את כל 13 הספרות שמודפסות בשורה. המוצר יוצג לאישור לפני השיוך.',
+    msg: source.title + '\n' + source.position + '\nהקלד את הברקוד המלא שמודפס בשורה, 8 או 13 ספרות. המוצר יוצג לאישור לפני השיוך.',
     inputMode: 'numeric', value: '', placeholder: 'ברקוד מלא מהשורה', okText: 'מצא מוצר' });
   if (entered == null) return false;
   const barcode = String(entered).replace(/\s/g, '');
-  if (!aiIsValidEan13(barcode)) { showToast('הקלד ברקוד תקין בן 13 ספרות מהשורה בתעודה', null, null, 3800); return false; }
+  if (!aiIsValidRetailBarcode(barcode)) { showToast('הקלד ברקוד תקין בן 8 או 13 ספרות מהשורה בתעודה', null, null, 3800); return false; }
   if (!isCurrent()) { showToast('התעודה השתנתה. פתח שוב את השורה שברצונך לתקן.', null, null, 3800); return false; }
   const matches = aiCatalogBarcodeMatches(barcode, false);
   if (matches.length !== 1) { showToast(matches.length ? 'הברקוד שייך ליותר ממוצר אחד במאגר. יש לתקן את הכפילות.' : 'הברקוד לא נמצא במאגר. בדוק שהקלדת את כל הספרות נכון.', null, null, 4200); return false; }
@@ -14520,7 +14595,8 @@ function aiConfirmNameCandidate(documentIndex, rowIndex, candidateProductId) {
   // שתי צורות בחירה מגיעות לכאן: שם עמום שהשרת החזיר לו כמה מועמדים,
   // וקונפליקט בין שתי קריאות ברקוד שההכרעה האוטומטית לא סגרה.
   const conflictChoice = aiConflictChoiceRow(row);
-  if (!row || (String(row.barcodeMatchMethod || '') !== 'suggested_name_multiple' && !conflictChoice)) {
+  const modelChoice = row && row.modelVerification && row.modelVerification.version === 1 && (row.modelVerification.issues || []).includes('identity');
+  if (!row || (String(row.barcodeMatchMethod || '') !== 'suggested_name_multiple' && !conflictChoice && !modelChoice)) {
     showToast('אפשרויות המוצר כבר אינן זמינות — הפעל את הסריקה מחדש', null, null, 3400); return false;
   }
   // אין אמון במזהה שהגיע מה-DOM: מפיקים מחדש את הרשימה המותרת מהשורה,
@@ -14544,7 +14620,8 @@ function aiConfirmNameCandidate(documentIndex, rowIndex, candidateProductId) {
   const receivedQty = receivedLine ? (Number(receivedLine.received) || 0) : 0;
   row.barcodeUserConfirmedFromObserved = row.barcodeObserved;
   row.barcodeUserConfirmedFromReadType = row.barcodeReadType;
-  row.barcodeUserConfirmedFromMethod = conflictChoice ? 'conflicting_reads' : 'suggested_name_multiple';
+  row.barcodeUserConfirmedFromMethod = modelChoice ? 'paper_identity_review' : conflictChoice ? 'conflicting_reads' : 'suggested_name_multiple';
+  if (modelChoice) row.barcodePaperIdentityReview = { productId: selectedId, barcode: selected.barcode, evidence: priceAuditIdentityEvidence(row) };
   row.barcodeUserConfirmedFromCatalogHintId = selectedId;
   row.barcodeUserConfirmedCandidateIds = candidates.map(candidate => String(candidate.product.id));
   row.barcodeUserConfirmedCrossCheck = {
@@ -21553,6 +21630,7 @@ app.addEventListener('click', (e) => {
   if (role === 'ai-open-source-row') { aiOpenSourceRowPage(parseInt(t.dataset.doc, 10), parseInt(t.dataset.row, 10)); return; }
   if (role === 'price-confirm-identity') { priceAuditConfirmIdentity(Number(t.dataset.doc), Number(t.dataset.row), t.dataset.candidateId, t.dataset.candidateBarcode, t.dataset.reviewToken); return; }
   if (role === 'price-confirm-paper') { priceAuditConfirmPaper(Number(t.dataset.doc), Number(t.dataset.row), t.dataset.reviewToken); return; }
+  if (role === 'price-confirm-values') { priceAuditConfirmValues(Number(t.dataset.doc), Number(t.dataset.row), t.dataset.reviewToken); return; }
   if (role === 'price-confirm-document') { priceAuditConfirmDocument(Number(t.dataset.doc), t.dataset.reviewToken); return; }
   if (role === 'price-reopen-paper') { priceAuditReopenPaper(Number(t.dataset.doc), Number(t.dataset.row)); return; }
   if (role === 'price-complete-carton') return priceAuditCompleteCarton(Number(t.dataset.doc), Number(t.dataset.row), id);
