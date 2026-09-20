@@ -10,7 +10,7 @@ function setup({ gap = false, consensus = false, issues = [], carton = false, ba
   if (barcode) { data.products[0].barcode = r.barcode = r.barcodeObserved = data.items[0].barcode = barcode; }
   if (missingDiscount) r.lineDiscountExVat = null;
   if (gap) { r.unitPriceExVat = 6; r.grossLineTotalExVat = r.lineTotalExVat = 60; d.subtotalExVat = 60; }
-  if (carton) data.promos = [{ id: 'p1', name: 'מבצע חלב', productIds: ['milk'], pct: 20, start: '2026-09-01', end: '2026-09-30', minQty: 1, minUnit: 'carton', cartonSize: null }];
+  if (carton) data.promos = [{ id: 'p1', name: 'מבצע חלב', productIds: ['milk'], pct: 20, start: '2026-09-01', end: '2026-09-30', minQty: 2, minUnit: 'carton', cartonSize: null }];
   if (consensus) {
     r.barcodeMatchMethod = 'model_consensus';
     r.modelVerification = { version: 1, status: issues.length ? 'needs_review' : 'verified', selectedRead: 2, strongSelected: true,
@@ -67,15 +67,15 @@ test('stale card cannot acknowledge changed financial data', async () => {
   assert.equal(report(c).rows[0].paperConfirmed, false);
 });
 
-test('missing carton size is completed in receiving and saved, with no OCR or changed paper', async () => {
+test('an explicit multi-carton minimum can be completed without OCR or changed paper', async () => {
   const { c } = setup({ carton: true });
   const paper = c.run('JSON.stringify(aiScanResponse.scan.documents[0].__pricePaper)');
   assert.match(html(c), /data-role="price-complete-carton"/);
   assert.doesNotMatch(html(c), /data-role="paper-row-edit"|data-role="rc-photo-capture"/);
-  c.run("showInputModal=async()=> '10';pendingReceipt={ex:999}");
+  c.run("showInputModal=async()=> '5';pendingReceipt={ex:999}");
   await c.click('price-complete-carton', 'p1', { doc: '0', row: '0' });
-  assert.equal(c.writes.at(-1).data.cartonSize, 10);
-  assert.equal(c.run('promos[0].cartonSize'), 10);
+  assert.equal(c.writes.at(-1).data.cartonSize, 5);
+  assert.equal(c.run('promos[0].cartonSize'), 5);
   assert.equal(report(c).rows[0].capability, 'checkable');
   assert.equal(report(c).rows[0].expectedOptions[0].price, 4);
   assert.equal(c.run('pendingReceipt'), null);
