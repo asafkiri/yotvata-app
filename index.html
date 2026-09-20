@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v357 פותר הפער: מוצא אילו מוצרים לא זוכו</title>
+    <title>הזמנות יטבתה - v358 אימות סריקות וטיפול בפערים</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v357 פותר הפער: מוצא אילו מוצרים לא זוכו</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v358 אימות סריקות וטיפול בפערים</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -672,10 +672,10 @@ let aiScanAttemptCount = 0;
 const AI_SCAN_MAX_AUTO_ROTATION_RETRIES = 2;
 // v179: כשל רשת ("Failed to fetch") הוא זמני כמעט תמיד. עד v178 הבהוב אחד
 // מחק תעודה שלמה מהסריקה בלי ניסיון נוסף. הטיימאאוט המקומי מעט מעל התקרה
-// של השרת (180 שניות מודל + 90 ניסיון ברקוד), כדי שבקשה תקועה תיפול אצלנו
+// של השרת (שתי קריאות במקביל עד 180 שניות + הכרעה עד 180 שניות), כדי שבקשה תקועה תיפול אצלנו
 // מהר ותנוסה שוב, במקום להמתין עד שהרשת חותכת אותה בשקט.
 const AI_SCAN_NETWORK_RETRIES = 2;
-const AI_SCAN_FETCH_TIMEOUT_MS = 300000;
+const AI_SCAN_FETCH_TIMEOUT_MS = 420000;
 const AI_SCAN_NETWORK_RETRY_DELAY_MS = 2500;
 const AI_SCAN_MIN_SERVICE_VERSION = 127;
 const AI_BARCODE_SUFFIX_DIGITS = 6;
@@ -1522,7 +1522,7 @@ function deliveryCreditLiveStatus(receiving = false, evaluation = aiScanEvaluati
   status.fullyCovered = status.shortageCovered && !status.pending && !status.invalid.length
     && Math.abs(status.amountGap) <= 0.02 && (status.unitsGap == null || status.unitsGap === 0)
     && !surplus && !status.findings.filter(aiIsActionableFinding).filter(priceAuditLegacyVisible).length
-    && !priceAuditPendingRows(receiptPriceAudit()).length;
+    && !receiptPriceAudit().rows.some(r => r.capability !== 'checkable' || r.result === 'difference');
   return status;
 }
 function deliveryCreditRemainingFindings(findings, status) {
@@ -11332,6 +11332,14 @@ function openPaperRowCorrection(documentIndex, rowIndex) {
     const raw = source.doc.__pricePaper.rows[rowIndex], gross = r2(qty * unit);
     const values = { quantity: qty, unitPriceExVat: unit, grossLineTotalExVat: gross, lineDiscountExVat: Math.max(0, r2(gross - total)), lineTotalExVat: total };
     Object.assign(row, values);
+    if (normalizeBarcode(row.barcode || '') !== barcode) {
+      row.barcode = barcode;
+      row.barcodeMatchMethod = 'user_confirmed';
+      row.barcodeUserConfirmedFromMethod = 'paper_identity_review';
+      row.barcodeUserConfirmedFromCatalogHintId = productId;
+      row.barcodePaperIdentityReview = { productId, barcode, evidence: priceAuditIdentityEvidence(row) };
+      row.userConfirmedAt = Date.now();
+    }
     row.paperValuesCorrection = { sourceId: source.doc.__priceSourceId, originalEvidence: JSON.stringify(raw), values,
       productId, barcode, at: Date.now(), previous: row.paperValuesCorrection ? { values: row.paperValuesCorrection.values, at: row.paperValuesCorrection.at } : null };
     // This approval names the already identified product and the new paper
@@ -11356,6 +11364,48 @@ function priceAuditIdentity(mapped, raw) {
   // או על השם המודפס אינה מסומנת כך, ולכן היא כן נבדקת.
   if (resolved && resolved.priceAssisted === true) return null;
   return resolved && resolved.product || null;
+}
+function aiModelReviewIssues(row) {
+  const proof = row && row.modelVerification;
+  if (!proof || proof.version !== 1) return [];
+  const doc = aiScanResponse && aiScanResponse.scan && aiScanResponse.scan.documents.find(d => (d.rows || []).includes(row));
+  const corrected = doc && paperRowCorrectionValid(doc, doc.rows.indexOf(row));
+  const identityConfirmed = row.barcodeMatchMethod === 'user_confirmed' && !!aiResolveInvoiceBarcode(row).product;
+  const financialFields = ['quantity', 'unitPriceExVat', 'grossLineTotalExVat', 'lineDiscountExVat', 'lineTotalExVat'];
+  const issues = (proof.issues || []).filter(f => !(f === 'identity' && identityConfirmed) && !(financialFields.includes(f) && corrected));
+  if (!corrected && proof.evidence) for (const key of financialFields) {
+    if (JSON.stringify(proof.evidence[key] ?? null) !== JSON.stringify(row[key] ?? null) && !issues.includes(key)) issues.push(key);
+  }
+  return issues;
+}
+function priceAuditDocumentReviewToken(doc) {
+  const source = priceAuditSource(doc) || doc;
+  return JSON.stringify([doc.__priceSourceId, doc.noteIndex, source.invoiceNumber, source.pageCount, source.subtotalExVat,
+    source.printedUnits, source.printedLines, source.documentDiscountExVat, (source.rows || []).map(r => [r.sourcePage, r.quantity, r.lineTotalExVat]),
+    doc.modelVerification && doc.modelVerification.issues]);
+}
+function priceAuditConsensusConfirmed(row) {
+  const proof = row && row.modelVerification;
+  return !!(proof && proof.version === 1 && ['agreed', 'verified'].includes(proof.status)
+    && proof.evidence && !aiModelReviewIssues(row).length
+    && ['quantity', 'unitPriceExVat', 'grossLineTotalExVat', 'lineDiscountExVat', 'lineTotalExVat']
+      .every(key => JSON.stringify(proof.evidence[key] ?? null) === JSON.stringify(row[key] ?? null))
+    && aiResolveInvoiceBarcode(row).method === 'model_consensus');
+}
+function priceAuditDocumentReviewNeeded(doc) {
+  if (!doc || !doc.modelVerification || !(doc.modelVerification.issues || []).length) return false;
+  const review = doc.paperSummaryReview;
+  return !(review && review.at > 0 && review.token === priceAuditDocumentReviewToken(doc));
+}
+function priceAuditConfirmDocument(documentIndex, token) {
+  const doc = aiScanResponse && aiScanResponse.scan && aiScanResponse.scan.documents.find(d => d.noteIndex === documentIndex);
+  const input = aiScanDocuments[documentIndex], source = doc && priceAuditSource(doc);
+  if (!doc || !input || aiScanBusy || receiptFinalizing || token !== priceAuditDocumentReviewToken(doc)
+      || !yotvataPaperCheck(source, input.pages.length || input.restoredPageCount || 0).ok) return false;
+  doc.paperSummaryReview = { token, at: Date.now() };
+  receiptInvalidateReviewCalculation(); aiScanEvaluation = aiEvaluateInvoiceScan(aiScanResponse);
+  saveReceiptDraft(); refreshPriceAuditViews();
+  return true;
 }
 // זהות שנקבעה בעזרת המחיר אינה "לא זוהה": היא ידועה, ורק אינה יכולה לאשר
 // את המחיר. ההפרדה נחוצה כדי שהשורה תסביר את עצמה במקום להיראות ככשל זיהוי.
@@ -11557,7 +11607,7 @@ function receiptPriceAudit() {
     const dateAssumed = !readDate && PRICE_AUDIT_SUPPLIER === 'yotvata';
     const day = readDate || (dateAssumed ? todayStr() : null);
     const docId = doc.__priceSourceId || (aiScanDocuments[doc.noteIndex] || {}).scanId || String(receiptDraftId) + ':' + doc.noteIndex;
-    const info = { id: docId, index: doc.noteIndex, number: (source && (source.docNumber || source.invoiceNumber)) || doc.invoiceNumber || null, date: day, dateAssumed: dateAssumed, complete: allComplete, summaryDiscount: 0, summaryStatus: '' };
+    const info = { id: docId, index: doc.noteIndex, number: (source && (source.docNumber || source.invoiceNumber)) || doc.invoiceNumber || null, date: day, dateAssumed: dateAssumed, complete: allComplete, summaryDiscount: 0, summaryStatus: '', reviewRequired: priceAuditDocumentReviewNeeded(doc), paperSummaryReview: doc.paperSummaryReview || null };
     out.documents.push(info);
     const entries = relevant.map(({ raw, sourceIndex }) => {
       const mapped = (doc.rows || [])[sourceIndex], product = source ? priceAuditIdentity(mapped, raw) : null;
@@ -11599,6 +11649,9 @@ function receiptPriceAudit() {
         row.capability = 'partial'; row.reason = 'יחידת המידה אינה מוכחת מול המאגר (יחידה, אריזה או משקל)';
       }
       if (row.capability === 'checkable' && (raw.priceIncludesVat === true || raw.priceIncludesDeposit === true)) { row.capability = 'partial'; row.reason = 'חסר פירוט להפרדת מע״מ או פיקדון ממחיר השורה'; }
+      if (row.capability === 'checkable' && aiModelReviewIssues(mapped).length) {
+        row.capability = 'partial'; row.reason = 'הסריקות לא הסכימו על נתוני השורה. בדוק ואשר את הכמות והמחיר לפי הנייר';
+      }
       return { row, raw, mapped, product };
     });
     const eligible = entries.filter(e => e.row.capability === 'checkable');
@@ -11607,9 +11660,10 @@ function receiptPriceAudit() {
       if (row.capability !== 'checkable') return;
       const active = promos.filter(pr => pr && Array.isArray(pr.productIds) && pr.productIds.includes(product.id) && promoActive(pr, day)
         && (PRICE_AUDIT_SUPPLIER === 'berman' ? (promoFixedPrice(pr) > 0 || pr.type !== 'monthEnd') : pr.type !== 'monthEnd'));
-      if (active.some(pr => pr.minUnit === 'carton' && !(priceAuditNumber(pr.cartonSize) > 0))) { row.capability = 'partial'; row.reason = 'חסר מספר יחידות בארגז לבדיקת תנאי המבצע'; return; }
+      const missingCartons = active.filter(pr => pr.minUnit === 'carton' && !(priceAuditNumber(pr.cartonSize) > 0));
+      if (missingCartons.length) { row.capability = 'partial'; row.reason = 'חסר מספר יחידות בארגז לבדיקת תנאי המבצע'; row.missingCartonPromoIds = missingCartons.map(pr => pr.id); return; }
       const triggered = active.filter(pr => entries.reduce((sum, x) => sum + (x.product && pr.productIds.includes(x.product.id) ? (x.row.quantity || 0) : 0), 0) >= promoMinUnitsP(pr));
-      if (triggered.length > 1) { row.capability = 'partial'; row.reason = 'יותר ממבצע אחד בתוקף מתאים למוצר; נדרשת הכרעה במאגר'; return; }
+      if (triggered.length > 1) { row.capability = 'partial'; row.reason = 'יותר ממבצע אחד בתוקף מתאים למוצר; נדרשת הכרעה במאגר'; row.conflictingPromoIds = triggered.map(pr => pr.id); return; }
       const pr = triggered[0] || null;
       const monthly = PRICE_AUDIT_SUPPLIER === 'berman' && pr && promoFixedPrice(pr) > 0;
       row.promo = pr ? { id: pr.id || null, name: pr.name || '', pct: Number(pr.pct) || 0, fixedPrice: Number(pr.fixedPrice) || null, start: pr.start, end: pr.end, minUnits: promoMinUnitsP(pr) } : null;
@@ -11658,7 +11712,7 @@ function receiptPriceAudit() {
       } else if (discount > 0 && included) info.summaryStatus = 'ההנחה בסיכום כבר כלולה בסכומי השורות; לא הופחתה שוב';
       else if (discount > 0) info.summaryStatus = 'הנחת הסיכום אינה נסגרת מול סכומי השורות; אין חלוקה למוצרים';
     }
-    entries.forEach(({ row }) => {
+    entries.forEach(({ row, mapped }) => {
       if (row.capability === 'checkable' && (row.comparisonPrice == null || row.comparisonPrice < 0 || !row.expectedOptions.length)) { row.capability = 'partial'; row.reason = 'חסר מחיר באותו בסיס להשוואה'; }
       if (row.capability === 'checkable' && row.comparisonPrice != null && row.expectedOptions.length) {
         // Existing price-comparison tolerance: <= 2 agorot per unit, full
@@ -11669,10 +11723,17 @@ function receiptPriceAudit() {
         row.expectedOptions = row.expectedOptions.map(o => ({ ...o, unitDifference: row.comparisonPrice - o.price, lineDifference: r2((row.comparisonPrice - o.price) * row.quantity) }));
         row.reason = matches.length ? (matches.length > 1 ? 'המחיר מתאים לכמה צורות מחיר; לא ניתן לדעת איזו הנחה יושמה' : 'המחיר תואם: ' + matches[0].label) : 'המחיר בתעודה שונה מהמחיר שבמאגר';
       }
+      const review = mapped && mapped.paperPriceReview;
+      const token = priceAuditPaperReviewToken(row);
+      const manuallyConfirmed = review && review.at > 0 && review.token === token;
+      const modelConfirmed = priceAuditConsensusConfirmed(mapped) && (!mapped.paperPriceReviewRequested || mapped.paperPriceReviewRequested.token !== token);
+      row.paperConfirmed = !!(row.capability === 'checkable' && row.result === 'difference' && (manuallyConfirmed || modelConfirmed));
+      if (row.paperConfirmed) row.paperReview = manuallyConfirmed ? cloneSafe(review) : { source: 'model_consensus', token,
+        selectedRead: mapped.modelVerification.selectedRead, identitySupport: mapped.modelVerification.identitySupport };
       out.rows.push(row);
     });
   });
-  out.complete = allComplete && out.rows.length > 0 && out.rows.every(r => r.capability === 'checkable');
+  out.complete = allComplete && out.rows.length > 0 && out.rows.every(r => r.capability === 'checkable') && !out.documents.some(d => d.reviewRequired);
   return out;
 }
 // שירות הפענוח אינו מחזיר תאריך תעודה. עד כאן כל קליטה קיבלה על כך שתי
@@ -11724,7 +11785,96 @@ function priceAuditChoiceHtml(r) {
     '<div class="font-bold text-sm mt-3">בחר רק אם המוצר תואם לנייר:</div>' + buttons + aiManualPaperBarcodeButton(c.docIndex, c.rowIndex) + '</div>';
 }
 function priceAuditPendingRows(a) {
-  return a.rows.filter(r => r.capability !== 'checkable' || r.result === 'difference');
+  return a.rows.filter(r => r.capability !== 'checkable' || (r.result === 'difference' && !r.paperConfirmed));
+}
+// Acknowledging the paper finishes a review task, never a financial discrepancy.
+// Bind it to the current source, identity, date and calculation, so any edit
+// reopens the task automatically (including edits arriving from another device).
+function priceAuditPaperReviewToken(row) {
+  const source = aiSourceRow(row.documentIndex, row.rowIndex);
+  return JSON.stringify([row.id, row.productId, row.name, row.date, row.quantity,
+    source && source.mapped.barcode, source && priceAuditIdentityEvidence(source.mapped), source && paperRowValues(source.row),
+    row.catalogBasePrice, row.comparisonPrice, row.expectedOptions, row.promo,
+    row.chargeDerivation, row.capability, row.result]);
+}
+function receiptInvalidateReviewCalculation() {
+  pendingReceipt = null; reconcileAiAudit = null;
+  aiAnalyzeResult = null; aiAnalyzeError = ''; receiptAnalysisCache = null;
+}
+function priceAuditConfirmPaper(documentIndex, rowIndex, token) {
+  if (aiScanBusy || receiptFinalizing) return false;
+  const row = receiptPriceAudit().rows.find(r => r.documentIndex === documentIndex && r.rowIndex === rowIndex);
+  const source = row && aiSourceRow(documentIndex, rowIndex);
+  if (!source || row.capability !== 'checkable' || row.result !== 'difference' || token !== priceAuditPaperReviewToken(row)) {
+    showToast('נתוני השורה השתנו. בדוק את הנתונים המעודכנים לפני האישור.', null, null, 3800); return false;
+  }
+  source.mapped.paperPriceReview = { token, at: Date.now() };
+  delete source.mapped.paperPriceReviewRequested;
+  receiptInvalidateReviewCalculation(); saveReceiptDraft(); refreshPriceAuditViews();
+  showToast('הנתונים אושרו לפי הנייר. פער המחיר נשמר בפירוט התעודה.', null, null, 3500);
+  return true;
+}
+function priceAuditReopenPaper(documentIndex, rowIndex) {
+  if (aiScanBusy || receiptFinalizing) return false;
+  const source = aiSourceRow(documentIndex, rowIndex); if (!source) return false;
+  const row = receiptPriceAudit().rows.find(r => r.documentIndex === documentIndex && r.rowIndex === rowIndex);
+  if (row) source.mapped.paperPriceReviewRequested = { token: priceAuditPaperReviewToken(row) };
+  delete source.mapped.paperPriceReview;
+  receiptInvalidateReviewCalculation(); saveReceiptDraft(); refreshPriceAuditViews();
+  return true;
+}
+async function priceAuditCompleteCarton(documentIndex, rowIndex, promoId) {
+  if (aiScanBusy || receiptFinalizing) return false;
+  const row = receiptPriceAudit().rows.find(r => r.documentIndex === documentIndex && r.rowIndex === rowIndex);
+  const promo = promos.find(p => p.id === promoId);
+  if (!row || !(row.missingCartonPromoIds || []).includes(promoId) || !promo) return false;
+  const signature = JSON.stringify(promo), response = aiScanResponse;
+  const entered = await showInputModal({ title: 'כמה יחידות יש בארגז?',
+    msg: (promo.name || 'המבצע') + '\nהנתון יישמר במבצע וישמש גם בהזמנות הבאות.',
+    inputMode: 'numeric', value: '', placeholder: 'לדוגמה 12', okText: 'שמור ובדוק שוב' });
+  if (entered == null) return false;
+  const text = String(entered).trim(), size = Number(text);
+  if (!/^\d+$/.test(text) || !Number.isSafeInteger(size) || size < 1 || size > 10000) {
+    showToast('הזן מספר יחידות שלם וחיובי.', null, null, 3000); return false;
+  }
+  const fresh = promos.find(p => p.id === promoId);
+  if (aiScanBusy || receiptFinalizing || aiScanResponse !== response || !fresh || JSON.stringify(fresh) !== signature) {
+    showToast('התעודה או המבצע השתנו. פתח שוב את השורה.', null, null, 3500); return false;
+  }
+  const saved = await runCloudTask('complete promo carton size', { op: 'update', path: dataPath('promos', promoId),
+    data: { cartonSize: size }, operationId: makeOperationId('promo_carton') });
+  if (!saved) return false;
+  // A snapshot may already have replaced the local object while saving.
+  const current = promos.find(p => p.id === promoId);
+  if (current && JSON.stringify(current) === signature) current.cartonSize = size;
+  receiptInvalidateReviewCalculation();
+  if (aiScanResponse) aiScanEvaluation = aiEvaluateInvoiceScan(aiScanResponse);
+  saveReceiptDraft(); refreshPriceAuditViews(); refreshReceiptTotals();
+  showToast('גודל הארגז נשמר. בדיקת המבצע עודכנה.', null, null, 3000);
+  return true;
+}
+function priceAuditReviewedHtml(rows) {
+  const reviewed = rows.filter(r => r.paperConfirmed);
+  if (!reviewed.length) return '';
+  return '<details data-price-reviewed class="rounded-xl border border-rose-200 bg-rose-50 p-3 mt-3"><summary class="cursor-pointer font-black text-rose-800">פערי מחיר שאומתו ונשמרו (' + reviewed.length + ')</summary>' +
+    '<p class="text-xs mt-2">הנתונים מהנייר אומתו. הפער מול המאגר נשאר מתועד; המחירים והחיוב לא שונו באימות.</p>' +
+    reviewed.map(r => '<div class="border-t border-rose-200 mt-2 pt-2"><b>' + htmlEscape(r.name) + '</b>' +
+      '<div class="text-xs mt-1">' + (r.paperReview && r.paperReview.source === 'model_consensus' ? 'אומת בהסכמה בין הסריקות' : 'אושר על ידך לפי הנייר') + '</div>' +
+      r.expectedOptions.map(o => '<div class="text-sm">בתעודה ₪' + fmtUnitPrice(r.comparisonPrice, true) + ' · צפוי ₪' + fmtUnitPrice(o.price, true) + ' · פער לשורה ₪' + fmtMoney(o.lineDifference) + '</div>').join('') +
+      '<button data-role="price-reopen-paper" data-doc="' + r.documentIndex + '" data-row="' + r.rowIndex + '" class="btn-tap py-3 font-bold text-blue-700">פתח לבדיקה חוזרת</button></div>').join('') + '</details>';
+}
+function priceAuditAutomaticChoicesHtml(rows) {
+  const automatic = rows.filter(r => {
+    const source = aiSourceRow(r.documentIndex, r.rowIndex);
+    return source && aiResolveInvoiceBarcode(source.mapped).method === 'verified_equal_price_name';
+  });
+  if (!automatic.length) return '';
+  return '<details data-price-automatic class="mt-3 text-sm"><summary class="cursor-pointer font-bold text-slate-600">התאמות אוטומטיות בין מוצרים באותו מחיר (' + automatic.length + ')</summary>' +
+    automatic.map(r => {
+      const source = aiSourceRow(r.documentIndex, r.rowIndex);
+      const choice = { docIndex: r.documentIndex, rowIndex: r.rowIndex, candidates: aiLocalSuggestedNameCandidates(source.mapped).map(c => ({ productId: c.product.id, productName: c.product.name, barcode: c.barcode })) };
+      return '<div class="border rounded-xl p-3 mt-2"><b>' + htmlEscape(r.name) + '</b><details class="mt-2"><summary class="cursor-pointer text-blue-700">שנה מוצר אם צריך</summary>' + priceAuditChoiceHtml({ choice }) + '</details></div>';
+    }).join('') + '</details>';
 }
 function priceAuditActionCardHtml(r) {
   const money = n => n == null ? 'לא זמין' : '₪' + fmtUnitPrice(n, true);
@@ -11748,9 +11898,14 @@ function priceAuditActionCardHtml(r) {
     '" class="btn-tap w-full rounded-xl border border-blue-200 bg-blue-50 text-blue-700 py-3 mt-3 font-black">' +
     (r.capability === 'missing_catalog_price' ? 'השלם מחיר במאגר' : 'עדכן מחיר במאגר') + '</button>' : '';
   let action;
-  if (difference) action = '<p class="mt-2 font-bold">האם המחיר והכמות כאן הם מה שמודפס בשורה של המוצר שבחרת?</p>' + paperRowCorrectionButton(r.documentIndex, r.rowIndex) +
+  if (difference) action = '<p class="mt-2 font-bold">האם המחיר והכמות כאן הם מה שמודפס בשורה של המוצר שבחרת?</p>' +
+    '<button data-role="price-confirm-paper" data-doc="' + r.documentIndex + '" data-row="' + r.rowIndex + '" data-review-token="' + htmlEscape(priceAuditPaperReviewToken(r)) + '" class="btn-tap w-full rounded-xl bg-emerald-700 text-white py-3 mt-3 font-black">כן, כך כתוב בתעודה — שמור את הפער</button>' + paperRowCorrectionButton(r.documentIndex, r.rowIndex) +
     aiManualPaperBarcodeButton(r.documentIndex, r.rowIndex) + '<details class="mt-2 text-sm"><summary class="cursor-pointer py-2 font-bold">הנתונים מהנייר נכונים, והמחיר במאגר לא מעודכן</summary>' + editProduct + '</details>';
   else if (r.capability === 'missing_catalog_price') action = '<p class="mt-2">הוסף את מחיר הקנייה ליחידה כדי שנוכל להשוות אותו למחיר בתעודה.</p>' + editProduct;
+  else if (r.missingCartonPromoIds && r.missingCartonPromoIds.length) action = '<p class="mt-2 font-bold">חסר מספר יחידות בארגז בהגדרת המבצע.</p>' +
+    r.missingCartonPromoIds.map(id => '<button data-role="price-complete-carton" data-doc="' + r.documentIndex + '" data-row="' + r.rowIndex + '" data-id="' + htmlEscape(id) + '" class="btn-tap w-full rounded-xl bg-blue-600 text-white py-3 mt-3 font-black">השלם מספר יחידות בארגז</button>').join('');
+  else if (r.conflictingPromoIds && r.conflictingPromoIds.length) action = '<p class="mt-2 font-bold">' + htmlEscape(r.reason) + '</p>' +
+    r.conflictingPromoIds.map(id => '<button data-role="promo-open" data-id="' + htmlEscape(id) + '" class="btn-tap w-full rounded-xl border border-blue-200 py-3 mt-2 font-black">ערוך ' + htmlEscape((promos.find(p => p.id === id) || {}).name || 'מבצע') + '</button>').join('');
   else action = '<p class="mt-2 font-bold">' + htmlEscape(r.reason) + '</p>' + paperRowCorrectionButton(r.documentIndex, r.rowIndex) + receiptBackToPhotosHtml();
   const comparison = difference ? r.expectedOptions.map(o => '<div class="rounded-lg bg-rose-50 p-3 mt-2">' +
     '<div>מחיר בתעודה ליחידה: <b>' + money(r.comparisonPrice) + '</b></div>' +
@@ -11774,17 +11929,21 @@ function receiptPriceAuditHtml(report, { summary = false } = {}) {
   const shell = '<section data-price-audit class="rounded-xl border-2 border-amber-300 bg-white p-3 mb-3 text-sm" dir="rtl" aria-label="בדיקת מחירים ומבצעים">';
   if (a.state === 'running' || a.state === 'unsaved') return shell + '<b>' + (a.state === 'running' ? 'בדיקת המחירים תופיע אחרי השלמת הפענוח ושמירתו. אפשר להמשיך לסרוק.' : 'בדיקת המחירים ממתינה לשמירת הפענוח בהצלחה.') + '</b></section>';
   const pending = priceAuditPendingRows(a);
+  const reviewed = a.rows.filter(r => r.paperConfirmed);
+  const documentReviews = a.documents.filter(d => d.reviewRequired);
   const correctionProblems = paperRowCorrectionProblems();
   const money = n => n == null ? 'לא זמין' : '₪' + fmtUnitPrice(n, true);
-  const openPanel = pending.length > 0 || !a.complete;
+  const openPanel = pending.length > 0 || !a.complete || reviewed.length > 0;
   const title = pending.length ? (pending.length === 1 ? 'נשארה שורה אחת לטיפול' : 'נשארו ' + pending.length + ' שורות לטיפול') :
+    documentReviews.length ? 'צריך לאשר את סיכום התעודה' :
+    reviewed.length && a.complete ? 'הבדיקה הושלמה · ' + reviewed.length + ' פערי מחיר נשמרו' :
     a.complete ? 'המחירים שנבדקו תואמים · ' + a.rows.length + ' שורות · אין מה לאשר' : 'צריך להשלים את צילום התעודה';
   const panelShell = '<section data-price-audit class="rounded-xl ' + (openPanel ? 'border-2 border-amber-300' : 'border border-emerald-200')
     + ' bg-white p-2.5 mb-2 text-sm" dir="rtl" aria-label="בדיקת מחירים ומבצעים">';
   // Edits must return to receiving and discard the already-calculated checkout
   // snapshot; a summary modal must not expose inert or stale approval buttons.
   if (summary) return panelShell + '<div class="font-black">' + title + '</div>' + (openPanel ?
-    '<button data-role="price-open-review" class="btn-tap w-full rounded-xl bg-blue-600 text-white py-3 mt-2 font-black">פתח את השורות שנותרו לטיפול</button>' : '') + '</section>';
+    '<button data-role="price-open-review" class="btn-tap w-full rounded-xl bg-blue-600 text-white py-3 mt-2 font-black">' + (pending.length ? 'פתח את השורות שנותרו לטיפול' : 'הצג את פרטי הבדיקה') + '</button>' : '') + '</section>';
   return panelShell + '<details data-price-panel' + (openPanel ? ' open' : '') +
     '><summary class="flex items-center justify-between gap-2 cursor-pointer font-black ' +
     (openPanel ? 'text-amber-900' : 'text-emerald-800') + '">' +
@@ -11792,7 +11951,16 @@ function receiptPriceAuditHtml(report, { summary = false } = {}) {
     (pending.length ? '<p class="mt-2 text-slate-600">מוצגות רק השורות שנותרו לטיפול. לאחר זיהוי המוצר המחיר נבדק אוטומטית, ושורה תקינה יוצאת מהרשימה.</p>' : '') +
     (correctionProblems.length ? '<div role="alert" class="rounded-xl bg-amber-50 border-2 border-amber-300 p-3 mt-3"><b>התיקון נשמר, אבל השורות עדיין אינן תואמות לסיכום החשבונית.</b><p class="mt-1">בדוק את התיקון האחרון או תקן שורות נוספות לפי הנייר.</p>' + correctionProblems.map(d => '<p class="mt-1 text-xs">תעודה ' + htmlEscape(d.number || String(d.index + 1)) + ': ' + htmlEscape(d.problems.join(' · ')) + '</p>').join('') + '</div>' : '') +
     pending.map(priceAuditActionCardHtml).join('') +
-    (!pending.length && !a.complete ? '<p class="mt-2">חסרה קריאה מלאה של התעודה. פתח את הצילומים והשלם את העמודים החסרים.</p>' + receiptBackToPhotosHtml() : '') +
+    documentReviews.map(info => {
+      const doc = aiScanResponse.scan.documents.find(d => d.noteIndex === info.index), paper = priceAuditSource(doc), input = aiScanDocuments[info.index];
+      const balanced = yotvataPaperCheck(paper, input.pages.length || input.restoredPageCount || 0).ok;
+      return '<div class="border-2 border-amber-300 rounded-xl p-3 mt-3"><b>אימות סיכום תעודה ' + htmlEscape(info.number || String(info.index + 1)) + '</b>' +
+        '<p class="mt-2">הסריקות לא הסכימו על הסיכום. בדוק מול הנייר: ₪' + fmtMoney(paper.subtotalExVat) + ' לפני מע״מ · ' + paper.printedUnits + ' יחידות · ' + paper.rows.length + ' שורות שנקראו.</p>' +
+        (balanced ? '<button data-role="price-confirm-document" data-doc="' + info.index + '" data-review-token="' + htmlEscape(priceAuditDocumentReviewToken(doc)) + '" class="btn-tap w-full rounded-xl bg-blue-600 text-white py-3 mt-3 font-black">כן, הסיכום תואם לנייר</button>' : '') + receiptBackToPhotosHtml() + '</div>';
+    }).join('') +
+    priceAuditReviewedHtml(a.rows) +
+    priceAuditAutomaticChoicesHtml(a.rows) +
+    (!pending.length && !a.complete && !documentReviews.length ? '<p class="mt-2">חסרה קריאה מלאה של התעודה. פתח את הצילומים והשלם את העמודים החסרים.</p>' + receiptBackToPhotosHtml() : '') +
     paperRowCorrectionHistoryHtml() + priceAuditDatesHtml(a, money) +
     '</details></section>';
 }
@@ -11800,6 +11968,7 @@ function priceAuditSetDate(index, value) {
   const day = priceAuditDate(value), doc = aiScanResponse && aiScanResponse.scan && aiScanResponse.scan.documents.find(d => d.noteIndex === index);
   if (!doc || !day) return false;
   doc.__priceConfirmedDate = day;
+  receiptInvalidateReviewCalculation();
   // The date decides which promotion was in force, so the comparison engine is
   // rebuilt too; otherwise the findings keep judging by the previous day.
   if (aiScanResponse) { try { aiScanEvaluation = aiEvaluateInvoiceScan(aiScanResponse); } catch (e) {} }
@@ -11823,7 +11992,7 @@ function refreshPriceScannerNotice() {
   const relevant = scanPurpose === 'receiving' && a.state === 'ready' && (pending.length > 0 || !a.complete);
   if (relevant) button.classList.remove('hidden'); else button.classList.add('hidden');
   if (!relevant) return;
-  button.textContent = pending.length ? (pending.length === 1 ? 'שורה אחת לטיפול' : pending.length + ' שורות לטיפול') + ' — פתח את הרשימה' : 'צריך להשלים את צילום התעודה';
+  button.textContent = pending.length ? (pending.length === 1 ? 'שורה אחת לטיפול' : pending.length + ' שורות לטיפול') + ' — פתח את הרשימה' : a.documents.some(d => d.reviewRequired) ? 'צריך לאשר את סיכום התעודה' : 'צריך להשלים את צילום התעודה';
 }
 
 function refreshPriceAuditViews() {
@@ -12094,6 +12263,33 @@ function aiConflictReadCandidates(row) {
 function aiConflictChoiceRow(row) {
   return !!row && (row.barcodeRetryConflict === true || String(row.barcodeMatchMethod || '') === 'conflicting_reads');
 }
+// The receiving engine and price review must use the same decision. For
+// ranked ambiguous names, equality must cover the entire pricing rule, not a
+// rounded base price: promotions, carton thresholds, deposits and packs matter.
+function aiNameChoiceResolution(row, candidates) {
+  const qty = priceAuditNumber(row && row.quantity), confidence = Number(row && row.confidence);
+  if (!row || !Array.isArray(candidates) || !candidates.length || !(qty > 0) || !Number.isInteger(qty)
+      || !Number.isFinite(confidence) || confidence < .78 || aiMoneyCents(row.lineTotalExVat) == null || aiRowArithmeticError(row, qty)) return null;
+  const safe = candidates.every(c => c && c.product && aiCatalogBarcodeIsSafe(c.barcode)
+    && aiCatalogBarcodeMatches(c.barcode, false).length === 1);
+  if (!safe) return null;
+  const result = (candidate, method) => ({ product: candidate.product, barcode: candidate.barcode,
+    observed: aiNormalizeBarcodePattern(row.barcodeObserved) || 'לא נקרא', method,
+    identityEvidence: { proofModel: method, candidateIds: candidates.map(c => String(c.product.id)) } });
+  if (candidates.length < 2) return null;
+  const day = receiptPromoDay(row);
+  const profile = p => {
+    const price = priceAuditNumber(p.price);
+    const active = promos.filter(pr => pr && pr.type !== 'monthEnd' && (pr.productIds || []).includes(p.id) && promoActive(pr, day));
+    if (!(price > 0) || active.length > 1 || active.some(pr => pr.minUnit === 'carton' && !(priceAuditNumber(pr.cartonSize) > 0))) return null;
+    return JSON.stringify([price, Number(p.deposit) || 0, p.billingPackId || null, Number(p.billingPackSize) || null,
+      p.priceUnit || p.unitOfMeasure || 'unit', active.map(pr => [pr.id || null, pr.pct, pr.minQty || 1, pr.minUnit || 'unit', pr.cartonSize || null,
+        (pr.productIds || []).slice().sort(), pr.start, pr.end])]);
+  };
+  const profiles = candidates.map(c => profile(c.product));
+  if (!profiles[0] || !profiles.every(p => p === profiles[0]) || !aiPriceCorroborates(row, qty, aiMoneyCents(row.lineTotalExVat), candidates[0].product)) return null;
+  return result(candidates[0], 'verified_equal_price_name');
+}
 // סדר ההכרעה קבוע ומוכח, ואינו מנחש:
 // 1. בדיוק מועמד אחד נשען על ברקוד תקין וייחודי — כל היתר, אם ישנם, הם
 //    רמזי שם. נדרש לו גם חיזוק עצמאי אחד: הקריאה השנייה רחוקה ממנו בספרה
@@ -12359,6 +12555,19 @@ function aiResolveInvoiceBarcode(row) {
   const observed = normalizeBarcode(observedRaw);
   const observedPattern = aiNormalizeBarcodePattern(observedRaw);
   const resolved = normalizeBarcode(row && row.barcode != null ? row.barcode : '');
+  if (method === 'model_consensus') {
+    const proof = row.modelVerification, identity = proof && proof.identity;
+    const evidence = proof && proof.evidence;
+    const bound = evidence && ['barcode', 'barcodeReadType', 'catalogHintId', 'catalogCandidateHintIds', 'description', 'sourcePage', 'lineNumber']
+      .every(key => JSON.stringify(evidence[key] ?? null) === JSON.stringify(row[key] ?? null));
+    const supported = proof && proof.version === 1 && [0, 1, 2].includes(proof.selectedRead)
+      && Array.isArray(proof.identitySupport) && proof.identitySupport.some(i => [0, 1, 2].includes(i) && i !== proof.selectedRead);
+    const matches = identity && aiCatalogBarcodeMatches(identity.barcode, false);
+    if (!bound || !supported || !identity || resolved !== identity.barcode || !aiIsValidEan13(resolved)
+        || matches.length !== 1 || String(matches[0].product.id) !== identity.productId) return { error: 'זהות המוצר השתנתה מאז אימות הסריקות — אשר אותה לפי הנייר' };
+    return { product: matches[0].product, barcode: resolved, observed, method,
+      identityEvidence: { proofModel: 'model_consensus', selectedRead: proof.selectedRead, identitySupport: proof.identitySupport } };
+  }
   // שורה שהמשתמש כבר הכריע בה את הקונפליקט נבדקת בענף user_confirmed, שם
   // רשימת המועמדים נגזרת מחדש מהשורה והבחירה מאומתת מולה.
   const conflictConfirmed = method === 'user_confirmed' && String(row && row.barcodeUserConfirmedFromMethod || '') === 'conflicting_reads';
@@ -12521,6 +12730,8 @@ function aiResolveInvoiceBarcode(row) {
   if (method === 'suggested_name_multiple') {
     const nameCandidates = aiLocalSuggestedNameCandidates(row);
     if (nameCandidates.length < 2) return { error: 'רשימת המוצרים האפשריים אינה תקינה או אינה תואמת עוד למאגר המקומי' };
+    const decision = row.modelVerification ? null : aiNameChoiceResolution(row, nameCandidates);
+    if (decision) return decision;
     return {
       error: 'נדרשת בחירת משתמש בין כמה מוצרים בעלי שם דומה',
       suggestion: {
@@ -12542,6 +12753,7 @@ function aiResolveInvoiceBarcode(row) {
     if (suggestedProductId && suggestedProduct.id !== suggestedProductId) return { error: 'זהות המוצר המוצע אינה תואמת למאגר המקומי' };
     if (method === 'suggested_name_only') {
       if (aiSingleNameCandidateId(row) !== String(suggestedProduct.id) || !String(row && row.description || '').trim()) return { error: 'הצעת השם אינה קשורה למועמד יחיד במאגר המקומי' };
+      if (row.modelVerification && (row.modelVerification.issues || []).includes('identity')) return { error: 'הסריקות לא הסכימו על המוצר — אשר לפי הנייר' };
       const namePriceProof = aiNamePriceMatchProof(row, suggestedProduct);
       if (namePriceProof.ok) {
         return {
@@ -12677,6 +12889,7 @@ function aiAutoResolveMethodHe(method) {
 function aiAutoResolvePendingRow(pending, aggregates) {
   const suggestion = pending.resolution && pending.resolution.suggestion;
   const row = pending.row, qty = pending.qty, cents = pending.cents;
+  if (aiModelReviewIssues(row).length) return null;
   // שורה שהכמות, הסכום או החשבון שלה לא נקראו אינה ניתנת להכרעה אוטומטית.
   if (qty == null || cents == null || pending.arithmeticError) return null;
   if (!suggestion) {
@@ -12709,7 +12922,7 @@ function aiAutoResolvePendingRow(pending, aggregates) {
       return { product: localQtyMatches[0].product, barcode: localQtyMatches[0].barcode, method: 'auto_local_name_qty' };
     }
     const priceList = priceMatches.map(candidate => aiMoneyCents(Number(candidate.product.price) || 0));
-    if (priceList.every(value => value != null && Math.abs(value - priceList[0]) <= 2)) {
+    if (priceList.every(value => value != null && Math.abs(value - priceList[0]) <= 2) && aiNameChoiceResolution(row, priceMatches)) {
       return { product: priceMatches[0].product, barcode: priceMatches[0].barcode, method: 'auto_local_name_same_price' };
     }
     pending.fallbackReason = 'כמה מוצרים מתאימים לשם ולמחיר — אין הכרעה בטוחה';
@@ -12733,7 +12946,7 @@ function aiAutoResolvePendingRow(pending, aggregates) {
     if (priceCandidates.length >= 2 && suggestion.barcodeConflict !== true) {
       const priceList = priceCandidates.map(candidate => aiMoneyCents(Number(candidate.product.price) || 0));
       const samePrice = priceList.every(value => value != null && Math.abs(value - priceList[0]) <= 2);
-      if (samePrice) {
+      if (samePrice && aiNameChoiceResolution(row, candidates)) {
         // מועמדים זהים במחיר: הבחירה זהה כספית לחלוטין. השרת דירג אותם
         // מהמתאים ביותר; המלאי עשוי להתחלף בין טעמים דומים והדבר מתועד.
         return { product: priceCandidates[0].product, barcode: priceCandidates[0].barcode, method: 'auto_name_same_price_first' };
@@ -12951,6 +13164,7 @@ function aiEvaluateInvoiceScan(payload, receivedRows = reconcileData || []) {
       missingDocuments++;
       errors.push('תעודה ' + (index + 1) + ': לא נקראה ממנה אף שורת מוצר — היא אינה משתתפת בהשוואה. צלם אותה שוב.');
     }
+    if (priceAuditDocumentReviewNeeded(doc)) errors.push('תעודה ' + (index + 1) + ': סיכום התעודה או מספר השורות עדיין לא אומתו בין הסריקות');
     // v272: אחרי שחזור מטיוטה אין תמונות בזיכרון, ולכן ההשוואה נעשית מול מונה
     // העמודים שנשמר בזמן הסריקה. בלעדיו תעודה תקינה לגמרי הייתה ננעלת עם
     // "פוענחו 2 עמודים מול 0 שצולמו" — נעילה שנגרמת מהשחזור עצמו, לא מהנייר.
@@ -12992,7 +13206,9 @@ function aiEvaluateInvoiceScan(payload, receivedRows = reconcileData || []) {
       else { docRowsCents += cents; rowTotalCents += cents; }
       const crossCheckNote = qty == null ? '' : aiRowGrossCrossCheckNote(row, qty);
       if (crossCheckNote) warnings.push(rowPrefix + crossCheckNote);
-      const arithmeticError = qty == null ? '' : aiRowArithmeticError(row, qty);
+      const arithmeticError = aiModelReviewIssues(row).filter(f => f !== 'identity').length
+        ? 'הכמות או המחיר עדיין לא אומתו בין הסריקות — אשר לפי הנייר'
+        : qty == null ? '' : aiRowArithmeticError(row, qty);
       if (arithmeticError) { errors.push(rowPrefix + arithmeticError); unusableRows++; if (!rowUnusableReason) rowUnusableReason = arithmeticError; }
       if (rowUnusableReason) {
         residuals.push({ docNumber: index + 1, documentIndex: index, lineNumber: rowNumber, sourcePage: Number(row.sourcePage), rowRegion: row.rowRegion || null, description: String(row.description || '').trim(), qty, amount: cents == null ? null : cents / 100, reason: rowUnusableReason, raw: { unit: row.unitPriceExVat, gross: row.grossLineTotalExVat, discount: row.lineDiscountExVat, total: row.lineTotalExVat } });
@@ -13391,6 +13607,7 @@ async function aiRequestInvoiceScan(token, documents) {
     body: JSON.stringify({
       // v221 עוגן לסריקה: הסכום והיחידות שהוקלדו לכל תעודה נשלחים לשרת —
       // נכנסים לפרומפט כסכום-ביקורת ומופעלים לאימות + קריאה חוזרת בשרת (v133).
+      reviewProtocolVersion: 1,
       documents: documents.map(d => ({
         noteIndex: d.noteIndex,
         pages: d.pages.map(p => p.dataUrl),
@@ -13410,6 +13627,7 @@ async function aiRequestInvoiceScan(token, documents) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload.ok) {
     const code = payload.error || '';
+    if (code === 'client_update_required') throw new Error(payload.message || 'רענן את האפליקציה לפני סריקה חדשה.');
     if (code === 'rate_limited') throw new Error('בוצעו יותר מדי ניסיונות. המתן 10 דקות ונסה שוב.');
     if (code === 'invalid_auth' || code === 'auth_required') throw new Error('האימות המאובטח נכשל. רענן את האפליקציה ונסה שוב.');
     if (code === 'incomplete_model_output' || code === 'model_refusal' || code === 'invalid_model_output') throw new Error('ה-AI לא החזיר פענוח מלא ובטוח. שום נתון לא שונה — צלם שוב את כל הדפים.');
@@ -13453,6 +13671,7 @@ async function aiRequestSingleDocScan(token, pages, expected) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
     body: JSON.stringify({
+      reviewProtocolVersion: 1,
       documents: [{
         noteIndex: 0,
         pages: pages.map(p => p.dataUrl),
@@ -13466,7 +13685,7 @@ async function aiRequestSingleDocScan(token, pages, expected) {
   const payload = await response.json().catch(() => ({}));
   if (!response.ok || !payload.ok) {
     const code = payload.error || '';
-    const fatal = code === 'rate_limited' || code === 'invalid_auth' || code === 'auth_required';
+    const fatal = code === 'rate_limited' || code === 'invalid_auth' || code === 'auth_required' || code === 'client_update_required';
     // v250: שרת שמוותר עם הסבר עברי (למשל anchor_pre_discount — הוקלד סכום שלפני
     // ההנחות) — ההסבר מוצג כלשונו. משפחת השגיאות הזו אומרת כמעט תמיד "העוגן
     // שהוקלד שגוי", ולכן מסומנת ומוצגת כאזהרה בולטת במקום קופסת שגיאה רגילה.
@@ -13474,7 +13693,8 @@ async function aiRequestSingleDocScan(token, pages, expected) {
       && !['incomplete_model_output', 'model_refusal', 'invalid_model_output', 'openai_error'].includes(code)
       && typeof payload.message === 'string' && !!payload.message.trim();
     const error = new Error(
-      code === 'rate_limited' ? 'בוצעו יותר מדי ניסיונות. המתן 10 דקות ונסה שוב.'
+      code === 'client_update_required' ? (payload.message || 'רענן את האפליקציה לפני סריקה חדשה.')
+        : code === 'rate_limited' ? 'בוצעו יותר מדי ניסיונות. המתן 10 דקות ונסה שוב.'
         : (code === 'invalid_auth' || code === 'auth_required') ? 'האימות המאובטח נכשל. רענן את האפליקציה ונסה שוב.'
         : (code === 'incomplete_model_output' || code === 'model_refusal' || code === 'invalid_model_output') ? 'ה-AI לא החזיר פענוח מלא ובטוח לתעודה זו.'
         : (code === 'openai_error' && payload.message) ? 'שירות ה-AI החזיר שגיאה: ' + payload.message
@@ -14235,6 +14455,7 @@ function priceAuditConfirmIdentity(documentIndex, rowIndex, productId, barcode, 
   row.barcodeMatchMethod = 'user_confirmed';
   row.barcodeSuggested = null; row.barcodeSuggestedProductId = null; row.barcodeSuggestedProductName = null;
   row.userConfirmedAt = Date.now();
+  receiptInvalidateReviewCalculation();
   aiScanEvaluation = aiEvaluateInvoiceScan(aiScanResponse);
   aiScanError = aiScanEvaluation.valid ? '' : 'הפענוח עדיין דורש בדיקה — נשארו שורות לבירור.';
   saveReceiptDraft();
@@ -14279,6 +14500,7 @@ async function aiEnterPrintedBarcode(documentIndex, rowIndex) {
     row.barcodeMatchMethod = 'user_confirmed';
     row.barcodeSuggested = null; row.barcodeSuggestedProductId = null; row.barcodeSuggestedProductName = null;
     row.userConfirmedAt = Date.now();
+    receiptInvalidateReviewCalculation();
     aiScanEvaluation = aiEvaluateInvoiceScan(aiScanResponse);
     aiScanError = aiScanEvaluation.valid ? '' : 'הפענוח עדיין דורש בדיקה — נשארו שורות לבירור.';
     saveReceiptDraft();
@@ -14291,6 +14513,7 @@ async function aiEnterPrintedBarcode(documentIndex, rowIndex) {
   return true;
 }
 function aiConfirmNameCandidate(documentIndex, rowIndex, candidateProductId) {
+  if (aiScanBusy || receiptFinalizing) return false;
   if (!aiScanResponse || !aiScanResponse.scan || !Array.isArray(aiScanResponse.scan.documents)) return false;
   const doc = aiScanResponse.scan.documents.find(item => Number(item && item.noteIndex) === Number(documentIndex));
   const row = doc && Array.isArray(doc.rows) ? doc.rows[Number(rowIndex)] : null;
@@ -14340,6 +14563,7 @@ function aiConfirmNameCandidate(documentIndex, rowIndex, candidateProductId) {
   row.barcodeSuggestedProductId = null;
   row.barcodeSuggestedProductName = null;
   row.userConfirmedAt = Date.now();
+  receiptInvalidateReviewCalculation();
   aiScanEvaluation = aiEvaluateInvoiceScan(aiScanResponse);
   saveReceiptDraft();
   aiScanError = aiScanEvaluation.valid ? '' : 'הפענוח עדיין דורש בדיקה — התעודה לא שונתה.';
@@ -14567,7 +14791,8 @@ function aiAutomaticNamePriceMappingsAudit() {
       // הכרעת קונפליקט בין שתי קריאות ברקוד היא החלטת זהות שנעשתה במכשיר
       // ולא נקראה מהנייר, ולכן היא נכנסת לאותו תיעוד עם המועמדים שנשקלו.
       const conflictMethod = automaticMethod.indexOf('conflict_') === 0;
-      if (!resolution || (!partialBarcodeMethod && !conflictMethod && automaticMethod !== 'verified_name_price') || !resolution.product || !resolution.barcode || !resolution.identityEvidence) return;
+      const nameChoiceMethod = ['verified_equal_price_name', 'model_consensus'].includes(automaticMethod);
+      if (!resolution || (!partialBarcodeMethod && !conflictMethod && !nameChoiceMethod && automaticMethod !== 'verified_name_price') || !resolution.product || !resolution.barcode || !resolution.identityEvidence) return;
       const proof = resolution.identityEvidence;
       output.push({
         documentIndex: Number.isInteger(Number(doc.noteIndex)) ? Number(doc.noteIndex) : documentIndex,
@@ -14577,7 +14802,8 @@ function aiAutomaticNamePriceMappingsAudit() {
         productId: resolution.product.id,
         productName: String(resolution.product.name || '').slice(0, 160),
         barcode: resolution.barcode,
-        barcodeSource: conflictMethod ? 'catalog_after_conflicting_barcode_reads' : partialBarcodeMethod ? 'catalog_after_unique_partial_barcode_and_name' : 'catalog_after_name_price_crosscheck',
+        barcodeSource: nameChoiceMethod ? automaticMethod : conflictMethod ? 'catalog_after_conflicting_barcode_reads' : partialBarcodeMethod ? 'catalog_after_unique_partial_barcode_and_name' : 'catalog_after_name_price_crosscheck',
+        candidateIds: Array.isArray(proof.candidateIds) ? proof.candidateIds : null,
         conflictCandidates: Array.isArray(proof.conflictCandidates) ? proof.conflictCandidates.slice(0, 8) : null,
         priceAssisted: resolution.priceAssisted === true,
         confirmationSource: automaticMethod,
@@ -19982,7 +20208,7 @@ async function savePromoEntity() {
   if (type === 'receipt') {
     qty = parseInt(($('promoMin').value || '').replace(/[^0-9]/g, ''), 10) || 1;
     minUnit = (promoUnitMode === 'carton') ? 'carton' : 'unit';
-    if (minUnit === 'carton') { cartonSize = parseInt(($('promoCarton').value || '').replace(/[^0-9]/g, ''), 10) || 0; if (qty > 1 && !(cartonSize > 0)) { showToast('הזן כמה יחידות יש בארגז', null, null, 2600); return; } }
+    if (minUnit === 'carton') { cartonSize = parseInt(($('promoCarton').value || '').replace(/[^0-9]/g, ''), 10) || 0; if (!(cartonSize > 0)) { showToast('הזן כמה יחידות יש בארגז', null, null, 2600); return; } }
   }
   const productIds = ((promoEdit.productIds) || []).slice();
   if (!productIds.length) { showToast('הוסף לפחות מוצר אחד לסל המבצע', null, null, 2600); return; }
@@ -21326,6 +21552,10 @@ app.addEventListener('click', (e) => {
   if (role === 'ai-open-suggestion-page') { aiOpenBarcodeSuggestionPage(parseInt(t.dataset.doc, 10), parseInt(t.dataset.page, 10)); return; }
   if (role === 'ai-open-source-row') { aiOpenSourceRowPage(parseInt(t.dataset.doc, 10), parseInt(t.dataset.row, 10)); return; }
   if (role === 'price-confirm-identity') { priceAuditConfirmIdentity(Number(t.dataset.doc), Number(t.dataset.row), t.dataset.candidateId, t.dataset.candidateBarcode, t.dataset.reviewToken); return; }
+  if (role === 'price-confirm-paper') { priceAuditConfirmPaper(Number(t.dataset.doc), Number(t.dataset.row), t.dataset.reviewToken); return; }
+  if (role === 'price-confirm-document') { priceAuditConfirmDocument(Number(t.dataset.doc), t.dataset.reviewToken); return; }
+  if (role === 'price-reopen-paper') { priceAuditReopenPaper(Number(t.dataset.doc), Number(t.dataset.row)); return; }
+  if (role === 'price-complete-carton') return priceAuditCompleteCarton(Number(t.dataset.doc), Number(t.dataset.row), id);
   if (role === 'ai-manual-paper-barcode') { aiEnterPrintedBarcode(parseInt(t.dataset.doc, 10), parseInt(t.dataset.row, 10)); return; }
   if (role === 'ai-confirm-barcode-suggestion') { aiConfirmBarcodeSuggestion(parseInt(t.dataset.doc, 10), parseInt(t.dataset.row, 10)); return; }
   if (role === 'ai-confirm-name-candidate') { aiConfirmNameCandidate(parseInt(t.dataset.doc, 10), parseInt(t.dataset.row, 10), t.dataset.candidateId); return; }

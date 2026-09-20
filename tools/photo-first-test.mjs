@@ -14,7 +14,7 @@ function source(name) {
   return html.slice(match.index, end + 2);
 }
 const names = ['receiptUsesManualQuantities','priceAuditNumber','priceAuditDate','priceAuditCapture','priceAuditSource','priceAuditIdentity','priceAuditDocumentComplete','receiptPriceAudit','dDisp','priceAuditDatesHtml','priceAuditChoiceHtml','receiptPriceAuditHtml','priceAuditLegacyVisible','refreshPriceScannerNotice','receiptRememberScanResults','receiptRebuildScanResponse','receiptScanChanged','receiptScanSnapshot','receiptStorageNotice','persistReceiptDraft','receiptDraftActive','scheduleReceiptDraftSync','refreshReceiptDraftNotice','yotvataPaperCheck', 'yotvataResetPhotoReceipt', 'yotvataCachedDoc', 'yotvataPhotoReady',
-  'yotvataInvalidatePhotoDoc', 'yotvataAdoptPaperAnchors', 'yotvataStartPaperScan', 'yotvataScanMetadata',
+  'yotvataInvalidatePhotoDoc', 'yotvataAdoptPaperAnchors', 'yotvataStartPaperScan', 'yotvataScanMetadata', 'aiScanPageAudit',
   'yotvataStoreScanResults', 'yotvataReceiptScanAudit', 'receiptDraftPayload', 'saveReceiptDraft', 'deliveryCreditSnapshot',
   'restoreDraftScan', 'restoreReceiptDraft', 'normNote', 'noteSum', 'noteAnchorSum', 'recomputeNoteTotal',
   'aiScanSingleDocPipeline', 'aiRunInvoiceScan', 'aiTotalPages', 'aiMoneyCents', 'aiDocRowUnits',

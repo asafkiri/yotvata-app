@@ -350,18 +350,17 @@ if(supplier==='yotvata'){
   assert.equal(report(b).rows[0].productId,'coffee');
   assert.equal(requests(b),0);
  });
- test('yotvata: a coin-flip between equally priced names still offers the correction',async()=>{
-  // Both candidates cost 5, so the existing automatic resolution takes the first
-  // one and the note is NOT blocked — the money is identical either way. But
-  // which product entered stock is still a guess, and the price audit cannot
-  // verify a price against an identity it did not prove. The choice stays
-  // available so the guess can be corrected; it just is not urgent.
+ test('yotvata: equivalent ranked names are automatic, with an optional correction',async()=>{
+  // The ranked choice now uses the same financial equivalence decision in both
+  // engines. Optional correction stays in collapsed details, outside the queue.
   const data=fixture({rows:[priced(nameRow(),5)]}),c=create(data);
   const html=await scan(c,data,{completeDate:false});
   c.run('aiScanEvaluation=aiEvaluateInvoiceScan(aiScanResponse)');
   assert.equal(c.run('aiScanEvaluation.barcodeSuggestions.length'),0);
   assert.equal(c.run("aiScanEvaluation.aggregates.get('milk').qty"),6);
-  assert.equal(report(c).rows[0].capability,'unidentified');
+  assert.equal(report(c).rows[0].capability,'checkable');
+  assert.equal(c.run('priceAuditPendingRows(receiptPriceAudit()).length'),0);
+  assert.match(html,/<details data-price-automatic/);
   assert.match(html,/data-role="ai-confirm-name-candidate"[^>]*data-candidate-id="coffee"/);
   // Correcting it moves the units and makes the price checkable.
   assert.equal(c.run("aiConfirmNameCandidate(0,0,'coffee')"),true);
@@ -440,7 +439,7 @@ test(supplier+': catalog update refreshes price view while physical quantity inp
 });
 test(supplier+': accepted identity correction rechecks saved original paper locally',async()=>{
  const data=fixture({unit:6}),c=create(data);await scan(c,data);
- c.run("Object.assign(aiScanResponse.scan.documents[0].rows[0],{barcode:null,barcodeObserved:null,barcodeReadType:'unreadable',barcodeMatchMethod:'suggested_name_multiple',catalogCandidateHintIds:['milk','coffee'],barcodeSuggestedCandidates:[{productId:'milk',barcode:'7290000000008'},{productId:'coffee',barcode:'7290000000015'}]});saveReceiptDraft()");
+ c.run("products[1].price=7;Object.assign(aiScanResponse.scan.documents[0].rows[0],{barcode:null,barcodeObserved:null,barcodeReadType:'unreadable',barcodeMatchMethod:'suggested_name_multiple',catalogCandidateHintIds:['milk','coffee'],barcodeSuggestedCandidates:[{productId:'milk',barcode:'7290000000008'},{productId:'coffee',barcode:'7290000000015'}]});saveReceiptDraft()");
  assert.equal(report(c).rows[0].capability,'unidentified');
  assert.equal(c.run('aiConfirmNameCandidate(0,0,"milk")'),true);assert.equal(report(c).rows[0].originalUnitPrice,6);assert.equal(report(c).rows[0].result,'difference');assert.equal(requests(c),1);
 });
