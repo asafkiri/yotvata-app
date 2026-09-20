@@ -450,9 +450,11 @@ test(supplier+': each document retains its own promotion date within one receipt
  assert.equal(rows[0].date,'2026-09-09');assert.equal(rows[0].result,'match');assert.equal(rows[1].date,'2026-08-31');assert.equal(rows[1].result,'difference');assert.equal(requests(c),2);
 });
 
-test(supplier+': carton promotion requires an explicit unit conversion',async()=>{
+test(supplier+': a missing carton size with the default minimum means one unit; explicit larger minimum still needs conversion',async()=>{
  const data=fixture({unit:4,qty:12,promo:{minQty:1,minUnit:'carton',cartonSize:12,...(supplier==='berman'?{fixedPrice:4}:{})}}),c=create(data);await scan(c,data);
  assert.equal(report(c).rows[0].result,'match');c.run('promos[0].cartonSize=null;renderReceiving()');
+ assert.equal(report(c).rows[0].result,'match');assert.doesNotMatch(view(c),/חסר מספר יחידות בארגז/);
+ c.run('promos[0].minQty=2;renderReceiving()');
  assert.equal(report(c).rows[0].capability,'partial');assert.match(view(c),/חסר מספר יחידות בארגז/);assert.equal(requests(c),1);
 });
 

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v360 התאמת מוצר לפי מחיר מאומת</title>
+    <title>הזמנות יטבתה - v361 מבצע ללא מינימום מיחידה אחת</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v360 התאמת מוצר לפי מחיר מאומת</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v361 מבצע ללא מינימום מיחידה אחת</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -6880,10 +6880,17 @@ function promoConflictMap() {
   });
   return map;
 }
+function promoNeedsCartonSize(pr) {
+  const qty = Number(pr && pr.minQty), size = Number(pr && pr.cartonSize);
+  // Legacy drafts can contain the default 1 + carton with no size. The user's
+  // rule treats that as no minimum, not a requirement to define a carton.
+  return !!(pr && pr.minUnit === 'carton' && Number.isFinite(qty) && qty > 1 && !(Number.isFinite(size) && size > 0));
+}
 function promoMinUnitsP(pr) {
   if (!pr) return 1;
-  const q = Number(pr.minQty) || 1;
-  if (pr.minUnit === 'carton') { const cs = Number(pr.cartonSize) || 0; return cs > 0 ? Math.max(1, q * cs) : Math.max(1, q); }
+  const q = Number(pr.minQty);
+  if (!Number.isFinite(q) || q <= 0) return 1;
+  if (pr.minUnit === 'carton') { const cs = Number(pr.cartonSize); return Number.isFinite(cs) && cs > 0 ? Math.max(1, q * cs) : Math.max(1, q); }
   return Math.max(1, q);
 }
 function promoMinLabelP(pr) {
@@ -11495,7 +11502,7 @@ function aiModelPriceResolution(row, hinted = aiModelIdentityCandidates(row)) {
       const pr = active.length === 1 && active[0];
       // Ignore only binary multiplication noise; never round unit prices to cents.
       const samePromoPrice = pr && Math.abs(discountedUnitPrice(base, pr.pct) - agreement.unitPrice) <= Number.EPSILON * Math.max(1, base) * 4;
-      if (pr && (pr.minUnit !== 'carton' || priceAuditNumber(pr.cartonSize) > 0)
+      if (pr && !promoNeedsCartonSize(pr)
           && Number(row.quantity) >= promoMinUnitsP(pr) && samePromoPrice) basis = 'active_promotion';
     }
     if (!basis) continue;
@@ -11760,7 +11767,7 @@ function receiptPriceAudit() {
       if (row.capability !== 'checkable') return;
       const active = promos.filter(pr => pr && Array.isArray(pr.productIds) && pr.productIds.includes(product.id) && promoActive(pr, day)
         && (PRICE_AUDIT_SUPPLIER === 'berman' ? (promoFixedPrice(pr) > 0 || pr.type !== 'monthEnd') : pr.type !== 'monthEnd'));
-      const missingCartons = active.filter(pr => pr.minUnit === 'carton' && !(priceAuditNumber(pr.cartonSize) > 0));
+      const missingCartons = active.filter(promoNeedsCartonSize);
       if (missingCartons.length) { row.capability = 'partial'; row.reason = 'חסר מספר יחידות בארגז לבדיקת תנאי המבצע'; row.missingCartonPromoIds = missingCartons.map(pr => pr.id); return; }
       const triggered = active.filter(pr => entries.reduce((sum, x) => sum + (x.product && pr.productIds.includes(x.product.id) ? (x.row.quantity || 0) : 0), 0) >= promoMinUnitsP(pr));
       if (triggered.length > 1) { row.capability = 'partial'; row.reason = 'יותר ממבצע אחד בתוקף מתאים למוצר; נדרשת הכרעה במאגר'; row.conflictingPromoIds = triggered.map(pr => pr.id); return; }
@@ -12420,7 +12427,7 @@ function aiNameChoiceResolution(row, candidates) {
   const profile = p => {
     const price = priceAuditNumber(p.price);
     const active = promos.filter(pr => pr && pr.type !== 'monthEnd' && (pr.productIds || []).includes(p.id) && promoActive(pr, day));
-    if (!(price > 0) || active.length > 1 || active.some(pr => pr.minUnit === 'carton' && !(priceAuditNumber(pr.cartonSize) > 0))) return null;
+    if (!(price > 0) || active.length > 1 || active.some(promoNeedsCartonSize)) return null;
     return JSON.stringify([price, Number(p.deposit) || 0, p.billingPackId || null, Number(p.billingPackSize) || null,
       p.priceUnit || p.unitOfMeasure || 'unit', active.map(pr => [pr.id || null, pr.pct, pr.minQty || 1, pr.minUnit || 'unit', pr.cartonSize || null,
         (pr.productIds || []).slice().sort(), pr.start, pr.end])]);
@@ -18522,9 +18529,9 @@ function setPromoUnitMode(mode) {
 function updatePromoHint() {
   const hint = $('promoUnitsHint'); if (!hint) return;
   const q = parseInt(($('promoMin').value || '').replace(/[^0-9]/g, ''), 10) || 0;
-  if (q <= 1) { hint.textContent = (q === 1 ? 'ללא תנאי כמות — חל על כל כמות' : ''); return; }
+  const cs = parseInt(($('promoCarton').value || '').replace(/[^0-9]/g, ''), 10) || 0;
+  if (!q || (q === 1 && (promoUnitMode !== 'carton' || !cs))) { hint.textContent = 'ללא מינימום — ההנחה חלה מיחידה אחת'; return; }
   if (promoUnitMode === 'carton') {
-    const cs = parseInt(($('promoCarton').value || '').replace(/[^0-9]/g, ''), 10) || 0;
     hint.textContent = cs > 0 ? ('המבצע חל מ-' + (q * cs) + ' יחידות (' + q + ' ארגז × ' + cs + ')') : 'הזן כמה יחידות יש בארגז';
   } else {
     hint.textContent = 'המבצע חל מ-' + q + ' יחידות';
@@ -20261,6 +20268,7 @@ async function downloadSignImage() {
 function renderPromoEdit() {
   const pe = promoEdit || {};
   const isNew = !pe.id;
+  const hasMinimum = promoMinUnitsP(pe) > 1 || promoNeedsCartonSize(pe);
   const ids = pe.productIds || [];
   const esc = s => (s == null ? '' : String(s)).replace(/"/g, '&quot;');
   app.innerHTML =
@@ -20274,7 +20282,7 @@ function renderPromoEdit() {
       '<div><label class="text-[11px] text-slate-400 font-bold block mb-1">אחוז הנחה</label><div class="flex items-center gap-2"><input id="promoPct" type="text" inputmode="decimal" value="' + (pe.pct != null ? pe.pct : '') + '" class="flex-1 p-2.5 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-rose-500" placeholder="10"><span class="text-slate-400 font-black text-lg">%</span></div></div>' +
       '<div class="flex gap-2"><div class="flex-1"><label class="text-[11px] text-slate-400 font-bold block mb-1">מתאריך</label><input id="promoStart" type="date" value="' + (pe.start || '') + '" class="w-full p-2.5 rounded-xl border-2 border-slate-200 outline-none text-sm font-bold focus:border-rose-500"></div><div class="flex-1"><label class="text-[11px] text-slate-400 font-bold block mb-1">עד תאריך</label><input id="promoEnd" type="date" value="' + (pe.end || '') + '" class="w-full p-2.5 rounded-xl border-2 border-slate-200 outline-none text-sm font-bold focus:border-rose-500"></div></div>' +
       '<div id="promoMinWrap"><label class="text-[11px] text-slate-400 font-bold block mb-1">מינימום להפעלה — סך כל הסל</label>' +
-        '<div class="flex gap-2 items-stretch"><input id="promoMin" type="text" inputmode="numeric" value="' + (pe.minQty != null && pe.minQty > 1 ? pe.minQty : '') + '" class="w-20 p-2.5 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-rose-500" placeholder="1">' +
+        '<div class="flex gap-2 items-stretch"><input id="promoMin" type="text" inputmode="numeric" value="' + (hasMinimum ? pe.minQty : '') + '" class="w-20 p-2.5 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-rose-500" placeholder="1">' +
           '<div class="flex-1 flex bg-slate-100 rounded-xl p-1"><button data-role="pe-unit-u" id="promoUnitU" class="flex-1 py-2 rounded-lg text-sm font-black">יחידות</button><button data-role="pe-unit-c" id="promoUnitC" class="flex-1 py-2 rounded-lg text-sm font-black">ארגזים</button></div></div>' +
         '<div id="promoCartonWrap" class="hidden mt-2"><label class="text-[11px] text-slate-400 font-bold block mb-1">כמה יחידות יש בארגז אחד?</label><input id="promoCarton" type="text" inputmode="numeric" value="' + (pe.cartonSize != null && pe.cartonSize > 0 ? pe.cartonSize : '') + '" class="w-full p-2.5 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-rose-500" placeholder="לדוגמה 12"></div>' +
         '<div id="promoUnitsHint" class="text-[11px] text-slate-500 font-bold mt-1.5 min-h-[16px]"></div>' +
@@ -20321,7 +20329,8 @@ function newPromo() {
 }
 function openPromoEdit(id) {
   const pr = promos.find(x => x.id === id); if (!pr) { newPromo(); return; }
-  promoEdit = { id: pr.id, name: pr.name || '', pct: pr.pct, start: pr.start || todayStr(), end: pr.end || '', minQty: pr.minQty || 1, minUnit: pr.minUnit || 'unit', cartonSize: pr.cartonSize || null, productIds: (pr.productIds || []).slice(), type: pr.type === 'monthEnd' ? 'monthEnd' : 'receipt' };
+  const hasMinimum = promoMinUnitsP(pr) > 1 || promoNeedsCartonSize(pr);
+  promoEdit = { id: pr.id, name: pr.name || '', pct: pr.pct, start: pr.start || todayStr(), end: pr.end || '', minQty: hasMinimum ? pr.minQty : 1, minUnit: hasMinimum ? pr.minUnit || 'unit' : 'unit', cartonSize: hasMinimum ? pr.cartonSize || null : null, productIds: (pr.productIds || []).slice(), type: pr.type === 'monthEnd' ? 'monthEnd' : 'receipt' };
   promoSearch = '';
   setView('promoEdit');
 }
@@ -20357,9 +20366,16 @@ async function savePromoEntity() {
   const type = (promoType === 'monthEnd') ? 'monthEnd' : 'receipt';
   let qty = 1, minUnit = 'unit', cartonSize = null;
   if (type === 'receipt') {
-    qty = parseInt(($('promoMin').value || '').replace(/[^0-9]/g, ''), 10) || 1;
-    minUnit = (promoUnitMode === 'carton') ? 'carton' : 'unit';
-    if (minUnit === 'carton') { cartonSize = parseInt(($('promoCarton').value || '').replace(/[^0-9]/g, ''), 10) || 0; if (!(cartonSize > 0)) { showToast('הזן כמה יחידות יש בארגז', null, null, 2600); return; } }
+    const enteredQty = parseInt(($('promoMin').value || '').replace(/[^0-9]/g, ''), 10) || 0;
+    if (enteredQty > 0) {
+      qty = enteredQty;
+      minUnit = (promoUnitMode === 'carton') ? 'carton' : 'unit';
+      if (minUnit === 'carton') {
+        cartonSize = parseInt(($('promoCarton').value || '').replace(/[^0-9]/g, ''), 10) || 0;
+        if (!cartonSize && qty > 1) { showToast('הזן כמה יחידות יש בארגז', null, null, 2600); return; }
+        if (!cartonSize) { minUnit = 'unit'; cartonSize = null; }
+      }
+    }
   }
   const productIds = ((promoEdit.productIds) || []).slice();
   if (!productIds.length) { showToast('הוסף לפחות מוצר אחד לסל המבצע', null, null, 2600); return; }
