@@ -19,7 +19,10 @@ const names = ['receiptUsesManualQuantities','priceAuditNumber','priceAuditDate'
   'restoreDraftScan', 'restoreReceiptDraft', 'normNote', 'noteSum', 'noteAnchorSum', 'recomputeNoteTotal',
   'aiScanSingleDocPipeline', 'aiRunInvoiceScan', 'aiTotalPages', 'aiMoneyCents', 'aiDocRowUnits',
   'rememberReceiptManualInput', 'switchReceiptEntryMode', 'receiptBackToPhotosHtml', 'noteEditorBodyHtml', 'parseNoteVal', 'readNoteEntry',
-  'aiSingleDocScore', 'aiSingleDocScoreBetter', 'aiFetchWithRetry', 'aiRequestSingleDocScan'];
+  'aiSingleDocScore', 'aiSingleDocScoreBetter', 'aiFetchWithRetry', 'aiRequestSingleDocScan',
+  'aiScanNewKey', 'aiScanPagesFingerprint', 'aiScanSendOnce', 'aiScanWaitVisible', 'aiScanPrepareConnection',
+  'aiScanWithUploadLock', 'aiScanDropCancelled', 'aiScanCancelledError', 'aiScanInvoiceProgress', 'deliveryCreditBusy',
+  'deliveryCreditLocalDraft', 'deliveryCreditValidResume'];
 function context(extra = {}) {
   const storage = new Map();
   const c = vm.createContext({ console, setTimeout, clearTimeout, AbortController, Date, JSON, Math, Number,
@@ -36,6 +39,8 @@ function context(extra = {}) {
     aiScanAttemptCount: 0, aiScanAutoRotationNote: '', reconcileData: null, currentView: 'receiving',
     AI_SCAN_MAX_AUTO_ROTATION_RETRIES: 2, AI_SCAN_NETWORK_RETRIES: 2, AI_SCAN_FETCH_TIMEOUT_MS: 2000,
     AI_SCAN_NETWORK_RETRY_DELAY_MS: 1, AI_SCAN_WORKER_URL: 'https://fixture.invalid/scan', RECEIPT_DRAFT_KEY: 'fixture',
+    AI_SCAN_RESUME_TTL_MS: 25 * 60 * 1000, AI_SCAN_HEALTH_TIMEOUT_MS: 2000, AI_SCAN_HEALTH_ATTEMPTS: 3, AI_SCAN_VISIBLE_SETTLE_MS: 1,
+    aiScanCutKeys: new Map(), aiScanServiceStatus: null, aiScanUploadChain: Promise.resolve(), aiScanUploadQueue: [],
     receiptDraftNoticeHtml:()=>'',products: [], auth: { currentUser: { getIdToken: async () => 'fixture' } },
     localStorage: { getItem: k => storage.get(k) || null, setItem: (k, v) => storage.set(k, v) },
     r2: n => Math.round(n * 100) / 100, refreshScanHost() {}, renderReceiving() {}, showToast() {},
@@ -163,11 +168,22 @@ test('photo missing summary never triggers orientation rereads', async () => {
   assert.equal(calls, 1);
   assert.equal(c.receiptPaperScanState, 'failed');
 });
-test('invoice network failures get one transport attempt; error remains visible', async () => {
-  const c = context(); let calls = 0;
-  c.fetch = async () => { calls++; throw new Error('network'); };
-  await assert.rejects(c.aiRequestSingleDocScan('fixture', [page()], {}));
-  assert.equal(calls, 1);
+test('invoice network failures get one transport attempt unless /health says scanResume (v147 or unknown); error remains visible', async () => {
+  // v364: a service whose last /health lacks scanResume (v147, or unknown) gets exactly one
+  // paid POST after an ambiguous network failure (the v325 rule). The failure is plain
+  // Hebrew; the browser's own text is kept only in detail.
+  for (const status of [null, { ok: true, keyConfigured: true, serviceVersion: 147, photoFirst: true }]) {
+    const c = context({ aiScanServiceStatus: status }); const bodies = [];
+    c.fetch = async (url, options) => { bodies.push(JSON.parse(options.body)); throw new TypeError('Load failed'); };
+    const error = await c.aiRequestSingleDocScan('fixture', [page()], {}).then(() => null, e => e);
+    assert.ok(error, 'must reject');
+    assert.equal(bodies.length, 1);
+    assert.equal(bodies[0].documents.length, 1);
+    assert.equal(error.networkFailure, true);
+    assert.match(error.message, /אין חיבור יציב לשירות הפענוח/);
+    assert.doesNotMatch(error.message, /Load failed|ניסיונות/);
+    assert.match(error.detail, /Load failed/);
+  }
 });
 test('new image invalidates only that document cache', () => {
   const c = context(); const a = input(), b = input();

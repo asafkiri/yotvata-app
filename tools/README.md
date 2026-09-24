@@ -60,6 +60,8 @@ node tools/ask-qty-test.js                      # שאלת הכמות בסימו
 node tools/promo-sku-test.js                    # קליטת מק"טים מדף המבצעים (v317)
 node tools/past-chips-test.js גיבוי.json        # צ׳יפים של "סימנת בעבר" (v318)
 node --test tools/return-credit-gap.test.mjs    # הכרעת זיכוי, פותר הפער, ותעודה שנשארת פתוחה (v357)
+node --test tools/scan-transport.test.mjs       # קריאה ששורדת נתק, חימום, תור של קריאה אחת בתשלום, זיכוי מהנהג (v364)
+node --test tools/delivery-credit-auto-read.test.mjs  # זיכוי מהנהג נקרא אוטומטית אחרי אישור הצילום, כרטיס עם פעולה אחת (v364)
 ```
 
 שתי בדיקות צריכות נתונים אמיתיים שאינם בריפו (גיבוי החנות ודפי הזמנה

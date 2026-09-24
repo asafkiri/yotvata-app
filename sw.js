@@ -2,7 +2,7 @@
 // מאפשר התקנה כאפליקציה (PWA) באנדרואיד + עבודה בסיסית גם ללא אינטרנט.
 // בעת עדכון index.html — שנה את המספר ב-CACHE_NAME (למשל yotvata-v2) כדי לרענן.
 
-const CACHE_NAME = 'yotvata-v363';
+const CACHE_NAME = 'yotvata-v364';
 const APP_SHELL = [
   './',
   './index.html',
@@ -32,6 +32,13 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
+  // v364: בקשות לשרתים אחרים (שירות הפענוח /health, Firebase, גופנים) הולכות
+  // ישר לרשת, בלי תיווך של ה-Service Worker. התיווך הפך את ה-GET של הדפדפן
+  // לבקשה חדשה מתוך ה-Worker (בלי החזרה האוטומטית של iOS על חיבור שמת),
+  // ותשובות כאלה ממילא לא נשמרו במטמון (רק type 'basic' נשמר).
+  let sameOrigin = false;
+  try { sameOrigin = new URL(req.url).origin === self.location.origin; } catch (e) { sameOrigin = false; }
+  if (!sameOrigin) return;
 
   // ניווט (טעינת הדף): קודם רשת, ואם אין אינטרנט - מהמטמון
   if (req.mode === 'navigate') {

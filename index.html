@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v363 החזרת פריטים מתעודה לרשימה הפתוחה</title>
+    <title>הזמנות יטבתה - v364 זיכוי מהנהג נקרא אוטומטית</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v363 החזרת פריטים מתעודה לרשימה הפתוחה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v364 זיכוי מהנהג נקרא אוטומטית</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -265,6 +265,8 @@
           <button id="aiOrientationRestore" type="button" class="hidden btn-tap py-2.5 rounded-xl bg-white/10 border border-white/15 text-white font-bold text-sm">חזור לתמונה המקורית</button>
         </div>
         <button id="aiOrientationConfirm" type="button" class="btn-tap w-full py-3.5 rounded-xl bg-emerald-600 text-white font-black text-lg"><i class="fa-solid fa-check ml-1"></i> אשר תמונה מלאה</button>
+        <!-- v364: רק בעמוד האחרון של זיכוי מהנהג: מאשר בלי לקרוא ופותח את המצלמה לחלק הבא של פתק ארוך -->
+        <button id="aiOrientationMorePart" type="button" class="hidden btn-tap w-full mt-2 py-2.5 rounded-xl bg-white/10 border border-white/15 text-white font-bold text-sm"><i class="fa-solid fa-camera ml-1"></i> הפתק ארוך? צלם עוד חלק</button>
         <p class="text-[11px] text-slate-400 font-bold text-center mt-2">התמונה לא תישלח ל-AI לפני האישור.</p>
       </div>
     </div>
@@ -678,6 +680,22 @@ const AI_SCAN_NETWORK_RETRIES = 2;
 const AI_SCAN_FETCH_TIMEOUT_MS = 420000;
 const AI_SCAN_NETWORK_RETRY_DELAY_MS = 2500;
 const AI_SCAN_MIN_SERVICE_VERSION = 127;
+// ===== v364: קריאה ששורדת נתק (פורט מתנובה v107) =====
+// "Load failed" באייפון = שום תשובה לא הגיעה לדפדפן, אבל השרת אולי כבר קורא
+// ומשלם. לכן כל קריאה בתשלום נושאת מפתח (scanKey). שרת v148 ומעלה ממשיך
+// לעבוד גם כשהחיבור מת, ומי שחוזר עם אותו מפתח אוסף את התוצאה בלי לשלם שוב.
+// ניסיון חוזר אוטומטי קורה רק כשתשובת /health התקינה האחרונה אמרה scanResume:true —
+// אחרת נשאר הכלל של v325: ניסיון אחד, ובלי שליחה עיוורת נוספת בתשלום. המפתח
+// נשמר בכל מקרה, כדי ש"נסה שוב" ידני עם אותם צילומים יאסוף במקום לשלם.
+const AI_SCAN_RESUME_TTL_MS = 25 * 60 * 1000;
+const aiScanCutKeys = new Map(); // טביעת אצבע של הצילומים → מפתח של קריאה שהקו מת עליה
+const AI_SCAN_HEALTH_TIMEOUT_MS = 15000;
+const AI_SCAN_HEALTH_ATTEMPTS = 3;      // GET חינמי ובטוח לחזרה — בניגוד ל-POST בתשלום
+const AI_SCAN_VISIBLE_SETTLE_MS = 400;  // אחרי חזרה מרקע הרשת באייפון צריכה רגע להתעורר
+let aiScanServiceStatus = null;         // תשובת /health התקינה האחרונה (null עד שמגיעה אחת)
+// v364: קריאה אחת בתשלום בכל רגע (כלל v179). חשבונית וזיכוי עומדים באותו תור.
+// מי שבתור (מחזיק או ממתין): { kind: 'invoice'|'credit', isCancelled(), abort() }.
+let aiScanUploadChain = Promise.resolve(), aiScanUploadQueue = [];
 const AI_BARCODE_SUFFIX_DIGITS = 6;
 let aiOrientationSession = null;
 let aiOrientationBusy = false;
@@ -1132,6 +1150,7 @@ function yotvataPaperCheck(doc, pageCount) {
 function yotvataResetPhotoReceipt() {
   aiScanRunId++;
   receiptDeliveryCredits = [];
+  aiScanDropCancelled(); // v364: הקריאות של התעודה שבוטלה נעצרות ומשחררות את התור
   receiptAnalysisCache = null; aiScanEditingImages = false;
   receiptEntryMode = 'photo'; receiptAnchorSource = null;
   receiptPaperScanState = ''; receiptPaperScanProblems = [];
@@ -1140,13 +1159,20 @@ function yotvataResetPhotoReceipt() {
 function refreshScanHost() {
   refreshPriceScannerNotice();
   if (currentView === 'receiving') {
-    if (receiptUsesManualQuantities() || !receiptOpened || receiptPhotoCaptureOpen) renderReceiving();
+    const manual = receiptUsesManualQuantities() && receiptOpened && !receiptPhotoCaptureOpen;
+    // v364: במסך הכמויות הידני כל עדכון של קריאת החשבונית היה בונה מחדש את כל המסך —
+    // גם תעודה שחיכתה בתור לזיכוי ויוצאת עכשיו לדרך. אם העובד מקליד באותו רגע מספר זיכוי
+    // או ברקוד, הטקסט נמחק והמקלדת נסגרת. בזמן כזה מתעדכנים רק אזורי המצב (כמו במסך
+    // הסריקה), והמסך המלא נבנה ברינדור הבא.
+    const typing = manual && !!deliveryCreditEditingCard();
+    if ((manual && !typing) || !receiptOpened || receiptPhotoCaptureOpen) renderReceiving();
     else {
       const status = $('rcPaperStatus');
-      if (status) status.innerHTML = yotvataPaperStatusHtml();
-      const priceHost = $('rcPriceAudit'); if (priceHost) priceHost.innerHTML = receiptPriceAuditHtml();
+      if (status) status.innerHTML = manual ? receiptManualStatusHtml() : yotvataPaperStatusHtml();
+      const priceHost = $('rcPriceAudit');
+      if (priceHost) priceHost.innerHTML = manual && (aiScanBusy || receiptPaperScanState === 'running') ? '' : receiptPriceAuditHtml();
       const qtyHost = $('rcQuantityOptions'); if (qtyHost) qtyHost.innerHTML = receiptQuantityButtonsHtml();
-      refreshReceiptTotals();
+      if (!manual) refreshReceiptTotals();
     }
   } else if (currentView === 'reconcile') renderReconcile();
 }
@@ -1232,14 +1258,11 @@ function yotvataAdoptPaperAnchors() {
   saveReceiptDraft(); refreshScanHost(); return true;
 }
 async function yotvataEnsurePhotoService() {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 15000);
-  try {
-    const response = await fetch(AI_SCAN_WORKER_URL.replace(/\/scan$/, '/health'), { cache: 'no-store', signal: controller.signal });
-    const status = await response.json();
-    if (!response.ok || !status.ok || !status.keyConfigured) throw new Error('שירות הפענוח אינו זמין כרגע. אפשר להמשיך בספירה ולהזין את הסיכום ידנית.');
-    if (Number(status.serviceVersion) < 145 || status.photoFirst !== true) throw new Error('שירות הצילום בתחילת הקליטה עדיין לא עודכן. אפשר להזין את הסיכום ידנית.');
-  } finally { clearTimeout(timer); }
+  // v364: החימום המשותף (חזרה על GET, תרגום לעברית, שמירת scanResume).
+  const status = await aiScanPrepareConnection();
+  if (!status.ok || !status.keyConfigured) throw new Error('שירות הפענוח אינו זמין כרגע. אפשר להמשיך בספירה ולהזין את הסיכום ידנית.');
+  if (Number(status.serviceVersion) < 145 || status.photoFirst !== true) throw new Error('שירות הצילום בתחילת הקליטה עדיין לא עודכן. אפשר להזין את הסיכום ידנית.');
+  return status;
 }
 async function yotvataStartPaperScan(opts = {}) {
   if (!yotvataPhotoReady()) return;
@@ -1279,9 +1302,39 @@ function yotvataStoreScanResults(results) {
   saveReceiptDraft();
 }
 function deliveryCreditSnapshot() {
-  return receiptDeliveryCredits.map(({ pages, ...c }) => ({ ...c, pageCount: pages.length || c.pageCount || 0 }));
+  // v364: waiting/waitingFor/progress הם מצב תצוגה רגעי של קריאה שרצה — לא נשמרים בטיוטה.
+  // resume (מפתח האיסוף) נשמר רק בטיוטה המקומית — ראה deliveryCreditLocalDraft.
+  return receiptDeliveryCredits.map(({ pages, waiting, waitingFor, progress, resume, ...c }) => ({ ...c, pageCount: pages.length || c.pageCount || 0 }));
+}
+// v364: מפתח הקריאה של זיכוי (c.resume = { scanKey, at }) נכנס לטיוטה שבמכשיר בלבד,
+// לא לענן: הוא שייך לחיבור של המכשיר הזה, ובלעדיו טיוטת הענן והחתימה שלה לא משתנות.
+function deliveryCreditLocalDraft(payload) {
+  const keys = new Map(receiptDeliveryCredits.filter(c => deliveryCreditValidResume(c.resume)).map(c => [c.id, c.resume]));
+  if (!keys.size || !payload || !Array.isArray(payload.deliveryCredits)) return payload;
+  return { ...payload, deliveryCredits: payload.deliveryCredits.map(c => keys.has(c.id) ? { ...c, resume: { ...keys.get(c.id) } } : c) };
+}
+function deliveryCreditValidResume(resume) {
+  return !!resume && typeof resume === 'object' && typeof resume.scanKey === 'string' && /^[A-Za-z0-9_-]{8,64}$/.test(resume.scanKey)
+    && Number.isFinite(resume.at) && resume.at > 0;
+}
+// v364: זיכוי שהצילומים שלו אבדו (רענון) אבל הקריאה ששולמה אולי מחכה בשרת: הקריאה
+// נקטעה ברענון (interrupted) או בנתק (network), והמפתח שלה צעיר מ-AI_SCAN_RESUME_TTL_MS.
+// מפתח שפג — רק צילום מחדש.
+function deliveryCreditCollectable(c) {
+  return !!c && !c.paper && !c.pages.length && deliveryCreditValidResume(c.resume) && Date.now() - c.resume.at < AI_SCAN_RESUME_TTL_MS
+    && (c.status === 'interrupted' || (c.status === 'error' && c.errorKind === 'network'));
 }
 function deliveryCreditFind(id) { return receiptDeliveryCredits.find(c => c.id === id); }
+// v364: זיכוי שמכינים או קוראים עכשיו. 'waiting' נכלל מראש למקרה שהתור יהפוך לסטטוס.
+function deliveryCreditBusy(c) { return !!c && ['preparing', 'waiting', 'reading'].includes(c.status); }
+function deliveryCreditReadActive() { return receiptDeliveryCredits.some(deliveryCreditBusy); }
+// v364: זיכוי שבו מודפסת הנחה כללית על כל התעודה, בנפרד מהשורות (שורות -60, -40,
+// הנחה 5, לפני מע״מ -95). שרת v148 מקבל נייר כזה — החשבון שלו נכון — אבל כאן כל
+// זיכוי נבדק מול החוסר לפי שורות המוצרים, וההנחה לא שייכת לשום מוצר, ולכן אי אפשר
+// לצרף אותו כאן. צילום חוזר היה קורא שוב את אותו נייר (בתשלום) ומגיע לאותה תוצאה
+// בלי סוף — ולכן ההודעה לא מבקשת לצלם: מסירים את הזיכוי ורושמים את הסכום שלו בתעודה
+// השמורה ("התקבל זיכוי מהספק" — הזיכוי הישן לפי סכום בלבד, shortCreditNotes).
+const DELIVERY_CREDIT_DOC_DISCOUNT_PROBLEM = 'בזיכוי הזה מודפסת הנחה כללית על כל התעודה, ולכן אי אפשר לצרף אותו כאן. צילום נוסף לא יעזור. הסר את הזיכוי וסיים את הקליטה. אחר כך לחץ למעלה על "תעודות", פתח את התעודה הזאת, לחץ "התקבל זיכוי מהספק" והקלד את סכום הזיכוי לפני מע״מ כמו שמודפס על הנייר.';
 function deliveryCreditPaperCheck(paper, pageCount) {
   const cents = v => typeof v === 'number' && Number.isFinite(v) ? Math.round(v * 100) : null;
   if (!paper || !Array.isArray(paper.rows) || !paper.rows.length) return 'לא נקראו שורות הזיכוי. צלם שוב את כל התעודה.';
@@ -1296,19 +1349,36 @@ function deliveryCreditPaperCheck(paper, pageCount) {
     sum += amount;
     if (!/פ.?קדון/.test(String(row.description || ''))) units += qty;
   }
-  if (sum !== subtotal) return 'סכום שורות הזיכוי אינו תואם לסיכום המודפס. צלם שוב את הסיכום והשורות.';
+  // v364: הנחה כללית נפרדת — אותו כלל כמו discountSeparate בשרת: שוויון מדויק באגורות,
+  // על ערכים מוחלטים (הנחה שנקראה בלי מינוס נחשבת גם היא).
+  const discount = Math.abs(cents(paper.documentDiscountExVat) || 0);
+  const discountSeparate = sum !== subtotal && discount > 0 && Math.abs(sum) - discount === Math.abs(subtotal);
+  if (sum !== subtotal && !discountSeparate) return 'סכום שורות הזיכוי אינו תואם לסיכום המודפס. צלם שוב את הסיכום והשורות.';
   if (paper.printedUnits != null && Math.abs(paper.printedUnits) !== units) return 'כמויות הזיכוי אינן תואמות לסך היחידות המודפס. בדוק את הצילום.';
   if (paper.printedLines != null && paper.printedLines !== paper.rows.length) return 'מספר שורות הזיכוי אינו תואם לסיכום המודפס.';
-  if (cents(paper.vatAmount) != null && cents(paper.totalInclVat) != null && subtotal + cents(paper.vatAmount) !== cents(paper.totalInclVat)) return 'סכומי הזיכוי לפני ואחרי מע״מ אינם תואמים. בדוק את הצילום.';
+  // v364: בזיכוי מדפיסים לעיתים את המע״מ ואת הסה״כ בלי מינוס. הבדיקה כאן
+  // בודקת רק את החשבון (|לפני מע״מ| + |מע״מ| = |סה״כ|); הסימן השלילי של
+  // הסיכום ושל כל שורה עדיין חובה למעלה — נייר חיובי לעולם אינו הופך לזיכוי.
+  if (cents(paper.vatAmount) != null && cents(paper.totalInclVat) != null && Math.abs(subtotal) + Math.abs(cents(paper.vatAmount)) !== Math.abs(cents(paper.totalInclVat))) return 'סכומי הזיכוי לפני ואחרי מע״מ אינם תואמים. בדוק את הצילום.';
+  // v364: רק נייר שכל שאר הבדיקות שלו עברו מקבל "צילום נוסף לא יעזור"; קריאה שנסגרת
+  // דרך ההנחה אבל סותרת ביחידות/בשורות/במע״מ היא קריאה שגויה, ועדיין מבקשת צילום חוזר.
+  if (discountSeparate) return DELIVERY_CREDIT_DOC_DISCOUNT_PROBLEM;
   return '';
 }
 function deliveryCreditRows(c) {
   return (c.paper && c.paper.rows || []).map((raw, i) => {
-    const barcode = normalizeBarcode(c.barcodes && c.barcodes[i] != null ? c.barcodes[i] : raw.barcode || raw.barcodeObserved || '');
-    const matches = aiIsValidEan13(barcode) ? aiCatalogBarcodeMatches(barcode, false) : [];
+    const typed = !!c.barcodes && c.barcodes[i] != null;
+    const barcode = normalizeBarcode(typed ? c.barcodes[i] : raw.barcode || raw.barcodeObserved || '');
+    // v364: כשהשרת סירב לבחור מוצר (הספרות מתאימות לכמה מוצרים, או שהקריאות
+    // חלקו על המוצר) — הספרות שנקראו מוצגות לעובד, אבל לא בוחרים מהן מוצר לבד.
+    // למשל 8 ספרות אחרונות של ברקוד EAN-13 שהן גם ברקוד EAN-8 של מוצר אחר.
+    const refused = !typed && !raw.barcode && /^(ambiguous|conflicting_reads|suggested_)/.test(String(raw.barcodeMatchMethod || ''));
+    // v364: כמו בחשבונית מאז v359 — ברקוד קמעונאי תקין (EAN-13 או EAN-8 עם ספרת ביקורת) ומוצר יחיד במאגר.
+    const matches = !refused && aiIsValidRetailBarcode(barcode) ? aiCatalogBarcodeMatches(barcode, false) : [];
     const product = matches.length === 1 ? matches[0].product : null;
+    // v364: refused מסמן לכרטיס שהספרות שנקראו הן רמז בלבד — שדה הברקוד מוצג ריק.
     return { productId: product ? String(product.id) : null, barcode, name: product ? product.name : raw.description,
-      qty: Math.abs(raw.quantity), amount: Math.abs(r2(raw.lineTotalExVat)), sourceRow: i };
+      qty: Math.abs(raw.quantity), amount: Math.abs(r2(raw.lineTotalExVat)), sourceRow: i, ...(refused ? { refused: true } : {}) };
   });
 }
 function deliveryCreditSignature(c) {
@@ -1332,57 +1402,253 @@ function deliveryCreditConfirm(id) {
   showToast('הזיכוי צורף למשלוח. בסיום הספירה נבדוק איזה חוסר הוא מכסה.', null, null, 3200); return true;
 }
 function deliveryCreditInvalidate(c) {
-  c.paper = null; c.status = 'capture'; c.error = ''; c.confirmedAt = null; c.confirmedSignature = null;
+  c.paper = null; c.status = 'capture'; c.error = ''; c.errorKind = ''; c.errorDetail = ''; c.confirmedAt = null; c.confirmedSignature = null;
   c.barcodes = []; pendingReceipt = null;
+  c.resume = null; // v364: צילום חדש (או חלק נוסף) — הקריאה הקודמת כבר לא שלו
 }
 function deliveryCreditOpenPage(id, pageIndex) {
   const c = deliveryCreditFind(id), page = c && c.pages[pageIndex];
-  if (!page || aiScanBusy || aiOrientationBusy || c.status === 'reading') return false;
+  // v364: עמוד זיכוי נפתח לבדיקה גם בזמן שהחשבונית נקראת ברקע (aiScanBusy).
+  // עד v363 החלון לא נפתח אז, ושום דבר לא פתח אותו אחר כך — הזיכוי נתקע.
+  // עמודי החשבונית נשארים נעולים כמו קודם; זיכוי שמוכן או נקרא עכשיו — לא נפתח.
+  if (!page || aiOrientationBusy || deliveryCreditBusy(c)) return false;
   aiOrientationSession = { page, reviewOnly: !!c.paper, cropMode: false };
   $('aiOrientationModal').classList.remove('hidden'); $('aiOrientationModal').classList.add('flex');
   aiSetOrientationBusy(false); aiPaintOrientationReview(); return true;
 }
-async function deliveryCreditAddFiles(id, files) {
+// v364: replace=true — "צלם את הזיכוי מחדש". הצילומים הקיימים מוחלפים רק אחרי
+// שהצילום החדש הוכן בהצלחה; כישלון בהכנה משאיר אותם כמו שהם.
+async function deliveryCreditAddFiles(id, files, replace = false) {
   const c = deliveryCreditFind(id);
-  if (!c || !files || !files.length || ['preparing', 'reading'].includes(c.status) || receiptFinalizing) return false;
-  const slots = 4 - c.pages.length;
+  if (!c || !files || !files.length || deliveryCreditBusy(c) || receiptFinalizing) return false;
+  const slots = replace ? 4 : 4 - c.pages.length;
   if (slots <= 0) { showToast('עד 4 עמודים לתעודת זיכוי', null, null, 2500); return false; }
   c.status = 'preparing'; saveReceiptDraft(); renderReceiving();
   try {
     const pages = [];
-    for (const file of Array.from(files).slice(0, slots)) pages.push(await aiCompressInvoiceImage(file));
+    // v364: פתק זיכוי ארוך וצר מקבל תקציב שטח במקום תקרת צלע ארוכה (ראה AI_CREDIT_MAX_PIXELS).
+    for (const file of Array.from(files).slice(0, slots)) pages.push(await aiCompressInvoiceImage(file, false, AI_CREDIT_MAX_PIXELS));
     if (deliveryCreditFind(id) !== c) return false;
-    deliveryCreditInvalidate(c); c.pages.push(...pages); c.pageCount = c.pages.length;
-    saveReceiptDraft(); renderReceiving(); aiOpenNextUnconfirmedOrientation(); return true;
+    if (replace && aiOrientationSession && c.pages.includes(aiOrientationSession.page)) aiCloseOrientationReview();
+    deliveryCreditInvalidate(c); if (replace) c.pages = []; c.pages.push(...pages); c.pageCount = c.pages.length;
+    saveReceiptDraft(); renderReceiving();
+    // v364: פותחים לבדיקה את הצילום שזה עתה צולם לזיכוי הזה — גם כשהחשבונית
+    // נקראת ברקע. אם חלון אחר כבר פתוח, התור הרגיל ימשיך אחריו.
+    const next = c.pages.findIndex(p => !p.orientationConfirmed);
+    if (aiOrientationSession || next === -1 || !deliveryCreditOpenPage(id, next)) aiOpenNextUnconfirmedOrientation();
+    return true;
   } catch (error) {
-    if (deliveryCreditFind(id) === c) { c.status = 'error'; c.error = 'לא ניתן להכין את צילום הזיכוי. נסה שוב.'; saveReceiptDraft(); renderReceiving(); }
+    if (deliveryCreditFind(id) === c) {
+      // v364: 'part' = חלק נוסף של פתק ארוך לא הוכן; החלקים שכבר אושרו נשמרים,
+      // והפעולה הראשית היא לצלם שוב את החלק הבא — לא להחליף את כל הזיכוי.
+      c.status = 'error'; c.errorKind = !replace && c.pages.length ? 'part' : 'photo'; c.error = 'לא הצלחנו להכין את הצילום. צלם שוב.';
+      // v364: אחרי רענון pageCount עוד סופר את הצילום שאבד. הצילום החדש נכשל, אז אין עכשיו
+      // שום צילום — מאפסים, כדי שהכרטיס יראה את השגיאה החדשה ולא את הודעת הרענון.
+      c.pageCount = c.pages.length;
+      c.errorDetail = String((error && error.message) || '').slice(0, 200); saveReceiptDraft(); renderReceiving();
+    }
     return false;
   }
 }
-async function deliveryCreditRead(id) {
+// v364: נקודת הכניסה לקריאת זיכוי. עוברת באותו תור של קריאה-אחת-בתשלום כמו
+// החשבונית (הזיכוי ממתין לתעודה שבקריאה, ולהפך), ומחממת את החיבור ב-GET
+// /health בתוך התור, רגע לפני ההעלאה. עד v363 ה-POST יצא על חיבור ישן בלי
+// חימום — ובאייפון זה "Load failed" מיידי. options: onProgress(text),
+// onWaiting(kind) (רק אם באמת צריך לחכות; kind = למי), onStart(), isCancelled(), getToken(force).
+async function deliveryCreditTransport(token, pages, options = {}) {
+  return aiRequestSingleDocScan(token, pages, { amount: null, units: null }, { ...options, documentKind: 'credit', warmUp: true });
+}
+// v364: הכרטיס שבו העובד מקליד עכשיו מספר זיכוי או ברקוד (השדה הממוקד בתוך
+// #rcDeliveryCredits), או null. מי שבונה מחדש את המסך בזמן כזה מוחק את מה שהוקלד.
+function deliveryCreditEditingCard(host = $('rcDeliveryCredits')) {
+  const active = typeof document !== 'undefined' ? document.activeElement : null;
+  return host && active && typeof host.contains === 'function' && host.contains(active) && active.dataset
+    && /^delivery-credit-(number|barcode)$/.test(active.dataset.role || '') && typeof active.closest === 'function'
+    ? active.closest('[data-delivery-credit]') : null;
+}
+// v364: עדכון קל של כרטיסי הזיכוי בלבד (תור, התקדמות), בלי לרנדר את כל מסך
+// הקליטה — הסורק ושדה הכמות הפעיל נשארים כמו שהם.
+function deliveryCreditRefreshCards() {
+  const host = currentView === 'receiving' ? $('rcDeliveryCredits') : null;
+  const html = host ? deliveryCreditsHtml() : '';
+  if (!host || !html) return;
+  // v364: אם העובד מקליד עכשיו מספר זיכוי או ברקוד בכרטיס של זיכוי אחר, הכרטיס הזה
+  // לא נבנה מחדש — אחרת הטקסט שהקליד נמחק, המקלדת נסגרת, ובכרום אף נשמר חצי מהטקסט
+  // (שדה ממוקד שמוסר יורה change). שאר הכרטיסים (ובהם הזיכוי שבקריאה) מתעדכנים כרגיל,
+  // והכרטיס שבעריכה מתעדכן ברינדור הבא. מספר הכרטיסים לא משתנה באמצע קריאה —
+  // הוספה והסרה של זיכוי עוברות ב-renderReceiving.
+  const editing = deliveryCreditEditingCard(host);
+  if (!editing) { host.outerHTML = html; return; }
+  receiptDeliveryCredits.forEach(c => {
+    const card = host.querySelector('[data-delivery-credit="' + c.id + '"]');
+    if (card && card !== editing) card.outerHTML = deliveryCreditCardHtml(c);
+  });
+}
+function deliveryCreditPaperError(message) {
+  const error = new Error(message); error.creditPaper = true; return error;
+}
+// v364: collect=true — "אסוף את הקריאה": זיכוי שהצילומים שלו אבדו ברענון, אבל מפתח
+// הקריאה ששולמה נשמר בטיוטה המקומית (c.resume). נשלח רק גוף האיסוף, בלי צילומים,
+// באותו תור ואותו חימום; הצלחה ממשיכה לבדיקה הרגילה (בדיקת הנייר לא צריכה צילום).
+async function deliveryCreditRead(id, collect = false) {
   const c = deliveryCreditFind(id);
-  if (!c || c.paper || ['reading', 'preparing'].includes(c.status) || !c.pages.length || c.pages.some(p => !p.orientationConfirmed) || receiptFinalizing) return false;
+  if (!c || c.paper || deliveryCreditBusy(c) || receiptFinalizing) return false;
+  if (collect ? !deliveryCreditCollectable(c) : (!c.pages.length || c.pages.some(p => !p.orientationConfirmed))) return false;
   if (!auth || !auth.currentUser) { showToast('המתן לחיבור המאובטח ונסה שוב', null, null, 3000); return false; }
-  c.status = 'reading'; c.error = ''; saveReceiptDraft(); renderReceiving();
+  c.status = 'reading'; c.error = ''; c.errorKind = ''; c.errorDetail = ''; c.waiting = false; c.progress = '';
+  saveReceiptDraft(); renderReceiving();
+  const current = () => deliveryCreditFind(id) === c;
   try {
     const token = await auth.currentUser.getIdToken();
-    if (deliveryCreditFind(id) !== c) return false;
+    if (!current()) return false;
     // The existing OCR endpoint preserves signed paper values. Keep this result
     // separate from invoice-only anchors, retries, product counts and pricing.
-    const result = await aiRequestSingleDocScan(token, c.pages, { amount: null, units: null });
-    if (deliveryCreditFind(id) !== c) return false;
+    // v364: c.waiting = הזיכוי ממתין בתור לקריאה אחרת בתשלום, ו-c.waitingFor —
+    // למה: 'invoice' (החשבונית), 'credit' (זיכוי אחר) או null (כמה סוגים);
+    // c.progress = הודעת התקדמות/חיבור מחדש של הזיכוי עצמו (לעולם לא aiScanProgressText).
+    // v364: onUpload — מפתח הקריאה נשמר על הזיכוי (c.resume = { scanKey, at }) רגע לפני
+    // ההעלאה, בטיוטה המקומית בלבד, וגם זה רק מול שרת שאוסף (scanResume). אחרי רענון
+    // באמצע הקריאה הזיכוי מציע "אסוף את הקריאה" בחינם במקום צילום וקריאה בתשלום.
+    // at נשאר של ההעלאה הראשונה במפתח הזה (איסוף חוזר לא מאריך את חייו).
+    const result = await deliveryCreditTransport(token, collect ? [] : c.pages, {
+      ...(collect ? { resumeKey: c.resume.scanKey } : {}),
+      isCancelled: () => !current(),
+      getToken: force => auth.currentUser.getIdToken(force),
+      onWaiting: kind => { if (current()) { c.waiting = true; c.waitingFor = kind || null; deliveryCreditRefreshCards(); } },
+      onStart: () => { if (current() && c.waiting) { c.waiting = false; deliveryCreditRefreshCards(); } },
+      onProgress: text => { if (current()) { c.progress = String(text || ''); deliveryCreditRefreshCards(); } },
+      onUpload: ({ scanKey, resumable }) => {
+        if (!current()) return;
+        c.resume = !resumable ? null : c.resume && c.resume.scanKey === scanKey ? c.resume : { scanKey, at: Date.now() };
+        saveReceiptDraft();
+      }
+    });
+    if (!current()) return false;
+    c.waiting = false; c.progress = ''; c.resume = null; // v364: תוצאת הקריאה הגיעה — אין עוד מה לאסוף
     const docs = result.scan && result.scan.documents || [];
-    if (docs.length !== 1) throw new Error('לא התקבלה תעודת זיכוי יחידה. צלם כל תעודת זיכוי בנפרד.');
-    c.pageCount = c.pages.length; c.paper = cloneSafe(docs[0].__pricePaper || docs[0]);
+    if (docs.length !== 1) throw deliveryCreditPaperError('לא התקבלה תעודת זיכוי יחידה. צלם כל תעודת זיכוי בנפרד.');
+    // v364: באיסוף אחרי רענון אין צילומים — מספר העמודים הוא זה שנשמר בטיוטה.
+    c.pageCount = collect ? Number(c.pageCount) || 0 : c.pages.length; c.paper = cloneSafe(docs[0].__pricePaper || docs[0]);
     const problem = deliveryCreditPaperCheck(c.paper, c.pageCount);
-    if (problem) { c.paper = null; throw new Error(problem); }
+    if (problem) { c.paper = null; throw deliveryCreditPaperError(problem); }
     c.number = String(c.paper.invoiceNumber || '').trim(); c.barcodes = []; c.status = 'review';
     c.scanAudit = { requestId: result.requestId || null, model: result.model || null, scanAudit: result.scanAudit || null };
-    saveReceiptDraft(); renderReceiving(); return true;
+    // v364: הקריאה מסתיימת ברקע, בזמן שהעובד אולי מקליד כמות — רק כרטיסי הזיכוי
+    // מתעדכנים, בלי לבנות מחדש את כל מסך הקליטה (שדה הכמות הפעיל נשאר).
+    saveReceiptDraft(); deliveryCreditRefreshCards(); return true;
   } catch (error) {
-    if (deliveryCreditFind(id) === c) { c.status = 'error'; c.error = error.message || 'פענוח הזיכוי נכשל. נסה שוב.'; saveReceiptDraft(); renderReceiving(); }
+    if (current()) {
+      // v364: סוג התקלה קובע מה מציעים לעובד: network = אותו צילום שוב (נאסף
+      // בלי תשלום נוסף כשהשרת תומך), paper = לצלם שוב, service = לנסות בעוד רגע.
+      c.status = 'error'; c.waiting = false; c.progress = '';
+      const code = String((error && error.code) || ''), message = String((error && error.message) || '');
+      // v364: המפתח נמחק רק כשהקריאה הסתיימה בתוצאה שהוצגה (נייר) או כשהתעבורה שכחה אותו
+      // (resumable === false). כשל לפני שהמפתח נקבע (חימום, תור) לא אומר עליו כלום.
+      if (error && (error.creditPaper || error.resumable === false)) c.resume = null;
+      // v364: 'discount' = זיכוי עם הנחה כללית (DELIVERY_CREDIT_DOC_DISCOUNT_PROBLEM) — אין צילום חוזר.
+      // resumable === true (למשל איסוף שסורב באימות): הקריאה ששולמה עוד בשרת — כמו נתק:
+      // "נסה שוב" (או "אסוף את הקריאה" אחרי רענון) אוסף אותה בלי תשלום נוסף.
+      c.errorKind = error && error.creditPaper ? (message === DELIVERY_CREDIT_DOC_DISCOUNT_PROBLEM ? 'discount' : 'paper')
+        : error && (error.networkFailure || error.resumable === true || code === 'auth/network-request-failed') ? 'network' : 'service';
+      // v364: השורה הראשית תמיד בעברית. הודעה שלא נכתבה באפליקציה — Firebase
+      // (חידוש האימות בלי קליטה), הודעת OpenAI שהשרת מעביר ב-openai_error, או
+      // תקלת קוד — עוברת כלשונה רק לשורה הטכנית הקטנה.
+      const foreign = !(error && error.creditPaper) && (code === 'openai_error' || !/[֐-׿]/.test(message));
+      c.error = !foreign ? message
+        : c.errorKind === 'network' ? 'אין חיבור יציב. בדוק שיש קליטה ונסה שוב.'
+        : code.startsWith('auth/') ? 'האימות המאובטח נכשל. רענן את האפליקציה ונסה שוב.'
+        : code === 'openai_error' ? 'שירות הפענוח לא הצליח לקרוא את הזיכוי כרגע. נסה שוב בעוד רגע.'
+        : 'פענוח הזיכוי נכשל. נסה שוב.';
+      c.errorDetail = String((error && error.detail) || (foreign && code !== 'openai_error' && message) || code).slice(0, 200);
+      saveReceiptDraft(); deliveryCreditRefreshCards();
+    }
     return false;
   }
+}
+// ===== v364: זיכוי מהנהג נקרא אוטומטית אחרי אישור הצילום =====
+// דיווח מהשטח (אייפון, v363): בזמן שהחשבונית נקראה ברקע העובד צילם את פתק
+// הזיכוי (פתק תרמי ארוך וצר), אישר את הכיוון, נדרש ללחוץ על כפתור נפרד
+// "פענח את הזיכוי" — והקריאה נכשלה מיד: "הרשת נכשלה אחרי 1 ניסיונות — Load
+// failed". התיקון של התעבורה (חימום, תור, מפתח קריאה) נמצא ב-aiRequestSingleDocScan.
+// כאן — מה שהעובד רואה:
+// • הטריגר האוטומטי היחיד לקריאה בתשלום: אישור העמוד האחרון של הזיכוי בחלון
+//   בדיקת התמונה ("אשר וקרא את הזיכוי") — deliveryCreditAutoRead. לעולם לא
+//   מרינדור, שמירה, שחזור טיוטה, סנכרון ענן, מחיקה/ביטול או צפייה בצילום.
+// • פתק ארוך בכמה חלקים (נדיר): "הפתק ארוך? צלם עוד חלק" מאשר את החלק בלי
+//   לקרוא ופותח את המצלמה; הקריאה יוצאת כשהחלק האחרון מאושר.
+// • עמוד זיכוי נפתח לבדיקה גם בזמן שהחשבונית נקראת; הקריאה עצמה ממתינה בתור
+//   לחשבונית, והכרטיס אומר זאת.
+// • בכרטיס פעולה ראשית אחת לכל מצב. "נסה שוב" שולח את אותם צילומים (בשרת v148
+//   זה אוסף את הקריאה שכבר רצה, בלי לשלם שוב). "צלם את הזיכוי מחדש" מחליף את
+//   הצילומים רק אחרי שהחדש הוכן. הודעת הדפדפן (Load failed) — שורה טכנית קטנה.
+function deliveryCreditAutoRead(c) {
+  if (!c || deliveryCreditFind(c.id) !== c || c.paper || deliveryCreditBusy(c) || receiptFinalizing
+    || !c.pages.length || c.pages.some(p => !p.orientationConfirmed)) return false;
+  deliveryCreditRead(c.id);
+  return true;
+}
+// iOS פותח את המצלמה רק מתוך לחיצה של המשתמש — לכן הפתיחה נעשית ברצף הלחיצה.
+function deliveryCreditClickInput(inputId) {
+  const input = $(inputId);
+  if (input && typeof input.click === 'function') input.click();
+}
+// צילומים שכבר לא בזיכרון: אחרי רענון/שחזור מהענן התמונות לא נשמרות (כמו
+// בחשבונית), ולכן אין "נסה שוב" — רק צילום מחדש.
+function deliveryCreditPhotosLost(c) {
+  return !c.pages.length && (c.status === 'interrupted' || (c.status === 'error' && c.errorKind !== 'photo') || Number(c.pageCount) > 0);
+}
+function deliveryCreditNoticeHtml(c) {
+  const spin = '<i class="fa-solid fa-circle-notch fa-spin"></i> ';
+  if (c.status === 'preparing') return '<p role="status" class="mt-3 text-blue-700 font-bold">' + spin + 'מכין את הצילום…</p>';
+  if (c.status === 'reading') return '<p role="status" class="mt-3 text-blue-700 font-bold">' + spin +
+    // v364: ההמתנה נקראת בשם של מה שבאמת רץ לפניו — החשבונית, זיכוי אחר, או סתם קריאה קודמת.
+    (!c.waiting ? 'קורא את הזיכוי… אפשר להמשיך לסרוק מוצרים.'
+      : (c.waitingFor === 'invoice' ? 'ממתין לסיום קריאת החשבונית — הזיכוי ייקרא מיד אחריה.'
+        : c.waitingFor === 'credit' ? 'ממתין לסיום קריאת זיכוי אחר — הזיכוי ייקרא מיד אחריו.'
+        : 'ממתין לסיום קריאה קודמת — הזיכוי ייקרא מיד אחריה.') + ' אפשר להמשיך לסרוק מוצרים.') + '</p>' +
+    (c.progress ? '<p class="mt-1 text-sm font-bold text-blue-700">' + htmlEscape(c.progress) + '</p>' : '');
+  if (c.paper) return '';
+  // v364: זיכוי עם הנחה כללית — ההסבר נשאר גם אחרי רענון (הצילום ממילא לא נחוץ יותר).
+  if (c.status === 'error' && c.errorKind === 'discount') return '<p class="mt-2 text-amber-800 font-bold">' + htmlEscape(c.error) + '</p>';
+  // v364: הצילום אבד ברענון, אבל הקריאה ששולמה אולי מחכה בשרת — אוספים אותה בחינם.
+  if (deliveryCreditCollectable(c)) return '<p class="mt-2 text-amber-800 font-bold">הזיכוי כבר נשלח לקריאה, אבל התשובה לא הגיעה. לחץ "אסוף את הקריאה" כדי לקבל אותה בלי תשלום נוסף.</p>' +
+    (c.status === 'error' && c.errorDetail ? '<p class="mt-1 text-[11px] text-slate-400" dir="ltr">' + htmlEscape(c.errorDetail) + '</p>' : '');
+  if (deliveryCreditPhotosLost(c)) return '<p class="mt-2 text-amber-800 font-bold">' +
+    htmlEscape(c.status === 'error' && c.errorKind === 'paper' && c.error ? c.error : 'פענוח הזיכוי לא הושלם והצילום לא נשמר. צלם אותו שוב כדי להמשיך.') + '</p>';
+  if (!c.error) return '';
+  return '<p class="mt-2 text-amber-800 font-bold">' + htmlEscape(c.error) + '</p>' +
+    (c.errorDetail ? '<p class="mt-1 text-[11px] text-slate-400" dir="ltr">' + htmlEscape(c.errorDetail) + '</p>' : '');
+}
+// הכפתורים של זיכוי שעוד לא נקרא: פעולה ראשית אחת לכל מצב.
+function deliveryCreditCaptureHtml(c) {
+  const id = c.id;
+  const button = (role, text, main, extra = '') => '<button data-role="' + role + '" data-id="' + id + '"' + extra + ' class="btn-tap w-full ' +
+    (main ? 'bg-emerald-600 text-white rounded-xl py-3 mt-2 font-black' : 'py-2 text-sm font-bold text-slate-600') + '">' + text + '</button>';
+  const inputs = '<input id="creditCam_' + id + '" data-role="delivery-credit-file" data-id="' + id + '" type="file" accept="image/*" capture="environment" class="hidden">' +
+    '<input id="creditRetake_' + id + '" data-role="delivery-credit-file" data-replace="1" data-id="' + id + '" type="file" accept="image/*" capture="environment" class="hidden">' +
+    '<input id="creditFile_' + id + '" data-role="delivery-credit-file" data-id="' + id + '" type="file" accept="image/*" multiple class="hidden">';
+  const more = c.pages.length && c.pages.length < 4 ? button('delivery-credit-camera', 'הזיכוי ארוך? הוסף עוד צילום', false) : '';
+  // v364: זיכוי עם הנחה כללית — הפעולה היחידה היא להסיר אותו. אין צילום חוזר, אין קריאה
+  // חוזרת ואין צילום נוסף: כל אחד מהם הוא קריאה בתשלום שתגיע לאותה תוצאה.
+  if (c.status === 'error' && c.errorKind === 'discount') return button('delivery-credit-remove', 'הסר את הזיכוי', true);
+  // v364: "אסוף את הקריאה" שולח רק את המפתח (בלי צילומים ובלי תשלום); צילום מחדש — דרך שנייה.
+  if (!c.pages.length && deliveryCreditCollectable(c)) return inputs + button('delivery-credit-collect', 'אסוף את הקריאה', true) +
+    button('delivery-credit-retake', 'צלם את הזיכוי מחדש', false);
+  if (!c.pages.length) return inputs + (deliveryCreditPhotosLost(c)
+    ? button('delivery-credit-retake', 'צלם את הזיכוי מחדש', true)
+    : button('delivery-credit-camera', 'צלם את תעודת הזיכוי', true) + button('delivery-credit-gallery', 'בחר צילום מהגלריה', false));
+  const unchecked = c.pages.findIndex(p => !p.orientationConfirmed);
+  if (unchecked !== -1) return inputs + button('delivery-credit-page', 'בדוק ואשר את הצילום', true, ' data-page="' + unchecked + '"') + more;
+  if (c.status === 'error' && c.errorKind === 'part') return inputs +
+    button('delivery-credit-camera', 'צלם שוב את החלק הבא', true) +
+    button('delivery-credit-read', 'קרא את הזיכוי', false) + button('delivery-credit-retake', 'צלם את הזיכוי מחדש', false);
+  if (c.status === 'error' && (c.errorKind === 'paper' || c.errorKind === 'photo')) return inputs +
+    button('delivery-credit-retake', 'צלם את הזיכוי מחדש', true) +
+    button('delivery-credit-read', c.errorKind === 'paper' ? 'נסה לקרוא שוב את אותו צילום' : 'קרא את הזיכוי', false) + more;
+  if (c.status === 'error') return inputs + button('delivery-credit-read', 'נסה שוב', true) +
+    button('delivery-credit-retake', 'צלם את הזיכוי מחדש', false) + more;
+  // כל הצילומים אושרו אבל הקריאה לא יצאה (החיבור המאובטח לא היה מוכן, נמחק עמוד נוסף…).
+  return inputs + button('delivery-credit-read', 'קרא את הזיכוי', true) + more;
 }
 function deliveryCreditAction(role, id, page) {
   if (receiptFinalizing) return;
@@ -1394,43 +1660,49 @@ function deliveryCreditAction(role, id, page) {
   const c = deliveryCreditFind(id); if (!c) return;
   if (role === 'delivery-credit-remove') {
     receiptDeliveryCredits = receiptDeliveryCredits.filter(x => x !== c); pendingReceipt = null;
+    aiScanDropCancelled(); // v364: קריאה שרצה לזיכוי הזה נעצרת, ומי שממתין אחריה לא מחכה לשווא
     if (aiOrientationSession && c.pages.includes(aiOrientationSession.page)) aiCloseOrientationReview();
     saveReceiptDraft(); renderReceiving(); return;
   }
   if (role === 'delivery-credit-camera') $('creditCam_' + id).click();
   else if (role === 'delivery-credit-gallery') $('creditFile_' + id).click();
+  else if (role === 'delivery-credit-retake') deliveryCreditClickInput('creditRetake_' + id);
   else if (role === 'delivery-credit-read') return deliveryCreditRead(id);
+  else if (role === 'delivery-credit-collect') return deliveryCreditRead(id, true);
   else if (role === 'delivery-credit-page') deliveryCreditOpenPage(id, Number(page));
   else if (role === 'delivery-credit-confirm') deliveryCreditConfirm(id);
   else if (role === 'delivery-credit-edit') { c.status = 'review'; c.confirmedAt = null; c.confirmedSignature = null; pendingReceipt = null; saveReceiptDraft(); renderReceiving(); }
 }
+// v364: כרטיס של זיכוי אחד — כדי ש-deliveryCreditRefreshCards יוכל לבנות מחדש כרטיס בודד.
+function deliveryCreditCardHtml(c) {
+  const busy = deliveryCreditBusy(c), rows = c.paper ? deliveryCreditRows(c) : [];
+  const duplicate = deliveryCreditDuplicate(c);
+  const confirmed = c.status === 'confirmed' && c.confirmedSignature === deliveryCreditSignature(c) && !duplicate;
+  const pages = c.pages.map((p, i) => '<button data-role="delivery-credit-page" data-id="' + c.id + '" data-page="' + i + '" class="btn-tap border rounded-lg p-1"><img src="' + p.dataUrl + '" alt="עמוד בזיכוי" class="w-16 h-20 object-contain"><span class="text-xs">עמוד ' + (i + 1) + '</span></button>').join('');
+  return (confirmed ? '<details data-delivery-credit="' + c.id + '" class="border border-emerald-200 rounded-xl mt-2 bg-white"><summary class="cursor-pointer p-3 text-sm font-black text-emerald-800">זיכוי שאושר · ₪' + fmtMoney(Math.abs(c.paper.subtotalExVat)) + ' לפני מע״מ · פרטים</summary><div class="px-3 pb-3">' : '<article data-delivery-credit="' + c.id + '" class="border-2 border-emerald-200 rounded-xl p-3 mt-3 bg-white">') + '<div class="flex justify-between gap-2"><b>' + (confirmed ? 'זיכוי שאושר למשלוח' : 'תעודת זיכוי מהנהג') + '</b>' +
+    '<button data-role="delivery-credit-remove" data-id="' + c.id + '" class="btn-tap text-rose-700 text-sm font-bold">הסר זיכוי</button></div>' +
+    deliveryCreditNoticeHtml(c) +
+    (duplicate ? '<p class="mt-2 text-amber-800 font-bold">מספר הזיכוי הזה כבר צורף. בדוק את המספר או הסר את הכפילות.</p>' : '') +
+    (c.status === 'confirmed' && !confirmed && !duplicate ? '<p class="mt-2 text-amber-800 font-bold">פרטי המוצר השתנו. בדוק את הזיכוי ואשר שוב.</p>' : '') +
+    // v364: בזיכוי עם הנחה כללית לא מציגים את הצילום — סיבוב/חיתוך שלו הוא קריאה בתשלום לשווא.
+    (pages && !busy && !(c.status === 'error' && c.errorKind === 'discount') ? '<div class="flex gap-2 mt-2">' + pages + '</div>' : '') +
+    (c.paper ? (confirmed ? '<p class="mt-2 font-black text-emerald-800">זיכוי מס׳ ' + htmlEscape(c.number) + ' · ₪' + fmtMoney(Math.abs(c.paper.subtotalExVat)) + ' לפני מע״מ</p>' :
+      '<label class="block mt-3 text-sm font-bold">מספר תעודת הזיכוי<input data-role="delivery-credit-number" data-id="' + c.id + '" value="' + htmlEscape(c.number || '') + '" class="block w-full border rounded-lg p-2 mt-1" dir="ltr"></label>') +
+      rows.map((row, i) => '<div class="border-t border-slate-200 mt-3 pt-2"><div id="creditName_' + c.id + '_' + i + '" class="font-black">' + htmlEscape(row.name || 'מוצר שלא זוהה') + '</div><p>' + row.qty + ' יח׳ · זיכוי ₪' + fmtMoney(row.amount) + ' לפני מע״מ</p>' +
+        // v364: בשורה שהשרת סירב לזהות (refused) השדה ריק והספרות שנקראו מוצגות מעליו כרמז.
+        // אילו הוצגו בתוך השדה, עובד שמקליד מהנייר את אותן ספרות בדיוק לא היה משנה את
+        // הערך — הדפדפן לא יורה change, והשורה לא הייתה מזוהה לעולם.
+        (!confirmed ? '<label class="block text-xs font-bold mt-2">' + (row.productId ? 'ברקוד — אפשר לתקן לפי הנייר' : 'המוצר לא זוהה. הקלד את הברקוד מהנייר') +
+        (row.refused && row.barcode ? '<span data-credit-read-hint class="block mt-1 font-normal text-slate-500">נקרא בצילום: <span dir="ltr">' + htmlEscape(row.barcode) + '</span> — בדוק מול הנייר</span>' : '') +
+        '<input data-role="delivery-credit-barcode" data-id="' + c.id + '" data-row="' + i + '" value="' + htmlEscape(row.refused ? '' : row.barcode) + '"' +
+        (row.refused ? ' placeholder="הקלד את הברקוד מהנייר"' : '') + ' inputmode="numeric" class="block w-full border rounded-lg p-2 text-sm mt-1" dir="ltr"></label>' : '') + '</div>').join('') +
+      (confirmed ? '<p class="mt-2 text-sm text-slate-600">הזיכוי נבדק מול החוסר במוצרים האלה לפי הספירה הנוכחית.</p><button data-role="delivery-credit-edit" data-id="' + c.id + '" class="btn-tap text-blue-700 font-bold mt-2">תקן פרטי זיכוי</button>' :
+      '<p class="mt-3 text-sm font-bold">בדוק את מספר הזיכוי, המוצרים והכמויות מול הנייר. האם זה זיכוי על חוסר במשלוח הנוכחי?</p><button data-role="delivery-credit-confirm" data-id="' + c.id + '" class="btn-tap w-full bg-emerald-600 text-white rounded-xl py-3 mt-2 font-black">כן, צרף זיכוי של ₪' + fmtMoney(Math.abs(c.paper.subtotalExVat)) + ' למשלוח</button>') :
+      (!busy ? deliveryCreditCaptureHtml(c) : '')) + (confirmed ? '</div></details>' : '</article>');
+}
 function deliveryCreditsHtml() {
   if (receiptNoDoc || receiptAttachTarget) return '';
-  const cards = receiptDeliveryCredits.map(c => {
-    const busy = ['preparing', 'reading'].includes(c.status), rows = c.paper ? deliveryCreditRows(c) : [];
-    const duplicate = deliveryCreditDuplicate(c);
-    const confirmed = c.status === 'confirmed' && c.confirmedSignature === deliveryCreditSignature(c) && !duplicate;
-    const pages = c.pages.map((p, i) => '<button data-role="delivery-credit-page" data-id="' + c.id + '" data-page="' + i + '" class="btn-tap border rounded-lg p-1"><img src="' + p.dataUrl + '" alt="עמוד בזיכוי" class="w-16 h-20 object-contain"><span class="text-xs">עמוד ' + (i + 1) + '</span></button>').join('');
-    return (confirmed ? '<details data-delivery-credit="' + c.id + '" class="border border-emerald-200 rounded-xl mt-2 bg-white"><summary class="cursor-pointer p-3 text-sm font-black text-emerald-800">זיכוי שאושר · ₪' + fmtMoney(Math.abs(c.paper.subtotalExVat)) + ' לפני מע״מ · פרטים</summary><div class="px-3 pb-3">' : '<article class="border-2 border-emerald-200 rounded-xl p-3 mt-3 bg-white">') + '<div class="flex justify-between gap-2"><b>' + (confirmed ? 'זיכוי שאושר למשלוח' : 'תעודת זיכוי מהנהג') + '</b>' +
-      '<button data-role="delivery-credit-remove" data-id="' + c.id + '" class="btn-tap text-rose-700 text-sm font-bold">הסר זיכוי</button></div>' +
-      (busy ? '<p role="status" class="mt-3 text-blue-700 font-bold">' + (c.status === 'reading' ? 'מפענח את הזיכוי… אפשר להמשיך לספור מוצרים.' : 'מכין את הצילום…') + '</p>' : '') +
-      (c.error || c.status === 'interrupted' ? '<p class="mt-2 text-amber-800 font-bold">' + htmlEscape(c.error || 'פענוח הזיכוי לא הושלם. צלם אותו שוב כדי להמשיך.') + '</p>' : '') +
-      (duplicate ? '<p class="mt-2 text-amber-800 font-bold">מספר הזיכוי הזה כבר צורף. בדוק את המספר או הסר את הכפילות.</p>' : '') +
-      (c.status === 'confirmed' && !confirmed && !duplicate ? '<p class="mt-2 text-amber-800 font-bold">פרטי המוצר השתנו. בדוק את הזיכוי ואשר שוב.</p>' : '') +
-      (pages && !busy ? '<div class="flex gap-2 mt-2">' + pages + '</div>' : '') +
-      (c.paper ? (confirmed ? '<p class="mt-2 font-black text-emerald-800">זיכוי מס׳ ' + htmlEscape(c.number) + ' · ₪' + fmtMoney(Math.abs(c.paper.subtotalExVat)) + ' לפני מע״מ</p>' :
-        '<label class="block mt-3 text-sm font-bold">מספר תעודת הזיכוי<input data-role="delivery-credit-number" data-id="' + c.id + '" value="' + htmlEscape(c.number || '') + '" class="block w-full border rounded-lg p-2 mt-1" dir="ltr"></label>') +
-        rows.map((row, i) => '<div class="border-t border-slate-200 mt-3 pt-2"><div id="creditName_' + c.id + '_' + i + '" class="font-black">' + htmlEscape(row.name || 'מוצר שלא זוהה') + '</div><p>' + row.qty + ' יח׳ · זיכוי ₪' + fmtMoney(row.amount) + ' לפני מע״מ</p>' +
-          (!confirmed ? '<label class="block text-xs font-bold mt-2">' + (row.productId ? 'ברקוד — אפשר לתקן לפי הנייר' : 'המוצר לא זוהה. הקלד את הברקוד מהנייר') +
-          '<input data-role="delivery-credit-barcode" data-id="' + c.id + '" data-row="' + i + '" value="' + htmlEscape(row.barcode) + '" inputmode="numeric" class="block w-full border rounded-lg p-2 text-sm mt-1" dir="ltr"></label>' : '') + '</div>').join('') +
-        (confirmed ? '<p class="mt-2 text-sm text-slate-600">הזיכוי נבדק מול החוסר במוצרים האלה לפי הספירה הנוכחית.</p><button data-role="delivery-credit-edit" data-id="' + c.id + '" class="btn-tap text-blue-700 font-bold mt-2">תקן פרטי זיכוי</button>' :
-        '<p class="mt-3 text-sm font-bold">בדוק את מספר הזיכוי, המוצרים והכמויות מול הנייר. האם זה זיכוי על חוסר במשלוח הנוכחי?</p><button data-role="delivery-credit-confirm" data-id="' + c.id + '" class="btn-tap w-full bg-emerald-600 text-white rounded-xl py-3 mt-2 font-black">כן, צרף זיכוי של ₪' + fmtMoney(Math.abs(c.paper.subtotalExVat)) + ' למשלוח</button>') :
-        (!busy ? '<input id="creditCam_' + c.id + '" data-role="delivery-credit-file" data-id="' + c.id + '" type="file" accept="image/*" capture="environment" class="hidden">' +
-          '<input id="creditFile_' + c.id + '" data-role="delivery-credit-file" data-id="' + c.id + '" type="file" accept="image/*" multiple class="hidden">' +
-          '<button data-role="delivery-credit-camera" data-id="' + c.id + '" class="btn-tap w-full bg-emerald-50 text-emerald-800 rounded-xl py-3 mt-2 font-black">' + (c.pages.length ? 'הוסף עמוד לזיכוי' : 'צלם את תעודת הזיכוי') + '</button>' +
-          '<button data-role="delivery-credit-gallery" data-id="' + c.id + '" class="btn-tap w-full py-2 text-sm text-slate-600">בחר צילומים מהגלריה</button>' +
-          (c.pages.length && c.pages.every(p => p.orientationConfirmed) ? '<button data-role="delivery-credit-read" data-id="' + c.id + '" class="btn-tap w-full bg-blue-600 text-white rounded-xl py-3 font-black">פענח את הזיכוי</button>' : '') : '')) + (confirmed ? '</div></details>' : '</article>');
-  }).join('');
+  const cards = receiptDeliveryCredits.map(deliveryCreditCardHtml).join('');
   return '<section id="rcDeliveryCredits" class="mb-3" dir="rtl">' + cards + (receiptDeliveryCredits.length < 4 ?
     '<button data-role="delivery-credit-add" class="btn-tap ' + (receiptDeliveryCredits.length ? 'text-sm text-emerald-800 py-2 px-3 mt-1 font-bold' : 'w-full border-2 border-emerald-300 rounded-xl bg-emerald-50 text-emerald-900 py-3 mt-2 font-black') + '"><i class="fa-solid fa-camera"></i> ' +
     (receiptDeliveryCredits.length ? 'צלם תעודת זיכוי נוספת' : 'הנהג הביא זיכוי על חוסר? צלם כאן') + '</button>' : '') + '</section>';
@@ -1742,6 +2014,7 @@ function receiptStorageNotice(message) {
   if (message && changed) showToast(message, null, null, 7000);
 }
 function persistReceiptDraft(payload) {
+  payload = deliveryCreditLocalDraft(payload); // v364: מפתחות איסוף של זיכויים — רק במכשיר
   try {
     localStorage.setItem(RECEIPT_DRAFT_KEY, JSON.stringify(payload));
     receiptStorageNotice('');
@@ -1802,7 +2075,9 @@ function restoreReceiptDraft(incoming) {
     const s = incoming ? null : localStorage.getItem(RECEIPT_DRAFT_KEY); if (!s && !incoming) return;
     const o = incoming || JSON.parse(s);
     receiptDeliveryCredits = (Array.isArray(o && o.deliveryCredits) ? o.deliveryCredits : []).filter(c => c && typeof c.id === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(c.id)).slice(0, 4)
-      .map(c => ({ ...c, pages: [], status: ['preparing', 'reading'].includes(c.status) ? 'interrupted' : c.status }));
+      .map(({ waiting, waitingFor, progress, resume, ...c }) => ({ ...c, pages: [], status: deliveryCreditBusy(c) ? 'interrupted' : c.status,
+        // v364: מפתח האיסוף חוזר רק מהטיוטה שבמכשיר (incoming = ענן: אין מפתח).
+        ...(!incoming && deliveryCreditValidResume(resume) ? { resume: { scanKey: resume.scanKey, at: resume.at } } : {}) }));
     if (Array.isArray(o)) { receiptCountingMode = 'scan'; receiptList = o; receiptOpened = o.length > 0; }
     else if (o && typeof o === 'object') {
       receiptList = Array.isArray(o.items) ? o.items : [];
@@ -1949,7 +2224,9 @@ async function applyReceiptCloudDraft(envelope) {
   const payload = await unpackReceiptValue(envelope.content);
   // Decompression yields: typing or a newer snapshot may arrive meanwhile.
   if (envelope.revision < receiptSync.revision) return;
-  if (receiptSync.mutationId !== expectedMutation || aiScanBusy || receiptFinalizing) {
+  // v364: גם קריאת זיכוי שרצה נדחית כמו סריקת חשבונית — אחרת טיוטה מהענן
+  // שמגיעה באמצע מוחקת את הזיכוי ואת הקריאה שכבר שולמה.
+  if (receiptSync.mutationId !== expectedMutation || aiScanBusy || deliveryCreditReadActive() || receiptFinalizing) {
     receiptSyncConflict = envelope; refreshReceiptDraftNotice(); return;
   }
   if (!payload || payload.schemaVersion !== 4 || !Array.isArray(payload.items) || !Array.isArray(payload.notes)) throw new Error('טיוטת הענן אינה תקינה');
@@ -1986,7 +2263,7 @@ async function receiveReceiptCloudDraft(remote) {
     receiptSyncError = ''; receiptPersistSyncState(); return;
   }
   if (remote.revision <= receiptSync.revision) { scheduleReceiptDraftSync(); return; }
-  if (receiptSync.dirty || aiScanBusy) { receiptSyncConflict = remote; refreshReceiptDraftNotice(); return; }
+  if (receiptSync.dirty || aiScanBusy || deliveryCreditReadActive()) { receiptSyncConflict = remote; refreshReceiptDraftNotice(); return; }
   try { await applyReceiptCloudDraft(remote); }
   catch (error) { receiptSyncError = error.message; refreshReceiptDraftNotice(); }
 }
@@ -1998,7 +2275,7 @@ function startReceiptDraftListener() {
   }, error => { receiptSyncError = 'לא ניתן לסנכרן את טיוטת הקליטה. ' + (error.message || ''); refreshReceiptDraftNotice(); });
 }
 async function resolveReceiptDraftConflict(keepLocal) {
-  const remote = receiptSyncConflict; if (!remote || receiptSyncFlight || aiScanBusy) return;
+  const remote = receiptSyncConflict; if (!remote || receiptSyncFlight || aiScanBusy || deliveryCreditReadActive()) return;
   const local = receiptDraftPayload(true), expectedMutation = receiptSync.mutationId, mutationId = makeOperationId('draft_choice');
   try {
     const localContent = await packReceiptValue(local);
@@ -7418,19 +7695,25 @@ function receiptQuantityPaperRows() {
 function receiptUsesManualQuantities() {
   return receiptCountingMode === 'manual' && !receiptNoDoc && !receiptAttachTarget;
 }
-function receiptManualReceivingHtml() {
+// v364: אזור המצב של מסך הכמויות הידני — נפרד, כדי ש-refreshScanHost יעדכן רק אותו
+// בזמן שהעובד מקליד בכרטיס זיכוי.
+function receiptManualStatusHtml() {
   const running = aiScanBusy || receiptPaperScanState === 'running';
   const ready = !running && receiptPaperScanState === 'ok' && !!aiScanResponse;
   const problems = receiptPaperScanProblems.length ? receiptPaperScanProblems : [aiScanError || 'הפענוח לא הושלם. בדוק את צילומי התעודה כדי להמשיך.'];
-  const status = running
+  return running
     ? '<div role="status" class="rounded-xl bg-blue-50 border border-blue-200 p-4 mb-3 text-base font-bold text-blue-800"><i class="fa-solid fa-circle-notch fa-spin"></i> ' + htmlEscape(aiScanProgressText || 'מפענח את התעודה…') + '<div class="mt-2 text-sm">בסיום הפענוח אפשר לאשר את הכמויות או לדווח על חוסרים ועודפים.</div></div>'
     : ready ? ''
     : '<div role="status" class="rounded-xl bg-amber-50 border border-amber-300 p-4 mb-3 text-base font-bold text-amber-900">צריך להשלים את פענוח התעודה<div class="mt-2 text-sm">' + problems.map(htmlEscape).join('<br>') + '</div><button data-role="rc-photo-repair" class="btn-tap w-full bg-white border border-amber-300 rounded-xl py-3 mt-3">בדוק את צילומי התעודה</button></div>';
+}
+function receiptManualReceivingHtml() {
+  const running = aiScanBusy || receiptPaperScanState === 'running';
+  // v364: #rcPriceAudit קיים גם בזמן הפענוח (ריק), כדי שעדכון חלקי יוכל למלא אותו בסיום.
   return '<section data-manual-receiving dir="rtl" class="mb-4">' +
     '<h2 class="font-black text-xl text-slate-800 mb-3">בדיקת כמויות ידנית</h2>' +
-    '<div id="rcPaperStatus">' + status + '</div>' +
+    '<div id="rcPaperStatus">' + receiptManualStatusHtml() + '</div>' +
     '<div id="rcQuantityOptions">' + receiptQuantityButtonsHtml() + '</div>' +
-    (!running ? '<div id="rcPriceAudit">' + receiptPriceAuditHtml() + '</div>' : '') +
+    '<div id="rcPriceAudit">' + (!running ? receiptPriceAuditHtml() : '') + '</div>' +
     deliveryCreditsHtml() +
     '<button data-role="rc-count-by-scan" class="btn-tap w-full py-3 text-sm font-bold text-slate-600 underline">מעבר לקליטה בסריקת מוצרים</button></section>';
 }
@@ -9158,7 +9441,7 @@ function reconcileRowHtml(l) {
 // מה שכן מחייב איפוס: שינוי במספר התעודות. תעודה חדשה היא נייר שלא צולם.
 function resetAiInvoiceScan(force) {
   if (aiScanBusy && !force) return false;
-  if (force) aiScanRunId++;
+  if (force) { aiScanRunId++; aiScanDropCancelled(); }
   aiScanEditingImages = false; // A cancelled request must never write into the next receipt.
   aiCloseOrientationReview();
   const source = receiptNotes.length ? receiptNotes.map(normNote) : [{ amount: receiptNoteTotal, units: receiptNoteUnits }];
@@ -9778,6 +10061,20 @@ function aiQualityAdvice(quality) {
 // פיקסלים שנזרקים בצד השני. כשיהיה מספר מדוד (tools/scan-token-report.mjs)
 // אפשר יהיה להדק ל-1450 ולחסוך הקטנה שנייה.
 const AI_INVOICE_MAX_SIDE = 1850;
+// v364: פתק זיכוי תרמי ארוך וצר (1:5) קיבל עד כאן 1850px בצלע הארוכה — כלומר
+// כ-370px רוחב, וספרות קטנות מדי לקריאה. התקרה האמיתית של המודל היא תקציב
+// שטח (patches), ולכן עמוד זיכוי מקבל את אותו תקציב פיקסלים שעמוד 4:3 מקבל
+// היום (1850² × 0.75 ≈ 2.57MP), עם תקרה של 4096px לצלע הארוכה. פתק 1:5 נשאר
+// כ-715×3580. עמודי חשבונית לא השתנו בפיקסל. תקרת הבתים של aiCanvasToInvoiceJpeg
+// ו-MAX_PAGE_BYTES של השרת ממשיכות לחול.
+const AI_CREDIT_MAX_PIXELS = Math.round(AI_INVOICE_MAX_SIDE * AI_INVOICE_MAX_SIDE * 0.75);
+const AI_CREDIT_MAX_LONG_SIDE = 4096;
+// קנה המידה של הפלט: בלי maxPixels — התקרה הוותיקה של הצלע הארוכה (חשבונית,
+// זהה לחלוטין לעבר). עם maxPixels (עמוד זיכוי) — תקציב שטח ותקרת צלע 4096.
+function aiInvoiceOutputScale(width, height, maxPixels) {
+  if (!maxPixels) return Math.min(1, AI_INVOICE_MAX_SIDE / Math.max(width, height));
+  return Math.min(1, Math.sqrt(maxPixels / Math.max(1, width * height)), AI_CREDIT_MAX_LONG_SIDE / Math.max(width, height));
+}
 // העותק שעליו מזוהה הנייר: גדול מספיק שאריח יהיה משמעותי, קטן מספיק
 // ש-getImageData לא יפיל מכשיר ישן.
 const AI_CROP_PROXY_SIDE = 1500;
@@ -10381,7 +10678,9 @@ function aiDetectPaperRegion(img, sourceWidth, sourceHeight, report) {
 // ולכן כאן מגיעים גם cropInfo.kept (תרשים במסך האישור) וגם כפתור
 // "השאר תמונה מלאה". forceFullFrame הוא מסלול השחזור: הוא מדלג על
 // הזיהוי כדי שאפשר יהיה לחזור לפריים המלא מאותו קובץ מקור.
-async function aiCompressInvoiceImage(file, forceFullFrame) {
+// v364: maxPixels (אופציונלי) = תקציב שטח לעמוד זיכוי; נשמר על העמוד (page.maxPixels)
+// כדי שכל קידוד חוזר מהמקור — חיתוך ידני ושחזור התמונה המלאה — ישמור עליו.
+async function aiCompressInvoiceImage(file, forceFullFrame, maxPixels) {
   const raw = await aiReadFile(file);
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
@@ -10402,8 +10701,7 @@ async function aiCompressInvoiceImage(file, forceFullFrame) {
       cropInfo.reason = 'error'; cropInfo.value = (error && error.message) || '';
     }
   }
-  const maxSide = AI_INVOICE_MAX_SIDE;
-  const scale = Math.min(1, maxSide / Math.max(region.width, region.height));
+  const scale = aiInvoiceOutputScale(region.width, region.height, maxPixels);
   const width = Math.max(1, Math.round(region.width * scale)), height = Math.max(1, Math.round(region.height * scale));
   const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
   const ctx = canvas.getContext('2d', { alpha: false });
@@ -10428,7 +10726,9 @@ async function aiCompressInvoiceImage(file, forceFullFrame) {
   // originalImage נשאר null כשנחתך אוטומטית: הוא אמור להחזיק את הפריים
   // המלא, ו-encoded.dataUrl הוא כעת התמונה החתוכה. השחזור עובר דרך
   // sourceBlob עם forceFullFrame, ולכן אין צורך בקידוד שני של הפריים המלא.
-  return { dataUrl: encoded.dataUrl, baseDataUrl: encoded.dataUrl, rotation: 0, orientationConfirmed: false, cropped: autoCropped, autoCropped: autoCropped, cropInfo: cropInfo, quality: quality, qualityAdvice: aiQualityAdvice(quality), originalImage: autoCropped ? null : { dataUrl: encoded.dataUrl, region: { ...region }, scale: scale, rotationOffset: 0 }, sourceBlob: file, sourceRegion: { x: region.x, y: region.y, width: region.width, height: region.height }, processScale: scale, name: file.name || ('עמוד-' + Date.now() + '.jpg'), bytes: encoded.bytes };
+  const page = { dataUrl: encoded.dataUrl, baseDataUrl: encoded.dataUrl, rotation: 0, orientationConfirmed: false, cropped: autoCropped, autoCropped: autoCropped, cropInfo: cropInfo, quality: quality, qualityAdvice: aiQualityAdvice(quality), originalImage: autoCropped ? null : { dataUrl: encoded.dataUrl, region: { ...region }, scale: scale, rotationOffset: 0 }, sourceBlob: file, sourceRegion: { x: region.x, y: region.y, width: region.width, height: region.height }, processScale: scale, name: file.name || ('עמוד-' + Date.now() + '.jpg'), bytes: encoded.bytes };
+  if (maxPixels) page.maxPixels = maxPixels;
+  return page;
 }
 function aiOrientationLocation(page) {
   for (let docIndex = 0; docIndex < aiScanDocuments.length; docIndex++) {
@@ -10449,7 +10749,7 @@ function aiSetOrientationBusy(busy) {
   aiOrientationBusy = !!busy;
   const overlay = $('aiOrientationBusy');
   if (overlay) { overlay.classList.toggle('hidden', !busy); overlay.classList.toggle('flex', !!busy); }
-  ['aiOrientationLeft', 'aiOrientationRight', 'aiOrientationConfirm', 'aiOrientationCancel', 'aiOrientationCrop', 'aiOrientationRestore'].forEach(id => {
+  ['aiOrientationLeft', 'aiOrientationRight', 'aiOrientationConfirm', 'aiOrientationMorePart', 'aiOrientationCancel', 'aiOrientationCrop', 'aiOrientationRestore'].forEach(id => {
     const button = $(id); if (button) button.disabled = !!busy;
   });
 }
@@ -10563,7 +10863,8 @@ function aiCropPointerMove(event) {
   const deltaX = (position.x - state.drag.lastX) / fit.s, deltaY = (position.y - state.drag.lastY) / fit.s;
   if (!deltaX && !deltaY) return;
   state.drag.lastX = position.x; state.drag.lastY = position.y;
-  state.moved = true;
+  // v364: רק מסגרת שזזה באמת מחליפה את כפתור האישור ל"קרא את הזיכוי" בעמוד שכבר אושר.
+  if (!state.moved) { state.moved = true; aiUpdateOrientationControls(); }
   const r = state.rect, iw = state.w, ih = state.h;
   const minW = iw * 0.15, minH = ih * 0.15;
   if (state.drag.mode === 'move') {
@@ -10609,8 +10910,7 @@ async function aiReprocessFromSource(page, originalRect) {
   let y = Math.max(0, Math.min(sourceHeight - 64, Math.round(originalRect.y)));
   const w = Math.max(64, Math.min(sourceWidth - x, Math.round(originalRect.w)));
   const h = Math.max(64, Math.min(sourceHeight - y, Math.round(originalRect.h)));
-  const maxSide = AI_INVOICE_MAX_SIDE;
-  const outScale = Math.min(1, maxSide / Math.max(w, h));
+  const outScale = aiInvoiceOutputScale(w, h, page.maxPixels); // v364: עמוד זיכוי שומר על תקציב השטח שלו
   const width = Math.max(1, Math.round(w * outScale)), height = Math.max(1, Math.round(h * outScale));
   const canvas = document.createElement('canvas');
   canvas.width = width; canvas.height = height;
@@ -10749,7 +11049,28 @@ function aiUpdateOrientationControls() {
     restore.textContent = session.page.autoCropped && !cropMode ? 'השאר תמונה מלאה' : 'חזור לתמונה המקורית';
   }
   if (crop) crop.classList.toggle('col-span-2', !canRestore);
-  if (confirm) confirm.innerHTML = '<i class="fa-solid ' + (reviewOnly ? 'fa-xmark' : 'fa-check') + ' ml-1"></i> ' + (reviewOnly ? 'סגור וחזור לתוצאות' : cropMode ? 'אשר חיתוך והמשך' : session.page.cropped ? 'אשר תמונה חתוכה' : 'אשר תמונה מלאה');
+  // v364: בעמוד האחרון שמחכה לבדיקה בזיכוי מהנהג — האישור גם קורא את הזיכוי,
+  // ולידו "הפתק ארוך? צלם עוד חלק" (עד 4 חלקים). עמודי חשבונית וצפייה בלבד — כמו קודם.
+  const location = aiOrientationLocation(session.page), credit = location && location.credit ? location.doc : null;
+  // v364: עמוד שכבר אושר (נפתח מהתמונה בכרטיס) אינו קורא שוב — אלא אם מסגרת החיתוך
+  // הוזזה עכשיו. אישור בלי גרירה רק סוגר (ראה aiConfirmOrientationReview), ולכן עד
+  // שהמסגרת זזה הכפתור לא מבטיח קריאה (aiCropPointerMove מרענן בתזוזה הראשונה).
+  const cropMoved = cropMode && !!(aiCropState && aiCropState.moved);
+  const readsCredit = !!credit && !reviewOnly && (cropMoved || !session.page.orientationConfirmed)
+    && credit.pages.every(p => p === session.page || p.orientationConfirmed);
+  const morePart = $('aiOrientationMorePart');
+  // v364: אחרי ש"צלם עוד חלק" שמר חיתוך, הלחיצה הבאה פותחת את המצלמה. אומרים את זה
+  // בתוך החלון עצמו — הודעה קופצת (toast) מוסתרת מתחת לחלון. ההנחיה קשורה לתמונה
+  // הנוכחית: סיבוב, שחזור או חיתוך חדש משנים את התמונה ומבטלים אותה.
+  const partReady = readsCredit && !cropMode && !!session.morePartReady && session.morePartReady === session.page.dataUrl;
+  if (hint && partReady) hint.textContent = 'החיתוך נשמר. עכשיו לחץ על "פתח מצלמה לחלק הבא" וצלם את המשך הפתק.';
+  if (morePart) {
+    morePart.classList[readsCredit && credit.pages.length < 4 ? 'remove' : 'add']('hidden');
+    morePart.innerHTML = '<i class="fa-solid fa-camera ml-1"></i> ' + (partReady ? 'פתח מצלמה לחלק הבא' : 'הפתק ארוך? צלם עוד חלק');
+  }
+  if (confirm) confirm.innerHTML = '<i class="fa-solid ' + (reviewOnly ? 'fa-xmark' : 'fa-check') + ' ml-1"></i> ' + (reviewOnly ? 'סגור וחזור לתוצאות'
+    : readsCredit ? (cropMode ? 'אשר חיתוך וקרא את הזיכוי' : 'אשר וקרא את הזיכוי')
+    : cropMode ? 'אשר חיתוך והמשך' : session.page.cropped ? 'אשר תמונה חתוכה' : 'אשר תמונה מלאה');
 }
 function aiToggleCropMode() {
   const session = aiOrientationSession;
@@ -10771,7 +11092,7 @@ async function aiRestoreOriginalImage() {
     // New captures reuse the saved full image. Older in-memory pages can recover from the source file.
     // forceFullFrame=true, אחרת הזיהוי היה חותך שוב ו"חזרה לתמונה המלאה"
     // הייתה מחזירה את אותה תמונה חתוכה.
-    const original = page.originalImage || (await aiCompressInvoiceImage(page.sourceBlob, true)).originalImage;
+    const original = page.originalImage || (await aiCompressInvoiceImage(page.sourceBlob, true, page.maxPixels)).originalImage;
     const turns = aiNormalizeQuarterTurns((Number(page.rotation) || 0) / 90 + (original.rotationOffset || 0));
     const rendered = await aiRenderInvoiceRotation(original.dataUrl, turns);
     if (aiOrientationSession !== session || !aiOrientationLocation(page)) return;
@@ -10814,8 +11135,10 @@ function aiOpenOrientationReview(docIndex, pageIndex, requireReconfirm) {
   return true;
 }
 function aiOpenNextUnconfirmedOrientation() {
-  if (aiOrientationSession || aiScanBusy || aiOrientationBusy) return false;
-  for (let docIndex = 0; docIndex < aiScanDocuments.length; docIndex++) {
+  if (aiOrientationSession || aiOrientationBusy) return false;
+  // v364: בזמן קריאת החשבונית עמודיה נעולים כמו קודם, אבל עמוד של זיכוי מהנהג
+  // עדיין נפתח — אחרת זיכוי שצולם באמצע הקריאה נשאר בלי דרך לאשר אותו.
+  if (!aiScanBusy) for (let docIndex = 0; docIndex < aiScanDocuments.length; docIndex++) {
     const pageIndex = aiScanDocuments[docIndex].pages.findIndex(page => !page.orientationConfirmed);
     if (pageIndex !== -1) return aiOpenOrientationReview(docIndex, pageIndex, false);
   }
@@ -10858,28 +11181,58 @@ async function aiRotateOrientationReview(deltaTurns) {
     if (label) label.textContent = error && error.message === 'image_too_large' ? 'לא ניתן לסובב בלי לחרוג ממגבלת הגודל' : 'הסיבוב נכשל — התמונה המקורית לא השתנתה';
   } finally { aiSetOrientationBusy(false); }
 }
-async function aiConfirmOrientationReview() {
+// v364: options.creditAddPart — "הפתק ארוך? צלם עוד חלק": מאשר עמוד זיכוי בלי
+// לקרוא ופותח את המצלמה לחלק הבא. מהמאזין של "אשר" מגיע כאן אירוע הלחיצה,
+// שאין בו את השדה — ולכן אישור רגיל.
+async function aiConfirmOrientationReview(options) {
+  const addPart = !!(options && options.creditAddPart === true);
   const location = aiOrientationSession && aiOrientationLocation(aiOrientationSession.page);
   if (!location || aiOrientationBusy) return;
   if (aiOrientationSession.reviewOnly) { aiCloseOrientationReview(); return; }
+  // v364: עמוד זיכוי שכבר אושר ולא שונה עכשיו (נפתח מהתמונה הממוזערת בכרטיס,
+  // למשל אחרי קריאה שנכשלה) — צפייה בלבד: סוגרים בלי לאפס את הכרטיס ובלי קריאה
+  // נוספת בתשלום. סיבוב ושחזור מבטלים את האישור, וחיתוך נבדק למטה. קריאה חוזרת
+  // של אותו צילום נשארת רק בכפתורים המפורשים בכרטיס ("נסה שוב").
+  const creditViewOnly = !!location.credit && !addPart && location.page.orientationConfirmed === true;
+  let cropApplied = false;
   // v157: אם מסגרת החיתוך הוזזה — קודם מחילים אותה מהמקור, ורק אז מאשרים.
   if (aiOrientationSession.cropMode && aiCropState && aiCropState.moved) {
     aiSetOrientationBusy(true);
     try {
-      await aiApplyCropIfMoved(location.page);
+      cropApplied = await aiApplyCropIfMoved(location.page);
     } catch (cropError) {
       if (aiCropState) aiCropState.moved = false;
       aiSetOrientationBusy(false);
+      // v364: המסגרת נחשבת שוב כלא-מוזזת — הכפתור חוזר לנוסח שאינו מבטיח קריאה.
+      aiUpdateOrientationControls();
       showToast(cropError && cropError.message === 'image_too_large' ? 'החיתוך חורג ממגבלת הגודל — התמונה נשארה; אפשר לאשר או לגרור מסגרת קטנה יותר' : 'החיתוך נכשל — התמונה נשארה כפי שהיא; אפשר לאשר או לגרור שוב', null, null, 3500);
       return;
     }
     aiSetOrientationBusy(false);
+    // v364: iOS פותח את המצלמה רק ברצף הלחיצה, והחיתוך (פענוח הצילום המקורי)
+    // לוקח זמן — אחריו המצלמה כבר לא נפתחת. לכן "צלם עוד חלק" עם מסגרת שהוזזה רק
+    // שומר את החיתוך ומשאיר את החלון (העמוד השתנה, ולכן ממתין לאישור); הלחיצה
+    // הבאה פותחת את המצלמה מיד.
+    if (addPart && location.credit) {
+      if (aiOrientationSession && aiOrientationSession.page === location.page) {
+        location.page.orientationConfirmed = false; aiInvalidateOrientationLocation(location);
+        // v364: ההנחיה ללחיצה הבאה מוצגת בתוך החלון (aiUpdateOrientationControls) —
+        // הודעה קופצת (toast) נמצאת מתחת לחלון המלא ואף אחד לא היה רואה אותה.
+        aiOrientationSession.cropMode = false; aiOrientationSession.morePartReady = location.page.dataUrl; aiPaintOrientationReview();
+      }
+      return;
+    }
   }
+  if (creditViewOnly && !cropApplied) { aiCloseOrientationReview(); setTimeout(aiOpenNextUnconfirmedOrientation, 0); return; }
   if (location.credit) deliveryCreditInvalidate(location.doc); else yotvataInvalidatePhotoDoc(location.doc);
   location.page.orientationConfirmed = true;
   aiCloseOrientationReview();
   if (location.credit) {
     saveReceiptDraft(); renderReceiving();
+    // v364: חלק נוסף של פתק ארוך — המצלמה נפתחת עכשיו, עדיין בתוך הלחיצה.
+    if (addPart && location.doc.pages.length < 4) { deliveryCreditClickInput('creditCam_' + location.doc.id); return; }
+    // v364: זה הטריגר האוטומטי היחיד: כשכל עמודי הזיכוי אושרו — קוראים אותו, פעם אחת.
+    deliveryCreditAutoRead(location.doc);
     setTimeout(aiOpenNextUnconfirmedOrientation, 0);
     return;
   }
@@ -13822,57 +14175,402 @@ async function aiFetchWithRetry(url, options, retries = AI_SCAN_NETWORK_RETRIES)
         await new Promise(resolve => setTimeout(resolve, AI_SCAN_NETWORK_RETRY_DELAY_MS * (attempt + 1)));
         continue;
       }
+      // v364: עברית פשוטה בלי הודעת הדפדפן באנגלית (היא נשמרת ב-detail),
+      // ובלי "אחרי 1 ניסיונות" כשהיה ניסיון אחד בלבד.
+      const tries = retries + 1;
       const finalError = new Error(aborted
-        ? 'הבקשה לא ענתה תוך ' + Math.round(AI_SCAN_FETCH_TIMEOUT_MS / 1000) + ' שניות, גם אחרי ' + (retries + 1) + ' ניסיונות'
-        : 'הרשת נכשלה אחרי ' + (retries + 1) + ' ניסיונות — ' + ((error && error.message) || 'Failed to fetch'));
+        ? 'השירות לא ענה תוך ' + Math.round(AI_SCAN_FETCH_TIMEOUT_MS / 1000) + ' שניות' + (tries > 1 ? ', גם אחרי ' + tries + ' ניסיונות.' : '.')
+        : (tries > 1 ? 'הרשת נכשלה גם אחרי ' + tries + ' ניסיונות.' : 'הרשת נכשלה.') + ' בדוק שיש קליטה ונסה שוב.');
       finalError.networkFailure = true;
+      finalError.detail = (error && error.message) || (aborted ? 'AbortError' : 'Failed to fetch');
       throw finalError;
     }
   }
   throw new Error('הרשת נכשלה');
 }
-async function aiRequestSingleDocScan(token, pages, expected) {
-  const response = await aiFetchWithRetry(AI_SCAN_WORKER_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-    body: JSON.stringify({
+// v364: מפתח קריאה — עד 32 תווים, בתוך מה שהשרת מקבל ([A-Za-z0-9_-]{8,64}).
+function aiScanNewKey() {
+  const api = typeof crypto === 'object' && crypto ? crypto : null;
+  let key = api && typeof api.randomUUID === 'function' ? String(api.randomUUID()).replace(/[^A-Za-z0-9_]/g, '') : '';
+  while (key.length < 32) key += Math.random().toString(16).slice(2);
+  return key.slice(0, 32);
+}
+// v364: טביעת אצבע של הבקשה: סוג המסמך, העוגנים שנשלחו, ואורך וקצה של כל
+// עמוד. מפתח שנשמר אחרי נתק שייך בדיוק לאותה בקשה: קריאת זיכוי לעולם לא
+// תאסוף קריאת חשבונית, ועוגן שתוקן אחרי הנתק מבקש קריאה חדשה.
+function aiScanPagesFingerprint(pages, expected, documentKind) {
+  const anchor = expected ? [expected.amount, expected.units].join(',') : '';
+  return (documentKind || 'invoice') + '|' + anchor + '#' + (pages || []).map(p => {
+    const url = String((p && p.dataUrl) || '');
+    return url.length + ':' + url.slice(-48);
+  }).join('|');
+}
+// v364: מחכה שהאפליקציה תחזור לחזית. באייפון אין רשת כשהמסך נעול או כשעוברים
+// לאפליקציה אחרת, וניסיון שיוצא באותו רגע נכשל מיד. אחרי החזרה — רגע קצר
+// (AI_SCAN_VISIBLE_SETTLE_MS) שבו הרשת מתעוררת. אפליקציה שכבר בחזית לא מחכה.
+function aiScanWaitVisible() {
+  if (typeof document === 'undefined' || !document || document.visibilityState !== 'hidden'
+    || typeof document.addEventListener !== 'function') return Promise.resolve(false);
+  return new Promise(resolve => {
+    const onChange = () => {
+      if (document.visibilityState === 'hidden') return;
+      if (typeof document.removeEventListener === 'function') document.removeEventListener('visibilitychange', onChange);
+      setTimeout(() => resolve(true), AI_SCAN_VISIBLE_SETTLE_MS);
+    };
+    document.addEventListener('visibilitychange', onChange);
+  });
+}
+// v364: חימום לפני העלאה בתשלום. GET /health פותח חיבור טרי (iOS מנסה שוב
+// בעצמו GET על חיבור ישן שמת, אבל לא POST — ומכאן "Load failed" מיידי בזיכוי),
+// ומחזיר את יכולות השרת, ביניהן scanResume (בלעדיו אין ניסיון חוזר אוטומטי).
+// ה-GET חינמי ובטוח לחזרה: נפילת רשת, תשובה קטועה או 5xx מנוסים עד 3 פעמים.
+// רק תשובה תקינה נשמרת ב-aiScanServiceStatus (v364: חימום שנכשל משאיר את הקודמת);
+// כשל סופי = שגיאה בעברית עם networkFailure.
+async function aiScanPrepareConnection() {
+  await aiScanWaitVisible();
+  let lastError = null;
+  for (let attempt = 0; attempt < AI_SCAN_HEALTH_ATTEMPTS; attempt++) {
+    const last = attempt === AI_SCAN_HEALTH_ATTEMPTS - 1;
+    if (attempt) {
+      await new Promise(resolve => setTimeout(resolve, 600 * attempt));
+      await aiScanWaitVisible();
+    }
+    const controller = typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), AI_SCAN_HEALTH_TIMEOUT_MS) : null;
+    let response, status = null;
+    try {
+      response = await fetch(AI_SCAN_WORKER_URL.replace(/\/scan$/, '/health'),
+        Object.assign({ cache: 'no-store' }, controller ? { signal: controller.signal } : {}));
+      try { status = await response.json(); } catch (error) { status = null; }
+    } catch (error) {
+      if (timer) clearTimeout(timer);
+      lastError = error; continue;
+    }
+    if (timer) clearTimeout(timer);
+    const valid = !!status && typeof status === 'object' && !Array.isArray(status);
+    if (!last && (!valid || (!response.ok && Number(response.status) >= 500))) {
+      lastError = new Error(valid ? 'HTTP ' + response.status : 'invalid health response'); continue;
+    }
+    // v364: רק תשובה תקינה של השרת מחליפה את aiScanServiceStatus. חימום שנכשל (אין
+    // קליטה, 5xx/4xx של השער) לא אומר כלום על גרסת השרת — ואם היה מוחק את scanResume,
+    // תעודה שממתינה בתור אחרי זיכוי שהחימום שלו נכשל הייתה מאבדת את האיסוף האוטומטי,
+    // בדיוק כשהקליטה חלשה. הקורא מקבל את הכישלון בערך המוחזר (או בשגיאה למטה).
+    if (response.ok && valid) { aiScanServiceStatus = status; return status; }
+    return { ok: false, httpStatus: Number(response.status) || null };
+  }
+  const failure = new Error('שירות הפענוח לא זמין כרגע. בדוק שיש קליטה ונסה שוב.');
+  failure.networkFailure = true;
+  failure.code = 'health_unreachable';
+  failure.detail = ((lastError && lastError.message) || 'Failed to fetch') + ' · GET /health ×' + AI_SCAN_HEALTH_ATTEMPTS;
+  throw failure;
+}
+// v364: תור של קריאה-אחת-בתשלום (כלל v179, שנשבר כשהזיכוי רץ במקביל לקריאת
+// החשבונית ברקע). כל קריאה — תעודה או זיכוי — מחכה שהקודמת תסתיים, בהצלחה
+// או בכישלון. onWaiting נקרא רק כשבאמת צריך לחכות. השחרור ב-finally, והתור
+// הבא מחכה גם לכל מי שלפניו, כך שאין חפיפה ואין נעילה תקועה; לולאת החשבונית
+// ממילא סדרתית, ולכן אף קריאה אינה מחכה לעצמה.
+// v364: קריאה שבוטלה (תעודה שבוטלה, זיכוי שהוסר) — התוצאה שלה ממילא נזרקת.
+// עוצרים את השליחה שלה, ואף אחד לא מחכה לה: אחרת הקריאה הבאה חיכתה עד שהשרת
+// יענה לקריאה המבוטלת (עד 7 דקות), והודעת ההמתנה הצביעה על מסמך שלא קיים.
+function aiScanDropCancelled() {
+  aiScanUploadQueue.forEach(e => { if (e.isCancelled && e.isCancelled() && e.abort) e.abort(); });
+}
+// entry = { kind: 'invoice'|'credit', isCancelled(), abort() }. onWaiting(kind) מקבל
+// את סוג מי שממתינים לו: 'invoice' / 'credit' כשכולם מאותו סוג, אחרת null.
+async function aiScanWithUploadLock(task, onWaiting, entry = {}) {
+  aiScanDropCancelled();
+  const previous = aiScanUploadChain;
+  let release = null;
+  const mine = new Promise(resolve => { release = resolve; });
+  aiScanUploadChain = previous.then(() => mine);
+  const ahead = aiScanUploadQueue.filter(e => !(e.isCancelled && e.isCancelled()));
+  aiScanUploadQueue.push(entry);
+  try {
+    if (ahead.length) {
+      const kinds = [...new Set(ahead.map(e => e.kind))];
+      if (typeof onWaiting === 'function') { try { onWaiting(kinds.length === 1 ? kinds[0] : null); } catch (error) { /* תצוגה בלבד */ } }
+      await previous;
+    }
+    return await task();
+  } finally {
+    aiScanUploadQueue = aiScanUploadQueue.filter(e => e !== entry);
+    release();
+  }
+}
+function aiScanCancelledError() {
+  const error = new Error('scan_cancelled'); error.cancelled = true; return error;
+}
+// v364: ניסיון יחיד: שליחה, קריאת הגוף וניתוחו — הכול בתוך ה-try, כי החיבור
+// יכול למות גם באמצע הגוף. השרת פותח 200 ומזרים רווחים עד שהתשובה מוכנה,
+// ולכן גוף ריק או לא-JSON בסטטוס תקין = חיבור שנקטע, ויש מה לאסוף. גוף כזה
+// בסטטוס שגיאה (502 של שער, 413, 429) הוא תשובת שירות ולא נתק — אין מה לאסוף.
+async function aiScanSendOnce(token, body, entry = null) {
+  if (entry && entry.aborted) throw aiScanCancelledError();
+  const controller = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), AI_SCAN_FETCH_TIMEOUT_MS) : null;
+  if (entry) entry.controller = controller; // aiScanDropCancelled עוצר דרכו קריאה שבוטלה
+  let response, text;
+  try {
+    response = await fetch(AI_SCAN_WORKER_URL, Object.assign({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify(body)
+    }, controller ? { signal: controller.signal } : {}));
+    text = await response.text();
+  } catch (error) {
+    if (timer) clearTimeout(timer);
+    if (entry && entry.aborted) throw aiScanCancelledError(); // בוטלה — לא נתק, אין מה לאסוף
+    const aborted = !!(error && error.name === 'AbortError');
+    const cut = new Error(aborted ? 'שירות הפענוח לא ענה בזמן.' : 'אין חיבור יציב לשירות הפענוח.');
+    cut.networkFailure = true;
+    // v364: השרת כבר ענה 2xx והקו מת רק באמצע הגוף — הבקשה התקבלה, והקריאה בתשלום כבר רצה.
+    // מכאן שליחה מלאה נוספת היא קריאה שנייה בתשלום (ראה accepted ב-aiRequestSingleDocScan).
+    if (response && response.ok) cut.accepted = true;
+    cut.detail = (error && error.message) || (aborted ? 'AbortError' : 'Failed to fetch');
+    throw cut;
+  }
+  if (timer) clearTimeout(timer);
+  let payload = null;
+  try { payload = JSON.parse(text); } catch (error) { payload = null; }
+  if (!payload || typeof payload !== 'object') {
+    if (!response.ok) {
+      const refused = new Error('שירות הפענוח לא הצליח לענות כרגע. נסה שוב בעוד רגע.');
+      refused.code = 'http_' + response.status;
+      refused.httpStatus = response.status;
+      refused.detail = 'HTTP ' + response.status;
+      throw refused;
+    }
+    const cut = new Error('החיבור נקטע לפני שהתשובה הגיעה.');
+    cut.networkFailure = true;
+    cut.truncated = true;
+    cut.accepted = true; // v364: 200 שהתחיל להזרים — הבקשה התקבלה בשרת
+    cut.detail = 'truncated response · HTTP ' + response.status;
+    throw cut;
+  }
+  return { response, payload };
+}
+// v364: הודעת התקדמות של קריאת החשבונית — מה שעשה aiFetchWithRetry עד היום:
+// ההודעה מצטרפת אחרי " · " לשורת "קורא תעודה X מתוך Y…", ומסך הסריקה מתרענן.
+function aiScanInvoiceProgress(text) {
+  aiScanProgressText = (aiScanProgressText || '').split(' · ')[0] + (text ? ' · ' + text : '');
+  refreshScanHost();
+}
+// v364: options — documentKind ('credit' או כלום), onProgress(text) — כל הודעת
+// התקדמות/חיבור-מחדש עוברת רק דרכו; onWaiting(kind) — רק כשהקריאה ממתינה בתור,
+// ו-kind אומר למי: 'invoice' / 'credit' / null (כמה סוגים);
+// onStart() — כשההעלאה בתשלום מתחילה בפועל; isCancelled() — נבדק אחרי ההמתנה
+// ולפני כל ניסיון חוזר; warmUp — GET /health בתוך התור רגע לפני ההעלאה;
+// getToken(force) — טוקן עדכני לכל שליחה (בלעדיו — token שהתקבל).
+// v364: onUpload({ scanKey, resumable }) — רגע לפני השליחה הראשונה, כשהמפתח כבר נקבע
+// (resumable = השרת הצהיר scanResume). resumeKey — איסוף בלבד של קריאה קודמת במפתח
+// הזה, בלי צילומים (זיכוי אחרי רענון): אין שום גוף מלא. v364: resume_unknown שם אינו
+// סוף הקריאה — מנסים את האיסופים האוטומטיים שנשארו, ואחר כך שגיאה שהמפתח בה נשמר.
+// שגיאה שנזרקה אחרי שהמפתח נקבע נושאת resumable: true = אפשר עוד לאסוף את הקריאה
+// במפתח הזה בלי לשלם, false = המפתח נשכח.
+async function aiRequestSingleDocScan(token, pages, expected, options = {}) {
+  const opts = options || {};
+  const documentKind = opts.documentKind === 'credit' ? 'credit' : null;
+  const progress = text => { if (typeof opts.onProgress === 'function') opts.onProgress(text); };
+  const cancelled = () => typeof opts.isCancelled === 'function' && !!opts.isCancelled();
+  // v364: הטוקן נלקח רגע לפני כל שליחה — אחרי ההמתנה בתור ואחרי חזרה מנעילת
+  // מסך — ולא פעם אחת לפני התור. getIdToken() מחזיר את הטוקן השמור כל עוד נשארו
+  // לו יותר מ-30 שניות, ואיסוף שיוצא אחרי נעילה ארוכה עם טוקן שפג נענה 401 על
+  // קריאה שכבר שולמה. כשהחידוש עצמו נכשל (אין קליטה) — ממשיכים עם הטוקן שיש.
+  const tokenNow = async force => {
+    if (typeof opts.getToken === 'function') {
+      try { const renewed = await opts.getToken(!!force); if (renewed) return renewed; } catch (error) { /* הטוקן שהתקבל */ }
+    }
+    return token;
+  };
+  const authRefused = p => !!p && (p.error === 'invalid_auth' || p.error === 'auth_required');
+  // v364: מי שבתור של הקריאה-בתשלום (ראה aiScanWithUploadLock). abort() עוצר
+  // שליחה שבאוויר כשהקריאה בוטלה — התוצאה שלה ממילא הייתה נזרקת.
+  const entry = { kind: documentKind || 'invoice', isCancelled: cancelled, aborted: false, controller: null,
+    abort() { entry.aborted = true; if (entry.controller) entry.controller.abort(); } };
+  return aiScanWithUploadLock(async () => {
+    if (cancelled()) throw aiScanCancelledError();
+    if (typeof opts.onStart === 'function') opts.onStart();
+    if (opts.warmUp) {
+      const status = await aiScanPrepareConnection();
+      if (!status.ok || !status.keyConfigured) {
+        const unavailable = new Error('שירות הפענוח אינו זמין כרגע. נסה שוב בעוד רגע.');
+        unavailable.code = 'service_unavailable';
+        unavailable.detail = status.httpStatus ? 'HTTP ' + status.httpStatus : String(status.keyStatus || 'health not ok');
+        throw unavailable;
+      }
+      if (cancelled()) throw aiScanCancelledError();
+    }
+    const expectedSubtotalExVat = expected && Number(expected.amount) > 0 ? r2(Number(expected.amount)) : null;
+    const expectedUnits = expected && Number.isFinite(Number(expected.units)) && Number(expected.units) > 0 ? Math.round(Number(expected.units)) : null;
+    const resumeOnly = typeof opts.resumeKey === 'string' && opts.resumeKey ? opts.resumeKey : null;
+    const fingerprint = resumeOnly ? null : aiScanPagesFingerprint(pages, { amount: expectedSubtotalExVat, units: expectedUnits }, documentKind);
+    const remembered = fingerprint ? aiScanCutKeys.get(fingerprint) : null;
+    const fresh = remembered && Date.now() - remembered.at < AI_SCAN_RESUME_TTL_MS ? remembered : null;
+    if (remembered && !fresh) aiScanCutKeys.delete(fingerprint);
+    const scanKey = resumeOnly || (fresh ? fresh.key : aiScanNewKey());
+    const fullBody = resumeOnly ? null : {
       reviewProtocolVersion: 1,
+      scanKey,
+      ...(documentKind ? { documentKind } : {}),
       documents: [{
         noteIndex: 0,
         pages: pages.map(p => p.dataUrl),
-        expectedSubtotalExVat: expected && Number(expected.amount) > 0 ? r2(Number(expected.amount)) : null,
-        expectedUnits: expected && Number.isFinite(Number(expected.units)) && Number(expected.units) > 0 ? Math.round(Number(expected.units)) : null
+        expectedSubtotalExVat,
+        expectedUnits
       }],
       receivedProductIds: aiReceivedProductIds(),
       catalog: products.map(p => ({ id: p.id, name: p.name || '', barcode: normalizeBarcode(p.barcode || '') })).filter(p => /^\d{6,20}$/.test(p.barcode))
-    })
-  }, 0);
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload.ok) {
-    const code = payload.error || '';
-    const fatal = code === 'rate_limited' || code === 'invalid_auth' || code === 'auth_required' || code === 'client_update_required';
-    // v250: שרת שמוותר עם הסבר עברי (למשל anchor_pre_discount — הוקלד סכום שלפני
-    // ההנחות) — ההסבר מוצג כלשונו. משפחת השגיאות הזו אומרת כמעט תמיד "העוגן
-    // שהוקלד שגוי", ולכן מסומנת ומוצגת כאזהרה בולטת במקום קופסת שגיאה רגילה.
-    const anchorExplained = !fatal
-      && !['incomplete_model_output', 'model_refusal', 'invalid_model_output', 'openai_error'].includes(code)
-      && typeof payload.message === 'string' && !!payload.message.trim();
-    const error = new Error(
-      code === 'client_update_required' ? (payload.message || 'רענן את האפליקציה לפני סריקה חדשה.')
-        : code === 'rate_limited' ? 'בוצעו יותר מדי ניסיונות. המתן 10 דקות ונסה שוב.'
-        : (code === 'invalid_auth' || code === 'auth_required') ? 'האימות המאובטח נכשל. רענן את האפליקציה ונסה שוב.'
-        : (code === 'incomplete_model_output' || code === 'model_refusal' || code === 'invalid_model_output') ? 'ה-AI לא החזיר פענוח מלא ובטוח לתעודה זו.'
-        : (code === 'openai_error' && payload.message) ? 'שירות ה-AI החזיר שגיאה: ' + payload.message
-        : anchorExplained ? payload.message.trim()
-        : 'הסריקה החכמה לא הצליחה לתעודה זו.'
-    );
-    error.scanAudit = payload.scanAudit || null;
-    error.fatal = fatal;
-    error.anchorExplained = anchorExplained;
-    throw error;
-  }
-  (payload.scan && payload.scan.documents || []).forEach(priceAuditCapture);
-  return payload;
+    };
+    // שרת v148 אוסף במפתח; שרת v147 עונה על גוף כזה 400 invalid_document_count,
+    // ואז (ורק אז) נשלחים הצילומים מחדש — בדיוק פעם אחת. v364: ורק אם הגוף המלא
+    // במפתח הזה מעולם לא נענה 2xx (ראה accepted למטה), או ב"נסה שוב" של העובד על מפתח lost.
+    const resumeBody = { reviewProtocolVersion: 1, scanKey, resume: true };
+    // ניסיון חוזר אוטומטי רק מול שרת שהצהיר שהוא אוסף (scanResume). מול v147
+    // נשאר ניסיון אחד — חזרה עיוורת שם הייתה משלמת פעמיים על אותה תעודה.
+    const retries = aiScanServiceStatus && aiScanServiceStatus.scanResume === true ? AI_SCAN_NETWORK_RETRIES : 0;
+    // v364: accepted = גוף מלא במפתח הזה כבר קיבל 2xx (השרת קיבל את הצילומים ומשלם),
+    // גם אם הגוף של התשובה נקטע. נשמר עם המפתח, כדי ש"נסה שוב" ידני יידע זאת.
+    // keyKept = המפתח עוד שמור לאיסוף (ב-aiScanCutKeys, או אצל מי שביקש resumeKey).
+    let accepted = !!(fresh && fresh.accepted), keyKept = !!fresh || !!resumeOnly;
+    // v364: lost = כל האיסופים האוטומטיים של מפתח שהתקבל (2xx) נענו resume_unknown — ראה למטה.
+    const remember = (lost = false) => {
+      if (fingerprint) aiScanCutKeys.set(fingerprint, { key: scanKey, at: Date.now(), ...(accepted ? { accepted: true } : {}), ...(lost ? { lost: true } : {}) });
+      keyKept = true;
+    };
+    const forget = () => { if (fingerprint) aiScanCutKeys.delete(fingerprint); keyKept = false; };
+    const send = async (full, force = false) => {
+      try { return await aiScanSendOnce(await tokenNow(force), full ? fullBody : resumeBody, entry); }
+      catch (error) { if (full && error && error.accepted) accepted = true; throw error; }
+    };
+    if (typeof opts.onUpload === 'function') { try { opts.onUpload({ scanKey, resumable: retries > 0 }); } catch (error) { /* שמירה בלבד */ } }
+    let response = null, payload = null, answeredResume = false;
+    // v364: המתנה לפני הניסיון האוטומטי הבא (נתק, או איסוף שלא מצא את הקריאה):
+    // אותו מרווח, המתנה לחזרה לאפליקציה ובדיקת ביטול לפני ואחרי.
+    const pause = async (attempt, text) => {
+      if (cancelled()) throw aiScanCancelledError();
+      progress(text + ' (ניסיון ' + (attempt + 2) + ' מתוך ' + (retries + 1) + ')…');
+      await new Promise(resolve => setTimeout(resolve, AI_SCAN_NETWORK_RETRY_DELAY_MS * (attempt + 1)));
+      await aiScanWaitVisible();
+      if (cancelled()) throw aiScanCancelledError();
+    };
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const resuming = attempt > 0 || !!fresh || !!resumeOnly;
+      try {
+        let sent = await send(!resuming);
+        // v364: 401 על איסוף אינו תשובה על הקריאה — טוקן מחודש ואותו איסוף פעם אחת נוספת.
+        if (resuming && authRefused(sent.payload) && typeof opts.getToken === 'function') sent = await send(false, true);
+        response = sent.response; payload = sent.payload; answeredResume = resuming;
+        if (resuming && payload.ok === false && (payload.error === 'resume_unknown' || payload.error === 'invalid_document_count')) {
+          // v364: שליחה מלאה נוספת מותרת רק כשהגוף המלא מעולם לא התקבל (אף 2xx במפתח הזה):
+          // אז השרת כנראה לא קיבל את הצילומים, ולא שילם עליהם. אחרי 2xx הקריאה כבר שולמה —
+          // שליחה אוטומטית שם היא קריאה שנייה בתשלום שהעובד לא בחר בה (כלל v325).
+          // resume_unknown אומר רק שהמופע הזה של השירות לא מכיר את המפתח: Cloud Run מפזר
+          // בקשות בין מופעים, והקריאה ששולמה מחכה אולי במופע שקיבל את הצילומים. איסוף הוא
+          // בחינם — אז מנסים את האיסופים האוטומטיים שנשארו, ורק אחר כך עוצרים, והמפתח נשמר:
+          // • עם צילומים — המפתח נשמר כ-lost. "נסה שוב" של העובד אוסף פעם אחת, ואם שוב לא
+          //   נמצא — שולח את הצילומים באותו מפתח (לא חדש): במופע שמחזיק את הקריאה השרת מחזיר
+          //   את התוצאה השמורה או מצטרף לקריאה שרצה, בחינם; במופע אחר — קריאה אחת שהעובד בחר.
+          // • איסוף בלבד (resumeKey, זיכוי אחרי רענון) — המפתח הוא הקשר היחיד לקריאה ששולמה
+          //   (אין צילומים): הוא נשמר, ו"אסוף את הקריאה" נשאר עד שהמפתח פג.
+          // v147 (invalid_document_count) אינו שומר דבר: המפתח נשכח, ו"נסה שוב" הוא קריאה חדשה
+          // אחת במפתח חדש, שהעובד בחר בה.
+          const unknown = payload.error === 'resume_unknown';
+          const chosenResend = unknown && attempt === 0 && !!fresh && !!fresh.lost;
+          if (unknown && (resumeOnly || accepted) && !chosenResend) {
+            if (attempt < retries) { await pause(attempt, 'מחפש את הקריאה שכבר רצה'); continue; }
+            const tries = ' · ' + (attempt + 1) + (attempt ? ' attempts' : ' attempt');
+            if (resumeOnly) {
+              const pending = new Error('הקריאה עוד לא נמצאה בשרת. לחץ שוב "אסוף את הקריאה" בעוד רגע, או צלם את הזיכוי מחדש.');
+              pending.code = 'resume_not_found';
+              pending.detail = 'resume_unknown · HTTP ' + response.status + tries;
+              pending.resumable = true;
+              throw pending;
+            }
+            remember(true);
+            const notFound = new Error('הקריאה הקודמת לא נמצאה בשרת. נסה שוב — הצילום יישלח שוב.');
+            notFound.code = 'resume_lost';
+            notFound.detail = 'resume_unknown · HTTP ' + response.status + tries;
+            notFound.resumable = true;
+            throw notFound;
+          }
+          if ((resumeOnly || accepted) && !chosenResend) {
+            forget();
+            const lost = new Error('הקריאה הקודמת אבדה בשרת. נסה שוב — הצילום ייקרא מחדש.');
+            lost.code = 'resume_lost';
+            lost.detail = String(payload.error) + ' · HTTP ' + response.status;
+            lost.resumable = false;
+            throw lost;
+          }
+          const retried = await send(true);
+          response = retried.response; payload = retried.payload; answeredResume = false;
+        }
+        break;
+      } catch (error) {
+        if (!error || !error.networkFailure) { // השירות ענה — אין ניסיון חוזר ואין מה לאסוף
+          if (error && typeof error === 'object' && !error.cancelled && error.resumable === undefined) error.resumable = keyKept;
+          throw error;
+        }
+        remember(); // כדי ש"נסה שוב" עם אותם צילומים יאסוף במקום לשלם שוב
+        if (attempt >= retries) {
+          const failure = new Error(error.message + (retries
+            ? ' הקריאה ממשיכה בשרת — ניסיון נוסף יאסוף אותה בלי צילום חדש.'
+            : ' בדוק שיש קליטה ונסה שוב.'));
+          failure.networkFailure = true;
+          failure.code = error.truncated ? 'connection_cut' : 'network_error';
+          failure.detail = (error.detail || '') + ' · ' + (attempt + 1) + (attempt ? ' attempts' : ' attempt');
+          failure.attempts = attempt + 1;
+          failure.resumable = true;
+          throw failure;
+        }
+        await pause(attempt, 'החיבור נפל, מתחבר מחדש לקריאה שכבר רצה');
+      }
+    }
+    // השרת ענה — אין מה לאסוף, והקריאה הבאה תהיה חדשה. v364: חוץ מאיסוף שנענה
+    // בלי תוצאה (סירוב אימות, מפתח חסר בשרת): זה לא אומר דבר על הקריאה ששולמה —
+    // היא עוד בשרת, והמפתח נשמר כדי ש"נסה שוב" (עם טוקן חדש) יאסוף אותה בלי לשלם.
+    // v364: תוצאה של הקריאה עצמה — הצלחה, או כישלון שמור שהשרת מחזיר עם אותו scanKey
+    // (שרת v148 שומר כישלון ומחזיר אותו בכל איסוף עד שפג תוקפו) — מוחקת את המפתח.
+    // העובד רואה את הכישלון, ו"נסה שוב" הוא קריאה חדשה אחת במפתח חדש שהוא בחר בה.
+    // סירוב (resume_unknown, אימות, קצב, מפתח חסר בשרת) לעולם אינו נושא scanKey.
+    const jobResult = (response.ok && payload.ok === true) || (!!scanKey && payload.scanKey === scanKey);
+    if (answeredResume && !jobResult) remember();
+    else forget();
+    if (!response.ok || !payload.ok) {
+      const code = payload.error || '';
+      const fatal = code === 'rate_limited' || code === 'invalid_auth' || code === 'auth_required' || code === 'client_update_required';
+      // v364: איסוף שסורב באימות — המפתח נשמר והקריאה ששולמה מחכה בשרת. רענון היה מוחק
+      // את המפתח ואת הצילומים שבזיכרון, והקריאה הבאה הייתה משולמת שוב — לכן כאן לא
+      // אומרים "רענן", אלא "נסה שוב" (שאוסף עם טוקן חדש). "רענן" נשאר רק להעלאה מלאה שסורבה.
+      const resumeAuthRefused = answeredResume && keyKept && (code === 'invalid_auth' || code === 'auth_required');
+      // v250: שרת שמוותר עם הסבר עברי (למשל anchor_pre_discount — הוקלד סכום שלפני
+      // ההנחות) — ההסבר מוצג כלשונו. משפחת השגיאות הזו אומרת כמעט תמיד "העוגן
+      // שהוקלד שגוי", ולכן מסומנת ומוצגת כאזהרה בולטת במקום קופסת שגיאה רגילה.
+      const anchorExplained = !fatal
+        && !['incomplete_model_output', 'model_refusal', 'invalid_model_output', 'openai_error'].includes(code)
+        && typeof payload.message === 'string' && !!payload.message.trim();
+      const error = new Error(
+        code === 'client_update_required' ? (payload.message || 'רענן את האפליקציה לפני סריקה חדשה.')
+          : code === 'rate_limited' ? 'בוצעו יותר מדי ניסיונות. המתן 10 דקות ונסה שוב.'
+          : resumeAuthRefused ? 'החיבור המאובטח נכשל. נסה שוב — הקריאה שכבר נעשתה תיאסף בלי תשלום נוסף.'
+          : (code === 'invalid_auth' || code === 'auth_required') ? 'האימות המאובטח נכשל. רענן את האפליקציה ונסה שוב.'
+          : (code === 'incomplete_model_output' || code === 'model_refusal' || code === 'invalid_model_output') ? 'ה-AI לא החזיר פענוח מלא ובטוח לתעודה זו.'
+          : (code === 'openai_error' && payload.message) ? 'שירות ה-AI החזיר שגיאה: ' + payload.message
+          : anchorExplained ? payload.message.trim()
+          : 'הסריקה החכמה לא הצליחה לתעודה זו.'
+      );
+      error.scanAudit = payload.scanAudit || null;
+      error.code = code || null;
+      // v364: הודעת OpenAI כלשונה (אנגלית) — לשורה הטכנית הקטנה בכרטיס הזיכוי.
+      if (code === 'openai_error' && payload.message) error.detail = String(payload.message);
+      error.fatal = fatal;
+      error.anchorExplained = anchorExplained;
+      error.resumable = keyKept; // v364: true = אפשר עוד לאסוף במפתח הזה (סירוב אימות/קצב על איסוף)
+      if (resumeAuthRefused) error.detail = code + ' · HTTP ' + response.status;
+      throw error;
+    }
+    (payload.scan && payload.scan.documents || []).forEach(priceAuditCapture);
+    return payload;
+  }, opts.onWaiting, entry);
 }
 // v179: סכימת יחידות של מסמך שחזר מה-AI — בלי שורות פיקדון. זה כלל v176
 // ("פיקדון נספר בכסף בלבד"), שתוקן בלולאה הראשית של המעריך אך פוספס כאן
@@ -13912,8 +14610,20 @@ async function aiScanSingleDocPipeline(token, docIndex, inputDoc = aiScanDocumen
   const runAttempt = async (pages) => {
     if (runId !== aiScanRunId) throw new Error('scan_cancelled');
     let payload;
-    const startedAt = Date.now();
-    try { payload = await aiRequestSingleDocScan(token, pages, inputDoc); }
+    let startedAt = Date.now(), waited = false;
+    // v364: הודעות תור/חיבור-מחדש של התעודה עוברות רק דרך onProgress, ורק
+    // כל עוד הסריקה הזו לא בוטלה. תעודה שממתינה לקריאת זיכוי אומרת זאת;
+    // אחרת (קריאה קודמת שעוד רצה) — בלי לנחש מה היא.
+    const progress = text => { if (runId === aiScanRunId) aiScanInvoiceProgress(text); };
+    try {
+      payload = await aiRequestSingleDocScan(token, pages, inputDoc, {
+        isCancelled: () => runId !== aiScanRunId,
+        getToken: force => auth.currentUser.getIdToken(force),
+        onWaiting: kind => { waited = true; progress(kind === 'credit' ? 'ממתין לסיום קריאת הזיכוי…' : 'ממתין לסיום קריאה קודמת…'); },
+        onStart: () => { startedAt = Date.now(); if (waited) progress(''); },
+        onProgress: progress
+      });
+    }
     catch (error) {
       if (runId === aiScanRunId) receiptScanHistory.push({ docIndex, startedAt, completedAt: Date.now(), ok: false,
         error: error.message, scanAudit: error.scanAudit || null });
@@ -21535,6 +22245,7 @@ $('scanClose').addEventListener('click', closeScanner);
 $('aiOrientationLeft').addEventListener('click', () => aiRotateOrientationReview(-1));
 $('aiOrientationRight').addEventListener('click', () => aiRotateOrientationReview(1));
 $('aiOrientationConfirm').addEventListener('click', aiConfirmOrientationReview);
+$('aiOrientationMorePart').addEventListener('click', () => aiConfirmOrientationReview({ creditAddPart: true }));
 $('aiOrientationCrop').addEventListener('click', aiToggleCropMode);
 $('aiOrientationRestore').addEventListener('click', aiRestoreOriginalImage);
 $('aiOrientationCancel').addEventListener('click', aiCancelOrientationReview);
@@ -21694,7 +22405,7 @@ $('rsBody').addEventListener('click', e => {
 });
 $('scanPriceNotice').addEventListener('click', () => { closeScanner(); renderReceiving(); const panel = app.querySelector('[data-price-panel]'); if (panel) { panel.open = true; panel.scrollIntoView({ block: 'start' }); } });
 app.addEventListener('change', (e) => {
-  if (e.target.dataset.role === 'delivery-credit-file') { const input = e.target; deliveryCreditAddFiles(input.dataset.id, Array.from(input.files || [])); input.value = ''; return; }
+  if (e.target.dataset.role === 'delivery-credit-file') { const input = e.target; deliveryCreditAddFiles(input.dataset.id, Array.from(input.files || []), input.dataset.replace === '1'); input.value = ''; return; }
   if (['delivery-credit-number', 'delivery-credit-barcode'].includes(e.target.dataset.role)) {
     const input = e.target, c = deliveryCreditFind(input.dataset.id);
     if (!c || !c.paper || receiptFinalizing) return;
