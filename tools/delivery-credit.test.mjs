@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runtime, fixture, fakeCloud } from './receipt-scan-harness.mjs';
+import { runtime, fixture, fakeCloud, reply } from './receipt-scan-harness.mjs';
 
 const json = (c, expression) => JSON.parse(c.run('JSON.stringify(' + expression + ')'));
 const uploads = c => c.requests.filter(r => r.url.endsWith('/scan')).length;
@@ -300,12 +300,18 @@ test('unfinished scan recovers with a clear recapture action after reload', asyn
   c.run("receiptDeliveryCredits=[{id:'credit-1',status:'reading',pages:[],pageCount:1}];saveReceiptDraft()");
   const restored = runtime('yotvata', { data, storage: c.storage });
   assert.match(restored.run('deliveryCreditsHtml()'), /לא הושלם.*צלם אותו שוב/);
+  // v364: the photos are gone, so the only action is a new photo, never a retry without photos.
+  assert.match(restored.run('deliveryCreditsHtml()'), /data-role="delivery-credit-retake"[^>]*>צלם את הזיכוי מחדש</);
+  assert.doesNotMatch(restored.run('deliveryCreditsHtml()'), /data-role="delivery-credit-read"/);
   assert.equal(restored.run('deliveryCreditReady()'), false); assert.equal(uploads(restored), 0);
 });
 
 test('a removed credit ignores a response that arrives later', async () => {
   const { c, data } = setup(); const pending = response(data);
-  let release; c.context.fetch = async () => new Promise(resolve => { release = () => resolve({ ok: true, json: async () => pending }); });
+  // v364: the warm-up GET /health answers normally; only the paid read is held back.
+  const health = c.context.fetch;
+  let release; c.context.fetch = async (url, options) => String(url).endsWith('/health') ? health(url, options)
+    : new Promise(resolve => { release = () => resolve(reply(pending)); });
   c.run("receiptDeliveryCredits=[{id:'credit-1',status:'capture',pages:[{dataUrl:'data:image/jpeg;base64,AA==',orientationConfirmed:true}]}]");
   const work = c.run("deliveryCreditRead('credit-1')");
   await new Promise(resolve => setImmediate(resolve));
@@ -366,6 +372,84 @@ test('legacy amount-only credits retain their existing payment and closure behav
   assert.equal(c.run('receiptPayableBaseEx({...pendingFixture,items:pendingFixture.lines,noteTotalInc:93.8})'), 50);
 });
 
+// v364: coffee is short by 6 (43.80). The credit prints two coffee rows (-26.30,
+// -20.00 = -46.30), a separate document discount of 2.50 and a subtotal of -43.80.
+// Service v148 accepts that paper; the app cannot match a discount to a product.
+async function readDiscountCredit(c, data, o = {}) {
+  const original = data.paper, base = data.paper.scan.documents[0].rows[1];
+  const row = (n, amount, qty) => ({ ...structuredClone(base), quantity: qty, lineNumber: n, sourcePage: 1,
+    lineTotalExVat: amount, grossLineTotalExVat: amount, lineDiscountExVat: 0 });
+  const subtotal = o.subtotal ?? -43.8;
+  data.paper = { ok: true, serviceVersion: 148, model: 'fixture', requestId: 'credit-discount', scan: { warnings: [], documents: [{
+    noteIndex: 0, invoiceNumber: 'CR-DISC', pageCount: 1, subtotalExVat: subtotal,
+    documentDiscountExVat: o.discount === undefined ? -2.5 : o.discount,
+    vatAmount: Math.round(subtotal * 18) / 100, totalInclVat: Math.round(subtotal * 118) / 100,
+    printedUnits: o.units ?? 6, printedLines: 2, rows: [row(1, o.first ?? -26.3, 4), row(2, -20, 2)] }] } };
+  c.run(`receiptDeliveryCredits.push({id:'credit-1',status:'capture',pageCount:1,
+    pages:[{dataUrl:'data:image/jpeg;base64,Zml4dHVyZQ==',orientationConfirmed:true}]});`);
+  const result = await c.run("deliveryCreditRead('credit-1')");
+  data.paper = original;
+  return result;
+}
+
+test('a credit with a separate document discount is never sent to a retake loop; it points to the amount-only credit', async () => {
+  const { c, data } = setup();
+  assert.equal(await readDiscountCredit(c, data), false);
+  const card = json(c, 'receiptDeliveryCredits[0]');
+  assert.equal(card.status, 'error'); assert.equal(card.errorKind, 'discount'); assert.equal(card.paper, null);
+  assert.match(card.error, /הנחה כללית/); assert.match(card.error, /צילום נוסף לא יעזור/);
+  assert.match(card.error, /"תעודות".*"התקבל זיכוי מהספק"/);
+  assert.doesNotMatch(card.error, /צלם שוב/);
+  const html = c.run('deliveryCreditsHtml()');
+  assert.match(html, /data-role="delivery-credit-remove" data-id="credit-1" class="[^"]*bg-emerald-600[^"]*">הסר את הזיכוי</, 'removing is the main action');
+  assert.doesNotMatch(html, /delivery-credit-(retake|read|camera|gallery|page)/, 'no paid read of the same paper, and no photo to rotate');
+  assert.equal(uploads(c), 1);
+  // After a reload the photo is gone; the explanation and the only action stay.
+  const reloaded = runtime('yotvata', { data, storage: c.storage });
+  const after = reloaded.run('deliveryCreditsHtml()');
+  assert.match(after, /הנחה כללית/); assert.match(after, />הסר את הזיכוי</);
+  assert.doesNotMatch(after, /delivery-credit-retake|לא הושלם/);
+  assert.equal(uploads(reloaded), 0);
+  // The advice really leads somewhere: remove, finish with the shortage open, then
+  // "התקבל זיכוי מהספק" on the saved receipt records the amount-only credit.
+  await c.click('delivery-credit-remove', 'credit-1');
+  assert.equal(c.run('receiptDeliveryCredits.length'), 0);
+  const p = finish(c);
+  assert.equal(p.status, 'open');
+  c.run('flushReceiptDraftToCloud=async()=>{receiptSync.dirty=false;return true;}');
+  await c.run('confirmReceipt()');
+  const saved = c.writes.find(w => w.path?.includes('receipts'))?.data;
+  assert.ok(saved);
+  c.context.savedDiscountReceipt = { ...saved, id: 'rc-1' };
+  c.run("receipts=[savedDiscountReceipt];currentView='receiptsHistory';renderReceiptsHistory()");
+  assert.match(c.node('app').innerHTML, /data-role="rc-short-credit" data-id="rc-1"[^>]*>.*התקבל זיכוי מהספק/);
+  await c.click('rc-short-credit', 'rc-1');
+  assert.equal(c.node('shortCreditModal').classList.contains('flex'), true);
+  c.node('shortCreditAmount').value = '43.80';
+  await c.run('confirmShortCredit()');
+  assert.deepEqual(c.run('JSON.stringify(receipts[0].shortCreditNotes.map(n => n.amount))'), '[43.8]');
+  assert.equal(c.run('receiptDiscrepancyInfo(receipts[0]).shortFullyCredited'), true);
+  assert.equal(uploads(c), 1);
+});
+
+test('a document discount read with another contradiction, or one that does not close, still asks for a retake', async () => {
+  for (const [label, options, kind, message] of [
+    ['units do not match', { units: 7 }, 'paper', /כמויות הזיכוי/],
+    ['the discount does not close the rows', { discount: -2.4 }, 'paper', /סכום שורות הזיכוי אינו תואם/],
+    ['no discount printed', { discount: null }, 'paper', /סכום שורות הזיכוי אינו תואם/],
+    ['the discount read without a minus sign', { discount: 2.5 }, 'discount', /הנחה כללית/]
+  ]) {
+    const { c, data } = setup();
+    assert.equal(await readDiscountCredit(c, data, options), false, label);
+    assert.equal(c.run('receiptDeliveryCredits[0].errorKind'), kind, label);
+    assert.match(c.run('receiptDeliveryCredits[0].error'), message, label);
+  }
+  // Rows that already include the discount (their sum is the subtotal) are an ordinary credit.
+  const { c, data } = setup();
+  assert.equal(await readDiscountCredit(c, data, { first: -23.8 }), true);
+  assert.equal(c.run('receiptDeliveryCredits[0].status'), 'review');
+});
+
 test('camera action, image rotation and quick confirmation read only the credit and preserve invoice state', async () => {
   const { c, data } = setup(); let openedCamera = '';
   c.context.document.getElementById = id => { const n = c.node(id); n.click = () => { openedCamera = id; }; return n; };
@@ -380,10 +464,13 @@ test('camera action, image rotation and quick confirmation read only the credit 
   await c.run('aiRotateOrientationReview(1)');
   assert.equal(c.run('receiptDeliveryCredits[0].pages[0].rotation'), 90);
   data.paper = response(data);
+  // v364: confirming the last photo of the credit is the read; there is no separate button.
+  assert.match(c.node('aiOrientationConfirm').innerHTML, /אשר וקרא את הזיכוי/);
   await c.run('aiConfirmOrientationReview()');
-  assert.equal(uploads(c), 0, 'Allow more pages before a single explicit credit read');
-  await c.click('delivery-credit-read', id);
-  assert.equal(c.run('receiptDeliveryCredits[0].status'), 'review');
+  assert.equal(c.run('receiptDeliveryCredits[0].status'), 'reading');
+  await c.click('delivery-credit-read', id); // a stray tap while reading never sends again
+  for (let i = 0; i < 20; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(c.run('receiptDeliveryCredits[0].status'), 'review', c.run('receiptDeliveryCredits[0].error'));
   assert.equal(c.run('JSON.stringify([aiScanResponse,aiScanRunId,receiptNoteTotal,receiptNoteUnits])'), before);
   assert.equal(uploads(c), 1);
   assert.deepEqual(JSON.parse(c.requests.find(r => r.url.endsWith('/scan')).body).documents[0].pages, ['data:image/jpeg;base64,AQ==']);

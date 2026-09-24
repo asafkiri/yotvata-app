@@ -39,10 +39,10 @@ export function runtime(supplier, { storage = new Map(), data = fixture(supplier
     signInAnonymously: async () => ({}), onAuthStateChanged() {},
     fetch: async (url, options) => {
       requests.push({ url: String(url), body: options?.body });
-      if (options?.body && JSON.parse(options.body).mode === 'analyze') return {ok:true, status:200, json:async()=>({ok:true,analysis:{claims:[],summary:'fixture'}})};
-      if (String(url).endsWith('/health')) return { ok: true, json: async () => ({ok: true, keyConfigured: true, serviceVersion: supplier === 'tnuva' ? 10 : 145, photoFirst: true}) };
+      if (options?.body && JSON.parse(options.body).mode === 'analyze') return reply({ok:true,analysis:{claims:[],summary:'fixture'}});
+      if (String(url).endsWith('/health')) return reply({ok: true, keyConfigured: true, serviceVersion: supplier === 'tnuva' ? 10 : 145, photoFirst: true});
       if (!String(url).endsWith('/scan')) throw new Error('Unexpected network request: ' + url);
-      return { ok: true, status: 200, json: async () => structuredClone(data.paper) };
+      return reply(data.paper);
     }
   });
   vm.runInContext(moduleSource, context, { filename: 'index.html', timeout: 5000 });
@@ -70,6 +70,13 @@ export function runtime(supplier, { storage = new Map(), data = fixture(supplier
     return events.get('app:click')({ target });
   }
   return { context, run, scan, click, node, nodes, events, requests, storage, writes, toasts, callbacks };
+}
+
+// A fetch Response double. v364: the scan transport reads the body with text()
+// (a cut connection shows up as an unparsable 200); other callers use json().
+export function reply(payload, status = 200) {
+  const body = typeof payload === 'string' ? payload : JSON.stringify(payload);
+  return { ok: status >= 200 && status < 300, status, json: async () => JSON.parse(body), text: async () => body };
 }
 
 export function fixture(supplier) {

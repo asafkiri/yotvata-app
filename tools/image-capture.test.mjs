@@ -11,7 +11,7 @@ function source(name) {
   const end = html.slice(m.index, eol).trimEnd().endsWith('}') ? eol : html.indexOf('\n}', eol) + 2;
   return html.slice(m.index, end);
 }
-const names = ['aiCompressInvoiceImage', 'aiDetectPaperRegion', 'aiMeasurePageQuality', 'aiQualityAdvice', 'aiDrawCropMap', 'aiCropInitFrame', 'aiCropResetOverlay', 'aiCropDraw',
+const names = ['aiCompressInvoiceImage', 'aiInvoiceOutputScale', 'aiDetectPaperRegion', 'aiMeasurePageQuality', 'aiQualityAdvice', 'aiDrawCropMap', 'aiCropInitFrame', 'aiCropResetOverlay', 'aiCropDraw',
   'aiCropSyncCanvasBox', 'aiCropContainRect', 'aiCropFit', 'aiCropHitTest', 'aiCropPointerPosition',
   'aiCropPointerDown', 'aiCropPointerMove', 'aiCropPointerUp', 'aiApplyCropIfMoved',
   'aiReprocessFromSource', 'aiUnrotateRect', 'aiNormalizeQuarterTurns', 'aiRenderInvoiceRotation',
@@ -48,7 +48,7 @@ function context() {
     showToast: message => { c.lastToast = message; },
     aiReadFile: async () => 'source', aiLoadImage: async url => { assert.ok(images.has(url), url); return images.get(url); },
     aiEnhanceDocumentPixels: () => false,
-    AI_INVOICE_MAX_SIDE: 1850, AI_CROP_PROXY_SIDE: 1500,
+    AI_INVOICE_MAX_SIDE: 1850, AI_CROP_PROXY_SIDE: 1500, AI_CREDIT_MAX_PIXELS: Math.round(1850 * 1850 * 0.75), AI_CREDIT_MAX_LONG_SIDE: 4096,
     Uint8ClampedArray, Uint8Array, Uint32Array,
     aiFlattenIllumination: (data, width, height, analysis) => { if (analysis) analysis.ready = true; return true; },
     aiTextAnchorBox: () => cropPlan ? { x: cropPlan.x, y: cropPlan.y, width: cropPlan.width, height: cropPlan.height } : null,
@@ -327,4 +327,51 @@ test('a sharp well-lit measurement produces no advice at all', () => {
   // על סמך המדד הזה חייב קודם לכייל אותו מול צילומים אמיתיים מתויגים.
   assert.equal(ctx.c.aiQualityAdvice({ v: 1, paperPx: 1800, sharpness: 0.1, contrast: 150, glarePct: 2, paperLuma: 243 }), null,
     'sharpness alone must never raise an advice until it is calibrated on real photos');
+});
+
+// v364: פתק זיכוי ארוך וצר מקבל תקציב שטח (≈2.57MP, כמו עמוד 4:3 היום) במקום
+// תקרת 1850 לצלע הארוכה. התקציב הוא תכונה של העמוד (page.maxPixels), ולכן
+// כל קידוד חוזר מהמקור — חיתוך ידני ושחזור הפריים המלא — שומר עליו. עמוד
+// חשבונית מאותו צילום נשאר בדיוק כמו קודם.
+test('a 1:5 credit slip keeps its area budget through capture, manual crop and restore; invoice pages are unchanged', async () => {
+  const budget = Math.round(1850 * 1850 * 0.75);
+  const last = draws => output(draws).at(-1).args.slice(1);
+  const ctx = context(), { c, draws, images } = ctx;
+  images.set('source', { naturalWidth: 1000, naturalHeight: 5000 });
+  const invoice = await c.aiCompressInvoiceImage({ name: 'invoice.jpg' });
+  assert.deepEqual(last(draws), [0, 0, 1000, 5000, 0, 0, 370, 1850], 'invoice pages keep the old long-side cap');
+  assert.equal('maxPixels' in invoice, false);
+  const page = await c.aiCompressInvoiceImage({ name: 'slip.jpg' }, false, budget);
+  const [, , , , , , w, h] = last(draws);
+  assert.equal(page.maxPixels, budget);
+  assert.ok(w >= 710 && w <= 720 && h >= 3570 && h <= 3590, 'credit slip ' + w + 'x' + h);
+  assert.ok(w * h <= budget * 1.002, 'area budget ' + w * h);
+  assert.equal(page.originalImage.scale, page.processScale);
+  // חיתוך ידני: 10% למעלה ולמטה מהמקור, מקודד מחדש מאותו תקציב שטח.
+  c.aiScanDocuments = [{ pages: [page] }];
+  c.aiOpenOrientationReview(0, 0, true);
+  c.aiToggleCropMode();
+  const state = c.aiCropState;
+  state.rect = { x: 0, y: state.h * .1, w: state.w, h: state.h * .8 }; state.moved = true;
+  await c.aiConfirmOrientationReview();
+  assert.equal(page.cropped, true);
+  const cropped = last(draws);
+  near({ w: cropped[2], h: cropped[3] }, { w: 1000, h: 4000 }, 3);
+  assert.ok(cropped[6] > 790 && cropped[7] > 3150, 'crop re-encode keeps the credit budget: ' + cropped.slice(6));
+  assert.ok(cropped[6] * cropped[7] <= budget * 1.002);
+  // שחזור מהמקור (עמוד בלי originalImage שמור) — שוב בתקציב הזיכוי.
+  delete page.originalImage;
+  c.aiOpenOrientationReview(0, 0, true);
+  await c.aiRestoreOriginalImage();
+  assert.equal(page.cropped, false);
+  assert.deepEqual(last(draws).slice(0, 4), [0, 0, 1000, 5000]);
+  assert.deepEqual(last(draws).slice(6), [w, h]);
+  // אותו צילום כחשבונית 4:3 — זהה בפיקסל למה שהיה.
+  images.set('source', { naturalWidth: 4000, naturalHeight: 3000 });
+  await c.aiCompressInvoiceImage({ name: 'invoice43.jpg' });
+  assert.deepEqual(last(draws), [0, 0, 4000, 3000, 0, 0, 1850, 1388]);
+  // פתק צר מאוד נעצר בתקרת 4096 לצלע הארוכה.
+  images.set('source', { naturalWidth: 500, naturalHeight: 6000 });
+  await c.aiCompressInvoiceImage({ name: 'narrow.jpg' }, false, budget);
+  assert.equal(last(draws)[7], 4096);
 });

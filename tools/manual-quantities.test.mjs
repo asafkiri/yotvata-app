@@ -244,7 +244,8 @@ test(supplier+': the two photo buttons show distinct screens during and after th
   assert.equal(r.run('receiptPaperScanState'),'ok');assert.deepEqual(json(r,'receiptList'),[]);
   if(manual){const html=assertManualScreen(r);assert.match(html,/data-role="rc-quantity-all"/);assert.match(html,/data-role="rc-quantity-differences"/);assert.match(html,/data-price-audit/);assert.doesNotMatch(html,/data-quantity-picker/);}
   else assert.match(r.node('app').innerHTML,/data-role="rc-scan"/);
-  requests.push(r.requests.filter(x=>x.url.endsWith('/scan')).map(x=>JSON.parse(x.body)));
+  // v364: every paid read carries its own resume key; the OCR request itself must be identical.
+  requests.push(r.requests.filter(x=>x.url.endsWith('/scan')).map(x=>{const {scanKey,...body}=JSON.parse(x.body);assert.match(scanKey,/^[A-Za-z0-9_-]{8,64}$/);return body;}));
  }
  assert.equal(requests[0].length,1);assert.deepEqual(requests[1],requests[0]);
 });

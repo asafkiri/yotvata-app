@@ -1,0 +1,460 @@
+# Driver credit read automatically — v364
+
+## Field report
+
+On an iPhone running app v363, the invoice was still being read in the
+background ("קורא תעודה 1 מתוך 2…") when the driver handed over a credit note.
+The note was a long, narrow thermal slip. The worker photographed it, confirmed
+the orientation, and then had to find a separate "פענח את הזיכוי" button. The
+read failed at once: "הרשת נכשלה אחרי 1 ניסיונות — Load failed". The user said
+it basically never works. Driver credits are usually one slip in one photo;
+credits with several parts are rare.
+
+## Root causes found
+
+1. "Load failed" is WebKit's `TypeError` when no HTTP response with CORS
+   headers reached the page. The credit POST had exactly one attempt
+   (`retries = 0`), and unlike the invoice run it was not preceded by the
+   `GET /health` warm-up. iOS silently retries an idempotent GET on a dead
+   pooled connection, but not a POST. The credit could also run at the same
+   time as the background invoice upload, which broke the v179 rule of one
+   paid upload at a time.
+2. The service wrote `200` headers but flushed nothing until its first
+   10-second heartbeat. For those 10 seconds the phone's `fetch()` stayed
+   pending while paid model work was already running. A drop in that window
+   showed as "Load failed" while the service kept paying. There was no way to
+   resume, so a blind retry could pay twice (hence v325's one-attempt rule).
+3. Service: a malformed request path crashed the process, which dropped every
+   scan in flight. Node's 5-second keep-alive, shorter than that of Cloud Run's
+   front end, could produce 502/503 responses without CORS on reused
+   connections.
+4. Dead ends in the app:
+   - While the invoice was read, the credit's photo check could not open, and
+     nothing reopened it later.
+   - The read needed a separate button.
+   - The error card showed raw English, and its big button ("הוסף עמוד לזיכוי")
+     added a duplicate page instead of retaking the photo.
+   - The retry text went to the invoice banner.
+5. Once the network worked, correct credits could still be rejected:
+   - Rows accepted EAN-13 barcodes only.
+   - VAT and total were compared with their signs, so a VAT line printed
+     without a minus failed.
+   - The service had no notion of a credit note, so credits got no arithmetic
+     self-correction.
+   - A slip that prints positive numbers under a "זיכוי" title was rejected.
+6. Photos were limited to 1850 px on the long side, so a 1:5 slip was sent
+   about 370 px wide.
+7. A cloud draft that arrived during a credit read discarded the paid result.
+
+## What changed in app v364
+
+Transport (shared with invoices; see `tools/PHOTO-FIRST.md`, v364):
+
+- Every paid `/scan` carries a random `scanKey`.
+- A credit read warms the connection with `GET /health` right before its
+  upload. The GET is retried up to three times, because it is free.
+- The credit and the invoice wait for each other in one queue
+  (`aiScanWithUploadLock`), so there is never more than one paid upload at a
+  time.
+- An automatic retry only collects the same read by key (`resume: true`, no
+  photos). It happens only when the last successful `/health` answer reported
+  `scanResume: true` (a warm-up that fails keeps that answer). Against
+  v147 there is still exactly one attempt.
+- The key of a read whose connection was cut is remembered for 25 minutes, so
+  a manual "נסה שוב" with the same photos collects instead of paying again.
+  A credit's key is also kept in the local draft, so after a reload the read
+  can be collected without photos ("אסוף את הקריאה", see the third review round
+  below).
+- Errors are plain Hebrew. The browser's text is kept apart as `detail`.
+
+Credit paper and photos (see `tools/DELIVERY-CREDITS-AND-PAPER-CORRECTIONS.md`):
+
+- EAN-8 barcodes are accepted, with the invoice rules.
+- VAT and total are compared by magnitude. The subtotal and every row must
+  still be negative.
+- Credit photos get an area budget (about 2.57 MP, long side at most 4096 px)
+  instead of the 1850 px long-side cap.
+- A cloud draft that arrives during a credit read is deferred, so the paid
+  result is kept.
+
+What the worker sees:
+
+- **No read button.** Confirming the last unchecked photo of a credit is the
+  read: the button says "אשר וקרא את הזיכוי" (`aiConfirmOrientationReview` →
+  `deliveryCreditAutoRead`). This is the only automatic trigger. Rendering,
+  saving, draft restore, cloud sync, cancelling or deleting a photo, confirming
+  an invoice page and a review-only look never start a read.
+- **Long slips.** "הפתק ארוך? צלם עוד חלק" appears only on the last unchecked
+  photo of a credit, and only while it has fewer than four photos. It confirms
+  the photo without reading and opens the camera within the same tap. The read
+  starts when the last part is confirmed.
+- **During the invoice read.** A credit photo opens for checking at once
+  (`deliveryCreditOpenPage` and `aiOpenNextUnconfirmedOrientation` no longer
+  wait for the invoice read to finish; invoice pages stay locked). The just-taken photo is
+  the one that opens. The card says "ממתין לסיום קריאת החשבונית — הזיכוי ייקרא
+  מיד אחריה. אפשר להמשיך לסרוק מוצרים." and then "קורא את הזיכוי…", plus any
+  reconnect text.
+- **One main action per card state:**
+  - "צלם את תעודת הזיכוי" (no photo yet)
+  - "בדוק ואשר את הצילום" (a photo not yet checked)
+  - "קרא את הזיכוי" (all photos checked but no read started)
+  - "נסה שוב" (network or service failure: the same photos; after a network
+    failure also the same key, so on v148 this collects the read that is
+    already running; after an accepted upload whose collections found no job,
+    one more collection and then the photos with the same key; after a failure
+    the service reported, one new read with a new key)
+  - "אסוף את הקריאה" (photos lost in a reload, but the read that was cut by
+    the reload or by the network can still be collected by its key: sends only
+    the key, nothing is paid; "צלם את הזיכוי מחדש" is the second way)
+  - "צלם את הזיכוי מחדש" (paper problem, or photos lost after a reload or cloud
+    restore with nothing to collect; never a retry with photos that are gone)
+
+  Photos that exist also get the small "הזיכוי ארוך? הוסף עוד צילום".
+- **Retake replaces the photos.** "צלם את הזיכוי מחדש" uses its own camera
+  input (`creditRetake_<id>`, `data-replace="1"`,
+  `deliveryCreditAddFiles(id, files, true)`). The old photos are replaced only
+  after the new one is prepared.
+- **Technical text** such as "Load failed" or "HTTP 502" appears only as a
+  small grey left-to-right line.
+- **The finished read** refreshes only the credit cards
+  (`deliveryCreditRefreshCards`), not the whole receiving screen. A quantity
+  field the worker is typing in stays as it is. So does a credit number or
+  barcode being typed in another credit's card: while such a field has focus,
+  the refresh rebuilds every other card one by one (`deliveryCreditCardHtml`,
+  keyed by `data-delivery-credit`) and leaves that card alone until the next
+  render.
+
+### Fixes from the v364 review (same release)
+
+- **Fresh token for every send.** `aiRequestSingleDocScan` takes
+  `getToken(force)` and asks for a token right before each send: after the
+  queue wait and after a screen lock. Firebase hands back its cached token
+  until 30 s before it expires, so a collection sent after a long lock used to
+  get `401 invalid_auth`; the key was then dropped and "נסה שוב" paid for a
+  second read of a job the service still held. A collection refused on sign-in
+  is now sent once more with a renewed token, and a collection answered without
+  a result keeps the key.
+- **A shown result drops the key.** A collection that returns the read's own
+  result — a success, or a stored failure carrying the same `scanKey` — deletes
+  the remembered key (`aiScanCutKeys`). Before, a stored failure kept the key,
+  so every "נסה שוב" collected the same failure again until the job expired.
+  Now "נסה שוב" after a shown failure makes exactly one new paid read, with a
+  new key, that the worker chose. Only answers without a result (no reply,
+  sign-in or rate-limit refusal, missing key on the server, `resume_unknown`
+  while its one full re-send is on the way, or after an accepted upload or on a
+  collect-only read — see the fourth review round) keep the key.
+- **A failed warm-up keeps the last good `/health` answer.** A credit read
+  queued between two invoice documents warms its own connection. When every
+  GET failed (no reception, or a 5xx/4xx from the front end), the global
+  `aiScanServiceStatus` used to become `null` / `{ok:false}`, and the invoice
+  document queued behind it lost `scanResume` — its dropped upload was then
+  shown as failed instead of collected, exactly on a weak signal. Now only a
+  successful answer replaces the status; the failure is returned to the caller
+  only. A later successful answer from a rolled-back v147 still turns resume
+  off.
+- **Cancelled reads release the queue.** Each queued read is
+  `{ kind, isCancelled(), abort() }` (`aiScanUploadQueue`). Cancelling a receipt
+  or removing a credit aborts its upload (`aiScanDropCancelled`); nobody waits
+  for a read whose result would be thrown away.
+- **Waiting text names what is really ahead:** the invoice, another credit
+  ("ממתין לסיום קריאת זיכוי אחר…"), or an earlier read of both kinds.
+- **Looking is not reading.** Tapping the photo of a credit that was already
+  confirmed (for example after a failed read) and confirming it unchanged only
+  closes the window. A rotated, restored or cropped photo is read again. Paid
+  rereads of the same photo stay on the card's own buttons. In crop mode on
+  such a photo the green button says "אשר חיתוך והמשך" (and "צלם עוד חלק" is
+  hidden) until the frame really moves; the first move switches it to "אשר
+  חיתוך וקרא את הזיכוי", and a crop that fails switches it back.
+- **No automatic product from a refused row.** When the service refused to
+  pick a product (`ambiguous`, `conflicting_reads`, `suggested_*`), the row
+  shows the digits it read and asks for the barcode. Before, an EAN-8 that is
+  also the tail of another product's EAN-13 was picked on its own.
+- **Hebrew main line.** A Firebase error (sign-in renewal without reception)
+  or an OpenAI message passed through as `openai_error` goes only to the small
+  technical line.
+- **A failed retake after a reload shows its own error.** After a reload the
+  credit has no photo but still counts one (`pageCount`), so the card says the
+  photo was not saved. When the retake's photo then cannot be prepared,
+  `deliveryCreditAddFiles` sets `pageCount` to the photos really left (none):
+  the card shows "לא הצלחנו להכין את הצילום. צלם שוב." with its technical line,
+  the camera as the main action and the gallery as a second way. A retake that
+  failed before a reload kept the old photo, so after the reload that card
+  still says the photo was not saved.
+- **A failed extra part keeps part 1.** `errorKind: 'part'`; the main action is
+  "צלם שוב את החלק הבא", with "קרא את הזיכוי" and a full retake as secondary
+  actions.
+- **Crop, then another part.** "הפתק ארוך? צלם עוד חלק" with a moved crop frame
+  first saves the crop and keeps the window open; the next tap opens the camera
+  inside the tap (the crop decodes the photo after the tap, and iOS would ignore
+  a camera opened then). The window itself says so: the hint reads "החיתוך
+  נשמר. עכשיו לחץ על "פתח מצלמה לחלק הבא"…" and the button is renamed "פתח
+  מצלמה לחלק הבא" until the photo changes (rotate, restore, a new crop) or the
+  window closes. A toast would be invisible: `#toast` (z-60) is under the
+  full-screen window (z-95).
+
+### Fixes from the third review round (same release)
+
+- **A read the service accepted is never paid twice on its own.** When a full
+  upload was answered `2xx` and the connection died while the body was read
+  (`fetch` resolved, `text()` failed, or a `200` held only heartbeat
+  whitespace), the service had the photos and was paying. `aiScanSendOnce`
+  marks such a cut `accepted`, and the mark is kept with the remembered key
+  (`aiScanCutKeys`). If a later collection of that key gets `resume_unknown`
+  or `invalid_document_count` (v147), the app no longer sends the photos again
+  by itself (v325). On v147 it forgets the key and shows "הקריאה הקודמת אבדה
+  בשרת. נסה שוב — הצילום ייקרא מחדש." (code `resume_lost`, not a network error,
+  so the credit card's main action is "נסה שוב"); that "נסה שוב" is one new read
+  with a new key, chosen by the worker. For `resume_unknown` see the fourth
+  review round below: the key is kept and "נסה שוב" re-sends it. The single
+  automatic full re-send with the same key stays only for an upload that never
+  got a `2xx` (the request itself failed), where the service most likely never
+  received the photos.
+- **Sign-in refused on a collection: "נסה שוב", not "רענן".** The key is kept;
+  a reload would lose the photos (and an invoice's key, which lives only in
+  memory), and the next read would be paid again. The message is "החיבור המאובטח נכשל. נסה שוב — הקריאה שכבר נעשתה
+  תיאסף בלי תשלום נוסף." on the credit card (`errorKind: 'network'`, main action
+  "נסה שוב") and in the invoice banner. "רענן את האפליקציה" stays only for a
+  full upload refused on sign-in. Errors thrown by the transport after the key
+  was chosen carry `resumable` (true: the key is kept; false: forgotten).
+- **A refused credit row can be identified by typing the paper's digits.** Such
+  a row (`ambiguous`, `conflicting_reads`, `suggested_*`) was rendered with the
+  read digits as the field's value. When the paper shows the same digits, typing
+  them changed nothing, the browser fired no `change`, and the row stayed
+  unidentified forever. Now the field is empty (placeholder "הקלד את הברקוד
+  מהנייר") and the read digits are a hint above it ("נקרא בצילום: …"). The read
+  digits are never accepted on their own.
+- **The credit's key survives a reload.** When the upload starts against a
+  service that can collect (`scanResume`), the credit gets
+  `resume: { scanKey, at }` (`onUpload` of `aiRequestSingleDocScan`). It is
+  written to the local draft only (`deliveryCreditLocalDraft` in
+  `persistReceiptDraft`); `deliveryCreditSnapshot`, the cloud draft and its
+  signature never contain it (another device signs in differently). It is
+  cleared when a job result is shown (success, paper error, stored failure) or
+  the transport forgets the key, and when the credit is removed or gets new
+  photos. After a reload an `interrupted` or `network` credit whose key is
+  younger than `AI_SCAN_RESUME_TTL_MS` shows "אסוף את הקריאה"
+  (`deliveryCreditCollectable`, `deliveryCreditRead(id, true)`): only
+  `{reviewProtocolVersion, scanKey, resume: true}` goes out
+  (`aiRequestSingleDocScan(..., { resumeKey })`), through the same queue and
+  warm-up, and the result continues to the normal review; the paper check uses
+  the page count saved in the draft. An expired key leaves only "צלם את הזיכוי
+  מחדש"; `resume_unknown` keeps the key (fourth review round below). There are
+  no photos, so there is never a full body.
+- **Manual-quantities mode keeps a credit field being typed.** An invoice
+  document that waited behind a credit and then started (and every later
+  progress update) called `refreshScanHost`, which rebuilt the whole manual
+  screen and wiped a credit number or barcode being typed. While such a field
+  has focus (`deliveryCreditEditingCard`, the same guard as
+  `deliveryCreditRefreshCards`) only `#rcPaperStatus`
+  (`receiptManualStatusHtml`), `#rcQuantityOptions` and `#rcPriceAudit` are
+  refreshed; the next refresh without that focus renders the screen as before.
+
+### Fixes from the fourth review round (same release)
+
+`resume_unknown` says only that the instance that answered has no record of the
+key. Cloud Run can run several instances, and a collection can land on another
+instance than the one holding the paid read. Two paths gave up after one such
+answer and lost a read that was still waiting (reproduced end to end with two
+real `createServer()` instances of the service and the real app module):
+
+- **An accepted upload keeps its key.** After a full body answered `2xx` and
+  then cut, a collection answered `resume_unknown` used to forget the key at
+  once. The one remaining automatic collection was never tried, and "נסה שוב"
+  sent the photos with a new key, so a read that the instance holding the job
+  would have answered for free was paid again. Now the remaining free automatic
+  collections are tried (`AI_SCAN_NETWORK_RETRIES`, the same back-off, the same
+  wait for the app to be visible). If they all get `resume_unknown`, the key is
+  kept in `aiScanCutKeys` with `accepted` and `lost`, and the error is
+  `resume_lost` with `resumable: true` and the message "הקריאה הקודמת לא נמצאה
+  בשרת. נסה שוב — הצילום יישלח שוב." A credit keeps its `resume` key
+  (`errorKind: 'network'`, main action "נסה שוב"). The worker's "נסה שוב" (or a
+  new start of the invoice scan) with the same photos collects once more and,
+  if that also gets `resume_unknown`, sends the photos once with the **same**
+  key. On the instance that holds the read the service returns the stored
+  success or joins the running read, with no model call. Anywhere else it is
+  one read, the same as a new key, that the worker chose. v147
+  (`invalid_document_count`) still forgets the key.
+- **"אסוף את הקריאה" after a reload keeps the key.** A collect-only read
+  (`resumeKey`) answered `resume_unknown` used to forget the key and clear
+  `c.resume`, leaving only a retake (a second paid read) although the paid read
+  could still be waiting on another instance. The key is the only link to it:
+  there are no photos. Now the remaining free automatic collections are tried,
+  and then the error is `resume_not_found` with `resumable: true`: the key stays
+  in memory and in the local draft, the card keeps "אסוף את הקריאה" as the main
+  action and "צלם את הזיכוי מחדש" as the second, until the key is older than
+  `AI_SCAN_RESUME_TTL_MS` (25 minutes, within the service's 30-minute job
+  retention). A collection costs nothing: it is checked before the rate
+  limiter and makes no model call.
+
+**Follow-up (not in this release): invoices after a reload.** An invoice
+document whose read was cut by a reload still asks for its photos again, and
+that new read is paid. The same local-draft key (`resumeKey`) could collect it;
+it needs its own restore state on the photo gate and was left out of v364.
+
+## Companion service v148 (yotvata-ai-scan)
+
+- Scan jobs can be resumed by `scanKey`: the job survives a dropped
+  connection, and `resume` collects it without another model call. A read that
+  failed is collected as its own error, not `resume_unknown`, so the app shows
+  it instead of paying for a second read on its own. The stored failure is kept
+  like a success, until the job expires or is evicted, and every collection of
+  that key returns it. (Dropping it after it was written to one collection
+  connection was wrong: after a screen lock that reply can be lost, the next
+  automatic collection got `resume_unknown` and the app sent the photos again —
+  a second paid read nobody chose.)
+- Headers and a first whitespace byte are flushed at once.
+- A malformed URL answers `400 invalid_url` instead of crashing.
+- `keepAliveTimeout` is 620 s.
+- `/health` reports `scanResume` and `creditDocuments`.
+- Credit mode (`documentKind: "credit"`) normalizes a real credit note to
+  negative amounts and checks its arithmetic by magnitude, with the same
+  arbitration read as invoices. An ordinary invoice is never flipped. v147
+  ignores `scanKey` and `documentKind`.
+
+## Release order
+
+Either order is safe:
+
+- **App v364 on a v147 service:** the app warms the connection, queues uploads
+  and makes one attempt. The key is remembered, so a manual "נסה שוב" costs one
+  free `400` and then one upload (when the cut upload had already been answered
+  `2xx`, that first "נסה שוב" shows "הקריאה הקודמת אבדה בשרת" and the next one
+  uploads). No credit key is kept for after a reload. Slips that print positive numbers are still
+  rejected as "not a credit" until v148 is live.
+- **v148 with an older app:** the older app sends no key or `documentKind` and
+  gets the v147 behaviour.
+
+Recommended order: deploy service v148 (confirm that `/health` shows
+`serviceVersion:148`, `scanResume:true` and `creditDocuments:true`), then
+release app v364 (`sw.js` `CACHE_NAME` is `yotvata-v364`, and the badge reads
+"v364 זיכוי מהנהג נקרא אוטומטית").
+
+## What was verified, and what was not
+
+- `node --test --test-reporter=tap tools/*.test.mjs tools/photo-first-test.mjs`
+  runs 371 tests; 369 pass. The two failures (the actual price gap "yes" action
+  and unresolved paper values in `receipt-review-fixes.test.mjs`) already fail
+  on the v363 main branch with the same assertions and are unrelated.
+- `tools/delivery-credit-auto-read.test.mjs` (27 tests) runs the complete app
+  module with simulated browser, fetch, timers, image preparation and Firebase.
+  It covers:
+  - one photo, one confirmation and exactly one paid upload, with no second
+    read from a repeated confirmation, a tap while reading, a reopen, a
+    re-render, a save, timers or a review-only view;
+  - two parts through "הפתק ארוך? צלם עוד חלק": zero uploads after part 1 and
+    one upload with both pages after part 2;
+  - a credit photographed during the background invoice read: it opens, waits
+    in the queue with the waiting text, never overlaps the invoice upload, and
+    leaves `aiScanRunId` unchanged;
+  - invoice pages locked during the read while credit pages open from the
+    queue and from the card;
+  - an invoice confirmation never reads a credit;
+  - a v147 "Load failed" shown in Hebrew, with the English only in the
+    technical line, and "נסה שוב" collecting (free 400) and then uploading
+    once with the same key;
+  - on v148, "נסה שוב" collecting the running read after the automatic
+    reconnects gave up, so the photo is paid for once;
+  - a paper error: retake is the main action, a failed preparation keeps the
+    old photo, and the new photo replaces it and is read;
+  - reload and cloud restore with zero uploads and only retake offered;
+  - deleting an extra photo, or sign-in not ready: no read, and "קרא את
+    הזיכוי" remains;
+  - the old "decode" step absent from every card state;
+  - the finished read not rebuilding the receiving screen;
+  - the review fixes: looking at a failed credit's photo never pays again
+    (a rotated one is read), Hebrew main line for Firebase and OpenAI errors,
+    a credit queued behind another credit, a failed extra part, and a moved
+    crop followed by "צלם עוד חלק" opening the camera within the second tap;
+  - the second review round: the crop instruction shown inside the window
+    (hint and button, cleared by a rotation or the next part), the crop-mode
+    button on a confirmed photo promising a read only after the frame moved
+    (and not after a failed crop), a failed retake after a reload showing its
+    own error, and a credit number or barcode being typed in one card surviving
+    another credit's read finishing;
+  - the third review round: a reload during a read (and after a network
+    failure) offering "אסוף את הקריאה", which sends only the key through the
+    same warm-up and reaches the review with one paid read in total; the key in
+    the local draft and never in the cloud draft; an expired key, a cloud
+    restore and a v147 service leaving only "צלם את הזיכוי מחדש", with no full
+    body; a collection whose automatic collections all land on an instance
+    without the job (`resume_unknown`) keeping the key and "אסוף את הקריאה"
+    (retake second) until the key expires, and the next collection reaching the
+    instance with the job and the review with one paid read and no full body;
+    and, in manual-quantities mode, an
+    invoice read that waited behind a credit updating only the status areas
+    (no full render) while a credit number or barcode is being typed.
+- `tools/scan-transport.test.mjs` also covers the review fixes: a collection
+  after a ten-minute lock and a credit queued behind a long invoice read both
+  go out with a token taken after the wait (Firebase cache and service expiry
+  modelled); a collection refused on sign-in keeps the key and "נסה שוב"
+  collects without paying again; a refused (`ambiguous` /
+  `suggested_name_multiple`) credit row never picks a product; a cancelled
+  receipt and a removed credit abort their uploads and release the queue; a
+  stored failure whose collection reply was lost is collected again (no second
+  full body), is shown, drops the key, and "נסה שוב" then sends one full body
+  with a new key; a collection without a job result (rate limit, missing key,
+  another key) keeps the key; a failed credit warm-up keeps `scanResume` for
+  the invoice document queued behind it, while a successful v147 answer still
+  turns it off. Each of these tests fails when its fix alone is taken out.
+  Third and fourth review rounds (7 tests): a full body answered `200` whose
+  body read then failed sends no second full body on its own. Collected as
+  `invalid_document_count` (v147) it shows the Hebrew "lost" message with
+  "נסה שוב" as the main action, and that "נסה שוב" sends one full body with a
+  new key. Collected as `resume_unknown` (v148) it uses every automatic
+  collection, keeps the key (`lost`, the credit's `resume` too) with "נסה שוב"
+  as the main action, and that "נסה שוב" collects once and then sends the
+  photos with the same key. Two scripted instances, each with its own job
+  store: the upload on A, every automatic collection on B, and the worker's
+  "נסה שוב" (credit) or new scan start (invoice) reaching A pays for one read in
+  total; an upload that never got a `2xx` still re-sends once with the same
+  key; the same for an invoice document; a collection refused on sign-in says
+  "נסה שוב" (credit card, `network`, and invoice banner) while a refused full
+  upload still says "רענן"; and a refused credit row renders an empty field
+  with the read digits as a hint, so typing the paper's digits (with browser
+  `change` semantics) identifies the row and the credit can be attached.
+- `tools/delivery-credit.test.mjs` was updated to the new contract. Its
+  money, identity and invoice-state assertions are unchanged. It also covers a
+  credit with a separate document discount: the specific message, "הסר את
+  הזיכוי" as the only action (also after a reload), one upload, and the
+  amount-only "התקבל זיכוי מהספק" on the saved receipt closing the shortage; a
+  discount that does not close, or a read that also contradicts the units,
+  still asks for a retake.
+- The new tests were checked by breaking the code on purpose. Each of 21
+  deliberate regressions (for example no automatic read, a read from render or
+  cancel, an invoice unlocked during its read, a retake that appends, a retake
+  replaced before preparation, a retry offered without photos, English in the
+  main text, a full-screen render when the read finishes) made at least one
+  test fail. The third review round was checked the same way: each of 13
+  deliberate regressions (the automatic full re-send after an accepted upload,
+  no `accepted` mark, a prefilled refused row, "רענן" or `service` for a
+  refused collection, no key stored, the key not persisted, no age limit, a full
+  body in collect-only mode, the key sent to the cloud draft, no collect button,
+  a lost key kept, no focus guard in manual mode) made at least one new test
+  fail. The fourth review round too: forgetting a collect-only key on
+  `resume_unknown`, forgetting an accepted key on `resume_unknown`, and keeping
+  it without the same-key re-send each made at least one of its tests fail.
+- Service: `npm test` in `yotvata-ai-scan` passed 70 of 70 at the time of
+  writing, with mocked model responses and fixture tokens. The fourth review
+  round was also checked end to end (outside the suite) with the real app module
+  and two real `createServer()` instances (only the model and Google's keys
+  faked): an accepted upload collected on the other instance, and "אסוף את
+  הקריאה" after a reload, each end with one paid read.
+- **Not verified:**
+  - no native iPhone or WebKit test;
+  - no deployed Cloud Run service;
+  - no paid model call.
+
+  In particular, these still need a real device:
+  - that the camera opens from the second tap of "הפתק ארוך? צלם עוד חלק"
+    after a manual crop (the tests model the tap, not WebKit);
+  - that the `/health` warm-up really prevents "Load failed" on a stale
+    connection;
+  - that "אסוף את הקריאה" after a real reload (iOS may also evict the page in
+    the background) collects the read from the Cloud Run instance that ran it.
+
+  Acceptance on a phone: while an invoice is being read, photograph a one-slip
+  credit, confirm it once, keep scanning products, and check that the credit
+  turns into a review card without pressing anything else.
+
+Synthetic test documents only. No customer receipt, image, credential or live
+data was used or changed.

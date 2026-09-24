@@ -10,8 +10,12 @@ when its OCR price was wrong.
 - “הנהג הביא זיכוי על חוסר? צלם כאן” is available during ordinary receiving,
   including the invoice capture screen and manual entry.
 - Camera and gallery use the existing full-image, rotation and explicit-crop
-  controls. Prepare all pages, then press “פענח את הזיכוי”. Each explicit read
-  makes one request; it does not reread the invoices.
+  controls. Since v364 there is no separate read button: confirming the last
+  photo of a credit (“אשר וקרא את הזיכוי”) starts its read. A long slip in
+  several parts uses “הפתק ארוך? צלם עוד חלק”, which confirms without reading
+  and opens the camera; the read starts when the last part is confirmed. Each
+  read makes one paid request for that credit only; it never rereads the
+  invoices.
 - Review the credit number, product, quantity and amount excluding VAT, then
   confirm that the credit belongs to the current delivery. Up to four credits,
   each with up to four pages, can be attached.
@@ -41,6 +45,105 @@ test authentication, returned the negative credit without checksum/barcode
 retries. No backend change or paid model call was needed for this update.
 The protocol does not return a reference invoice number for credit notes, so
 the user explicitly confirms ownership by the current delivery.
+
+### v364: credit read transport and paper acceptance
+
+- A credit read warms the connection (`GET /health`) right before its upload and
+  waits its turn behind an invoice document that is being read (one paid upload
+  at a time). While queued the card object has `waiting: true` and `waitingFor`
+  (`'invoice'`, `'credit'` or `null`), so the card names what it really waits
+  for; reconnect text is in `progress` (never the invoice banner). Failures set
+  `errorKind` (`network` | `service` | `paper` | `photo` | `part` | `discount`), a Hebrew
+  `error` and a technical `errorDetail`. The main `error` is always Hebrew: an
+  English Firebase or OpenAI message goes only to `errorDetail`. See
+  `tools/PHOTO-FIRST.md` (v364) for resume-by-key.
+- Rows accept EAN-8 as well as EAN-13 with the invoice path's check-digit and
+  single-product rules. A row the service refused to resolve (`barcode: null`
+  with `ambiguous`, `conflicting_reads` or a `suggested_*` method — for example
+  the last 8 digits of an EAN-13 that are also another product's EAN-8) shows
+  the digits it read as a hint above an empty barcode field (“נקרא בצילום: …”)
+  and never picks a product by itself; the worker types the barcode from the
+  paper. The field is empty on purpose: with the read digits as its value, a
+  worker typing the same digits changed nothing, the browser fired no `change`,
+  and the row could never be identified. VAT and total are compared by magnitude, because slips
+  often print them without a minus sign; the subtotal and every row must still
+  be negative.
+- Credit pages use an area budget (≈2.57MP, long side ≤ 4096) instead of the
+  1850px long-side cap, so a long 1:5 thermal slip keeps about 715×3580 pixels.
+  The budget is stored on the page and kept by manual crop and restore. Invoice
+  pages are unchanged. The gain needs the slip isolated by the automatic or a
+  manual crop; an uncropped 4:3 frame gets the same pixels as before.
+- A cloud draft that arrives during a credit read is deferred to the existing
+  conflict notice instead of discarding the paid result.
+- A credit that prints a separate discount on the whole document (rows −60 and
+  −40, discount 5, subtotal −95) is not supported: coverage matches row totals
+  to the shortage, and the discount belongs to no product. Service v148 accepts
+  such a paper, so a retake would only pay for the same answer again. When the
+  rows close to the subtotal exactly through the discount (in agorot, by
+  magnitude) and every other check passes, the card gets `errorKind:
+  'discount'`: the message says a new photo will not help, and the only action
+  is “הסר את הזיכוי” (no retake, no read of the same photo, no extra photo, and
+  the photo is not shown for rotating). The worker then finishes the receipt
+  and records the credit on the saved receipt with the legacy amount-only entry
+  (“תעודות” → the receipt → “התקבל זיכוי מהספק”, amount before VAT). A discount
+  that does not close exactly, or a read that also contradicts units, lines or
+  VAT, is still a `paper` error with a retake.
+
+### v364: automatic read and one clear action per state
+
+The read starts automatically in exactly one place: confirming, in the photo
+check window, the photo that leaves no unchecked photo in that credit
+(`aiConfirmOrientationReview` → `deliveryCreditAutoRead`). Rendering, saving,
+draft restore, cloud sync, deleting or cancelling a photo, confirming an
+invoice page and a review-only look at a photo never start a read. Tapping the
+photo of a credit that was already confirmed (for example after a failed read)
+and confirming it unchanged only closes the window; a rotated, restored or
+cropped photo is read again (in crop mode the button promises a read only after
+the frame really moved). A read in
+progress cannot be started again: its card has no action buttons, its photos
+cannot be reopened, and `deliveryCreditRead` refuses a busy credit.
+
+- A credit photographed while the invoice is read in the background opens for
+  checking at once. Invoice pages stay locked during their read, as before. The
+  confirmed credit waits in the one-paid-upload queue; its card says “ממתין
+  לסיום קריאת החשבונית — הזיכוי ייקרא מיד אחריה. אפשר להמשיך לסרוק מוצרים.”
+  (behind another credit: “ממתין לסיום קריאת זיכוי אחר…”; behind both kinds:
+  “ממתין לסיום קריאה קודמת…”). A removed credit or a cancelled receipt stops its
+  upload, so nothing waits for a read whose result would be thrown away.
+- The card offers one main action per state: “צלם את תעודת הזיכוי” (no photo),
+  “בדוק ואשר את הצילום” (a photo not yet checked), “קרא את הזיכוי” (all photos
+  checked but no read started, for example when sign-in was not ready or an
+  extra photo was deleted), “נסה שוב” after a network or service failure (same
+  photos, same key: on service v148 this collects the read that is already
+  running instead of paying again), and “צלם את הזיכוי מחדש” after a paper
+  problem (unreadable, sums do not match, not a credit). The alternative is a
+  small secondary button. Photos that exist also get “הזיכוי ארוך? הוסף עוד
+  צילום”.
+- “צלם את הזיכוי מחדש” opens a separate camera input (`creditRetake_<id>`,
+  `data-replace="1"`). Its photo replaces the credit's photos only after it was
+  prepared successfully; a failed preparation keeps the old photos. When an
+  extra part of a long slip cannot be prepared (`errorKind: 'part'`), the
+  confirmed parts stay and the main action is “צלם שוב את החלק הבא”.
+- “הפתק ארוך? צלם עוד חלק” after moving the crop frame first saves the crop and
+  keeps the window open; the next tap opens the camera (iOS opens it only
+  within a tap, and the crop decodes the photo after the tap is over). The
+  window's hint says so and the button reads “פתח מצלמה לחלק הבא” (a toast would
+  be hidden under the full-screen window).
+- After a reload or a cloud restore the photos are not in memory, so a credit
+  that was being read or had failed never offers a retry with photos. When the
+  read went out to a service that can collect (`scanResume`), the local draft
+  (never the cloud draft) keeps its key (`resume: { scanKey, at }`): for 25
+  minutes a credit whose read was cut by the reload or by the network offers
+  “אסוף את הקריאה”, which sends only the key (no photos, nothing paid) and
+  continues to the normal review. A collection that finds no job
+  (`resume_unknown`) may have reached another instance of the service than the
+  one holding the paid read: the free automatic collections are tried, and then
+  the key is kept, so “אסוף את הקריאה” stays (with “צלם את הזיכוי מחדש” as the
+  second action) until the key expires. An expired key, a cloud restore or a
+  v147 service leave only “צלם את הזיכוי מחדש”.
+- Messages are simple Hebrew. The browser's own text (for example “Load
+  failed”) or an HTTP status appears only as a small grey left-to-right line.
+- Details, field report and verification: `tools/CREDIT-AUTO-READ-V364.md`.
 
 ## Correcting an OCR row
 
