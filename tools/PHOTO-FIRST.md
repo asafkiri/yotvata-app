@@ -105,6 +105,31 @@ focus; only the status, quantity-button and price areas are refreshed. See
 `tools/DELIVERY-CREDITS-AND-PAPER-CORRECTIONS.md` and
 `tools/CREDIT-AUTO-READ-V364.md`; tests: `tools/delivery-credit-auto-read.test.mjs`.
 
+### v366 — the driver credit is photographed on the gate
+
+The photo gate always renders the credit section (`deliveryCreditsHtml({ gate:
+true })`), also for a no-document receipt that came back to its photos; a
+credit photographed there clears `receiptNoDoc` (the receipt has paper) — when
+the photo is actually added (`deliveryCreditAddFiles`), not on the tap of the
+green button: a cancelled camera leaves an empty card and the flag, and the
+no-document receipt still finishes "לפי ספירה" — is read at once, its card refreshes in place on the gate (worded for the gate:
+"… אפשר להמשיך לצלם את התעודות וללחוץ "התחל קליטת מוצרים"."), and "התחל קליטת
+מוצרים" keeps it while the invoice uploads queue behind its read ("ממתין
+לסיום קריאת הזיכוי…"). `yotvataPhotoReady()` ignores credits. "אין תעודה
+בכלל" asks before dropping gate credits ("המשך בלי זיכוי"), then drops them
+with a toast. The gate says under its intro: "תעודת זיכוי מהנהג מצלמים בכפתור
+הירוק — היא נקראת לבד." — not in attach mode, where the gate has no credit
+button. A credit on a receipt without paper (drafts from before this change)
+is still shown on the receiving screen, and the finish stops with an
+explanation until it is removed or the anchors are typed. The anchors screen
+("הקלדת סכום ויחידות ידנית", before "התחל קליטה") renders the credit section
+as well, so a gate credit does not vanish there and a read that ends there
+refreshes its card in place. "התעודה הגיעה — הזן את נתוניה" on an old open
+receipt refuses while a credit with a photo or an invoice page is on the gate
+("צילמת תעודה או זיכוי לקליטה חדשה — סיים אותה, או הסר את הצילומים, לפני
+צירוף תעודה") instead of wiping them and aborting a paid read. See
+`tools/CREDIT-AUTO-READ-V364.md` (v366); tests: `tools/credit-on-gate.test.mjs`.
+
 ## Validation
 
 `node --test tools/photo-first-test.mjs`
