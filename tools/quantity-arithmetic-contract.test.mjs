@@ -171,3 +171,37 @@ test('against the real service, a quantity the arithmetic does not prove still r
   assert.match(html, /data-role="price-confirm-values"/);
   assert.match(html, /data-role="paper-row-edit"/);
 });
+
+test('against the real service, a row only one read parsed is explained as a single read — never as reads that did not agree', { skip }, async () => {
+  // The v365 field scenario: cheap read 0 fails on the network, cheap read 1 balances and is selected, the
+  // verifier times out. The service's real answer for every row: one reading, no field supported by
+  // another read, every financial field and the identity in issues — a shape the imitated fixture
+  // (readings spliced, fieldSupport kept) never produces.
+  const { output, calls } = await service([new Error('network failure'), answer(modelDoc(readRows('selected'))), new Error('verifier timeout')]);
+  assert.equal(calls.length, 3, 'the failed cheap read still escalates to the verifier');
+  assert.equal(output.ok, true, JSON.stringify(output).slice(0, 300));
+  assert.equal(output.scan.verification.verifier.outcome, 'failed');
+  assert.equal(output.paperValidation[0].ok, true, 'the selected read balances');
+  const proof = output.scan.documents[0].rows[0].modelVerification;
+  assert.equal(proof.readings.length, 1);
+  assert.deepEqual(Object.values(proof.fieldSupport), [[], [], [], [], []]);
+  assert.deepEqual(proof.issues, ['quantity', 'unitPriceExVat', 'grossLineTotalExVat', 'lineDiscountExVat', 'lineTotalExVat', 'identity']);
+  const c = await scanInApp(structuredClone(output));
+  // The worker confirms the product first (the identity card); then the financial card renders.
+  const candidate = json(c, 'receiptPriceAudit().rows[0].identityConfirmation');
+  assert.ok(candidate && candidate.productId, 'an identity candidate is offered');
+  await c.click('price-confirm-identity', '', { doc: '0', row: '0', candidateId: candidate.productId, candidateBarcode: candidate.barcode,
+    reviewToken: c.run('priceAuditIdentityReviewToken(aiSourceRow(0,0), ' + JSON.stringify(candidate) + ')') });
+  assert.deepEqual(json(c, 'receiptPriceAudit().rows[0].modelReviewIssues'), ['quantity', 'unitPriceExVat', 'grossLineTotalExVat', 'lineDiscountExVat', 'lineTotalExVat']);
+  const html = c.run('receiptPriceAuditHtml()');
+  const block = (html.match(/<div class="mt-2 text-sm text-slate-700" data-row-dispute>[\s\S]*?<\/div>/) || [''])[0];
+  assert.match(block, /<p>רק קריאה אחת קראה את השורה הזאת \(הקריאה השלישית, המודל החזק, נכשלה\), ולכן אין קריאה נוספת שמאשרת את הכמות, מחיר היחידה, הסכום לפני הנחה, ההנחה ואת הסכום\.<\/p>/);
+  // One read cannot have "reads that did not agree", and the list after "מאשרת את" is joined with "ואת".
+  assert.doesNotMatch(html, /לא מוסכם בין הקריאות|לא הסכימו|באף אחת מהקריאות/);
+  assert.doesNotMatch(block, /ועל /);
+  assert.doesNotMatch(block, /החשבון לא מכריע/, 'the paper balances and 13 × 5.00 = 65.00: no paper or arithmetic reason is left');
+  assert.match(block, /<p class="mt-1 text-\[11px\] text-slate-400" dir="ltr">network_error<\/p>/);
+  assert.match(html, /data-role="price-confirm-values"/);
+  assert.match(html, /data-role="paper-row-edit"/);
+  assert.deepEqual([c.run('aiSourceRow(0,0).mapped.quantity'), c.run('aiSourceRow(0,0).mapped.unitPriceExVat')], [13, 5], 'the OCR values are as read');
+});

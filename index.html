@@ -12031,7 +12031,9 @@ function priceAuditRowDisputeHtml(documentIndex, rowIndex, issues) {
   if (!source || !fields.length) return '';
   const row = source.mapped, readings = priceAuditRowReadings(row), lone = readings.length === 1;
   const names = fields.map(f => PAPER_ROW_FIELD_NAMES[f]);
-  const list = names.length <= 1 ? names.join('') : names.slice(0, -1).join(', ') + ' ועל ' + names[names.length - 1];
+  // v367: אותה רשימה בשני ניסוחים — "הסכימו על X ועל Y" ו"מאשרת את X ואת Y".
+  const listOf = conj => names.length <= 1 ? names.join('') : names.slice(0, -1).join(', ') + conj + names[names.length - 1];
+  const list = listOf(' ועל ');
   const label = r => 'קריאה ' + (r.read + 1) + (r.strong === true || r.read >= 2 ? ' (המודל החזק)' : '');
   const show = (f, v) => v == null ? 'לא נקרא' : typeof v === 'number' && Number.isFinite(v) ? (f === 'quantity' ? String(v) : f === 'unitPriceExVat' ? fmtUnitPrice(v, true) : fmtMoney(v)) : htmlEscape(String(v));
   const perRead = f => readings.map(r => htmlEscape(label(r)) + ' – ' + show(f, r.values[f])).join(' · ');
@@ -12042,7 +12044,7 @@ function priceAuditRowDisputeHtml(documentIndex, rowIndex, issues) {
   const tail = failed ? ' הקריאה השלישית (המודל החזק) נכשלה, לכן נשארו שתי קריאות שלא הסכימו.'
     : disagreed ? ' גם הקריאה השלישית (המודל החזק) קראה את הנייר, ועדיין אין שתי קריאות שמסכימות.' : '';
   let what;
-  if (lone) what = '<p>רק קריאה אחת קראה את השורה הזאת' + (failed ? ' (הקריאה השלישית, המודל החזק, נכשלה)' : '') + ', ולכן אין קריאה נוספת שמאשרת את ' + htmlEscape(list) + '.</p>';
+  if (lone) what = '<p>רק קריאה אחת קראה את השורה הזאת' + (failed ? ' (הקריאה השלישית, המודל החזק, נכשלה)' : '') + ', ולכן אין קריאה נוספת שמאשרת את ' + htmlEscape(listOf(' ואת ')) + '.</p>';
   else if (!readings.length) what = '<p>הקריאות לא הסכימו על ' + htmlEscape(list) + '.' + tail + '</p>';
   else if (fields.length === 1) what = '<p data-row-dispute-field="' + htmlEscape(fields[0]) + '">הקריאות לא הסכימו על ' + htmlEscape(list) + ': ' + perRead(fields[0]) + '.' + tail + '</p>';
   else what = '<p>הקריאות לא הסכימו על ' + htmlEscape(list) + '.' + tail + '</p>' + fields.map(line).join('');
@@ -12051,8 +12053,9 @@ function priceAuditRowDisputeHtml(documentIndex, rowIndex, issues) {
   const proof = priceAuditQuantityArithmetic(row, check.ok && Number.isInteger(check.units) && check.units > 0);
   const why = { paper: 'התעודה לא מתאזנת מול הסיכום המודפס', unit: 'מחיר היחידה לא מוסכם בין הקריאות', net: 'סכום השורה לא מוסכם בין הקריאות',
     gross: 'הסכום לפני הנחה לא מוסכם בין הקריאות', values: 'הכמות או מחיר היחידה לא נקראו כמספר תקין',
-    arithmetic: 'מחיר היחידה × הכמות לא יוצא סכום השורה ' + (readings.some(r => priceAuditRowArithmeticHolds(r.values)) ? 'בקריאה שנבחרה' : 'באף אחת מהקריאות') };
-  const reasons = proof.reasons.filter(code => why[code]).map(code => why[code]);
+    arithmetic: 'מחיר היחידה × הכמות לא יוצא סכום השורה ' + (lone ? 'בקריאה היחידה' : readings.some(r => priceAuditRowArithmeticHolds(r.values)) ? 'בקריאה שנבחרה' : 'באף אחת מהקריאות') };
+  // v367: בקריאה יחידה אין "קריאות" שלא הסכימו — המשפט למעלה כבר הסביר שאין קריאה תומכת לשדות; נשארות רק סיבות של הנייר והחשבון.
+  const reasons = proof.reasons.filter(code => why[code] && !(lone && ['unit', 'net', 'gross'].includes(code))).map(code => why[code]);
   return '<div class="mt-2 text-sm text-slate-700" data-row-dispute>' + what +
     (reasons.length ? '<p class="mt-1">החשבון לא מכריע: ' + htmlEscape(reasons.join(' · ')) + '.</p>' : '') +
     // הסיבה הטכנית לכישלון — שורה קטנה משמאל לימין, כמו בפאנל הסיכום.

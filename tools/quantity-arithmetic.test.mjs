@@ -164,10 +164,12 @@ test('when the verifier failed the card says so, with two readings and the techn
   // The verifier record lives with the document's metadata, so a reload explains the same.
   const reloaded = runtime('yotvata', { data, storage: c.storage });
   assert.match(html(reloaded), /הקריאה השלישית \(המודל החזק\) נכשלה/);
-  // A lone reading: no dispute is claimed.
-  c.run(`${row(c, 5)}.modelVerification.readings.splice(1);renderReceiving()`);
+  // A lone reading (the service's real shape: no field supported by another read): no dispute is claimed,
+  // neither by the sentence nor by the reasons — only the arithmetic of the single read is left.
+  c.run(`${row(c, 5)}.modelVerification.readings.splice(1);for (const f in ${row(c, 5)}.modelVerification.fieldSupport) ${row(c, 5)}.modelVerification.fieldSupport[f] = [];renderReceiving()`);
   assert.match(html(c), /<p>רק קריאה אחת קראה את השורה הזאת \(הקריאה השלישית, המודל החזק, נכשלה\), ולכן אין קריאה נוספת שמאשרת את הכמות\.<\/p>/);
-  assert.doesNotMatch(html(c), /לא הסכימו/);
+  assert.match(html(c), /<p class="mt-1">החשבון לא מכריע: מחיר היחידה × הכמות לא יוצא סכום השורה בקריאה היחידה\.<\/p>/);
+  assert.doesNotMatch(html(c), /לא הסכימו|לא מוסכם|באף אחת מהקריאות/);
   // Without readings at all (service v148) the sentence is generic but names the field.
   c.run(`delete ${row(c, 5)}.modelVerification.readings;renderReceiving()`);
   assert.match(html(c), /<p>הקריאות לא הסכימו על הכמות\. הקריאה השלישית \(המודל החזק\) נכשלה, לכן נשארו שתי קריאות שלא הסכימו\.<\/p>/);
