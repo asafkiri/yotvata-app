@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v365 זיכוי מאומת מצורף לבד</title>
+    <title>הזמנות יטבתה - v366 זיכוי מצלמים כבר במסך הצילום</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v365 זיכוי מאומת מצורף לבד</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v366 זיכוי מצלמים כבר במסך הצילום</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -1155,6 +1155,10 @@ function yotvataResetPhotoReceipt() {
   receiptEntryMode = 'photo'; receiptAnchorSource = null;
   receiptPaperScanState = ''; receiptPaperScanProblems = [];
   receiptPhotoCaptureOpen = false; receiptScanHistory = []; receiptManualInput = null;
+  // v366: "אין תעודה בכלל" (receiptNoDoc) שייך לקליטה שאופסה עכשיו, לא לבאה אחריה.
+  // כל מי שקורא לכאן (סיום, ביטול, צירוף נייר וביטולו) מאפס את הדגל גם בעצמו —
+  // האיפוס כאן מבטיח שקליטה חדשה תמיד מתחילה עם מסך צילום שלם, כולל כפתור הזיכוי.
+  receiptNoDoc = false;
 }
 function refreshScanHost() {
   refreshPriceScannerNotice();
@@ -1215,10 +1219,14 @@ function yotvataPhotoGateHtml() {
     '<h2 class="text-xl font-black text-slate-800 mt-1">מצלמים ומתחילים לקלוט</h2>' +
     '<p class="text-sm text-slate-600 mt-2">צלם את כל עמודי התעודה, כולל הסיכום ושורת החתימה בעמוד האחרון. הפענוח ירוץ בזמן שתסרוק מוצרים.</p>' +
     '<p class="text-xs font-bold text-slate-500 mt-2">עמודים של אותה תעודה נשארים יחד. תעודה נוספת מהנהג מוסיפים בנפרד.</p>' +
+    // v366: הזיכוי מצולם כאן, יחד עם התעודות — לא רק אחרי "התחל קליטת מוצרים".
+    // בצירוף נייר לקליטה שנשמרה אין כפתור זיכוי במסך הצילום — ולכן גם לא ההסבר עליו.
+    (deliveryCreditsAllowed(true) ? '<p class="text-xs font-bold text-slate-500 mt-1">תעודת זיכוי מהנהג מצלמים בכפתור הירוק — היא נקראת לבד.</p>' : '') +
     (aiScanError ? '<div class="bg-amber-50 text-amber-800 rounded-xl p-3 mt-2 text-sm">' + htmlEscape(aiScanError) + '</div>' : '') +
     (aiScanBusy ? '<div class="p-4 font-black text-blue-700">מכין את הצילום…</div>' : cards) +
     (!aiScanBusy && aiScanDocuments.length < 4 ? '<button data-role="rc-photo-add-doc" class="btn-tap w-full py-3 mt-2 border border-slate-300 rounded-xl text-slate-700 font-bold">+ תעודה נוספת מהנהג / הספק</button>' : '') +
-    deliveryCreditsHtml() +
+    // v366: במסך הצילום כפתור הזיכוי מוצג תמיד (גם אחרי "אין תעודה בכלל") — מי שמצלם נייר, לקליטה שלו יהיה נייר.
+    deliveryCreditsHtml({ gate: true }) +
     '<button data-role="rc-photo-start" ' + (ready ? '' : 'disabled') + ' class="btn-tap w-full py-4 mt-4 rounded-2xl font-black text-lg ' + (ready ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-400') + '">התחל קליטת מוצרים</button>' +
     '<button data-role="rc-photo-quantity" ' + (ready ? '' : 'disabled') + ' class="btn-tap w-full py-3 mt-2 bg-white border-2 border-emerald-300 text-emerald-800 rounded-xl font-black text-base">פענח תעודה — הכמויות נבדקות ידנית</button>' +
     '<button data-role="rc-photo-manual" ' + (aiScanBusy ? 'disabled' : '') + ' class="btn-tap w-full py-3 text-sm font-bold text-slate-500">הקלדת סכום ויחידות ידנית</button>' + receivingNoDocGateHtml() + '</div>';
@@ -1713,12 +1721,14 @@ function deliveryCreditPhotosLost(c) {
 function deliveryCreditNoticeHtml(c) {
   const spin = '<i class="fa-solid fa-circle-notch fa-spin"></i> ';
   if (c.status === 'preparing') return '<p role="status" class="mt-3 text-blue-700 font-bold">' + spin + 'מכין את הצילום…</p>';
+  // v366: במסך הצילום עוד אין סורק מוצרים — שם ממשיכים לצלם תעודות ולוחצים "התחל קליטת מוצרים".
+  const goOn = receivingPhotoGateShown() ? ' אפשר להמשיך לצלם את התעודות וללחוץ "התחל קליטת מוצרים".' : ' אפשר להמשיך לסרוק מוצרים.';
   if (c.status === 'reading') return '<p role="status" class="mt-3 text-blue-700 font-bold">' + spin +
     // v364: ההמתנה נקראת בשם של מה שבאמת רץ לפניו — החשבונית, זיכוי אחר, או סתם קריאה קודמת.
-    (!c.waiting ? 'קורא את הזיכוי… אפשר להמשיך לסרוק מוצרים.'
+    (!c.waiting ? 'קורא את הזיכוי…'
       : (c.waitingFor === 'invoice' ? 'ממתין לסיום קריאת החשבונית — הזיכוי ייקרא מיד אחריה.'
         : c.waitingFor === 'credit' ? 'ממתין לסיום קריאת זיכוי אחר — הזיכוי ייקרא מיד אחריו.'
-        : 'ממתין לסיום קריאה קודמת — הזיכוי ייקרא מיד אחריה.') + ' אפשר להמשיך לסרוק מוצרים.') + '</p>' +
+        : 'ממתין לסיום קריאה קודמת — הזיכוי ייקרא מיד אחריה.')) + goOn + '</p>' +
     (c.progress ? '<p class="mt-1 text-sm font-bold text-blue-700">' + htmlEscape(c.progress) + '</p>' : '');
   if (c.paper) return '';
   // v364: זיכוי עם הנחה כללית — ההסבר נשאר גם אחרי רענון (הצילום ממילא לא נחוץ יותר).
@@ -1766,8 +1776,13 @@ function deliveryCreditCaptureHtml(c) {
 function deliveryCreditAction(role, id, page, row) {
   if (receiptFinalizing) return;
   if (role === 'delivery-credit-add') {
-    if (receiptDeliveryCredits.length >= 4) return;
+    if (receiptDeliveryCredits.length >= 4 || !deliveryCreditsAllowed()) return; // v366: הכפתור ממילא לא מוצג כשאסור — שמירה כפולה
     const c = { id: makeOperationId('delivery_credit'), pages: [], status: 'capture', pageCount: 0 };
+    // v366: זיכוי מהנהג שייך לקליטה עם תעודה. מי שמצלם זיכוי במסך הצילום של קליטה שנפתחה
+    // ב"אין תעודה בכלל" (וחזרה לצילום) אומר בזה שיש נייר — הדגל יורד כאן, ולא רק ב"התחל":
+    // כך הכרטיס נראה גם אחרי "הקלדת סכום ויחידות ידנית" ואחרי רענון, והסיום דורש סכום
+    // תעודה במקום לשמור "בלי תעודה" עם זיכוי סמוי (או לפתוח מסך התאמה מול תעודה ₪0).
+    receiptNoDoc = false;
     receiptDeliveryCredits.push(c); saveReceiptDraft(); renderReceiving(); $('creditCam_' + c.id).click(); return;
   }
   const c = deliveryCreditFind(id); if (!c) return;
@@ -1834,10 +1849,52 @@ function deliveryCreditCardHtml(c) {
       '<p class="mt-1 text-sm">בדוק מול הנייר ואשר את הצירוף למשלוח.</p><button data-role="delivery-credit-confirm" data-id="' + c.id + '" class="btn-tap w-full bg-emerald-600 text-white rounded-xl py-3 mt-2 font-black">כן, צרף זיכוי של ₪' + fmtMoney(Math.abs(c.paper.subtotalExVat)) + ' למשלוח</button>') :
       (!busy ? deliveryCreditCaptureHtml(c) : '')) + (confirmed ? '</div></details>' : '</article>');
 }
-function deliveryCreditsHtml() {
-  if (receiptNoDoc || receiptAttachTarget) return '';
+// ===== v366: זיכוי מצלמים כבר במסך הצילום =====
+// דיווח מהשטח (אייפון, v365): במסך "שלב 1 · צילום תעודה" לא היה איפה לצלם את פתק
+// הזיכוי מהנהג — קודם מצלמים את התעודות, לוחצים "התחל קליטת מוצרים", ורק במסך
+// הקליטה מופיע הכפתור הירוק. הסיבה: אחרי "אין תעודה בכלל" (receiptNoDoc) חלק
+// הזיכויים נעלם מכל מסך — גם ממסך הצילום שאליו חוזרים ב"חזרה לצילום התעודה / גלריה"
+// (וגם אחרי רענון, כי הטיוטה שומרת את הדגל). מסך הצילום שהעובד ראה היה בדיוק זה:
+// עם "אין תעודה בכלל", בלי כפתור זיכוי.
+// הכלל מעכשיו:
+// • מסך הקליטה של קליטה בלי תעודה — בלי כפתור צילום זיכוי (אין נייר → אין חוסר לטעון עליו).
+//   "בלי תעודה" בפועל = הדגל דולק ועדיין לא הוקלד שום עוגן — בדיוק כמו savingNoDoc
+//   בסיום ו-noteBar במסך: מרגע ש"הנייר הגיע" והוקלד סכום, יש מול מה לטעון חוסר,
+//   והכפתור חוזר. זיכוי שכבר צורף מוצג תמיד (להסרה/תיקון), והסיום עוצר עם הסבר עד
+//   שיוסר או שיוקלדו נתוני התעודה (finishReceipt) — מצב שמגיע רק מטיוטה ישנה (ראה למטה).
+// • מסך הצילום — תמיד עם כפתור הזיכוי: מי שמצלם נייר, לקליטה שלו יהיה נייר — ולכן
+//   צילום זיכוי מכבה את הדגל מיד (delivery-credit-add), לא רק "התחל קליטת מוצרים"
+//   (yotvataStartPaperScan). כך "הקלדת סכום ויחידות ידנית" אחרי זיכוי היא קליטה רגילה
+//   עם נייר: עוגנים חובה, והכרטיס נראה גם אחרי רענון. "אין תעודה בכלל" אחרי זיכוי
+//   שצולם כאן שואל קודם, ואז מוריד את הזיכויים (ראה rc-open-nodoc).
+// • צירוף נייר לקליטה שנשמרה (receiptAttachTarget) — בלי זיכויים בכל מסך (כמו קודם;
+//   פתיחה לצירוף היא המשך אפשרי, לא חלק מהגרסה הזאת).
+// הזיכוי שצולם במסך הצילום נקרא מיד (התור ריק), הכרטיס שלו מתעדכן שם דרך
+// deliveryCreditRefreshCards (שמוצא את #rcDeliveryCredits בתוך המסך הנוכחי), ואחרי
+// "התחל" קריאת התעודות ממתינה לו בתור הרגיל (aiScanWithUploadLock) — הזיכוי עצמו
+// שורד את המעבר: yotvataStartPaperScan ו-renderReceiving אינם נוגעים ב-receiptDeliveryCredits.
+function receivingOpened() {
+  // v306: בזמן צירוף נייר השורות כבר בפנים, ולכן "יש שורות" אינו מעיד עוד
+  // שהתעודה נפתחה — השער נמדד בעוגנים, בדיוק כמו בקליטה חדשה.
+  return receiptAttachTarget ? receiptOpened : (receiptOpened || receiptList.length > 0);
+}
+function receivingPhotoGateShown() {
+  return receiptEntryMode === 'photo' && (!receivingOpened() || receiptPhotoCaptureOpen);
+}
+function receiptWithoutPaper() {
+  return receiptNoDoc && !receiptNotes.length;
+}
+function deliveryCreditsAllowed(gate = receivingPhotoGateShown()) {
+  return !receiptAttachTarget && (gate || !receiptWithoutPaper());
+}
+function deliveryCreditsHtml({ gate = receivingPhotoGateShown() } = {}) {
+  // v366: זיכוי שכבר צורף מוצג תמיד (חוץ מצירוף נייר) — גם במסך קליטה בלי תעודה (טיוטה
+  // ישנה), כדי ש"הסר זיכוי" והתיקון יהיו בהישג יד. רק כפתור הצילום נעלם כשאין נייר.
+  if (receiptAttachTarget) return '';
+  const canAdd = deliveryCreditsAllowed(gate);
+  if (!canAdd && !receiptDeliveryCredits.length) return '';
   const cards = receiptDeliveryCredits.map(deliveryCreditCardHtml).join('');
-  return '<section id="rcDeliveryCredits" class="mb-3" dir="rtl">' + cards + (receiptDeliveryCredits.length < 4 ?
+  return '<section id="rcDeliveryCredits" class="mb-3" dir="rtl">' + cards + (canAdd && receiptDeliveryCredits.length < 4 ?
     '<button data-role="delivery-credit-add" class="btn-tap ' + (receiptDeliveryCredits.length ? 'text-sm text-emerald-800 py-2 px-3 mt-1 font-bold' : 'w-full border-2 border-emerald-300 rounded-xl bg-emerald-50 text-emerald-900 py-3 mt-2 font-black') + '"><i class="fa-solid fa-camera"></i> ' +
     (receiptDeliveryCredits.length ? 'צלם תעודת זיכוי נוספת' : 'הנהג הביא זיכוי על חוסר? צלם כאן') + '</button>' : '') + '</section>';
 }
@@ -7978,13 +8035,13 @@ function commitReceiptQuantityReview() {
 function renderReceiving() {
   refreshPriceScannerNotice();
   const t = receiptTotals();
-  // v306: בזמן צירוף נייר השורות כבר בפנים, ולכן "יש שורות" אינו מעיד עוד
-  // שהתעודה נפתחה — השער נמדד בעוגנים, בדיוק כמו בקליטה חדשה.
-  const opened = receiptAttachTarget ? receiptOpened : (receiptOpened || receiptList.length > 0);
+  // v366: "נפתחה" ו"מסך הצילום מוצג" עברו ל-receivingOpened / receivingPhotoGateShown —
+  // אותו כלל משמש גם את חלק הזיכויים (deliveryCreditsAllowed), שמוצג במסך הצילום תמיד.
+  const opened = receivingOpened();
   const banner = supplierGapBannerHtml();
   // v279: כלי הניהול עברו לטאב "ניהול" משלהם בשורת המצבים — מסך הקליטה נשאר נקי
   const topButtons = '';
-  if (receiptEntryMode === 'photo' && (!opened || receiptPhotoCaptureOpen)) {
+  if (receivingPhotoGateShown()) {
     app.innerHTML = '<div id="rcDraftStatus">' + receiptDraftNoticeHtml() + '</div>' + banner + receivingAttachBannerHtml() + yotvataPhotoGateHtml();
     return;
   }
@@ -8230,6 +8287,11 @@ async function saveNewProduct() {
 
 // --- סיכום ואישור תעודה ---
 function finishReceipt() {
+  // v366: זיכוי בקליטה בלי תעודה — אין נייר, ולכן אין חוסר שהזיכוי יכסה. בלי הבדיקה הזאת הזיכוי
+  // (מטיוטה ישנה: צולם במסך הצילום ואחריו "אין תעודה בכלל", לפני שהדגל ירד בצילום) היה מסיט את
+  // הסיום למסך ההשוואה, שם הוא נפסל ומחזיר למסך הקליטה. הבדיקה קודמת ל-deliveryCreditReady
+  // כדי שגם זיכוי שלא אושר יקבל את ההסבר הנכון; הכרטיס עצמו מוצג במסך (deliveryCreditsHtml).
+  if (receiptWithoutPaper() && receiptDeliveryCredits.length) { deliveryCreditOpenWork('לקליטה בלי תעודה אי אפשר לצרף זיכוי — הסר את הזיכוי או הקלד את נתוני התעודה.'); return; }
   if (!deliveryCreditReady()) { deliveryCreditOpenWork('לפני הסיום צריך להשלים ולאשר את תעודות הזיכוי שצורפו, או להסיר אותן.'); return; }
   if (!paperRowEnsureBalanced()) return;
   if (!receiptList.length) return;
@@ -22955,13 +23017,27 @@ app.addEventListener('click', (e) => {
   // v306: פתיחת קליטה בלי תעודה. אין עוגנים ואין מה לקרוא — רק סורקים את
   // מה שהגיע. התעודה תיסגר פתוחה עד שיצורף לה נייר.
   else if (role === 'rc-open-nodoc') {
-    receiptNotes = []; recomputeNoteTotal();
-    receiptNoDoc = true; receiptAttachTarget = null;
-    receiptOpened = true; editingNotes = false; anchorFixHint = '';
-    receiptDupConfirmed = false; receiptDepositWaived = false; receiptUnitsWaived = false;
-    resetAiInvoiceScan(true); aiScanDocuments = [];
-    receiptEntryMode = 'manual'; receiptPaperScanState = '';
-    saveReceiptDraft(); refreshReceipt(); openReceivingScanner();
+    const openNoDoc = () => {
+      receiptNotes = []; recomputeNoteTotal();
+      receiptNoDoc = true; receiptAttachTarget = null;
+      receiptOpened = true; editingNotes = false; anchorFixHint = '';
+      receiptDupConfirmed = false; receiptDepositWaived = false; receiptUnitsWaived = false;
+      // v366: זיכוי שצולם במסך הצילום שייך לקליטה עם נייר. בלי תעודה אין חוסר לטעון עליו —
+      // הזיכויים יורדים לפני שהתור נבדק: קריאה שרצה להם (או ממתינה) נעצרת ב-aiScanDropCancelled
+      // (הזיכוי כבר לא ברשימה → isCancelled), ולא יוצאת עוד שום קריאה בתשלום. חלון בדיקת
+      // הצילום — גם כשמוצג בו עמוד של זיכוי — נסגר ב-aiCloseOrientationReview שבתוך resetAiInvoiceScan(true).
+      const droppedCredits = receiptDeliveryCredits.length > 0;
+      receiptDeliveryCredits = []; pendingReceipt = null; aiScanDropCancelled();
+      resetAiInvoiceScan(true); aiScanDocuments = [];
+      receiptEntryMode = 'manual'; receiptPaperScanState = '';
+      saveReceiptDraft(); refreshReceipt(); openReceivingScanner();
+      if (droppedCredits) showToast('זיכוי מהנהג מצורף רק לקליטה עם תעודה.', null, null, 3600);
+    };
+    // v366: זיכוי שכבר צולם (ובוודאי כזה שכבר נקרא בתשלום, או שקריאתו מחכה בשרת לאיסוף) לא נמחק
+    // בלחיצה אחת בטעות — שואלים קודם, כמו ב"ביטול תעודה". כרטיס ריק שהמצלמה שלו בוטלה לא שווה שאלה.
+    if (receiptDeliveryCredits.some(c => c.pages.length || c.status !== 'capture')) {
+      showConfirm('אין תעודה בכלל', 'צילמת זיכוי מהנהג. בקליטה בלי תעודה הזיכוי יוסר ויהיה צריך לצלם אותו שוב. להמשיך בלי הזיכוי?', 'המשך בלי זיכוי', openNoDoc);
+    } else openNoDoc();
   }
   // v306: הנייר נמצא באמצע הסריקה — פותחים את שדות העוגנים, ומרגע שיש בהם
   // מספר הקליטה חוזרת להיות רגילה לכל דבר.

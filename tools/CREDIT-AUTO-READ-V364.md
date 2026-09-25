@@ -651,3 +651,170 @@ support.
   carry no `modelVerification`, so those credits still go through the
   worker's confirmation, as a v147 service's answer would.
 - Not verified: no phone, no deployed service, no paid model call.
+
+# The credit is photographed on the photo gate — v366
+
+## Field report
+
+Owner, iPhone, app v365. On "שלב 1 · צילום תעודה — מצלמים ומתחילים לקלוט"
+there was nowhere to photograph the driver's credit note. He had to photograph
+the invoices, press "התחל קליטת מוצרים", and only then did the green credit
+button appear on the receiving screen. He wants to photograph the credit right
+there, together with the invoices.
+
+## Root cause
+
+`yotvataPhotoGateHtml` already rendered `deliveryCreditsHtml()`, but that
+section returned nothing while `receiptNoDoc` was set (or in attach mode). The
+screenshot showed "אין תעודה בכלל — קלוט לפי ספירה" (hidden only in attach
+mode), so the receipt was a no-document one: "אין תעודה בכלל" was pressed at
+some point (`rc-open-nodoc` sets the flag), and the gate was reached again
+through "הנייר הגיע" → "חזרה לצילום התעודה / גלריה"
+(`switchReceiptEntryMode('photo')`) — or after a reload, since the draft
+persists `noDoc`. Nothing on that gate offered the credit until "התחל" cleared
+the flag. The finish path (`confirmReceipt`) did already reset the flag in
+v365, so a receipt saved as "open" did not leak it into the next one; the
+stale gate came from the same receipt returning to its photo step.
+
+## What changed
+
+- `deliveryCreditsAllowed(gate)` / `receivingPhotoGateShown()` /
+  `receivingOpened()`: one rule for the credit *button*. Attach mode
+  (`receiptAttachTarget`) hides the whole section everywhere, as before.
+  `receiptNoDoc` hides the button only on the receiving screen of a
+  no-document receipt (no paper → no shortage to claim) — "no document" in the
+  sense the finish (`savingNoDoc`) and the "קליטה בלי תעודה" bar already use,
+  `receiptWithoutPaper()`: the flag is set and no anchor has been typed. Once
+  "הנייר הגיע" and a sum was typed the receipt has paper and the button
+  returns. Cards of credits that already exist are always rendered
+  (`deliveryCreditsHtml` drops only the add button when it is not allowed), so
+  "הסר זיכוי" and the review/error actions stay reachable and
+  `deliveryCreditOpenWork` has a card to scroll to. On the photo gate the
+  section is always rendered (`deliveryCreditsHtml({ gate: true })`):
+  photographing paper means the receipt will have paper. The default `gate`
+  follows the screen that is shown, so `deliveryCreditRefreshCards` keeps
+  refreshing the gate card in place (reading, waiting, progress, attached)
+  without rebuilding the gate's document cards; `renderReceiving` uses the
+  same predicates. `delivery-credit-add` is refused where the button is not
+  rendered.
+- Photographing a credit clears `receiptNoDoc` (`delivery-credit-add`), not
+  only "התחל" (`yotvataStartPaperScan`): a credit photographed on the gate of
+  a no-document receipt — or on its receiving screen after the anchors were
+  typed — says the receipt has paper. So "הקלדת סכום ויחידות ידנית" after a
+  gate credit is an ordinary paper receipt (card visible, also after a reload;
+  the finish asks for the invoice amount) instead of a no-document receipt
+  with a hidden credit, whose finish was diverted into the reconcile screen
+  against ₪0 and then bounced ("הזיכוי אינו תואם לחוסר שנספר…") to a screen
+  without the card. Removing the typed note afterwards keeps the credit
+  visible and the finish still asks for the amount.
+- `finishReceipt` guard, before `deliveryCreditReady()`: a credit on a receipt
+  without paper (`receiptWithoutPaper() && receiptDeliveryCredits.length`,
+  reachable only from a draft saved before this change) stops with "לקליטה
+  בלי תעודה אי אפשר לצרף זיכוי — הסר את הזיכוי או הקלד את נתוני התעודה." and
+  scrolls to the card, which is on the screen; after "הסר זיכוי" the
+  no-document finish opens the summary as before, and after "מצאתי את
+  התעודה" + anchors it is an ordinary comparison with the credit.
+- `yotvataResetPhotoReceipt` also clears `receiptNoDoc`, so every reset of the
+  photo receipt (finish, cancel, attach and its cancel) starts the next one
+  with a whole gate whoever calls it; `receiptAttachTarget` is untouched there.
+- "אין תעודה בכלל" (`rc-open-nodoc`) after a credit was photographed on the
+  gate first asks — `showConfirm('אין תעודה בכלל', 'צילמת זיכוי מהנהג. בקליטה
+  בלי תעודה הזיכוי יוסר ויהיה צריך לצלם אותו שוב. להמשיך בלי הזיכוי?', 'המשך
+  בלי זיכוי')`, the same pattern as "ביטול תעודה" — because the credit was
+  already read (paid), or its read is waiting on the server, and a mis-tap
+  would otherwise cost a second paid read with no undo; nothing changes before
+  the answer. A receipt without credits, and an empty capture card (camera
+  cancelled, no photo), take the immediate path. On "המשך בלי זיכוי" it drops
+  the credits (`receiptDeliveryCredits = []`, `pendingReceipt` cleared),
+  aborts a read in flight or waiting (`aiScanDropCancelled`: the credit is no
+  longer in the list, so its entry is cancelled — the aborted upload's answer
+  is discarded and nothing else is sent), closes the photo window if it shows
+  a credit page (`aiCloseOrientationReview` inside `resetAiInvoiceScan(true)`),
+  and shows "זיכוי מהנהג מצורף רק לקליטה עם תעודה." — only when something was
+  dropped.
+- Gate wording: the green button stays right under "+ תעודה נוספת מהנהג /
+  הספק"; one grey line under the intro: "תעודת זיכוי מהנהג מצלמים בכפתור
+  הירוק — היא נקראת לבד." The line is omitted in attach mode, where the gate
+  has no credit button (`deliveryCreditsAllowed(true)`, the predicate the
+  section itself uses). On the gate a reading card ends with "אפשר להמשיך
+  לצלם את התעודות וללחוץ "התחל קליטת מוצרים"." — step 1 has no product
+  scanner — while the receiving screen keeps "אפשר להמשיך לסרוק מוצרים."
+  (`deliveryCreditNoticeHtml`, by `receivingPhotoGateShown()`).
+- A credit photographed before "התחל" is read at once (the queue is empty),
+  attached by itself when verified (v365) or left for review, and survives
+  "התחל קליטת מוצרים", "פענח תעודה — הכמויות נבדקות ידנית" and "הקלדת סכום
+  ויחידות ידנית": none of `yotvataStartPaperScan`, `renderReceiving`,
+  `aiRunInvoiceScan` or the draft save replaces the credit objects. The invoice
+  uploads queue behind a credit still being read (FIFO lock; the invoice banner
+  says "ממתין לסיום קריאת הזיכוי…"), and `yotvataPhotoReady()` never looks at
+  credits, so "התחל" is not blocked by a credit that is still read.
+- Version: v366 "זיכוי מצלמים כבר במסך הצילום"; `sw.js` cache `yotvata-v366`.
+
+## Verification
+
+- `tools/credit-on-gate.test.mjs` (9 tests, the complete app module; fetch,
+  timers, image preparation and Firebase are faked; no paid call): (a) a
+  finished no-document receipt (saved `open`, ₪45) → the next gate has the
+  button, the flag is not persisted, `yotvataResetPhotoReceipt` clears it;
+  (b) a no-document receipt back on the gate → button and hint shown, the
+  receiving screen hides the section and refuses `delivery-credit-add`, the
+  reloaded draft lands on the same gate with the button, "התחל" turns it into a
+  paper receipt, attach mode hides it on both screens and the gate hint with
+  it; (c) credit on the gate →
+  confirm → exactly one `/scan` (credit) → `confirmed` with the v149 verified
+  fixture → "התחל" → the invoice `/scan` goes out after the credit's, the same
+  credit object, the confirmed card on the receiving screen, finish coverage
+  unchanged (₪45 payable, `shortCreditNotes[0].autoConfirmed`, two uploads in
+  all); (d) "התחל" enabled while the credit is read, the invoice waits with its
+  banner text, the credit survives and attaches, one upload at a time, the
+  gate's reading card is worded for the gate (no "לסרוק מוצרים" there); (e)
+  "אין תעודה בכלל" with a read in flight → asks first (credit, draft and read
+  untouched before "המשך בלי זיכוי"), then credit dropped, upload aborted, the
+  late answer changes nothing, toast once, draft without it, finish not
+  blocked; with the photo still open → asks, then window closed, no request
+  at all; without a credit → no question, no toast; an empty capture card →
+  no question; (f) manual quantities and manual anchors keep the credit (no
+  invoice read on the manual path); (g) two gate credits → the waiting and
+  progress texts reach the gate card through `deliveryCreditRefreshCards`,
+  the gate HTML (document cards, photos, inputs) is byte-identical before and
+  after both reads, one paid read each; (h) the field-report receipt end to
+  end: no-document → "מצאתי את התעודה" → "חזרה לצילום" → gate credit clears
+  the flag (draft too) → "הקלדת סכום ויחידות ידנית" shows the card, the
+  floating "סיים תעודה" asks for the amount and never opens the reconcile
+  screen, a reload of that draft is the same paper receipt, typed anchors
+  open the ordinary comparison against ₪93.80; a review-status credit gets
+  "לפני הסיום צריך להשלים…" with the card on screen; the no-gate route
+  (anchors typed → credit on the receiving screen → note removed) keeps the
+  card and asks for the amount; (i) a v365 draft with a hidden credit on a
+  no-document receipt → card and "הסר זיכוי" rendered, no add button, finish
+  stops with the no-document explanation (confirmed and review credit alike),
+  after removal the no-document summary opens (`noDoc`, `open`, ₪45), after
+  "מצאתי את התעודה" + anchors the comparison opens with the credit.
+  Against the v365 app, (a), (b) and (e) fail; reverting each v366 review fix
+  alone fails its own test: cards + finish guard → (i), the confirmation →
+  (e), the flag cleared on add → (h), the attach-mode hint → (b), the gate
+  wording → (d) and (g).
+- The verified fixture (`verifiedCredit`, `verifiedRow`) moved from
+  `credit-auto-attach.test.mjs` to `tools/credit-verified-fixture.mjs`,
+  shared with the new tests; shape and values unchanged.
+- Full suite: 407 tests, 405 pass; the only failures are the two pre-existing
+  ones ("an actual price gap has a working yes action…", "unresolved paper
+  values can be confirmed as-is…").
+- Not verified: no phone, no deployed service, no paid model call.
+
+## Follow-ups
+
+- Attach mode (paper for a receipt saved without a document) still offers no
+  credit on any screen; a driver credit handed over with the late paper has
+  to be recorded from the receipt card ("התקבל זיכוי מהספק").
+- A draft saved before this change that holds a credit on a no-document
+  receipt (photographed on the gate, then "אין תעודה בכלל" — v365 kept the
+  credit) is now the only way into that state, since photographing a credit
+  clears the flag. Such a draft shows the card on its receiving screen (no add
+  button), and the finish stops with "לקליטה בלי תעודה אי אפשר לצרף זיכוי —
+  הסר את הזיכוי או הקלד את נתוני התעודה." until "הסר זיכוי" or "מצאתי את
+  התעודה" + anchors (test i).
+- On the manual-anchors path (no invoice read) a credit cannot be matched to a
+  per-product shortage, so the comparison still ends with "הזיכוי אינו תואם
+  לחוסר שנספר…" unless the counted lines explain it — unchanged since v364,
+  not part of this change.

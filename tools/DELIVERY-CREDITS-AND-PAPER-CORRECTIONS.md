@@ -8,7 +8,14 @@ when its OCR price was wrong.
 ## Receiving flow
 
 - “הנהג הביא זיכוי על חוסר? צלם כאן” is available during ordinary receiving,
-  including the invoice capture screen and manual entry.
+  including the invoice capture screen and manual entry. Since v366 the photo
+  gate ("שלב 1 · צילום תעודה") always offers it, also on a receipt that was
+  opened with "אין תעודה בכלל" and returned to its photos; photographing a
+  credit clears that flag (the receipt has paper). Only the receiving screen
+  of a no-document receipt (flag set, no anchor typed yet) has no add button
+  — credits that already exist are still shown there, and the finish stops
+  with an explanation until they are removed or the anchors are typed — and
+  attach mode has no credit at all.
 - Camera and gallery use the existing full-image, rotation and explicit-crop
   controls. Since v364 there is no separate read button: confirming the last
   photo of a credit (“אשר וקרא את הזיכוי”) starts its read. A long slip in
@@ -190,6 +197,30 @@ cannot be reopened, and `deliveryCreditRead` refuses a busy credit.
   (the checkout next to this repo) on the backup's credit 22229080 and hands
   its exact answer to the app — the automatic attach is proven against the
   service, not against a fixture that imitates it.
+
+### v366: the credit is photographed on the photo gate
+
+- Field report (owner, iPhone, v365): the gate showed "אין תעודה בכלל" but no
+  credit button, because `receiptNoDoc` hid the credit section on every screen
+  — including the gate a no-document receipt returns to ("הנייר הגיע" →
+  "חזרה לצילום התעודה / גלריה", or a reload of that draft).
+- `deliveryCreditsAllowed(gate)`: attach mode hides credits everywhere;
+  `receiptWithoutPaper()` (`receiptNoDoc` and no anchor typed — the finish's
+  own `savingNoDoc` rule) hides only the add button on the receiving screen
+  (no paper → no shortage claim); existing cards are always rendered; the
+  gate renders `deliveryCreditsHtml({ gate: true })`.
+  `yotvataResetPhotoReceipt` clears the flag, and so does `delivery-credit-add`
+  (photographing a credit says the receipt has paper — the card stays visible
+  after "הקלדת סכום ויחידות ידנית" and after a reload, and the finish asks for
+  the amount). `finishReceipt` refuses a credit on a receipt without paper
+  (old drafts only) with "לקליטה בלי תעודה אי אפשר לצרף זיכוי — הסר את הזיכוי
+  או הקלד את נתוני התעודה." instead of opening the reconcile screen. "אין
+  תעודה בכלל" after a gate credit asks first ("המשך בלי זיכוי"), then drops
+  the credits, aborts their read and says "זיכוי מהנהג מצורף רק לקליטה עם
+  תעודה.". A gate credit is read at once, survives "התחל קליטת מוצרים" (the
+  invoices queue behind it) and both manual paths. Details, tests and
+  follow-ups: `tools/CREDIT-AUTO-READ-V364.md` (v366 section); tests:
+  `tools/credit-on-gate.test.mjs`.
 
 ## Correcting an OCR row
 
