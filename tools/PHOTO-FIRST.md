@@ -121,7 +121,13 @@ with a toast. The gate says under its intro: "תעודת זיכוי מהנהג �
 הירוק — היא נקראת לבד." — not in attach mode, where the gate has no credit
 button. A credit on a receipt without paper (drafts from before this change)
 is still shown on the receiving screen, and the finish stops with an
-explanation until it is removed or the anchors are typed. See
+explanation until it is removed or the anchors are typed. The anchors screen
+("הקלדת סכום ויחידות ידנית", before "התחל קליטה") renders the credit section
+as well, so a gate credit does not vanish there and a read that ends there
+refreshes its card in place. "התעודה הגיעה — הזן את נתוניה" on an old open
+receipt refuses while a credit with a photo or an invoice page is on the gate
+("צילמת תעודה או זיכוי לקליטה חדשה — סיים אותה, או הסר את הצילומים, לפני
+צירוף תעודה") instead of wiping them and aborting a paid read. See
 `tools/CREDIT-AUTO-READ-V364.md` (v366); tests: `tools/credit-on-gate.test.mjs`.
 
 ## Validation

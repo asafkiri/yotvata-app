@@ -1538,7 +1538,8 @@ async function deliveryCreditAddFiles(id, files, replace = false) {
     deliveryCreditInvalidate(c); if (replace) c.pages = []; c.pages.push(...pages); c.pageCount = c.pages.length;
     // v366: זיכוי מהנהג שייך לקליטה עם תעודה. מי שמצלם זיכוי במסך הצילום של קליטה שנפתחה
     // ב"אין תעודה בכלל" (וחזרה לצילום) אומר בזה שיש נייר — הדגל יורד כאן, ולא רק ב"התחל":
-    // כך הכרטיס נראה גם אחרי "הקלדת סכום ויחידות ידנית" ואחרי רענון, והסיום דורש סכום
+    // כך הכרטיס נראה גם אחרי "הקלדת סכום ויחידות ידנית" (כבר במסך "נתוני התעודה", ואחרי
+    // "התחל קליטה") ואחרי רענון, והסיום דורש סכום
     // תעודה במקום לשמור "בלי תעודה" עם זיכוי סמוי (או לפתוח מסך התאמה מול תעודה ₪0).
     // הדגל יורד רק כשצילום באמת נוסף — לא בלחיצה על הכפתור הירוק: מצלמה שבוטלה משאירה
     // כרטיס ריק, וקליטה בלי תעודה נשארת כזאת (הסיום שלה לא ידרוש פתאום סכום תעודה שאין).
@@ -8058,6 +8059,10 @@ function renderReceiving() {
         '<div class="text-center mb-3"><i class="fa-solid fa-file-invoice text-blue-600 text-4xl mb-2"></i><div class="font-black text-slate-800 text-lg">נתוני התעודה</div><div class="text-sm text-slate-500">הזן את הסכום ללא מע״מ ואת סך היחידות שמודפס בתעודה.</div></div>' +
         noteEditorBodyHtml() +
         '<button data-role="rc-open" class="btn-tap w-full bg-blue-600 text-white rounded-2xl py-4 font-black text-lg flex items-center justify-center gap-2 mt-4"><i class="fa-solid fa-arrow-left"></i> התחל קליטה</button>' +
+        // v366: זיכוי שצולם במסך הצילום מוצג גם כאן, במסך הקלדת נתוני התעודה — לא רק אחרי "התחל קליטה".
+        // deliveryCreditRefreshCards מוצא כאן את #rcDeliveryCredits, ולכן קריאה שמסתיימת מעדכנת את הכרטיס
+        // בלי לבנות את המסך מחדש (הסכום שהוקלד נשאר). בצירוף נייר החלק ריק, כמו בכל מסך.
+        deliveryCreditsHtml() +
         receivingNoDocGateHtml() +
       '</div>';
     return;
@@ -17415,6 +17420,13 @@ function reopenReceiptForDoc(id) {
   const rc = receipts.find(x => x.id === id); if (!rc) return;
   if (receiptOpened || receiptList.length || receiptNotes.length) {
     showToast('יש קליטה פתוחה על המסך — סיים או בטל אותה לפני צירוף תעודה', null, null, 4200);
+    return;
+  }
+  // v366: גם קליטה שעוד במסך הצילום היא קליטה: זיכוי שצולם (ואולי כבר נקרא בתשלום, או שקריאתו
+  // רצה עכשיו) ותעודות שצולמו נמחקים ב-yotvataResetPhotoReceipt בלי מילה — והקריאה שבדרך נעצרת.
+  // כרטיס זיכוי ריק (המצלמה בוטלה, אין צילום) לא נספר. אותו כלל כמו השאלה ב"אין תעודה בכלל".
+  if (receiptDeliveryCredits.some(c => c.pages.length || c.status !== 'capture') || aiTotalPages() > 0) {
+    showToast('צילמת תעודה או זיכוי לקליטה חדשה — סיים אותה, או הסר את הצילומים, לפני צירוף תעודה', null, null, 4200);
     return;
   }
   const lines = (rc.items || [])

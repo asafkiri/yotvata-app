@@ -15,6 +15,12 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 async function flush(c, rounds = 30) {
   for (let i = 0; i < rounds; i++) { for (const cb of c.callbacks.splice(0)) cb(); await tick(); }
 }
+// Like flush, but leaves the parked fetch-timeout timers (`controller.abort()`) alone, so an
+// aborted upload signal can only come from the app dropping the read — never from the harness
+// running the 420 s timeout early (its clearTimeout is a no-op).
+async function flushKeepingUpload(c, rounds = 30) {
+  for (let i = 0; i < rounds; i++) { for (const cb of c.callbacks.splice(0)) { if (!/controller\.abort/.test(String(cb))) cb(); } await tick(); }
+}
 const json = (c, expression) => JSON.parse(c.run('JSON.stringify(' + expression + ')'));
 const app = c => c.node('app').innerHTML;
 const creditStatus = c => c.run('receiptDeliveryCredits[0].status');
@@ -272,9 +278,10 @@ test('e: "אין תעודה בכלל" after a gate credit asks first, then drops
   const { c, data, opened } = setup();
   let releaseCredit = null;
   const s = service(c, { answer: req => req.credit ? new Promise(resolve => { releaseCredit = () => resolve(reply(verifiedCredit(data))); }) : reply(data.paper) });
-  await gateCredit(c, opened); await flush(c, 5);
+  await gateCredit(c, opened); await flushKeepingUpload(c, 5);
   assert.equal(creditStatus(c), 'reading');
   assert.deepEqual(s.kinds(), ['health', 'full:credit']);
+  assert.equal(s.log[1].signal && s.log[1].signal.aborted, false, 'the upload is really in flight (its fetch-timeout timer has not run)');
   askFirst(c);
   await c.click('rc-open-nodoc');
   assert.deepEqual(json(c, 'confirmCalls'), CONFIRM, 'a photographed (paid) credit is not dropped without asking');
@@ -363,6 +370,7 @@ test('f: "פענח תעודה — הכמויות נבדקות ידנית" and "�
   assert.equal(m.c.run('receiptEntryMode'), 'manual');
   assert.equal(m.c.run('receiptDeliveryCredits[0] === gateCreditObject'), true);
   assert.match(m.c.node('app').innerHTML, /נתוני התעודה/);
+  assert.match(m.c.node('app').innerHTML, CONFIRMED_CARD, 'the anchors screen ("נתוני התעודה") shows the attached credit, before "התחל קליטה"');
   m.c.node('rcNoteInput').value = '93.8'; m.c.node('rcNoteUnits').value = '16';
   await m.c.click('rc-open');
   assert.equal(m.c.run('receiptOpened'), true);
@@ -415,7 +423,7 @@ test('g: while gate credits are read, only their cards refresh — the gate\'s d
 
 // v366 review: the field-report receipt end to end. A no-document receipt back on its gate
 // photographs the credit — from that moment the receipt has paper (the flag is cleared by the
-// green button itself), so the card stays visible on the receiving screen and after a reload,
+// photo itself, not by the tap; test j), so the card stays visible on the receiving screen and after a reload,
 // and the finish asks for the invoice amount instead of opening the reconcile screen against ₪0.
 const AMOUNT_TOAST = 'לפני האישור חובה להזין לכל תעודה סכום ללא מע״מ';
 const COMPLETE_TOAST = 'לפני הסיום צריך להשלים ולאשר את תעודות הזיכוי שצורפו, או להסיר אותן.';
@@ -628,4 +636,147 @@ test('j: the green button tapped and the camera cancelled photographs nothing �
   await photograph(f.c, fid, ['slip.jpg']);
   assert.equal(f.c.run('receiptDeliveryCredits[0].status === "error" && receiptDeliveryCredits[0].pages.length === 0'), true);
   assert.equal(f.c.run('receiptNoDoc'), true);
+});
+
+// v366 review: "התעודה הגיעה — הזן את נתוניה" on an old open no-document receipt (reopenReceiptForDoc)
+// was guarded only against a started receipt (opened / rows / notes). A receipt still on its photo
+// gate — a credit photographed and read (paid), invoice photos taken — was wiped by
+// yotvataResetPhotoReceipt without a word, and a credit upload in flight was aborted.
+const ATTACH_REFUSED = 'צילמת תעודה או זיכוי לקליטה חדשה — סיים אותה, או הסר את הצילומים, לפני צירוף תעודה';
+const STARTED_REFUSED = 'יש קליטה פתוחה על המסך — סיים או בטל אותה לפני צירוף תעודה';
+const OLD_OPEN = `receipts = [{ id: 'old1', date: '2026-09-20', timestamp: 1758300000000, status: 'open', noDoc: true, totalExVat: 15, count: 1,
+  items: [{ productId: 'milk', name: 'חלב בדיקה', barcode: '7290000000008', qty: 3 }] }]`;
+const draftCredits = c => json(c, 'JSON.parse(localStorage.getItem(RECEIPT_DRAFT_KEY)).deliveryCredits');
+
+test('k: "התעודה הגיעה — הזן את נתוניה" on an old open receipt refuses while a credit or an invoice photo is on the gate — the paid read is kept, not aborted', async () => {
+  // 1. A gate credit read and attached (one paid read), an invoice photographed; nothing started the receipt.
+  const { c, data, opened } = setup();
+  const s = service(c, { answer: req => reply(req.credit ? verifiedCredit(data) : data.paper) });
+  c.run('aiScanDocuments = [invoicePage()]');
+  await gateCredit(c, opened); await flush(c);
+  assert.equal(creditStatus(c), 'confirmed');
+  assert.deepEqual(s.kinds(), ['health', 'full:credit']);
+  assert.equal(c.run('!receiptOpened && !receiptList.length && !receiptNotes.length'), true, 'the started-receipt guard sees nothing here');
+  c.run(OLD_OPEN + "; setView('receiptsHistory')");
+  assert.match(app(c), /data-role="rc-attach-doc" data-id="old1"/, 'the old receipt offers the attach');
+  c.toasts.length = 0;
+  await c.click('rc-attach-doc', 'old1');
+  assert.equal(c.run('receiptAttachTarget'), null, 'the attach is refused');
+  assert.equal(c.run('currentView'), 'receiptsHistory');
+  assert.deepEqual(c.toasts, [ATTACH_REFUSED]);
+  assert.equal(c.run('receiptDeliveryCredits.length === 1 && receiptDeliveryCredits[0].status === "confirmed"'), true, 'the paid credit is kept');
+  assert.equal(c.run('aiTotalPages()'), 1, 'and the invoice photo');
+  assert.equal(draftCredits(c).length, 1, 'the draft still carries the credit');
+  assert.deepEqual(s.kinds(), ['health', 'full:credit'], 'no further request');
+  // 2. The credit upload still in flight: the refusal does not abort it.
+  const u = setup();
+  let signal = null;
+  service(u.c, { answer: req => { signal = req.signal; return new Promise(() => {}); } });
+  await gateCredit(u.c, u.opened); await flushKeepingUpload(u.c, 5);
+  assert.equal(creditStatus(u.c), 'reading');
+  assert.equal(signal && signal.aborted, false, 'the upload is in flight');
+  u.c.run(OLD_OPEN); u.c.toasts.length = 0;
+  await u.c.click('rc-attach-doc', 'old1');
+  assert.equal(u.c.run('receiptAttachTarget'), null);
+  assert.equal(creditStatus(u.c), 'reading');
+  assert.equal(signal.aborted, false, 'the upload is not aborted');
+  assert.deepEqual(u.c.toasts, [ATTACH_REFUSED]);
+  assert.equal(draftCredits(u.c).length, 1);
+  // 3. Invoice photos alone (unpaid, but photographed) refuse too.
+  const i = setup();
+  i.c.run('aiScanDocuments = [invoicePage()]; renderReceiving(); ' + OLD_OPEN);
+  i.c.toasts.length = 0;
+  await i.c.click('rc-attach-doc', 'old1');
+  assert.equal(i.c.run('receiptAttachTarget'), null);
+  assert.equal(i.c.run('aiTotalPages()'), 1, 'the photo is kept');
+  assert.deepEqual(i.c.toasts, [ATTACH_REFUSED]);
+  // 4. A clean gate, or one with only an empty capture card (camera cancelled), still enters attach mode.
+  for (const withEmptyCard of [false, true]) {
+    const a = setup();
+    a.c.run('renderReceiving(); ' + OLD_OPEN);
+    if (withEmptyCard) await addCredit(a.c, a.opened);
+    a.c.toasts.length = 0;
+    await a.c.click('rc-attach-doc', 'old1');
+    assert.equal(a.c.run('receiptAttachTarget && receiptAttachTarget.id'), 'old1', 'attach mode entered' + (withEmptyCard ? ' despite the empty card' : ''));
+    assert.equal(a.c.run('currentView'), 'receiving');
+    assert.deepEqual(a.c.toasts, []);
+    assert.deepEqual(json(a.c, 'receiptDeliveryCredits'), []);
+    assert.equal(a.c.run('receiptList.length'), 1, 'the old receipt\'s rows are loaded');
+    assert.match(app(a.c), GATE);
+    assert.doesNotMatch(app(a.c), /delivery-credit-add|rcDeliveryCredits/, 'attach mode has no credit');
+  }
+  // 5. A started receipt keeps the older guard and its own toast; the credit is kept there as before.
+  const t = setup();
+  service(t.c, { answer: req => reply(req.credit ? verifiedCredit(t.data) : t.data.paper) });
+  t.c.run('aiScanDocuments = [invoicePage()]');
+  await gateCredit(t.c, t.opened); await flush(t.c);
+  await t.c.click('rc-photo-start'); await flush(t.c);
+  assert.equal(t.c.run('receiptOpened'), true);
+  t.c.run(OLD_OPEN); t.c.toasts.length = 0;
+  await t.c.click('rc-attach-doc', 'old1');
+  assert.equal(t.c.run('receiptAttachTarget'), null);
+  assert.deepEqual(t.c.toasts, [STARTED_REFUSED]);
+  assert.equal(t.c.run('receiptDeliveryCredits.length'), 1);
+});
+
+// v366 review: the anchors screen ("נתוני התעודה", "הקלדת סכום ויחידות ידנית" before "התחל קליטה")
+// never rendered the credit section — a credit photographed on the gate vanished there until "התחל".
+test('l: the anchors screen shows the gate credit — a read that ends there updates the card in place, a review credit is confirmable there, the button opens the camera there', async () => {
+  // 1. The read ends on the anchors screen: the card is refreshed in place, the typed amount stays.
+  const { c, data, opened } = setup();
+  let releaseCredit = null;
+  const s = service(c, { answer: req => req.credit ? new Promise(resolve => { releaseCredit = () => resolve(reply(verifiedCredit(data))); }) : reply(data.paper) });
+  c.run('aiScanDocuments = [invoicePage()]');
+  await gateCredit(c, opened); await flushKeepingUpload(c, 5);
+  assert.equal(creditStatus(c), 'reading');
+  await c.click('rc-photo-manual');
+  assert.equal(c.run('receiptEntryMode === "manual" && !receiptOpened && !receivingOpened()'), true, 'the fresh receipt\'s anchors screen');
+  assert.match(app(c), /נתוני התעודה/);
+  assert.match(app(c), /id="rcDeliveryCredits"/, 'the reading card is on the anchors screen');
+  assert.match(app(c), /קורא את הזיכוי…/);
+  assert.match(app(c), /rc-open-nodoc/, '"אין תעודה בכלל" is still offered next to it');
+  c.node('rcNoteInput').value = '93.8';
+  const before = app(c);
+  releaseCredit(); await flush(c);
+  assert.equal(creditStatus(c), 'confirmed');
+  assert.equal(c.toasts.filter(t => t === AUTO_TOAST).length, 1);
+  assert.equal(app(c), before, 'the screen was not rebuilt by the finishing read');
+  assert.match(c.node('rcDeliveryCredits').outerHTML, CONFIRMED_CARD, 'the card was refreshed in place');
+  assert.equal(c.node('rcNoteInput').value, '93.8', 'the typed amount survives');
+  assert.deepEqual(s.kinds(), ['health', 'full:credit']);
+  c.node('rcNoteUnits').value = '16';
+  await c.click('rc-open');
+  assert.equal(c.run('receiptOpened && receiptNoteTotal === 93.8'), true);
+  assert.match(app(c), CONFIRMED_CARD, 'and "התחל קליטה" shows it as before');
+  // 2. A credit left for review: confirm and remove are on the anchors screen.
+  const v = setup();
+  service(v.c, { answer: req => reply(req.credit ? verifiedCredit(v.data, { verification: false }) : v.data.paper) });
+  await gateCredit(v.c, v.opened); await flush(v.c);
+  assert.equal(creditStatus(v.c), 'review');
+  await v.c.click('rc-photo-manual');
+  assert.match(app(v.c), /נתוני התעודה/);
+  assert.match(app(v.c), /data-role="delivery-credit-confirm"/);
+  assert.match(app(v.c), /data-role="delivery-credit-remove"/);
+  await v.c.click('delivery-credit-confirm', v.c.run('receiptDeliveryCredits[0].id'));
+  assert.equal(creditStatus(v.c), 'confirmed');
+  assert.match(app(v.c), /נתוני התעודה/);
+  assert.match(app(v.c), CONFIRMED_CARD);
+  // 3. The green button is on the anchors screen of a fresh receipt and opens the camera there.
+  const g = setup();
+  g.c.run('renderReceiving()');
+  await g.c.click('rc-photo-manual');
+  assert.match(app(g.c), /נתוני התעודה/);
+  assert.match(app(g.c), CREDIT_BUTTON);
+  const gid = await addCredit(g.c, g.opened);
+  assert.match(app(g.c), /נתוני התעודה/, 'still the anchors screen');
+  assert.match(app(g.c), new RegExp('data-delivery-credit="' + gid + '"'));
+  // A no-document receipt's anchors screen (flag set, nothing typed): existing cards only, no add button.
+  await g.c.click('rc-open-nodoc');
+  assert.equal(g.c.run('receiptNoDoc'), true);
+  // 4. Attach mode's anchors screen has no credit at all.
+  const a = setup();
+  a.c.run(`receiptAttachTarget = { id: 'old', timestamp: 1, date: '2026-09-20', label: 'x' }; receiptList = [{ productId: 'milk', name: 'חלב בדיקה', qty: 3 }];
+    receiptOpened = false; receiptEntryMode = 'manual'; renderReceiving()`);
+  assert.match(app(a.c), /נתוני התעודה/);
+  assert.doesNotMatch(app(a.c), /delivery-credit-add|rcDeliveryCredits/);
 });

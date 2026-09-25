@@ -697,11 +697,15 @@ stale gate came from the same receipt returning to its photo step.
   without rebuilding the gate's document cards; `renderReceiving` uses the
   same predicates. `delivery-credit-add` is refused where the button is not
   rendered.
-- Photographing a credit clears `receiptNoDoc` (`delivery-credit-add`), not
+- Photographing a credit clears `receiptNoDoc` (`deliveryCreditAddFiles`, once
+  the photo is added — the tap on `delivery-credit-add` only opens a card and
+  the camera, so a cancelled camera leaves the flag and the no-document receipt
+  still finishes "לפי ספירה"; credit-on-gate test j), not
   only "התחל" (`yotvataStartPaperScan`): a credit photographed on the gate of
   a no-document receipt — or on its receiving screen after the anchors were
   typed — says the receipt has paper. So "הקלדת סכום ויחידות ידנית" after a
-  gate credit is an ordinary paper receipt (card visible, also after a reload;
+  gate credit is an ordinary paper receipt (card visible — already on the
+  "נתוני התעודה" screen, before "התחל קליטה" — and after a reload;
   the finish asks for the invoice amount) instead of a no-document receipt
   with a hidden credit, whose finish was diverted into the reconcile screen
   against ₪0 and then bounced ("הזיכוי אינו תואם לחוסר שנספר…") to a screen
@@ -717,6 +721,29 @@ stale gate came from the same receipt returning to its photo step.
 - `yotvataResetPhotoReceipt` also clears `receiptNoDoc`, so every reset of the
   photo receipt (finish, cancel, attach and its cancel) starts the next one
   with a whole gate whoever calls it; `receiptAttachTarget` is untouched there.
+- The anchors screen ("נתוני התעודה" — "הקלדת סכום ויחידות ידנית" before
+  "התחל קליטה", `renderReceiving`'s unopened branch) renders
+  `deliveryCreditsHtml()` next to "אין תעודה בכלל" (review finding: a credit
+  photographed on the gate vanished there until "התחל", and a read that ended
+  there fired "הזיכוי צורף למשלוח…" with no card on the screen; the branch
+  never rendered credits, since v345). Same rule as everywhere: cards always,
+  the add button when `deliveryCreditsAllowed()`, nothing in attach mode.
+  `deliveryCreditRefreshCards` finds `#rcDeliveryCredits` there, so a read
+  that ends on that screen refreshes the card in place and the typed amount
+  stays; a review credit is confirmed or removed there; the green button opens
+  the camera on the same screen.
+- `reopenReceiptForDoc` ("התעודה הגיעה — הזן את נתוניה" on an open
+  no-document receipt) guarded only a started receipt (`receiptOpened`, rows,
+  notes); a receipt still on its gate — a credit photographed and read (paid),
+  or invoice photos — was wiped by `yotvataResetPhotoReceipt` without a word,
+  and a credit upload in flight was aborted (pre-existing; the gate credit
+  made it the primary path). It now also refuses while a credit with a photo
+  (or past the capture state) or any invoice page is on the gate: "צילמת
+  תעודה או זיכוי לקליטה חדשה — סיים אותה, או הסר את הצילומים, לפני צירוף
+  תעודה" — the same "worth asking" test as "אין תעודה בכלל", so an empty
+  capture card whose camera was cancelled does not block. The credit, its
+  draft entry and its upload are untouched; a clean gate still enters attach
+  mode, and a started receipt keeps the older toast.
 - "אין תעודה בכלל" (`rc-open-nodoc`) after a credit was photographed on the
   gate first asks — `showConfirm('אין תעודה בכלל', 'צילמת זיכוי מהנהג. בקליטה
   בלי תעודה הזיכוי יוסר ויהיה צריך לצלם אותו שוב. להמשיך בלי הזיכוי?', 'המשך
@@ -752,7 +779,7 @@ stale gate came from the same receipt returning to its photo step.
 
 ## Verification
 
-- `tools/credit-on-gate.test.mjs` (9 tests, the complete app module; fetch,
+- `tools/credit-on-gate.test.mjs` (12 tests, the complete app module; fetch,
   timers, image preparation and Firebase are faked; no paid call): (a) a
   finished no-document receipt (saved `open`, ₪45) → the next gate has the
   button, the flag is not persisted, `yotvataResetPhotoReceipt` clears it;
@@ -789,15 +816,38 @@ stale gate came from the same receipt returning to its photo step.
   no-document receipt → card and "הסר זיכוי" rendered, no add button, finish
   stops with the no-document explanation (confirmed and review credit alike),
   after removal the no-document summary opens (`noDoc`, `open`, ₪45), after
-  "מצאתי את התעודה" + anchors the comparison opens with the credit.
-  Against the v365 app, (a), (b) and (e) fail; reverting each v366 review fix
-  alone fails its own test: cards + finish guard → (i), the confirmation →
-  (e), the flag cleared on add → (h), the attach-mode hint → (b), the gate
-  wording → (d) and (g).
+  "מצאתי את התעודה" + anchors the comparison opens with the credit; (j) the
+  green button tapped and the camera cancelled photographs nothing — the flag
+  and the draft stay no-document, the empty card can be removed and the
+  receipt still finishes "לפי ספירה" (kept, it stops with the explanation and
+  a reload is still no-document), the photo on that card drops the flag, a
+  photo that fails preparation does not; (k) "התעודה הגיעה — הזן את נתוניה"
+  on an old open receipt while a gate credit is confirmed (one paid read),
+  still uploading (its signal not aborted) or an invoice page is photographed
+  → refused with the toast, credit, photo and draft kept, no further request;
+  a clean gate or an empty capture card still enters attach mode (rows
+  loaded, no credit); a started receipt keeps the older toast; (l) the
+  anchors screen shows the reading card next to "אין תעודה בכלל", a read that
+  ends there refreshes the card in place (screen not rebuilt, typed amount
+  kept, one paid read), a review credit is confirmed there, the green button
+  opens the camera there, attach mode shows none.
+  Test (e) flushes the parked timers without the fetch-timeout ones
+  (`flushKeepingUpload`) and first asserts the upload signal is not aborted —
+  with the harness's plain flush the 420 s timeout (its `clearTimeout` is a
+  no-op) had already aborted it before "המשך בלי זיכוי", so the abort
+  assertion proved nothing: neutering `aiScanDropCancelled` passed the old
+  test and fails this one.
+  Against the v365 app (`RECEIPT_TEST_APP=<v365 index.html>`) every test but
+  (c) fails — (a), (b), (d), (e), (f), (g), (h), (i), (j), (k), (l); (c)
+  exercises the credit read/attach path v364–v365 already had. Reverting each
+  v366 fix alone fails its own test: cards + finish guard → (i), the
+  confirmation → (e), the flag cleared on the photo rather than the tap → (h)
+  and (j), the attach-mode hint → (b), the gate wording → (d) and (g), the
+  attach guard → (k), the anchors-screen section → (f) and (l).
 - The verified fixture (`verifiedCredit`, `verifiedRow`) moved from
   `credit-auto-attach.test.mjs` to `tools/credit-verified-fixture.mjs`,
   shared with the new tests; shape and values unchanged.
-- Full suite: 407 tests, 405 pass; the only failures are the two pre-existing
+- Full suite: 410 tests, 408 pass; the only failures are the two pre-existing
   ones ("an actual price gap has a working yes action…", "unresolved paper
   values can be confirmed as-is…").
 - Not verified: no phone, no deployed service, no paid model call.

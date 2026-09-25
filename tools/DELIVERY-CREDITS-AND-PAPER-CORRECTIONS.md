@@ -221,7 +221,14 @@ cannot be reopened, and `deliveryCreditRead` refuses a busy credit.
   תעודה בכלל" after a gate credit asks first ("המשך בלי זיכוי"), then drops
   the credits, aborts their read and says "זיכוי מהנהג מצורף רק לקליטה עם
   תעודה.". A gate credit is read at once, survives "התחל קליטת מוצרים" (the
-  invoices queue behind it) and both manual paths. Details, tests and
+  invoices queue behind it) and both manual paths. The anchors screen ("נתוני
+  התעודה", before "התחל קליטה") shows the credit section too — a read that
+  ends there refreshes the card in place, and a review credit is confirmed or
+  removed there. "התעודה הגיעה — הזן את נתוניה" on an open no-document receipt
+  refuses while a credit with a photo or an invoice page is on the gate of a
+  new receipt ("צילמת תעודה או זיכוי לקליטה חדשה — סיים אותה, או הסר את
+  הצילומים, לפני צירוף תעודה"), so a paid read is never wiped or aborted
+  silently; an empty capture card does not block (test k). Details, tests and
   follow-ups: `tools/CREDIT-AUTO-READ-V364.md` (v366 section); tests:
   `tools/credit-on-gate.test.mjs`.
 
