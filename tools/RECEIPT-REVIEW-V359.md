@@ -119,3 +119,173 @@ readings at all unchanged). The last two tests fail against the panel without
 the effect note and without the lone-read sentence respectively.
 `tools/credit-service-contract.test.mjs` replays the lone-read case through the
 real service code (cheap read B and the verifier dropped) into the credit card.
+
+## v367: a quantity the arithmetic proves needs no confirmation
+
+### Field report (the shop's backup of 2026-09-25 12:03, app v366 / service v149)
+
+Invoice 9073807997 (3 pages, 22 rows) was read three times. The selected
+cheap read had every quantity right and its paper balanced (rows Σ 1,717.49 =
+the printed subtotal, units Σ 285 = the printed total). The other cheap read
+halved rows 6 and 18 (3 instead of 6, 10 instead of 20; units Σ 272, paper
+check failed). The verifier (`gpt-5.6-terra`) read the PACKAGES column for
+every row (1 on most rows, 2 on rows 6/18/21; units Σ 25, failed, not
+selected — correct). Rows 6 ("מארז 8 מילקי בטעם שוקולד": 6 × 16.03 = 96.18)
+and 18 ("מארז 6 שקיות מוקה": 20 × 12.53 = 250.60) ended with
+`modelVerification.issues: ['quantity']`, `fieldSupport.quantity: []` and
+every other field supported by reads 0 and 2, so the scan was `needs_review`
+and the receiving screen showed "נשארו 2 שורות לטיפול / צריך להשלים את
+הבדיקה", asking the worker to confirm a quantity the paper had already proved:
+the row arithmetic is exact, and only these quantities bring the document's
+units to the printed 285.
+
+### The rule (identical in the app and in service v150)
+
+A row's quantity counts as **verified by arithmetic** when all hold:
+
+1. the quantity is a positive integer and `unitPriceExVat > 0` (credit mode:
+   by magnitude);
+2. `unitPriceExVat` and `lineTotalExVat` of the selected read are each
+   supported by at least one other read (`fieldSupport` names a read index — a
+   string marker is not a read), and `grossLineTotalExVat` is supported too
+   when it is not `null`;
+3. in integer agorot: `round(qty × unit) === gross` when gross is not null and
+   `gross − |lineDiscountExVat| === net` (an unread discount is 0, so gross
+   must equal net); when gross is null: `round(qty × unit) === net + |discount|`;
+4. the selected paper passes `yotvataPaperCheck` (rows Σ = subtotal, units Σ =
+   the printed units total, which must have been read), so the quantity is
+   corroborated by the printed units total.
+
+A quantity that fails any of these keeps its issue. No OCR value is filled or
+altered, and the service's own record (`issues`, `fieldSupport`) is kept as
+received: the app only changes its verdict on it.
+
+A **deposit row** (`/פ.?קדון/`, the regex of both paper checks) is never
+proven by arithmetic, invoice and credit alike: `yotvataPaperCheck` and
+`deliveryCreditPaperCheck` do not count it in the units total, so the paper
+balances whatever its quantity is and condition (4) corroborates nothing. The
+service's `quantityArithmetic` (v150, `DEPOSIT_ROW`) answers `null` for such a
+row, and `priceAuditQuantityArithmetic` answers `reasons: ['deposit']` (the
+card says "שורת פיקדון לא נספרת בסך היחידות המודפס, ולכן הנייר לא מאשש את
+הכמות שלה"). Its quantity dispute stays with the worker — the manual buttons
+as for any unproven row — and the deposit line is not attached to the receipt
+until then. The service's own case shows why: the selected read swapped the
+deposit's quantity and price (4 × 9.00 for a printed 9 × 4.00) — the
+arithmetic holds, the paper balances, and only the worker can tell.
+
+### What changed in app v367
+
+- `priceAuditRowArithmeticHolds(values, credit)` is rule (3);
+  `priceAuditQuantityArithmetic(row, balanced, credit)` is the whole rule and
+  returns `{ proven, server, reasons }` (`reasons`: `support` — no
+  `fieldSupport`, a v146 answer; `values`, `unit`, `net`, `gross`,
+  `arithmetic`, `paper`, `deposit`) plus `{ unit, gross, net, printedUnitsBalanced }` on a
+  proof, the same shape as the service's `arithmetic.quantity`. The service
+  v150 marker (`fieldSupport.quantity` containing `'arithmetic'`) is accepted
+  as it is (`server: true`, the saved `modelVerification.arithmetic.quantity`
+  merged in). `priceAuditQuantityProvenByArithmetic(doc, row)` applies it to
+  an invoice row with `yotvataPaperCheck(priceAuditSource(doc) || doc,
+  priceAuditDocumentPageCount(doc))` — the source paper with the corrections
+  the worker approved, as the v365 discount rule does.
+- `aiModelReviewIssues(row)` drops a `'quantity'` issue that is proven. So the
+  row is no longer `partial` in `receiptPriceAudit`, `priceAuditPendingRows`
+  no longer lists it, `aiEvaluateInvoiceScan` no longer blocks the finish with
+  "הכמות או המחיר עדיין לא אומתו בין הסריקות", and `aiAutoResolvePendingRow`
+  may resolve it. The evidence check (row values against
+  `modelVerification.evidence`) is unchanged: an altered value still reopens
+  the row.
+- `priceAuditConsensusConfirmed(row)` treats a `needs_review` row whose only
+  issue was a proven quantity as consensus-confirmed (`arithmeticSettled`),
+  and a user-confirmed identity may sit next to a proven quantity
+  (`identityReviewed`). A service v150 row (`status: 'verified'`, the marker)
+  passes as any verified row. So a catalog price gap on such a row is
+  acknowledged by `paperReview.source: 'model_consensus'` and never asks "כן,
+  כך כתוב בתעודה" again; a row the arithmetic does not prove keeps the manual
+  "כן, הכמות והמחיר נכונים לפי הנייר" (`price-confirm-values`) and "הפענוח
+  שגוי — תקן לפי הנייר" exactly as before.
+- The row card ("צריך להשלים את הבדיקה") now explains itself
+  (`priceAuditRowDisputeHtml`, before the source-row box): the disputed
+  field(s) by their `PAPER_ROW_FIELD_NAMES`, what each read saw from
+  `modelVerification.readings` sorted by read ("הקריאות לא הסכימו על הכמות:
+  קריאה 1 – 3 · קריאה 2 – 6 · קריאה 3 (המודל החזק) – 2."; two fields get a
+  summary sentence and one line per field with
+  `data-row-dispute-field`), why the arithmetic does not settle it ("החשבון לא
+  מכריע: מחיר היחידה × הכמות לא יוצא סכום השורה באף אחת מהקריאות" — or
+  "בקריאה שנבחרה" when another read's arithmetic holds — "מחיר היחידה לא
+  מוסכם בין הקריאות", "סכום השורה לא מוסכם בין הקריאות", "הסכום לפני הנחה לא
+  מוסכם בין הקריאות", "התעודה לא מתאזנת מול הסיכום המודפס"; several reasons
+  joined with " · "), and the verifier's outcome in the v365 words
+  (`scan.verification.verifier` from `perDocument`: "הקריאה השלישית (המודל
+  החזק) נכשלה, לכן נשארו שתי קריאות שלא הסכימו." with the technical reason as
+  a small ltr line, or "גם הקריאה השלישית (המודל החזק) קראה את הנייר, ועדיין
+  אין שתי קריאות שמסכימות."). A single reading says "רק קריאה אחת קראה את
+  השורה הזאת…" and claims no dispute; without readings (v148) the sentence is
+  generic but names the field. Display only, no raw English.
+- The driver-credit consensus (`deliveryCreditConsensus`) applies the same
+  rule by magnitude, with `deliveryCreditPaperCheck` and a read printed units
+  total as condition (4), so a v149 credit answer whose only row dispute is a
+  proven quantity attaches by itself (v365 rule); a slip without a printed
+  units total, or a quantity the arithmetic does not prove, stays for review.
+- Version: v367 "כמות שמוכחת בחשבון לא דורשת אישור"; `sw.js` cache
+  `yotvata-v367`.
+
+### Verification
+
+- `tools/quantity-arithmetic-fixture.mjs`: the field case — rows 6 and 18
+  with the backup's real values and their three readings; the other 20 rows
+  are synthetic and only fill the printed totals (the backup's rows are not in
+  this repository); `readRows('selected' | 'halved' | 'packages')` are the
+  three model reads, `fieldInvoice()` the v149 answer shape (and the v150
+  shape with `server: 150`).
+- `tools/quantity-arithmetic.test.mjs` (14 tests, the complete app module):
+  the field case in the v149 shape (no pending rows, audit complete, rows
+  `match`, values and the service record untouched, no approval record
+  invented, the same after a reload); a proven quantity counting as consensus
+  for a catalog price gap (`paperReview.source: 'model_consensus'`); a
+  quantity the arithmetic does not prove (unit 16.04) pending with the exact
+  explanation, the three readings and the buttons; the "selected read" wording
+  when another read's arithmetic holds, on an unbalanced paper; an unsupported
+  unit price (both fields named, one readings line each, the unit reason); an
+  unbalanced paper (284 units); the verifier-failed, lone-read and v148
+  wordings, surviving a reload; the v150 marker accepted as it is (and still
+  needing a sound identity); the manual confirm flow and the paper-correction
+  flow unchanged for an unproven row; the rule's cases (gross null, a row
+  discount, credit magnitudes, a marker is not a read, every refusal reason);
+  a driver credit proven and one without a printed units total; a deposit row
+  on the invoice (row 21 as "פיקדון בקבוק", read 24 / 12 / 2, 261 printed
+  units so the paper balances anyway) pending with the deposit reason, rows 6
+  and 18 still proven, the finish blocked and no deposit line until the worker
+  confirms; a deposit row on a driver slip (−6 × 7.30 on a −1-unit slip) kept
+  for review with the dispute line; the rule's deposit cases (the service's
+  4 × 9.00, invoice and credit, a marker still accepted).
+- `tools/quantity-arithmetic-contract.test.mjs` (5 tests): the three reads
+  through the REAL service code in-process (`../yotvata-ai-scan`, mocked
+  model, no paid call), asserting the service's answer for rows 6 and 18 by
+  its version (v149: `needs_review`, `issues: ['quantity']`, empty support;
+  v150: `verified`, `fieldSupport.quantity: ['arithmetic']`,
+  `arithmetic.quantity`) and, through the real invoice scan path
+  (`yotvataStartPaperScan`), no pending row, audit complete, the finish not
+  blocked, values as returned; and an unproven quantity (16.04) reaching the
+  worker with the readings. It passes against the committed v149 service
+  (`YOTVATA_AI_SCAN=<v149 checkout>`) and against v150; against the v366 app
+  with the v149 service both tests fail — the field bug. The service's own
+  deposit scenario (milk 10 × 5.00 agreed; "פיקדון בקבוק" read 4 × 9.00 /
+  9 × 9.00 / 9 × 4.00 with a wrong subtotal on the verifier; 10 printed units)
+  in invoice and credit mode: the service answers `needs_review`, `issues:
+  ['quantity']`, no marker (`quantityArithmetic` null), and the app keeps the
+  row pending with the deposit reason (invoice) or the slip for review with
+  "הקריאות לא הסכימו על הכמות בשורה 2" (credit).
+- `tools/credit-auto-attach.test.mjs` ("a row the reads did not agree on")
+  and `tools/verified-price-identity.test.mjs` ("a real quantity
+  disagreement") had fixtures whose quantity the arithmetic now proves
+  (6 × 7.30 = 43.80 on a balanced slip; 6 × 5.24 = 31.44 with 6 units
+  printed): their money now reads 7.31 and 31.40 respectively, so they keep
+  testing a dispute the arithmetic does not settle. Every other assertion is
+  unchanged.
+- Against the v366 app (`RECEIPT_TEST_APP=<v366 index.html>`) 13 of the 14
+  new tests fail (the v150-marker contract test passes, as v366 already
+  accepts a `verified` row).
+- Full suite: 429 tests, 427 pass; the only failures are the two pre-existing
+  ones ("an actual price gap has a working yes action…", "unresolved paper
+  values can be confirmed as-is…").
+- Not verified: no phone, no deployed service, no paid model call.

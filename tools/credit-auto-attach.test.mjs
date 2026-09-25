@@ -253,9 +253,13 @@ test('a response without consensus evidence (v147 shape) or with a dispute stays
   assert.equal(credit(b.c).status, 'review');
   assert.deepEqual(reasons(b.c), ['disputed']);
   assert.match(card(b.c), /הקריאות לא הסכימו על הסכום לפני מע״מ — בדוק מול הנייר/);
-  // A row the reads did not agree on.
+  // A row the reads did not agree on. v367: a quantity the arithmetic proves on a balanced slip is no longer
+  // a dispute (quantity-arithmetic.test.mjs), so this row's unit price is read as 7.31 (6 × 7.31 ≠ 43.80).
   const d = setup();
-  await readCredit(d.c, d.data, verifiedCredit(d.data, { rowOptions: { 0: { issues: ['quantity'] } } }));
+  const disputedQuantity = verifiedCredit(d.data, { rowOptions: { 0: { issues: ['quantity'] } } }), disputedRow = disputedQuantity.scan.documents[0].rows[0];
+  disputedRow.unitPriceExVat = disputedRow.modelVerification.evidence.unitPriceExVat = 7.31;
+  disputedRow.modelVerification.readings.forEach(r => { r.values.unitPriceExVat = 7.31; });
+  await readCredit(d.c, d.data, disputedQuantity);
   assert.equal(credit(d.c).status, 'review');
   assert.match(card(d.c), /הקריאות לא הסכימו על הכמות בשורה 1 — בדוק מול הנייר/);
   assert.deepEqual(barcodeInputs(card(d.c)), [], 'a numeric dispute opens no barcode field');

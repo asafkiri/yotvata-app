@@ -868,3 +868,56 @@ stale gate came from the same receipt returning to its photo step.
   per-product shortage, so the comparison still ends with "הזיכוי אינו תואם
   לחוסר שנספר…" unless the counted lines explain it — unchanged since v364,
   not part of this change.
+
+# A quantity the arithmetic proves needs no confirmation — v367
+
+Field report and the rule: `tools/RECEIPT-REVIEW-V359.md` (v367 section).
+Invoice 9073807997 (3 pages, 22 rows, service v149) ended with two rows whose
+quantity no other read supported — one cheap read halved them, the verifier
+read the packages column — although 6 × 16.03 = 96.18 and 20 × 12.53 = 250.60
+exactly and only those quantities make the printed units total 285. The app
+asked the worker to confirm them.
+
+## What changed for the driver credit
+
+- `deliveryCreditConsensus` applies the same rule as the invoice audit
+  (`priceAuditQuantityArithmetic(row, balanced, true)`, by magnitude):
+  a row's `'quantity'` issue is not a dispute when the unit price and the
+  line total are supported by another read, the row arithmetic is exact in
+  agorot, `deliveryCreditPaperCheck` passes and the slip's printed units total
+  was read (`printedUnits` integer, non-zero). Such a row counts as settled
+  even while the service (v149) says `needs_review`, so a credit whose only
+  dispute is a proven quantity attaches by itself under the v365 rule
+  (`autoConfirmed: true`). Service v150 drops the issue itself
+  (`fieldSupport.quantity: ['arithmetic']`, `status: 'verified'`), which the
+  app accepts as it is.
+- A slip without a printed units total, or a quantity the arithmetic does not
+  prove, stays for review with the v365 line ("הקריאות לא הסכימו על הכמות
+  בשורה 1 — בדוק מול הנייר"). No paper value changes; the service's record is
+  kept as received.
+- A deposit row (`/פ.?קדון/`, the regex of `deliveryCreditPaperCheck`) is
+  never proven by arithmetic: the slip's printed units total does not count
+  it, so the slip balances whatever its quantity is and nothing on the paper
+  corroborates it. `priceAuditQuantityArithmetic` answers `reasons:
+  ['deposit']` — as service v150's `quantityArithmetic` answers `null` — and
+  the quantity dispute keeps the slip for review; it is not attached by
+  itself. The same rule in both repos.
+- Version: v367 "כמות שמוכחת בחשבון לא דורשת אישור"; `sw.js` cache
+  `yotvata-v367`.
+
+## Verification
+
+- `tools/quantity-arithmetic.test.mjs`: the credit case (6 × 7.30 = 43.80 on
+  the −48.80 / −7 slip attaches by itself, toast and `autoConfirmed`; the same
+  slip without a printed units total stays for review with the dispute line;
+  a deposit row "פיקדון קפה" on a −1-unit slip stays for review, no toast).
+- `tools/quantity-arithmetic-contract.test.mjs`: the real service in credit
+  mode on its own deposit slip (−4 × 9.00 read for a printed −9 × 4.00)
+  answers `needs_review`; `deliveryCreditRead` keeps the slip for review with
+  "הקריאות לא הסכימו על הכמות בשורה 2".
+- `tools/credit-auto-attach.test.mjs`: the "row the reads did not agree on"
+  fixture now reads the unit price as 7.31 (6 × 7.31 ≠ 43.80), so it still
+  tests a dispute the arithmetic does not settle; every other assertion is
+  unchanged.
+- Full suite: 429 tests, 427 pass; only the two pre-existing failures.
+- Not verified: no phone, no deployed service, no paid model call.
