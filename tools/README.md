@@ -62,7 +62,14 @@ node tools/past-chips-test.js גיבוי.json        # צ׳יפים של "סימ
 node --test tools/return-credit-gap.test.mjs    # הכרעת זיכוי, פותר הפער, ותעודה שנשארת פתוחה (v357)
 node --test tools/scan-transport.test.mjs       # קריאה ששורדת נתק, חימום, תור של קריאה אחת בתשלום, זיכוי מהנהג (v364)
 node --test tools/delivery-credit-auto-read.test.mjs  # זיכוי מהנהג נקרא אוטומטית אחרי אישור הצילום, כרטיס עם פעולה אחת (v364)
+node --test tools/credit-auto-attach.test.mjs   # זיכוי שהקריאה שלו אומתה מצורף לבד; שורת הסיבה כשלא; "תקן ברקוד" (v365)
+node --test tools/document-summary-review.test.mjs  # אימות סיכום תעודה רק על מחלוקת אמיתית, עם שם השדה ומה כל קריאה ראתה (v365)
+node --test tools/credit-service-contract.test.mjs  # החוזה מול שרת הסריקה האמיתי (yotvata-ai-scan v149) על זיכוי 22229080 מהגיבוי (v365)
 ```
+
+`credit-service-contract` מריצה את קוד השרת עצמו (בלי קריאה בתשלום) מהתיקייה
+שליד הריפו — `../yotvata-ai-scan` — או מהנתיב ב-`YOTVATA_AI_SCAN`; בלעדיו היא
+מדלגת עם הודעה.
 
 שתי בדיקות צריכות נתונים אמיתיים שאינם בריפו (גיבוי החנות ודפי הזמנה
 מהספק), ולכן הנתיב מגיע כארגומנט — `BACKUP` ו-`SAMPLES` בהתאמה. בלעדיו

@@ -16,9 +16,14 @@ when its OCR price was wrong.
   and opens the camera; the read starts when the last part is confirmed. Each
   read makes one paid request for that credit only; it never rereads the
   invoices.
-- Review the credit number, product, quantity and amount excluding VAT, then
-  confirm that the credit belongs to the current delivery. Up to four credits,
-  each with up to four pages, can be attached.
+- Since v365 a credit whose read was verified by the service (two reads that
+  agree on the summary, on every row and on the credit number, every product
+  resolved, not a duplicate, arithmetic exact) is attached by itself: a
+  driver's credit is always part of the current delivery. Otherwise the card
+  says in one line what is unclear (a product not identified, a number not
+  read or not verified, reads that disagree, a duplicate number), the worker
+  corrects it against the paper and confirms. Up to four credits, each with up
+  to four pages, can be attached.
 - Number and barcode can be corrected. Credit pages require negative printed
   amounts, internally consistent rows and summary, and exact catalog barcodes.
   A positive invoice is never silently converted into a credit.
@@ -144,6 +149,47 @@ cannot be reopened, and `deliveryCreditRead` refuses a busy credit.
 - Messages are simple Hebrew. The browser's own text (for example “Load
   failed”) or an HTTP status appears only as a small grey left-to-right line.
 - Details, field report and verification: `tools/CREDIT-AUTO-READ-V364.md`.
+
+### v365: confirmation is automatic when the read is verified
+
+- At the end of `deliveryCreditRead` (and only there — never on restore, cloud
+  sync or render) a credit with no review reason is set to `confirmed` with
+  `autoConfirmed: true`. `deliveryCreditReviewReasons(c)` is empty when the
+  paper's `modelVerification` has no disputed summary field and every row is
+  `agreed`/`verified` (`deliveryCreditConsensus`), every row resolves to one
+  catalog product, the number is not empty and at least one other read saw the
+  same number (`modelVerification.support.invoiceNumber`, service v149;
+  `deliveryCreditNumberUnsupported`), `deliveryCreditDuplicate` is false and
+  `deliveryCreditPaperCheck` passed. The printed discount total
+  (`documentDiscountExVat`) on a slip whose rows close to the subtotal exactly
+  is information, not a dispute. Answers without `modelVerification` (service
+  v147) always go to the worker; a v148 answer carries no evidence about the
+  number, so the credit waits for one tap ("מספר הזיכוי לא אומת בשרת — בדוק
+  אותו מול הנייר") until service v149 is live. A number the worker typed is
+  their decision and is not checked against the reads.
+- After an automatic attach the read also refreshes `#rcProgress`, `#rcTotals`
+  and `#rcCount` in place (`refreshReceiptTotals`, the same point as a quantity
+  keystroke), never the whole screen: the sticky bar was drawn when the read
+  started, while the credit still "needed confirmation".
+- The review card carries the reason in one line (`data-credit-review-reason`);
+  the ownership question was removed. When only one read of the slip parsed
+  (service v149 `readings` with a single read — the other cheap read and the
+  verifier dropped) the line is "רק קריאה אחת של הנייר הצליחה — בדוק את מספר
+  הזיכוי, המוצרים והכמויות מול הנייר", not a list of disagreements that never
+  happened. Barcode fields appear only under rows
+  without a product or rows the worker typed in; identified rows have a
+  “תקן ברקוד” link (`c.editBarcode[i]`, never saved). A barcode typed by the
+  worker settles that row's identity.
+- The attached card says “צורף אוטומטית — לא של המשלוח הזה? הסר זיכוי” when the
+  attach was automatic and keeps “תקן פרטי זיכוי”; a worker's confirmation or
+  edit clears `autoConfirmed`. `deliveryCreditNotes` carries `autoConfirmed`
+  into the saved receipt for audit.
+- Coverage, finish checks and the block on a credit that matches no shortage
+  are unchanged. Tests: `tools/credit-auto-attach.test.mjs`, and
+  `tools/credit-service-contract.test.mjs`, which runs the real service code
+  (the checkout next to this repo) on the backup's credit 22229080 and hands
+  its exact answer to the app — the automatic attach is proven against the
+  service, not against a fixture that imitates it.
 
 ## Correcting an OCR row
 
