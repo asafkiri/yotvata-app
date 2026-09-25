@@ -956,11 +956,16 @@ test('a refused credit row renders an empty barcode field with the read digits a
     assert.equal(c.run("deliveryCreditConfirm('credit-1')"), true, method + ': the credit can be attached');
     assert.equal(c.run('receiptDeliveryCredits[0].status'), 'confirmed', method);
   }
-  // A row the service did identify keeps its barcode in the field.
+  // v365: a row the service did identify has no barcode field by default — only
+  // "תקן ברקוד", which reveals the field with the read barcode in it.
   const data = fixture('yotvata'); const c = runtime('yotvata', { data });
   service(c, { version: 148, answer: () => reply(creditPaper(data)) });
   addCredit(c);
   assert.equal(await c.run("deliveryCreditRead('credit-1')"), true);
+  assert.doesNotMatch(c.run('deliveryCreditsHtml()'), /data-role="delivery-credit-barcode"/);
+  assert.match(c.run('deliveryCreditsHtml()'), /data-role="delivery-credit-edit-barcode" data-id="credit-1" data-row="0"[^>]*>תקן ברקוד</);
+  assert.doesNotMatch(c.run('deliveryCreditsHtml()'), /נקרא בצילום/);
+  await c.click('delivery-credit-edit-barcode', 'credit-1', { row: '0' });
   assert.match(c.run('deliveryCreditsHtml()'), /<input data-role="delivery-credit-barcode"[^>]* value="7290000000015"/);
   assert.doesNotMatch(c.run('deliveryCreditsHtml()'), /נקרא בצילום/);
 });

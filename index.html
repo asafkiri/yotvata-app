@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v364 זיכוי מהנהג נקרא אוטומטית</title>
+    <title>הזמנות יטבתה - v365 זיכוי מאומת מצורף לבד</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v364 זיכוי מהנהג נקרא אוטומטית</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v365 זיכוי מאומת מצורף לבד</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -1287,6 +1287,7 @@ function yotvataScanMetadata(result) {
     serviceVersion: result.serviceVersion || null, requestId: result.requestId || null,
     model: result.model || null, usage: result.usage || null,
     barcodeRetry: result.retryAudit || null, scanAudit: result.scanAudit || null,
+    verification: result.verification && typeof result.verification === 'object' ? result.verification : null, // v365
     checksumRetryAttempted: !!result.checksumRetryAttempted,
     checksumRetryModel: result.checksumRetryModel || null, error: result.errorMessage || '' };
 }
@@ -1304,7 +1305,8 @@ function yotvataStoreScanResults(results) {
 function deliveryCreditSnapshot() {
   // v364: waiting/waitingFor/progress הם מצב תצוגה רגעי של קריאה שרצה — לא נשמרים בטיוטה.
   // resume (מפתח האיסוף) נשמר רק בטיוטה המקומית — ראה deliveryCreditLocalDraft.
-  return receiptDeliveryCredits.map(({ pages, waiting, waitingFor, progress, resume, ...c }) => ({ ...c, pageCount: pages.length || c.pageCount || 0 }));
+  // v365: editBarcode ("תקן ברקוד" שנפתח בשורה מזוהה) הוא מצב תצוגה בלבד — לא נשמר.
+  return receiptDeliveryCredits.map(({ pages, waiting, waitingFor, progress, resume, editBarcode, ...c }) => ({ ...c, pageCount: pages.length || c.pageCount || 0 }));
 }
 // v364: מפתח הקריאה של זיכוי (c.resume = { scanKey, at }) נכנס לטיוטה שבמכשיר בלבד,
 // לא לענן: הוא שייך לחיבור של המכשיר הזה, ובלעדיו טיוטת הענן והחתימה שלה לא משתנות.
@@ -1389,6 +1391,99 @@ function deliveryCreditDuplicate(c) {
   return !!key && (receiptDeliveryCredits.some(other => other !== c && String(other.number || '').replace(/\s/g, '') === key) ||
     receipts.some(rc => rc.id !== (receiptAttachTarget && receiptAttachTarget.id) && (rc.shortCreditNotes || []).some(n => String(n.number || '').replace(/\s/g, '') === key)));
 }
+// ===== v365: זיכוי מאומת מצורף לבד =====
+// מהשטח (גיבוי החנות, קליטה של 25.9.2026, אפליקציה v364 / שרת v148): זיכוי 22229080
+// (פתק אחד, 2 שורות) נקרא בשתי קריאות זולות שהסכימו על הכול — שורות 'agreed', סיכום בלי
+// מחלוקת, שני המוצרים זוהו בשרת (model_consensus), המספר נקרא, הסכומים שליליים והחשבון
+// מדויק. ובכל זאת הכרטיס שאל "האם זה זיכוי על חוסר במשלוח הנוכחי?" והציג שדה ברקוד מתחת
+// לכל שורה. החלטת בעל העסק: זיכוי מהנהג הוא תמיד חלק מהמשלוח הנוכחי — הוא מגיע יחד עם
+// התעודות, לא זיכוי נפרד על משהו אחר — ולכן אין מה לאשר תעודה-תעודה. מעכשיו:
+// • זיכוי שהקריאה שלו אומתה (deliveryCreditReviewReasons ריק: הסיכום וכל שורה מוסכמים בין
+//   הקריאות, כל מוצר זוהה בשרת, יש מספר, לא כפול, ובדיקת הנייר עברה) מצורף לבד בסוף
+//   deliveryCreditRead — ורק שם. autoConfirmed: true נשמר לביקורת (גם בתעודה השמורה).
+//   שחזור טיוטה, סנכרון ענן ורינדור לעולם לא מאשרים: זיכוי מאושר חוזר כמו שנשמר.
+// • זיכוי שלא אומת נשאר לבדיקה, והכרטיס אומר בשורה אחת למה (מוצר שלא זוהה, מספר שלא
+//   נקרא, קריאות שלא הסכימו, מספר כפול). שדה ברקוד מוצג רק בשורה בלי מוצר; בשורה מזוהה
+//   יש קישור "תקן ברקוד" שפותח אותו (c.editBarcode — מצב תצוגה בלבד, לא נשמר).
+// • הכסף לא משתנה: הכיסוי מול החוסר, החסימה בסיום על זיכוי שלא תואם לחוסר, והכללים של
+//   deliveryCreditCoverage נשארו כפי שהיו. "הסר זיכוי" ו"תקן פרטי זיכוי" נשארים בכרטיס.
+// שמות השדות של סיכום התעודה, לשורת ההסבר בזיכוי ובפאנל אימות הסיכום של החשבונית.
+// v365: invoiceNumber — שרת v149 משווה את מספר הזיכוי בין הקריאות (בזיכוי בלבד) ומכניס
+// אותו ל-issues כשאף קריאה אחרת לא ראתה אותו מספר; בחשבונית השדה הזה לא נכנס ל-issues.
+const PAPER_SUMMARY_FIELD_NAMES = { subtotalExVat: 'הסכום לפני מע״מ', printedUnits: 'סך היחידות', documentDiscountExVat: 'הנחת המסמך',
+  pageCount: 'מספר העמודים', rowCount: 'מספר השורות', printedLines: 'מספר השורות המודפס', vatAmount: 'המע״מ', totalInclVat: 'הסכום כולל מע״מ',
+  invoiceNumber: 'מספר הזיכוי' };
+const PAPER_ROW_FIELD_NAMES = { identity: 'המוצר', quantity: 'הכמות', unitPriceExVat: 'מחיר היחידה', grossLineTotalExVat: 'הסכום לפני הנחה',
+  lineDiscountExVat: 'ההנחה', lineTotalExVat: 'הסכום' };
+// v365: מה הקריאות של השרת (modelVerification, מאז שרת v147/v148) אומרות על הזיכוי.
+// unverified — אין עדות בכלל (שרת ישן, או תשובה בלי modelVerification): לא מצרפים לבד.
+// disputes — שדות בסיכום או בשורות שאף קריאה אחרת לא תמכה בהם, בעברית, לשורת ההסבר.
+// "הנחת המסמך" בנייר שבדיקת הנייר שלו עברה (השורות נסגרות לסיכום בלי הנחה נפרדת — אחרת
+// deliveryCreditPaperCheck כבר עצר) היא שורת "סך ההנחות" שכבר כלולה בשורות: מידע בלבד,
+// לא מחלוקת. שורה בלי מוצר לא נספרת כאן פעמיים — הסיבה "מוצר לא זוהה" מכסה אותה.
+function deliveryCreditConsensus(c, rows = deliveryCreditRows(c)) {
+  const paper = c && c.paper, proof = paper && paper.modelVerification;
+  if (!proof || proof.version !== 1 || !Array.isArray(proof.issues)) return { verified: false, unverified: true, disputes: [] };
+  // v365: מספר זיכוי שהעובד הקליד (שונה מזה שנקרא) הוא ההכרעה שלו על המספר — כמו ברקוד שהוקלד
+  // לשורה — ומחלוקת 'invoiceNumber' של הקריאות (שרת v149) כבר לא רלוונטית. בזמן הקריאה עצמה
+  // המספר הוא תמיד זה שנקרא, ולכן זה לא משנה דבר בצירוף האוטומטי. ההשוואה בלי רווחים.
+  const numberKey = v => String(v == null ? '' : v).replace(/\s/g, '');
+  const typedNumber = !!numberKey(c.number) && numberKey(c.number) !== numberKey(paper.invoiceNumber);
+  const disputes = proof.issues.filter(f => f !== 'documentDiscountExVat' && !(typedNumber && f === 'invoiceNumber')).map(f => PAPER_SUMMARY_FIELD_NAMES[f] || String(f));
+  let unverifiedRows = 0;
+  (Array.isArray(paper.rows) ? paper.rows : []).forEach((row, i) => {
+    const rp = row && row.modelVerification;
+    // ברקוד שהעובד הקליד מהנייר הוא ההכרעה שלו על זהות המוצר — מחלוקת 'identity' של
+    // הקריאות כבר לא רלוונטית לשורה הזאת (הכמות והסכומים עדיין נבדקים).
+    const typed = !!c.barcodes && c.barcodes[i] != null;
+    const issues = (rp && Array.isArray(rp.issues) ? rp.issues : []).filter(f => !(typed && f === 'identity'));
+    if (rp && rp.version === 1 && !issues.length && (['agreed', 'verified'].includes(rp.status) || typed)) return;
+    unverifiedRows++;
+    if (rows[i] && !rows[i].productId) return;
+    const fields = [...new Set(issues.map(f => PAPER_ROW_FIELD_NAMES[f] || String(f)))];
+    disputes.push((fields.length ? fields.join(', ') : 'הקריאה') + ' בשורה ' + (i + 1));
+  });
+  // v365: lone — רק קריאה אחת פוענחה (שרת v149: readings עם קריאה אחת): הקריאות לא "חלקו", פשוט אין קריאה נוספת.
+  return { verified: !disputes.length && !unverifiedRows && (paper.rows || []).length > 0, unverified: false, disputes, lone: priceAuditDocumentLoneRead(paper) };
+}
+// v365: מספר הזיכוי הוא חלק מהעדות. הבדיקה היחידה על המספר הייתה "לא ריק", אבל המספר לא
+// היה חלק מההסכמה בשרת: שתי קריאות שנבדלו רק בו (22229030 מול 22229080) חזרו 'agreed' עם
+// המספר של הקריאה שנבחרה בלבד, והזיכוי היה מצורף לבד בלי שאיש הסתכל. המספר הוא המפתח של
+// הגנת הכפילות (deliveryCreditDuplicate): אותו פתק שנקרא במשלוח אחר עם המספר המודפס לא
+// היה כפול, מצורף שוב ומוריד שוב מהתשלום. שרת v149 משווה את המספר בזיכוי ומדווח
+// ב-modelVerification.support.invoiceNumber אילו קריאות אחרות ראו את אותו מספר (מספר בלי
+// תמיכה נכנס גם ל-issues — ואז "הקריאות לא הסכימו על מספר הזיכוי" של deliveryCreditConsensus
+// כבר מכסה). מצרפים לבד רק כשלפחות קריאה אחת נוספת ראתה את אותו מספר; בלי עדות בכלל (שרת
+// v148, או תשובה בלי support) הזיכוי נשאר לבדיקה כמו ב-v364, עד ששרת v149 באוויר. מספר
+// שהעובד הקליד (שונה מזה שנקרא) הוא ההכרעה שלו ולא נבדק כאן; ההשוואה בלי רווחים, כמו
+// ב-deliveryCreditDuplicate. הערך שנקרא לא משתנה, והאישור הידני לא עובר דרך הבדיקה הזאת.
+function deliveryCreditNumberUnsupported(c) {
+  const key = v => String(v == null ? '' : v).replace(/\s/g, '');
+  const read = key(c.paper && c.paper.invoiceNumber);
+  if (!read || key(c.number) !== read) return '';
+  const proof = c.paper.modelVerification, support = proof && proof.support && typeof proof.support === 'object' ? proof.support.invoiceNumber : undefined;
+  if (!Array.isArray(support)) return 'מספר הזיכוי לא אומת בשרת — בדוק אותו מול הנייר';
+  return support.length || (Array.isArray(proof.issues) && proof.issues.includes('invoiceNumber')) ? '' : 'הקריאות לא הסכימו על מספר הזיכוי — בדוק מול הנייר';
+}
+// v365: למה הזיכוי לא צורף לבד. רשימה ריקה = מצרפים לבד (deliveryCreditRead). כל סיבה היא
+// משפט פשוט לעובד; הכרטיס מציג אותן בשורה אחת (חוץ מ-duplicate, שכבר יש לו שורה משלו).
+function deliveryCreditReviewReasons(c) {
+  const reasons = [];
+  if (!c || !c.paper) return reasons;
+  const rows = deliveryCreditRows(c), missing = rows.filter(r => !r.productId).length;
+  const consensus = deliveryCreditConsensus(c, rows);
+  if (consensus.unverified) reasons.push({ code: 'unverified', text: 'הקריאה לא אומתה בשרת — בדוק את המוצרים, הכמויות והסכומים מול הנייר' });
+  // שורה בלי מוצר שלא אומתה נספרת רק ב-'product' למטה (consensus.verified כבר false בגללה).
+  else if (consensus.disputes.length) reasons.push({ code: 'disputed', text: consensus.lone ? 'רק קריאה אחת של הנייר הצליחה — בדוק את מספר הזיכוי, המוצרים והכמויות מול הנייר' // v365: קריאה יחידה
+    : 'הקריאות לא הסכימו על ' + consensus.disputes.join(', ') + ' — בדוק מול הנייר' });
+  if (missing) reasons.push({ code: 'product', text: missing === 1 ? 'מוצר אחד לא זוהה — הקלד את הברקוד מהנייר' : missing + ' מוצרים לא זוהו — הקלד את הברקודים מהנייר' });
+  if (!String(c.number || '').trim()) reasons.push({ code: 'number', text: 'מספר הזיכוי לא נקרא — הקלד אותו מהנייר' });
+  // v365: מספר שנקרא אבל אף קריאה אחרת לא תמכה בו (או שאין על זה עדות) — לא מצרפים לבד.
+  // כשהקריאה כולה לא אומתה ('unverified') הסיבה ההיא כבר אומרת לבדוק הכול.
+  else if (!consensus.unverified) { const unsupported = deliveryCreditNumberUnsupported(c); if (unsupported) reasons.push({ code: 'number', text: unsupported }); }
+  if (deliveryCreditDuplicate(c)) reasons.push({ code: 'duplicate', text: 'מספר הזיכוי כבר צורף' });
+  return reasons;
+}
 function deliveryCreditConfirm(id) {
   const c = deliveryCreditFind(id);
   if (!c || !['review', 'confirmed'].includes(c.status) || !c.paper) return false;
@@ -1398,12 +1493,14 @@ function deliveryCreditConfirm(id) {
     showToast(error || (!String(c.number || '').trim() ? 'השלם את מספר תעודת הזיכוי שמודפס בנייר.' : deliveryCreditDuplicate(c) ? 'תעודת הזיכוי הזאת כבר צורפה. אין לרשום אותה פעמיים.' : 'השלם ברקוד תקין למוצר שלא זוהה בזיכוי.'), null, null, 4500); return false;
   }
   c.status = 'confirmed'; c.confirmedAt = Date.now(); c.confirmedSignature = deliveryCreditSignature(c);
+  c.autoConfirmed = false; // v365: אישור של העובד — לא צירוף אוטומטי
   pendingReceipt = null; saveReceiptDraft(); renderReceiving();
   showToast('הזיכוי צורף למשלוח. בסיום הספירה נבדוק איזה חוסר הוא מכסה.', null, null, 3200); return true;
 }
 function deliveryCreditInvalidate(c) {
   c.paper = null; c.status = 'capture'; c.error = ''; c.errorKind = ''; c.errorDetail = ''; c.confirmedAt = null; c.confirmedSignature = null;
   c.barcodes = []; pendingReceipt = null;
+  c.autoConfirmed = false; c.editBarcode = []; // v365
   c.resume = null; // v364: צילום חדש (או חלק נוסף) — הקריאה הקודמת כבר לא שלו
 }
 function deliveryCreditOpenPage(id, pageIndex) {
@@ -1533,9 +1630,25 @@ async function deliveryCreditRead(id, collect = false) {
     if (problem) { c.paper = null; throw deliveryCreditPaperError(problem); }
     c.number = String(c.paper.invoiceNumber || '').trim(); c.barcodes = []; c.status = 'review';
     c.scanAudit = { requestId: result.requestId || null, model: result.model || null, scanAudit: result.scanAudit || null };
+    // v365: זיכוי מאומת מצורף לבד — כאן בלבד, בסוף הקריאה (גם באיסוף אחרי רענון), ולעולם
+    // לא בשחזור טיוטה או בסנכרון ענן. הסיבות שמשאירות זיכוי לבדיקה — deliveryCreditReviewReasons.
+    c.autoConfirmed = false; c.editBarcode = [];
+    if (!deliveryCreditReviewReasons(c).length) {
+      c.status = 'confirmed'; c.confirmedAt = Date.now(); c.confirmedSignature = deliveryCreditSignature(c); c.autoConfirmed = true;
+      pendingReceipt = null;
+      showToast('הזיכוי צורף למשלוח. בסיום הספירה נבדוק איזה חוסר הוא מכסה.', null, null, 3200);
+    }
     // v364: הקריאה מסתיימת ברקע, בזמן שהעובד אולי מקליד כמות — רק כרטיסי הזיכוי
     // מתעדכנים, בלי לבנות מחדש את כל מסך הקליטה (שדה הכמות הפעיל נשאר).
-    saveReceiptDraft(); deliveryCreditRefreshCards(); return true;
+    saveReceiptDraft(); deliveryCreditRefreshCards();
+    // v365: זיכוי שצורף לבד משנה גם את סרגל ההתקדמות הדביק ואת הסה"כ — "פער ₪…", "יש זיכוי
+    // שעדיין דורש אישור או תיקון" ו"בזיכוי ✓" צוירו כשהקריאה יצאה (renderReceiving למעלה,
+    // הזיכוי עוד לא היה מאושר), והכרטיס שמתחתיהם כבר אומר "זיכוי שאושר". מרעננים רק אותם
+    // (נקודת הרענון של v234: rcProgress, rcTotals, rcCount — כמו בהקלדת כמות), בלי לבנות
+    // את המסך: שדה הכמות הפעיל וכרטיס זיכוי שבעריכה נשארים. זיכוי שנשאר לבדיקה לא משנה
+    // את הסרגל (הוא כבר אמר שיש זיכוי שממתין), ולכן אין רענון; מחוץ למסך הקליטה אין מה לרענן.
+    if (c.autoConfirmed && currentView === 'receiving') refreshReceiptTotals();
+    return true;
   } catch (error) {
     if (current()) {
       // v364: סוג התקלה קובע מה מציעים לעובד: network = אותו צילום שוב (נאסף
@@ -1650,7 +1763,7 @@ function deliveryCreditCaptureHtml(c) {
   // כל הצילומים אושרו אבל הקריאה לא יצאה (החיבור המאובטח לא היה מוכן, נמחק עמוד נוסף…).
   return inputs + button('delivery-credit-read', 'קרא את הזיכוי', true) + more;
 }
-function deliveryCreditAction(role, id, page) {
+function deliveryCreditAction(role, id, page, row) {
   if (receiptFinalizing) return;
   if (role === 'delivery-credit-add') {
     if (receiptDeliveryCredits.length >= 4) return;
@@ -1671,13 +1784,23 @@ function deliveryCreditAction(role, id, page) {
   else if (role === 'delivery-credit-collect') return deliveryCreditRead(id, true);
   else if (role === 'delivery-credit-page') deliveryCreditOpenPage(id, Number(page));
   else if (role === 'delivery-credit-confirm') deliveryCreditConfirm(id);
-  else if (role === 'delivery-credit-edit') { c.status = 'review'; c.confirmedAt = null; c.confirmedSignature = null; pendingReceipt = null; saveReceiptDraft(); renderReceiving(); }
+  else if (role === 'delivery-credit-edit') { c.status = 'review'; c.confirmedAt = null; c.confirmedSignature = null; c.autoConfirmed = false; pendingReceipt = null; saveReceiptDraft(); renderReceiving(); }
+  else if (role === 'delivery-credit-edit-barcode') {
+    // v365: "תקן ברקוד" בשורה מזוהה — פותח את שדה הברקוד של השורה הזאת בלבד. מצב תצוגה
+    // בזיכרון (לא בטיוטה); רק כרטיסי הזיכוי מתרעננים, לא כל מסך הקליטה.
+    const i = Number(row);
+    if (!c.paper || !Array.isArray(c.paper.rows) || !Number.isInteger(i) || i < 0 || i >= c.paper.rows.length) return;
+    if (!Array.isArray(c.editBarcode)) c.editBarcode = [];
+    c.editBarcode[i] = true;
+    if ($('rcDeliveryCredits')) deliveryCreditRefreshCards(); else renderReceiving();
+  }
 }
 // v364: כרטיס של זיכוי אחד — כדי ש-deliveryCreditRefreshCards יוכל לבנות מחדש כרטיס בודד.
 function deliveryCreditCardHtml(c) {
   const busy = deliveryCreditBusy(c), rows = c.paper ? deliveryCreditRows(c) : [];
   const duplicate = deliveryCreditDuplicate(c);
   const confirmed = c.status === 'confirmed' && c.confirmedSignature === deliveryCreditSignature(c) && !duplicate;
+  const reasons = c.paper && !confirmed ? deliveryCreditReviewReasons(c).filter(r => r.code !== 'duplicate') : []; // v365
   const pages = c.pages.map((p, i) => '<button data-role="delivery-credit-page" data-id="' + c.id + '" data-page="' + i + '" class="btn-tap border rounded-lg p-1"><img src="' + p.dataUrl + '" alt="עמוד בזיכוי" class="w-16 h-20 object-contain"><span class="text-xs">עמוד ' + (i + 1) + '</span></button>').join('');
   return (confirmed ? '<details data-delivery-credit="' + c.id + '" class="border border-emerald-200 rounded-xl mt-2 bg-white"><summary class="cursor-pointer p-3 text-sm font-black text-emerald-800">זיכוי שאושר · ₪' + fmtMoney(Math.abs(c.paper.subtotalExVat)) + ' לפני מע״מ · פרטים</summary><div class="px-3 pb-3">' : '<article data-delivery-credit="' + c.id + '" class="border-2 border-emerald-200 rounded-xl p-3 mt-3 bg-white">') + '<div class="flex justify-between gap-2"><b>' + (confirmed ? 'זיכוי שאושר למשלוח' : 'תעודת זיכוי מהנהג') + '</b>' +
     '<button data-role="delivery-credit-remove" data-id="' + c.id + '" class="btn-tap text-rose-700 text-sm font-bold">הסר זיכוי</button></div>' +
@@ -1688,16 +1811,27 @@ function deliveryCreditCardHtml(c) {
     (pages && !busy && !(c.status === 'error' && c.errorKind === 'discount') ? '<div class="flex gap-2 mt-2">' + pages + '</div>' : '') +
     (c.paper ? (confirmed ? '<p class="mt-2 font-black text-emerald-800">זיכוי מס׳ ' + htmlEscape(c.number) + ' · ₪' + fmtMoney(Math.abs(c.paper.subtotalExVat)) + ' לפני מע״מ</p>' :
       '<label class="block mt-3 text-sm font-bold">מספר תעודת הזיכוי<input data-role="delivery-credit-number" data-id="' + c.id + '" value="' + htmlEscape(c.number || '') + '" class="block w-full border rounded-lg p-2 mt-1" dir="ltr"></label>') +
-      rows.map((row, i) => '<div class="border-t border-slate-200 mt-3 pt-2"><div id="creditName_' + c.id + '_' + i + '" class="font-black">' + htmlEscape(row.name || 'מוצר שלא זוהה') + '</div><p>' + row.qty + ' יח׳ · זיכוי ₪' + fmtMoney(row.amount) + ' לפני מע״מ</p>' +
-        // v364: בשורה שהשרת סירב לזהות (refused) השדה ריק והספרות שנקראו מוצגות מעליו כרמז.
-        // אילו הוצגו בתוך השדה, עובד שמקליד מהנייר את אותן ספרות בדיוק לא היה משנה את
-        // הערך — הדפדפן לא יורה change, והשורה לא הייתה מזוהה לעולם.
-        (!confirmed ? '<label class="block text-xs font-bold mt-2">' + (row.productId ? 'ברקוד — אפשר לתקן לפי הנייר' : 'המוצר לא זוהה. הקלד את הברקוד מהנייר') +
-        (row.refused && row.barcode ? '<span data-credit-read-hint class="block mt-1 font-normal text-slate-500">נקרא בצילום: <span dir="ltr">' + htmlEscape(row.barcode) + '</span> — בדוק מול הנייר</span>' : '') +
-        '<input data-role="delivery-credit-barcode" data-id="' + c.id + '" data-row="' + i + '" value="' + htmlEscape(row.refused ? '' : row.barcode) + '"' +
-        (row.refused ? ' placeholder="הקלד את הברקוד מהנייר"' : '') + ' inputmode="numeric" class="block w-full border rounded-lg p-2 text-sm mt-1" dir="ltr"></label>' : '') + '</div>').join('') +
-      (confirmed ? '<p class="mt-2 text-sm text-slate-600">הזיכוי נבדק מול החוסר במוצרים האלה לפי הספירה הנוכחית.</p><button data-role="delivery-credit-edit" data-id="' + c.id + '" class="btn-tap text-blue-700 font-bold mt-2">תקן פרטי זיכוי</button>' :
-      '<p class="mt-3 text-sm font-bold">בדוק את מספר הזיכוי, המוצרים והכמויות מול הנייר. האם זה זיכוי על חוסר במשלוח הנוכחי?</p><button data-role="delivery-credit-confirm" data-id="' + c.id + '" class="btn-tap w-full bg-emerald-600 text-white rounded-xl py-3 mt-2 font-black">כן, צרף זיכוי של ₪' + fmtMoney(Math.abs(c.paper.subtotalExVat)) + ' למשלוח</button>') :
+      rows.map((row, i) => {
+        // v365: שדה ברקוד רק בשורה בלי מוצר (השרת סירב או לא זיהה), בשורה שהעובד כבר הקליד
+        // בה ברקוד, או אחרי "תקן ברקוד". שורה מזוהה מציגה שם · כמות · סכום וקישור קטן בלבד.
+        const typed = !!c.barcodes && c.barcodes[i] != null;
+        const editable = !confirmed && (!row.productId || typed || !!(Array.isArray(c.editBarcode) && c.editBarcode[i]));
+        return '<div class="border-t border-slate-200 mt-3 pt-2"><div id="creditName_' + c.id + '_' + i + '" class="font-black">' + htmlEscape(row.name || 'מוצר שלא זוהה') + '</div><p>' + row.qty + ' יח׳ · זיכוי ₪' + fmtMoney(row.amount) + ' לפני מע״מ' +
+          (!confirmed && !editable ? ' · <button data-role="delivery-credit-edit-barcode" data-id="' + c.id + '" data-row="' + i + '" class="btn-tap text-xs text-blue-700 font-bold">תקן ברקוד</button>' : '') + '</p>' +
+          // v364: בשורה שהשרת סירב לזהות (refused) השדה ריק והספרות שנקראו מוצגות מעליו כרמז.
+          // אילו הוצגו בתוך השדה, עובד שמקליד מהנייר את אותן ספרות בדיוק לא היה משנה את
+          // הערך — הדפדפן לא יורה change, והשורה לא הייתה מזוהה לעולם.
+          (editable ? '<label class="block text-xs font-bold mt-2">' + (row.productId ? 'ברקוד — אפשר לתקן לפי הנייר' : 'המוצר לא זוהה. הקלד את הברקוד מהנייר') +
+          (row.refused && row.barcode ? '<span data-credit-read-hint class="block mt-1 font-normal text-slate-500">נקרא בצילום: <span dir="ltr">' + htmlEscape(row.barcode) + '</span> — בדוק מול הנייר</span>' : '') +
+          '<input data-role="delivery-credit-barcode" data-id="' + c.id + '" data-row="' + i + '" value="' + htmlEscape(row.refused ? '' : row.barcode) + '"' +
+          (row.refused ? ' placeholder="הקלד את הברקוד מהנייר"' : '') + ' inputmode="numeric" class="block w-full border rounded-lg p-2 text-sm mt-1" dir="ltr"></label>' : '') + '</div>';
+      }).join('') +
+      // v365: זיכוי שצורף לבד אומר זאת בשורה אחת, עם "הסר זיכוי" למקרה שאינו של המשלוח הזה.
+      (confirmed ? (c.autoConfirmed ? '<p data-credit-auto-note class="mt-2 text-sm text-slate-600">צורף אוטומטית — לא של המשלוח הזה? <button data-role="delivery-credit-remove" data-id="' + c.id + '" class="btn-tap text-rose-700 font-bold">הסר זיכוי</button></p>' : '') +
+        '<p class="mt-2 text-sm text-slate-600">הזיכוי נבדק מול החוסר במוצרים האלה לפי הספירה הנוכחית.</p><button data-role="delivery-credit-edit" data-id="' + c.id + '" class="btn-tap text-blue-700 font-bold mt-2">תקן פרטי זיכוי</button>' :
+      // v365: הכרטיס אומר בשורה אחת למה הזיכוי לא צורף לבד (הכפילות כבר הוסברה למעלה).
+      '<p data-credit-review-reason class="mt-3 text-sm font-bold text-amber-800">' + htmlEscape(reasons.length ? reasons.map(r => r.text).join(' · ') : 'בדוק את מספר הזיכוי, המוצרים והכמויות מול הנייר.') + '</p>' +
+      '<p class="mt-1 text-sm">בדוק מול הנייר ואשר את הצירוף למשלוח.</p><button data-role="delivery-credit-confirm" data-id="' + c.id + '" class="btn-tap w-full bg-emerald-600 text-white rounded-xl py-3 mt-2 font-black">כן, צרף זיכוי של ₪' + fmtMoney(Math.abs(c.paper.subtotalExVat)) + ' למשלוח</button>') :
       (!busy ? deliveryCreditCaptureHtml(c) : '')) + (confirmed ? '</div></details>' : '</article>');
 }
 function deliveryCreditsHtml() {
@@ -1717,7 +1851,8 @@ function deliveryCreditOpenWork(message) {
 }
 function deliveryCreditNotes(credits = receiptDeliveryCredits) {
   return credits.map(c => ({ id: c.id, source: 'delivery_credit_scan', number: c.number,
-    amount: Math.abs(r2(c.paper.subtotalExVat)), at: c.confirmedAt, rows: deliveryCreditRows(c), paper: c.paper, scanAudit: c.scanAudit || null }));
+    amount: Math.abs(r2(c.paper.subtotalExVat)), at: c.confirmedAt, rows: deliveryCreditRows(c), paper: c.paper, scanAudit: c.scanAudit || null,
+    autoConfirmed: c.autoConfirmed === true })); // v365: לביקורת — צורף לבד לפי קריאה מאומתת, בלי אישור של העובד
 }
 function deliveryCreditSummaryHtml() {
   const p = pendingReceipt, notes = p && p.shortCreditNotes || [];
@@ -2075,7 +2210,8 @@ function restoreReceiptDraft(incoming) {
     const s = incoming ? null : localStorage.getItem(RECEIPT_DRAFT_KEY); if (!s && !incoming) return;
     const o = incoming || JSON.parse(s);
     receiptDeliveryCredits = (Array.isArray(o && o.deliveryCredits) ? o.deliveryCredits : []).filter(c => c && typeof c.id === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(c.id)).slice(0, 4)
-      .map(({ waiting, waitingFor, progress, resume, ...c }) => ({ ...c, pages: [], status: deliveryCreditBusy(c) ? 'interrupted' : c.status,
+      // v365: זיכוי שאושר (גם לבד — autoConfirmed) חוזר מאושר כמו שנשמר; השחזור לעולם לא מאשר ולא קורא.
+      .map(({ waiting, waitingFor, progress, resume, editBarcode, ...c }) => ({ ...c, pages: [], status: deliveryCreditBusy(c) ? 'interrupted' : c.status,
         // v364: מפתח האיסוף חוזר רק מהטיוטה שבמכשיר (incoming = ענן: אין מפתח).
         ...(!incoming && deliveryCreditValidResume(resume) ? { resume: { scanKey: resume.scanKey, at: resume.at } } : {}) }));
     if (Array.isArray(o)) { receiptCountingMode = 'scan'; receiptList = o; receiptOpened = o.length > 0; }
@@ -11760,8 +11896,91 @@ function priceAuditConsensusConfirmed(row) {
       .every(key => JSON.stringify(proof.evidence[key] ?? null) === JSON.stringify(row[key] ?? null))
     && (resolution.method === 'model_consensus' || identityReviewed || priceMatched));
 }
+// v365: מספר העמודים שמולם נבדקת התעודה — הצילומים, או המונה שנשמר בטיוטה אחרי שחזור.
+function priceAuditDocumentPageCount(doc) {
+  const input = doc && aiScanDocuments[doc.noteIndex];
+  return input ? (input.pages.length || Number(input.restoredPageCount) || 0) : Number(doc && doc.pageCount) || 0;
+}
+// v365: השדות בסיכום התעודה שבאמת נשארו במחלוקת בין הקריאות. מהשטח (חשבונית 407300217607,
+// 25.9.2026): שלוש קריאות הסכימו על 311.77 לפני מע״מ, 61 יחידות ו-6 שורות, אבל הקריאה
+// השלישית (המודל החזק) קראה גם את שורת "סך ההנחות" (41.9) ששטראוס/יטבתה מדפיסות — הנחה
+// שכבר כלולה בשורות הנטו (11.93+15.97+7+7). השרת סימן documentDiscountExVat כמחלוקת, והפאנל
+// דרש מהעובד לאשר סיכום שכולן הסכימו עליו. כשהנייר הנבחר מאוזן בלי הנחה נפרדת
+// (yotvataPaperCheck: ok ו-!discountSeparate — סכום השורות פחות ההנחה אינו הסיכום, כלומר
+// ההנחה לא נחוצה לחשבון) ההנחה היא מידע בלבד ואינה דורשת אישור. שאר השדות (הסכום לפני
+// מע״מ, סך היחידות, מספר העמודים, מספר השורות) עדיין דורשים אישור מול הנייר.
+function priceAuditDocumentDisputes(doc) {
+  const proof = doc && doc.modelVerification;
+  const issues = proof && Array.isArray(proof.issues) ? proof.issues.filter(f => typeof f === 'string') : [];
+  if (!issues.includes('documentDiscountExVat')) return issues;
+  const check = yotvataPaperCheck(priceAuditSource(doc) || doc, priceAuditDocumentPageCount(doc));
+  return check.ok && !check.discountSeparate ? issues.filter(f => f !== 'documentDiscountExVat') : issues;
+}
+// v365: scan.verification של התעודה (שרת v149 מוסיף verifier { attempted, outcome, model }).
+// נשמר לכל תעודה במטא-נתונים שלה (perDocument, דרך yotvataScanMetadata) ולכן שורד טיוטה ושחזור.
+function priceAuditDocumentVerification(doc) {
+  if (!doc) return null;
+  const meta = aiScanResponse && Array.isArray(aiScanResponse.perDocument) ? aiScanResponse.perDocument.find(d => d && d.docIndex === doc.noteIndex) : null;
+  if (meta && meta.verification && typeof meta.verification === 'object') return meta.verification;
+  const input = aiScanDocuments[doc.noteIndex];
+  return input && input.scanResult && input.scanResult.verification && typeof input.scanResult.verification === 'object' ? input.scanResult.verification : null;
+}
+// v365: הקריאה השלישית (המודל החזק) נכשלה? שרת v149: verifier.outcome === 'failed' (ו-error נושא
+// את הסיבה: timeout, network_error, openai_error, incomplete_output, refusal, invalid_output);
+// 'agreed' / 'disagreed' = קראה את הנייר; 'not_needed' = לא נדרשה. תוצאות אחרות שנשמעות
+// ככישלון נחשבות כישלון גם הן. בלי verifier (שרת v148) — לא ידוע, ולא אומרים כלום.
+function priceAuditVerifierFailed(verification) {
+  const v = verification && verification.verifier;
+  if (!v || typeof v !== 'object' || v.attempted !== true) return false;
+  return v.ok === false || v.outcome === 'failed' || /fail|error|timeout|invalid|abort|cancel/i.test(String(v.outcome || ''));
+}
+// v365: הקריאות שפוענחו לתעודה (readings של שרת v149, ממוינות לפי מספר הקריאה). בלי readings
+// (שרת v148) — רשימה ריקה. משמש גם את הזיכוי (deliveryCreditConsensus).
+function priceAuditDocumentReadings(doc) {
+  const proof = doc && doc.modelVerification;
+  return (proof && Array.isArray(proof.readings) ? proof.readings : []).filter(r => r && r.values && typeof r.values === 'object' && Number.isInteger(r.read))
+    .sort((a, b) => a.read - b.read);
+}
+// v365: רק קריאה אחת של הנייר הצליחה? כשקריאה זולה אחת נכשלה (רשת, זמן) וגם קריאת ההכרעה
+// נכשלה, נשארת קריאה אחת בלי אף קריאה שתומכת בה: השרת מסמן את כל שדות הסיכום כמחלוקת, אבל
+// שום קריאה לא חלקה עליה. "הקריאות לא הסכימו" ו"נשארו שתי קריאות" יהיו שקר לעובד — אומרים
+// שהייתה רק קריאה אחת, ומבקשים לבדוק מול הנייר. בלי readings (שרת v148) — לא ידוע, כמו קודם.
+function priceAuditDocumentLoneRead(doc) { return priceAuditDocumentReadings(doc).length === 1; }
+// v365: ההסבר בפאנל — איזה שדה במחלוקת, מה כל קריאה ראתה (readings של שרת v149), והאם
+// הקריאה השלישית נכשלה. בלי readings (שרת v148) — משפט כללי אבל עם שם השדה.
+function priceAuditDocumentDisputeHtml(doc, paper) {
+  const fields = priceAuditDocumentDisputes(doc);
+  const names = fields.map(f => PAPER_SUMMARY_FIELD_NAMES[f] || f);
+  const list = names.length <= 1 ? names.join('') : names.slice(0, -1).join(', ') + ' ועל ' + names[names.length - 1];
+  const readings = priceAuditDocumentReadings(doc), lone = readings.length === 1;
+  const moneyField = f => ['subtotalExVat', 'documentDiscountExVat', 'vatAmount', 'totalInclVat'].includes(f);
+  const show = (f, v) => v == null ? 'לא נקרא' : typeof v === 'number' && Number.isFinite(v) ? (moneyField(f) ? fmtMoney(v) : String(v)) : htmlEscape(String(v));
+  const label = r => 'קריאה ' + (r.read + 1) + (r.strong === true || r.read >= 2 ? ' (המודל החזק)' : '');
+  // v365: שרת v149 משווה את הנחת המסמך לפי ההשפעה על החשבון ולא לפי הספרות, לכן שתי קריאות
+  // יכולות להדפיס אותו סכום ועדיין לחלוק אם הוא יורד מהסכום לפני מע״מ (readings[].discountSeparate).
+  // בלי ההסבר העובד רואה "5.00 · 5.00" תחת "לא הסכימו". רק כשיש סכום וכשהשרת שלח את הדגל
+  // (שרת v148 — כמו קודם). "לא יורדת מהסכום" ולא "כלולה בשורות": discountSeparate=false מכסה
+  // גם נייר שלא נסגר בשום דרך. תצוגה בלבד — הערך שנקרא לא משתנה.
+  const effect = (f, r) => f === 'documentDiscountExVat' && typeof r.discountSeparate === 'boolean' && typeof r.values[f] === 'number' && r.values[f] !== 0
+    ? (r.discountSeparate ? ' (יורדת מהסכום)' : ' (לא יורדת מהסכום)') : '';
+  const perField = fields.filter(f => readings.some(r => Object.prototype.hasOwnProperty.call(r.values, f)))
+    .map(f => '<p class="mt-1 text-xs text-slate-700" data-dispute-field="' + htmlEscape(f) + '">' + htmlEscape(PAPER_SUMMARY_FIELD_NAMES[f] || f) + ': ' + readings.map(r => htmlEscape(label(r)) + ': ' + show(f, r.values[f]) + effect(f, r)).join(' · ') + '</p>').join('');
+  const verification = priceAuditDocumentVerification(doc), verifier = verification && verification.verifier;
+  const failed = priceAuditVerifierFailed(verification);
+  // 'disagreed' (שרת v149): הקריאה השלישית קראה את הנייר ועדיין אין שתי קריאות שמסכימות — הנייר באמת לא ברור.
+  const disagreed = !failed && !!verifier && verifier.attempted === true && verifier.outcome === 'disagreed';
+  // v365: קריאה יחידה — אין מחלוקת ואין עם מה להשוות, ולכן גם לא רשימת "מה כל קריאה ראתה".
+  return '<p class="mt-2">' + (lone
+      ? 'רק קריאה אחת של הנייר הצליחה' + (failed ? ' (גם הקריאה השלישית, המודל החזק, נכשלה)' : '') + ', ולכן אין קריאה נוספת שמאשרת את הסיכום.'
+      : (list ? 'הקריאות לא הסכימו על ' + htmlEscape(list) + '.' : 'הסריקות לא הסכימו על הסיכום.') +
+        (failed ? ' הקריאה השלישית (המודל החזק) נכשלה, לכן נשארו שתי קריאות שלא הסכימו.' : disagreed ? ' גם הקריאה השלישית (המודל החזק) קראה את הנייר, ועדיין אין שתי קריאות שמסכימות.' : '')) +
+    '</p>' + (lone ? '' : perField) +
+    // הסיבה הטכנית לכישלון — רק בשורה קטנה, משמאל לימין, כמו שאר הטקסט הטכני באפליקציה.
+    (failed && verifier.error ? '<p class="mt-1 text-[11px] text-slate-400" dir="ltr">' + htmlEscape(String(verifier.error)).slice(0, 80) + '</p>' : '') +
+    '<p class="mt-2">בדוק מול הנייר: ₪' + fmtMoney(paper.subtotalExVat) + ' לפני מע״מ · ' + paper.printedUnits + ' יחידות · ' + paper.rows.length + ' שורות שנקראו.</p>';
+}
 function priceAuditDocumentReviewNeeded(doc) {
-  if (!doc || !doc.modelVerification || !(doc.modelVerification.issues || []).length) return false;
+  if (!doc || !doc.modelVerification || !priceAuditDocumentDisputes(doc).length) return false;
   const review = doc.paperSummaryReview;
   return !(review && review.at > 0 && review.token === priceAuditDocumentReviewToken(doc));
 }
@@ -12456,8 +12675,9 @@ function receiptPriceAuditHtml(report, { summary = false } = {}) {
     documentReviews.map(info => {
       const doc = aiScanResponse.scan.documents.find(d => d.noteIndex === info.index), paper = priceAuditSource(doc), input = aiScanDocuments[info.index];
       const balanced = yotvataPaperCheck(paper, input.pages.length || input.restoredPageCount || 0).ok;
+      // v365: ההסבר נוקב בשדה שבמחלוקת, במה שכל קריאה ראתה, ובכישלון של הקריאה השלישית.
       return '<div class="border-2 border-amber-300 rounded-xl p-3 mt-3"><b>אימות סיכום תעודה ' + htmlEscape(info.number || String(info.index + 1)) + '</b>' +
-        '<p class="mt-2">הסריקות לא הסכימו על הסיכום. בדוק מול הנייר: ₪' + fmtMoney(paper.subtotalExVat) + ' לפני מע״מ · ' + paper.printedUnits + ' יחידות · ' + paper.rows.length + ' שורות שנקראו.</p>' +
+        priceAuditDocumentDisputeHtml(doc, paper) +
         (balanced ? '<button data-role="price-confirm-document" data-doc="' + info.index + '" data-review-token="' + htmlEscape(priceAuditDocumentReviewToken(doc)) + '" class="btn-tap w-full rounded-xl bg-blue-600 text-white py-3 mt-3 font-black">כן, הסיכום תואם לנייר</button>' : '') + receiptBackToPhotosHtml() + '</div>';
     }).join('') +
     priceAuditReviewedHtml(a.rows) +
@@ -13682,7 +13902,10 @@ function aiEvaluateInvoiceScan(payload, receivedRows = reconcileData || []) {
       missingDocuments++;
       errors.push('תעודה ' + (index + 1) + ': לא נקראה ממנה אף שורת מוצר — היא אינה משתתפת בהשוואה. צלם אותה שוב.');
     }
-    if (priceAuditDocumentReviewNeeded(doc)) errors.push('תעודה ' + (index + 1) + ': סיכום התעודה או מספר השורות עדיין לא אומתו בין הסריקות');
+    // v365: השגיאה נוקבת בשדה שבמחלוקת (הנחת מסמך בנייר מאוזן אינה מחלוקת — priceAuditDocumentDisputes).
+    // קריאה יחידה (priceAuditDocumentLoneRead) — לא "לא הסכימו": אין קריאה נוספת.
+    if (priceAuditDocumentReviewNeeded(doc)) errors.push('תעודה ' + (index + 1) + ': ' + (priceAuditDocumentLoneRead(doc) ? 'רק קריאה אחת של הנייר הצליחה'
+      : 'הקריאות לא הסכימו על ' + priceAuditDocumentDisputes(doc).map(f => PAPER_SUMMARY_FIELD_NAMES[f] || f).join(', ')) + ' — צריך לאשר את הסיכום מול הנייר');
     // v272: אחרי שחזור מטיוטה אין תמונות בזיכרון, ולכן ההשוואה נעשית מול מונה
     // העמודים שנשמר בזמן הסריקה. בלעדיו תעודה תקינה לגמרי הייתה ננעלת עם
     // "פוענחו 2 עמודים מול 0 שצולמו" — נעילה שנגרמת מהשחזור עצמו, לא מהנייר.
@@ -14679,6 +14902,9 @@ async function aiScanSingleDocPipeline(token, docIndex, inputDoc = aiScanDocumen
     requestId: best.payload.requestId || null,
     usage: best.payload.usage || null,
     scanAudit: best.payload.scanAudit || null,
+    // v365: scan.verification של התעודה (סטטוס, הסלמה, ומאז שרת v149 גם verifier) נשמר
+    // לתעודה — הפאנל של אימות הסיכום מסביר בעזרתו אם הקריאה השלישית נכשלה.
+    verification: best.payload.scan && best.payload.scan.verification && typeof best.payload.scan.verification === 'object' ? best.payload.scan.verification : null,
     checksumRetryAttempted: !!best.payload.checksumRetryAttempted,
     checksumRetryModel: best.payload.checksumRetryModel || null,
     warnings: best.payload.scan && Array.isArray(best.payload.scan.warnings) ? best.payload.scan.warnings : [],
@@ -22417,7 +22643,8 @@ app.addEventListener('change', (e) => {
       const row = deliveryCreditRows(c)[i], name = $('creditName_' + c.id + '_' + i);
       if (name) name.textContent = row.productId ? row.name : 'הברקוד לא זוהה — בדוק אותו מול הנייר';
     }
-    c.status = 'review'; c.confirmedAt = null; c.confirmedSignature = null; pendingReceipt = null; saveReceiptDraft();
+    // v365: תיקון של העובד מבטל צירוף אוטומטי — האישור הבא הוא שלו.
+    c.status = 'review'; c.confirmedAt = null; c.confirmedSignature = null; c.autoConfirmed = false; pendingReceipt = null; saveReceiptDraft();
     return;
   }
   if (e.target.dataset.role === 'price-doc-date') { priceAuditSetDate(Number(e.target.dataset.doc), e.target.value); return; }
@@ -22524,7 +22751,7 @@ app.addEventListener('click', (e) => {
   const unitBtn = e.target.closest('[data-role="unit"]');
   if (unitBtn) { toggleUnit(unitBtn.dataset.id, unitBtn); buzz(8); return; }
   const t = e.target.closest('[data-role]'); if (!t) return;
-  if (t.dataset.role.startsWith('delivery-credit-')) return deliveryCreditAction(t.dataset.role, t.dataset.id, t.dataset.page);
+  if (t.dataset.role.startsWith('delivery-credit-')) return deliveryCreditAction(t.dataset.role, t.dataset.id, t.dataset.page, t.dataset.row);
   const role = t.dataset.role, id = t.dataset.id;
   if (role === 'paper-row-edit') { openPaperRowCorrection(Number(t.dataset.doc), Number(t.dataset.row)); return; }
   if (role === 'rc-count-by-scan') { receiptCountingMode = 'scan'; closeReceiptQuantityReview(); saveReceiptDraft(); renderReceiving(); return; }

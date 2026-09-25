@@ -198,7 +198,7 @@ test('photograph, confirm and save a credited shortage once without reducing sto
   assert.equal(c.run('JSON.stringify(aiScanResponse)'), paper);
   assert.equal(c.run('JSON.stringify(receiptList)'), stock);
   assert.equal(c.run('receiptNoteTotal'), 93.8);
-  assert.match(c.run('deliveryCreditsHtml()'), /האם זה זיכוי על חוסר במשלוח הנוכחי/);
+  assert.match(c.run('deliveryCreditsHtml()'), /ואשר את הצירוף למשלוח/);
   await c.click('delivery-credit-confirm', 'credit-1');
   const confirmed = c.run('JSON.stringify(deliveryCreditSnapshot())');
   await c.click('delivery-credit-confirm', 'credit-1');

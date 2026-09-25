@@ -458,3 +458,196 @@ release app v364 (`sw.js` `CACHE_NAME` is `yotvata-v364`, and the badge reads
 
 Synthetic test documents only. No customer receipt, image, credential or live
 data was used or changed.
+
+## v365: a verified credit is attached by itself
+
+### Field report (the shop's backup of 2026-09-25, app v364 / service v148)
+
+Credit 22229080, one slip, two rows. Both cheap reads agreed on everything:
+rows `agreed`, doc issues `[]`, `paper_verified`, `creditSigns: "negative"`,
+subtotal −155.50, printed units −12, both products resolved by the server
+(`model_consensus`), the number read. The app still showed the confirm card
+("בדוק את מספר הזיכוי, המוצרים והכמויות מול הנייר. האם זה זיכוי על חוסר
+במשלוח הנוכחי?") with a barcode field under every row. The owner's decision:
+a driver's credit is always part of the current delivery — it arrives together
+with the delivery documents, it is not a separate credit for something else —
+so there is nothing to confirm document by document; ask only when something
+is genuinely unclear.
+
+The same backup showed a false summary review on invoice 407300217607; that
+part is described in `tools/RECEIPT-REVIEW-V359.md` (v365 section).
+
+### What changed in app v365
+
+- **Automatic attach** (`deliveryCreditRead`, after the paper check, and only
+  there — never from a draft restore, cloud sync, render or refresh). When
+  `deliveryCreditReviewReasons(c)` is empty the credit becomes `confirmed`
+  with `confirmedAt`, `confirmedSignature` and `autoConfirmed: true` (kept in
+  the draft and, through `deliveryCreditNotes`, in the saved receipt's
+  `shortCreditNotes`, for audit). The toast is "הזיכוי צורף למשלוח. בסיום
+  הספירה נבדוק איזה חוסר הוא מכסה." — once, from the read itself. Empty
+  reasons means all of: the paper carries consensus evidence
+  (`paper.modelVerification` version 1 with no disputed field, and every row
+  `agreed`/`verified` with no issue — `deliveryCreditConsensus`), every row
+  resolves to one catalog product (none refused), the credit number is not
+  empty and at least one other read saw the same number (next bullet), it is
+  not a duplicate (`deliveryCreditDuplicate`) and `deliveryCreditPaperCheck`
+  passed. A disputed `documentDiscountExVat` alone is not a dispute for a
+  credit whose rows close to the subtotal exactly (the paper check already
+  rejects a separate discount): it is the printed discount total, information
+  only.
+- **The credit number is part of the evidence.** The review of this release
+  found that the number was outside the consensus: service v148 compared
+  `pageCount`, `subtotalExVat`, `printedUnits`, `documentDiscountExVat`, the
+  row count and the rows, never `invoiceNumber`. Two cheap reads that differed
+  only in the number (read 0: 22229030, read 1: 22229080) came back `agreed`,
+  `paper_verified`, issues `[]`, with the selected read's number and no trace
+  of the other, and the app's only check on the number was "not empty" — so
+  the credit was attached by itself with a number nobody looked at. That
+  number is the key of the duplicate guard (`deliveryCreditDuplicate`, receipt
+  history included): the same slip read in a later delivery with the printed
+  number was not a duplicate, attached again and reduced that receipt's
+  payable a second time. OCR digit confusion is real in this backup (barcodes
+  a digit off in two of three documents). Now
+  `deliveryCreditNumberUnsupported(c)` requires positive support before a
+  credit whose number is still the OCR one is attached by itself:
+  `paper.modelVerification.support.invoiceNumber` (service v149, credit mode
+  only: the other reads that saw the same number, whitespace-insensitive) must
+  name at least one read. Empty support keeps the credit in review with
+  "הקריאות לא הסכימו על מספר הזיכוי — בדוק מול הנייר" (when v149 also lists
+  `invoiceNumber` in `issues`, the existing "הקריאות לא הסכימו על …" line of
+  `deliveryCreditConsensus` carries it once, with `PAPER_SUMMARY_FIELD_NAMES.
+  invoiceNumber`). No evidence at all — a v148 answer, or one without
+  `support` — keeps it in review with "מספר הזיכוי לא אומת בשרת — בדוק אותו מול
+  הנייר": the v364 behaviour, one tap after a look at the number. The number
+  field shows the read digits; a number the worker typed (different from the
+  read one) is their decision, so it is not checked against the reads and a
+  v149 `invoiceNumber` dispute no longer counts for that credit (as a typed
+  barcode settles identity). `deliveryCreditConfirm` is unchanged and never
+  goes through this gate; the OCR value is never altered.
+- **The sticky bar is refreshed after an automatic attach.** `deliveryCreditRead`
+  rendered the receiving screen when the read started, so `#rcProgress` said
+  "פער ₪48.80 · יש זיכוי שעדיין דורש אישור או תיקון." and `#rcTotals` lacked
+  "· 7 בזיכוי ✓" while the card underneath already said "זיכוי שאושר". After
+  an automatic attach (and only then, on the receiving screen) the read now
+  calls `refreshReceiptTotals()` — v234's surgical refresh of `#rcProgress`,
+  `#rcTotals` and `#rcCount`, the same as a quantity keystroke — never a full
+  render, so the active quantity field and a credit card being edited stay. A
+  read that ends in review changes nothing (the bar already said a credit is
+  waiting). Money and finish were never affected.
+- **Review says why.** A credit that is not attached stays in `review`, and
+  the card carries one plain line (`data-credit-review-reason`): "מוצר אחד לא
+  זוהה — הקלד את הברקוד מהנייר" (or "N מוצרים לא זוהו…"), "מספר הזיכוי לא נקרא
+  — הקלד אותו מהנייר", "הקריאות לא הסכימו על הסכום לפני מע״מ / הכמות בשורה 2 …
+  — בדוק מול הנייר", "הקריאה לא אומתה בשרת — …" (a v147-shaped answer without
+  `modelVerification`). When only one read parsed (v149 `readings` with a
+  single read: the other cheap read and the verifier dropped, so every field
+  is an issue with no support) nothing disagreed, and the line is "רק קריאה
+  אחת של הנייר הצליחה — בדוק את מספר הזיכוי, המוצרים והכמויות מול הנייר"
+  (`deliveryCreditConsensus().lone`, `priceAuditDocumentLoneRead`) rather than
+  a list of "disagreements"; the `invoiceNumber` issue is not repeated as a
+  second reason. A duplicate keeps its own existing line ("מספר הזיכוי
+  הזה כבר צורף…") and is not repeated. The ownership question is gone; the
+  button is still "כן, צרף זיכוי של ₪… למשלוח" and the worker's confirmation
+  clears `autoConfirmed`.
+- **Barcode fields only where needed.** In the review card an identified row
+  shows name · quantity · amount and a small "תקן ברקוד" link
+  (`delivery-credit-edit-barcode`, `data-row`), which reveals that row's field
+  (`c.editBarcode[i]`, display state in memory only: `deliveryCreditSnapshot`
+  and `restoreReceiptDraft` drop it). A row without a product (refused or
+  unidentified) and a row whose barcode the worker typed keep their field.
+  Typing goes through the existing `change` handler; a barcode typed by the
+  worker is their decision on identity, so an `identity` dispute on that row
+  no longer counts (quantities and amounts still do). The number field is
+  unchanged.
+- **The attached card** ("זיכוי שאושר · ₪… · פרטים") gets one line when the
+  attach was automatic: "צורף אוטומטית — לא של המשלוח הזה? הסר זיכוי" (the
+  same remove action as the header), and keeps "תקן פרטי זיכוי".
+- **Money is unchanged.** Coverage (`deliveryCreditCoverage`), the live status,
+  the finish checks and the block on a credit that matches no counted shortage
+  ("הזיכוי אינו תואם לחוסר שנספר…") are exactly v364; an auto-attached credit
+  goes through the same checks as one confirmed by hand.
+
+### Companion service v149 (yotvata-ai-scan)
+
+- `documentDiscountExVat` is compared by its effect (the separate document
+  discount in agorot), so the printed discount total already inside the net
+  rows no longer disputes a summary that every read agreed on.
+- `doc.modelVerification.readings` (`[{ read, values: { pageCount,
+  subtotalExVat, printedUnits, printedLines, documentDiscountExVat, vatAmount,
+  totalInclVat }, discountSeparate }]`) and `.support` (`{ field: [reads] }`).
+- `scan.verification.verifier` (`{ attempted, model, requestId, outcome:
+  not_needed | failed | agreed | disagreed, error, selected }`).
+- The credit number is part of the credit consensus: `support.invoiceNumber`
+  lists the other reads that saw the same number, and in credit mode a number
+  no other read saw is an `invoiceNumber` issue that escalates to the verifier
+  like any other summary field. Invoice outcomes, paid-call counts and request
+  bodies are unchanged.
+
+The app works with v148 answers too (no readings, support or verifier): the
+summary panel falls back to a field-specific sentence without the per-read
+list, and a credit stays in review with "מספר הזיכוי לא אומת בשרת" — one tap,
+as in v364. **The automatic attach therefore needs service v149 to be live**;
+either release order is safe, but only v149 answers carry the number's
+support.
+
+### Verification
+
+- `node --test --test-reporter=tap tools/*.test.mjs tools/photo-first-test.mjs`
+  runs 398 tests; 396 pass. The two failures are the same pre-existing ones as
+  in v364 (`receipt-review-fixes.test.mjs`: the actual price gap "yes" action,
+  and unresolved paper values confirmed as-is).
+- `tools/credit-service-contract.test.mjs` (3 tests) is the guard against a
+  contract drift between the two repos: the review of this release found the
+  app suite proving the automatic attach with a fixture that invented
+  `support.invoiceNumber` while the service did not emit it — against the real
+  service no credit ever attached by itself. The tests run the service's
+  `createServer` in-process (the checkout next to this one, `../yotvata-ai-scan`,
+  or `YOTVATA_AI_SCAN=<dir>`; fake OpenAI, a locally signed token, no paid call;
+  skipped with a message when the service is not checked out) on the backup's
+  credit 22229080 — the two cheap reads exactly as its `readings` recorded them,
+  the real catalog rows — and hand the exact answer to the app: two agreeing
+  reads → `support.invoiceNumber: [1]`, issues `[]`, `paper_verified`, both rows
+  `model_consensus`, and the app attaches the credit by itself (one paid read,
+  one toast, ₪155.50, no confirm button, OCR untouched); the numbers 22229030 /
+  22229080 with a failed verifier → three calls, issue `['invoiceNumber']`, one
+  review line about the number, and with the verifier reading the printed
+  number → verified and attached; one parsed read (the other cheap read and the
+  verifier dropped) → "רק קריאה אחת של הנייר הצליחה …", one tap. Against the
+  v148 service code all three fail (`service v148`, no support).
+- `tools/credit-auto-attach.test.mjs` (14 tests, the complete app module; the
+  verified fixture imitates the v149 `support` map — the contract test above
+  keeps it honest — and `support: false` is the backup's v148 shape): the
+  lone-read card line (one reading, every field unsupported → one line "רק
+  קריאה אחת של הנייר הצליחה", no "לא הסכימו", no second number reason, one tap
+  attaches; two disagreeing readings keep the field sentence); the
+  field-shaped verified credit (two agreed rows,
+  resolved products, a number another read saw too, negative sums) is
+  `confirmed` with `autoConfirmed` right after the read and after the real
+  trigger (confirming the last photo), with one paid read, one toast, no
+  confirm button, no barcode fields, the automatic note, the sticky bar and
+  totals refreshed in place ("החוסר מכוסה בזיכוי ✓", "7 בזיכוי", no "דורש
+  אישור") while a read that ends in review or a read on another screen
+  rewrites nothing, coverage and finish as before (₪45 payable,
+  `shortCreditNotes[0].autoConfirmed`), and the saved receipt; a number no
+  other read saw (issue or empty support) → review with its line, the field
+  showing the read digits, nothing saved until the worker typed the printed
+  number or confirmed by hand, the OCR value kept; a v148 answer → review with
+  "מספר הזיכוי לא אומת בשרת", one tap, a subtotal dispute still named beside
+  it; an auto-attached credit that covers no shortage is
+  still blocked at finish; one refused row → review, the reason line, a field
+  only under that row, typing the paper's barcode and confirming by hand; a
+  number that was not read; a duplicate (this delivery and receipt history);
+  a v147-shaped answer, a subtotal dispute, a quantity dispute, and the
+  informational discount (still attached, OCR value kept); "תקן ברקוד"
+  revealing one row, typing a different barcode, the state never entering the
+  draft; reload and cloud restore keeping the credit confirmed with no read,
+  no toast and no re-fire, and "תקן פרטי זיכוי" clearing the automatic mark;
+  "הסר זיכוי" from the note reopening the gap.
+- `tools/delivery-credit.test.mjs`, `delivery-credit-auto-read.test.mjs` and
+  `scan-transport.test.mjs` were updated to the new contract only where they
+  matched the old review sentence or the always-present barcode field; every
+  money, identity and invoice-state assertion is unchanged. Their fixtures
+  carry no `modelVerification`, so those credits still go through the
+  worker's confirmation, as a v147 service's answer would.
+- Not verified: no phone, no deployed service, no paid model call.

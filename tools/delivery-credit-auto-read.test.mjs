@@ -148,7 +148,7 @@ test('one photo, one confirmation: exactly one paid read and nothing reads it ag
   pressConfirm(c); await flush(c);
   assert.equal(s.uploads().length, 1);
   assert.equal(c.run('JSON.stringify([aiScanResponse,aiScanRunId,receiptNoteTotal,receiptNoteUnits])'), invoiceBefore);
-  assert.match(card(c), /האם זה זיכוי על חוסר במשלוח הנוכחי/);
+  assert.match(card(c), /ואשר את הצירוף למשלוח/);
   assert.doesNotMatch(reading + card(c), OLD_BUTTON);
 });
 
@@ -325,7 +325,7 @@ test('a read that finishes while the worker counts updates only the credit card,
     release(); await flush(c);
     assert.equal(creditStatus(c), good ? 'review' : 'error');
     assert.equal(c.node('app').innerHTML, '<input data-role="amount" data-id="milk" value="7">', 'the receiving screen was not rebuilt');
-    assert.match(c.node('rcDeliveryCredits').outerHTML, good ? /האם זה זיכוי על חוסר במשלוח הנוכחי/ : /צלם את הזיכוי מחדש/);
+    assert.match(c.node('rcDeliveryCredits').outerHTML, good ? /ואשר את הצירוף למשלוח/ : /צלם את הזיכוי מחדש/);
   }
 });
 
@@ -362,7 +362,7 @@ test('a credit read that finishes while the worker types in another credit never
     assert.equal(c.run('receiptDeliveryCredits[1].status'), 'review', role);
     assert.equal(writes.section, 0, role + ': the section holding the typed field is not rebuilt');
     assert.equal(writes.cards[a], undefined, role + ': the card being typed in is left alone');
-    assert.match(writes.cards[b] || '', /^<article data-delivery-credit="[^"]+"[\s\S]*האם זה זיכוי על חוסר במשלוח הנוכחי/, role + ': the finished credit shows its result');
+    assert.match(writes.cards[b] || '', /^<article data-delivery-credit="[^"]+"[\s\S]*ואשר את הצירוף למשלוח/, role + ': the finished credit shows its result');
     assert.equal(c.run('receiptDeliveryCredits[0].number'), 'CR-A', role + ': nothing committed behind the worker\'s back');
     // Typing somewhere else (a quantity field) or nowhere: the whole section refreshes as before.
     c.context.document.activeElement = { dataset: { role: 'amount' }, closest: () => null };
@@ -818,7 +818,7 @@ test('reload during a credit read: "אסוף את הקריאה" collects it with
     assert.deepEqual(store.log.at(-1).body, { reviewProtocolVersion: 1, scanKey: key, resume: true }, how + ': no photos in the collection');
     assert.equal(store.paid(), 1, how + ': paid once');
     assert.equal(r.run('receiptDeliveryCredits[0].status'), 'review', how + ': ' + r.run('receiptDeliveryCredits[0].error'));
-    assert.match(card(r), /האם זה זיכוי על חוסר במשלוח הנוכחי/, how);
+    assert.match(card(r), /ואשר את הצירוף למשלוח/, how);
     assert.equal(r.run('receiptDeliveryCredits[0].resume'), null, how + ': a shown result drops the key');
     assert.equal('resume' in localDraft(r).deliveryCredits[0], false, how);
     assert.equal(r.run(`deliveryCreditConfirm(${JSON.stringify(id)})`), true, how + ': the paper check needs no photo');
