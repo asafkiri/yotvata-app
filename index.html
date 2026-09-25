@@ -11982,7 +11982,8 @@ function priceAuditRowArithmeticHolds(values, credit = false) {
 // { proven, server, reasons } ובהוכחה גם { unit, gross, net, printedUnitsBalanced } כמו בשרת.
 // reasons אומר למה החשבון לא מכריע (להסבר בכרטיס): 'support' (אין fieldSupport — שרת ישן),
 // 'values' (כמות או מחיר לא תקינים), 'unit' / 'net' / 'gross' (השדה בלי קריאה תומכת),
-// 'arithmetic' (החשבון לא נסגר), 'paper' (הנייר לא מתאזן). תמיכה היא קריאה אחרת (מספר קריאה);
+// 'arithmetic' (החשבון לא נסגר), 'paper' (הנייר לא מתאזן), 'deposit' (שורת פיקדון — הנייר אינו
+// מאשש את הכמות שלה). תמיכה היא קריאה אחרת (מספר קריאה);
 // סמן מחרוזת אינו קריאה. סמן השרת (v150: fieldSupport.quantity מכיל 'arithmetic') מתקבל כמו שהוא.
 function priceAuditQuantityArithmetic(row, balanced, credit = false) {
   const proof = row && row.modelVerification;
@@ -11992,6 +11993,10 @@ function priceAuditQuantityArithmetic(row, balanced, credit = false) {
     const saved = proof.arithmetic && proof.arithmetic.quantity;
     return { proven: true, server: true, reasons: [], ...(saved && typeof saved === 'object' ? saved : {}) };
   }
+  // v367: שורת פיקדון אינה נספרת בסך היחידות המודפס (yotvataPaperCheck / deliveryCreditPaperCheck מדלגות
+  // עליה), ולכן נייר מאוזן אינו מאשש את הכמות שלה — תנאי (4) לא מתקיים. כמו quantityArithmetic בשרת
+  // v150 (DEPOSIT_ROW): החשבון לבדו אינו מכריע אותה, והיא נשארת לאישור העובד. אותו ביטוי כמו בבדיקות הנייר.
+  if (/פ.?קדון/.test(String(row.description || ''))) return { proven: false, server: false, reasons: ['deposit'] };
   const num = v => typeof v === 'number' && Number.isFinite(v) ? (credit ? Math.abs(v) : v) : null;
   const reasons = [];
   const qty = num(row.quantity), unit = num(row.unitPriceExVat);
@@ -12053,6 +12058,7 @@ function priceAuditRowDisputeHtml(documentIndex, rowIndex, issues) {
   const proof = priceAuditQuantityArithmetic(row, check.ok && Number.isInteger(check.units) && check.units > 0);
   const why = { paper: 'התעודה לא מתאזנת מול הסיכום המודפס', unit: 'מחיר היחידה לא מוסכם בין הקריאות', net: 'סכום השורה לא מוסכם בין הקריאות',
     gross: 'הסכום לפני הנחה לא מוסכם בין הקריאות', values: 'הכמות או מחיר היחידה לא נקראו כמספר תקין',
+    deposit: 'שורת פיקדון לא נספרת בסך היחידות המודפס, ולכן הנייר לא מאשש את הכמות שלה',
     arithmetic: 'מחיר היחידה × הכמות לא יוצא סכום השורה ' + (lone ? 'בקריאה היחידה' : readings.some(r => priceAuditRowArithmeticHolds(r.values)) ? 'בקריאה שנבחרה' : 'באף אחת מהקריאות') };
   // v367: בקריאה יחידה אין "קריאות" שלא הסכימו — המשפט למעלה כבר הסביר שאין קריאה תומכת לשדות; נשארות רק סיבות של הנייר והחשבון.
   const reasons = proof.reasons.filter(code => why[code] && !(lone && ['unit', 'net', 'gross'].includes(code))).map(code => why[code]);

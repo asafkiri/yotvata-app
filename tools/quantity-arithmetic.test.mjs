@@ -13,7 +13,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runtime, fixture } from './receipt-scan-harness.mjs';
-import { PRODUCTS, SUBTOTAL, UNITS, fieldInvoice } from './quantity-arithmetic-fixture.mjs';
+import { PRODUCTS, SUBTOTAL, UNITS, FIELD_ROWS, fieldInvoice } from './quantity-arithmetic-fixture.mjs';
 import { creditInvoiceData, verifiedCredit } from './credit-verified-fixture.mjs';
 
 const json = (c, expr) => JSON.parse(c.run('JSON.stringify(' + expr + ')'));
@@ -25,19 +25,33 @@ const row = (c, i) => 'aiScanResponse.scan.documents[0].rows[' + i + ']';
 const finishErrors = c => json(c, 'aiEvaluateInvoiceScan(aiScanResponse).errors || []');
 const READINGS = 'קריאה 1 – 3 · קריאה 2 – 6 · קריאה 3 \\(המודל החזק\\) – 2';
 
-function setup(options = {}, { catalogPrice = null } = {}) {
+// `deposit`: row 21 ("מוצר בדיקה 21", 24 × 4.50 = 108.00) is a deposit row ("פיקדון בקבוק", the product's
+// deposit ₪4.50) whose quantity the reads did not agree on (24 selected, 12 in the other cheap read, 2 by
+// the verifier), like rows 6 and 18. The printed units total is 261: a deposit row is not counted in it
+// (yotvataPaperCheck), so the paper balances whatever the deposit quantity is.
+const DEPOSIT_ROW = 20, DEPOSIT_UNITS = UNITS - 24;
+function setup(options = {}, { catalogPrice = null, deposit = false } = {}) {
   const data = fixture('yotvata');
   data.products = PRODUCTS.map(p => ({ id: p.id, name: p.name, barcode: p.barcode, price: p.price }));
   if (catalogPrice != null) data.products[5].price = catalogPrice;
+  if (deposit) Object.assign(data.products[DEPOSIT_ROW], { name: 'פיקדון בקבוק', deposit: 4.5 });
   data.items = [];
-  const answer = fieldInvoice(options), d = answer.scan.documents[0];
+  const units = deposit ? DEPOSIT_UNITS : UNITS;
+  const answer = fieldInvoice(deposit ? { printedUnits: units, ...options } : options), d = answer.scan.documents[0];
+  if (deposit) {
+    const row = d.rows[DEPOSIT_ROW], proof = row.modelVerification;
+    row.description = proof.evidence.description = 'פיקדון בקבוק';
+    proof.readings.forEach(r => { r.values.description = 'פיקדון בקבוק'; });
+    proof.readings.find(r => r.read === 0).values.quantity = 12;
+    Object.assign(proof, { status: 'needs_review', issues: ['quantity'], fieldSupport: { ...proof.fieldSupport, quantity: [] } });
+  }
   d.__pricePaper = structuredClone(d); d.__priceSourceId = 'field-9073807997';
   data.paper = answer;
-  const saved = { ...answer, docInputs: [{ amount: SUBTOTAL, units: UNITS, pageCount: 3 }],
+  const saved = { ...answer, docInputs: [{ amount: SUBTOTAL, units, pageCount: 3 }],
     perDocument: [{ docIndex: 0, ok: true, serviceVersion: answer.serviceVersion, model: answer.model, requestId: answer.requestId, verification: answer.scan.verification }] };
   const c = runtime('yotvata', { data }); c.context.savedReview = saved;
   c.run(`receiptOpened=true;receiptDupConfirmed=true;restoreDraftScan(savedReview);receiptPaperScanState='ok';receiptDocDate='2026-09-25';
-    receiptNotes=[{amount:${SUBTOTAL},units:${UNITS}}];recomputeNoteTotal();receiptList=[];saveReceiptDraft();renderReceiving()`);
+    receiptNotes=[{amount:${SUBTOTAL},units:${units}}];recomputeNoteTotal();receiptList=[];saveReceiptDraft();renderReceiving()`);
   return { c, data };
 }
 
@@ -154,6 +168,51 @@ test('an unbalanced paper keeps the row pending and says the paper does not bala
   assert.match(html(c), new RegExp('הקריאות לא הסכימו על הכמות: ' + READINGS));
 });
 
+test('a deposit row is never proven by the arithmetic (service v150 rule): the paper does not count it, so its quantity stays with the worker and the card says why', async () => {
+  const { c, data } = setup({}, { deposit: true });
+  const R = row(c, DEPOSIT_ROW);
+  // 24 × 4.50 = 108.00 exactly, the money supported by reads 0 and 2, the paper balanced (261 printed units,
+  // the deposit not counted) — for a product row this would be proven; rows 6 and 18 still are.
+  assert.equal(c.run('yotvataPaperCheck(aiScanResponse.scan.documents[0], 3).ok'), true, 'the paper balances whatever the deposit quantity is');
+  assert.deepEqual(json(c, R + '.modelVerification.issues'), ['quantity']);
+  assert.deepEqual(json(c, R + '.modelVerification.fieldSupport.quantity'), []);
+  assert.deepEqual(json(c, 'priceAuditQuantityArithmetic(' + R + ', true)'), { proven: false, server: false, reasons: ['deposit'] });
+  assert.equal(c.run('priceAuditRowArithmeticHolds(' + R + ')'), true, 'the row arithmetic itself holds — it is the paper that cannot corroborate it');
+  assert.deepEqual(json(c, 'aiModelReviewIssues(' + R + ')'), ['quantity']);
+  assert.equal(c.run('priceAuditConsensusConfirmed(' + R + ')'), false);
+  for (const i of FIELD_ROWS) assert.deepEqual(json(c, 'aiModelReviewIssues(' + row(c, i) + ')'), [], 'row ' + (i + 1) + ' is still proven');
+  const a = report(c);
+  assert.deepEqual(pending(c).map(r => r.rowIndex), [DEPOSIT_ROW]);
+  assert.equal(a.rows[DEPOSIT_ROW].capability, 'partial');
+  assert.deepEqual(a.rows[DEPOSIT_ROW].modelReviewIssues, ['quantity']);
+  assert.equal(a.complete, false);
+  const h = html(c);
+  assert.match(h, /נשארה שורה אחת לטיפול/);
+  assert.match(h, /צריך להשלים את הבדיקה/);
+  assert.match(h, /<p data-row-dispute-field="quantity">הקריאות לא הסכימו על הכמות: קריאה 1 – 12 · קריאה 2 – 24 · קריאה 3 \(המודל החזק\) – 2\. גם הקריאה השלישית \(המודל החזק\) קראה את הנייר, ועדיין אין שתי קריאות שמסכימות\.<\/p>/);
+  assert.match(h, /<p class="mt-1">החשבון לא מכריע: שורת פיקדון לא נספרת בסך היחידות המודפס, ולכן הנייר לא מאשש את הכמות שלה\.<\/p>/);
+  assert.match(h, /data-role="price-confirm-values"/);
+  assert.match(h, /data-role="paper-row-edit"/);
+  assert.doesNotMatch(h, /אין מה לאשר/);
+  const visible = (h.match(/<div[^>]*data-row-dispute>[\s\S]*?<\/div>/) || [''])[0].replace(/<[^>]+>/g, ' ');
+  assert.ok(visible.length > 40 && !/[A-Za-z]/.test(visible), 'no raw English in the explanation: ' + visible);
+  // The finish is blocked on that row, and the deposit line is not attached to the receipt on a quantity
+  // only one read saw (before the fix it reached depositRows with quantity 24 and no manual stop).
+  const evaluation = json(c, 'aiEvaluateInvoiceScan(aiScanResponse)');
+  assert.equal(evaluation.valid, false);
+  assert.ok(evaluation.errors.some(e => /שורה 21: הכמות או המחיר עדיין לא אומתו בין הסריקות — אשר לפי הנייר/.test(e)), evaluation.errors.join(' | '));
+  assert.deepEqual(evaluation.depositRows, []);
+  // Nothing altered, and the same after a reload.
+  assert.equal(c.run(R + '.quantity'), 24);
+  assert.deepEqual(json(c, R + '.modelVerification.fieldSupport.quantity'), []);
+  assert.deepEqual(pending(runtime('yotvata', { data, storage: c.storage })).map(r => r.rowIndex), [DEPOSIT_ROW]);
+  // The worker's own confirmation still settles it, as for any unproven row.
+  await c.click('price-confirm-values', '', { doc: '0', row: String(DEPOSIT_ROW), reviewToken: c.run('priceAuditValuesReviewToken(aiSourceRow(0,' + DEPOSIT_ROW + '))') });
+  assert.deepEqual(pending(c), []);
+  assert.equal(c.run(R + '.quantity'), 24, 'the OCR value is kept');
+  assert.equal(json(c, 'aiEvaluateInvoiceScan(aiScanResponse)').depositRows.length, 1, 'confirmed by the worker, the deposit line is attached');
+});
+
 test('when the verifier failed the card says so, with two readings and the technical reason as a small ltr line', () => {
   const { c, data } = setup({ unit: 16.04, verifier: 'failed' });
   assert.deepEqual(pending(c).map(r => r.rowIndex), [5]);
@@ -257,6 +316,15 @@ test('the rule itself: gross null, a row discount, credit magnitudes, a string m
   assert.deepEqual(check(ok, true, false, { ...support, unitPriceExVat: ['arithmetic'] }).reasons, ['unit'], 'a marker is not a read');
   assert.deepEqual(check(ok, true, false, null).reasons, ['support'], 'a v146 answer has no fieldSupport');
   assert.equal(check(ok, false, false, { ...support, quantity: ['arithmetic'] }).server, true, 'the service marker is accepted as it is');
+  // A deposit row is never proven (the paper check does not count it in the units total), invoice and credit
+  // alike, with the same regex as the paper checks — service v150's DEPOSIT_ROW. The service's own deposit
+  // case: the selected read swapped quantity and price (4 × 9.00 for a printed 9 × 4.00): the arithmetic holds.
+  const swapped = { quantity: 4, unitPriceExVat: 9, grossLineTotalExVat: 36, lineDiscountExVat: 0, lineTotalExVat: 36 };
+  assert.equal(check({ ...swapped, description: 'חלב בדיקה' }).proven, true);
+  assert.deepEqual(check({ ...swapped, description: 'פיקדון בקבוק' }), { proven: false, server: false, reasons: ['deposit'] });
+  assert.deepEqual(check({ ...ok, description: 'פקדון' }).reasons, ['deposit']);
+  assert.deepEqual(check({ ...credit, description: 'פיקדון קפה' }, true, true), { proven: false, server: false, reasons: ['deposit'] });
+  assert.equal(check({ ...ok, description: 'פיקדון בקבוק' }, true, false, { ...support, quantity: ['arithmetic'] }).server, true, 'a service marker is still accepted as it is');
 });
 
 // The credit backstop: the same rule, by magnitude, on a driver credit read by service v149.
@@ -292,4 +360,24 @@ test('a driver credit (service v149): a quantity dispute the arithmetic proves o
   assert.deepEqual(unproven.reasons, ['disputed']);
   assert.equal(unproven.credit.status, 'review');
   assert.match(unproven.c.run('deliveryCreditsHtml()'), /הקריאות לא הסכימו על הכמות בשורה 1 — בדוק מול הנייר/);
+});
+
+test('a driver credit with a deposit row: the slip balances whatever its quantity is, so the quantity dispute stays for the worker (service v150 rule)', async () => {
+  // Row 1 is "פיקדון קפה" (−6 × 7.30 = −43.80, the money supported, the quantity not); the printed units
+  // total (−1) counts only the milk row, so deliveryCreditPaperCheck passes for any deposit quantity.
+  const data = creditInvoiceData();
+  const answer = verifiedCredit(data, { rowOptions: { 0: { issues: ['quantity'] } } }), doc = answer.scan.documents[0];
+  doc.rows[0].description = doc.rows[0].modelVerification.evidence.description = 'פיקדון קפה';
+  doc.rows[0].modelVerification.readings.forEach(r => { r.values.description = 'פיקדון קפה'; });
+  doc.printedUnits = doc.modelVerification.values.printedUnits = -1;
+  const { c, credit, reasons } = await readCredit(answer);
+  assert.equal(c.run('deliveryCreditPaperCheck(receiptDeliveryCredits[0].paper, 1)'), '', 'the slip balances');
+  assert.deepEqual(json(c, 'priceAuditQuantityArithmetic(receiptDeliveryCredits[0].paper.rows[0], true, true)'), { proven: false, server: false, reasons: ['deposit'] });
+  assert.deepEqual(json(c, 'deliveryCreditConsensus(receiptDeliveryCredits[0]).disputes'), ['הכמות בשורה 1']);
+  assert.deepEqual(reasons, ['disputed']);
+  assert.equal(credit.status, 'review');
+  assert.equal(!!credit.autoConfirmed, false);
+  assert.deepEqual(c.toasts, []);
+  assert.match(c.run('deliveryCreditsHtml()'), /הקריאות לא הסכימו על הכמות בשורה 1 — בדוק מול הנייר/);
+  assert.equal(credit.paper.rows[0].quantity, -6, 'the read value is kept');
 });
