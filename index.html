@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v366 זיכוי מצלמים כבר במסך הצילום</title>
+    <title>הזמנות יטבתה - v367 כמות שמוכחת בחשבון לא דורשת אישור</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v366 זיכוי מצלמים כבר במסך הצילום</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v367 כמות שמוכחת בחשבון לא דורשת אישור</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -1438,14 +1438,19 @@ function deliveryCreditConsensus(c, rows = deliveryCreditRows(c)) {
   const numberKey = v => String(v == null ? '' : v).replace(/\s/g, '');
   const typedNumber = !!numberKey(c.number) && numberKey(c.number) !== numberKey(paper.invoiceNumber);
   const disputes = proof.issues.filter(f => f !== 'documentDiscountExVat' && !(typedNumber && f === 'invoiceNumber')).map(f => PAPER_SUMMARY_FIELD_NAMES[f] || String(f));
+  // v367: כמות בלי קריאה תומכת שהחשבון מוכיח על פתק מסתכם (אותו כלל כמו בחשבונית, לפי ערך מוחלט,
+  // ורק כשסך היחידות המודפס נקרא) אינה מחלוקת; שרת v150 כבר מוריד אותה בעצמו.
+  const balanced = !deliveryCreditPaperCheck(paper, (c.pages && c.pages.length) || c.pageCount || 0) && Number.isInteger(paper.printedUnits) && Math.abs(paper.printedUnits) > 0;
   let unverifiedRows = 0;
   (Array.isArray(paper.rows) ? paper.rows : []).forEach((row, i) => {
     const rp = row && row.modelVerification;
     // ברקוד שהעובד הקליד מהנייר הוא ההכרעה שלו על זהות המוצר — מחלוקת 'identity' של
     // הקריאות כבר לא רלוונטית לשורה הזאת (הכמות והסכומים עדיין נבדקים).
     const typed = !!c.barcodes && c.barcodes[i] != null;
-    const issues = (rp && Array.isArray(rp.issues) ? rp.issues : []).filter(f => !(typed && f === 'identity'));
-    if (rp && rp.version === 1 && !issues.length && (['agreed', 'verified'].includes(rp.status) || typed)) return;
+    const raw = rp && Array.isArray(rp.issues) ? rp.issues : [];
+    const proven = raw.includes('quantity') && priceAuditQuantityArithmetic(row, balanced, true).proven; // v367
+    const issues = raw.filter(f => !(typed && f === 'identity') && !(proven && f === 'quantity'));
+    if (rp && rp.version === 1 && !issues.length && (['agreed', 'verified'].includes(rp.status) || typed || proven)) return;
     unverifiedRows++;
     if (rows[i] && !rows[i].productId) return;
     const fields = [...new Set(issues.map(f => PAPER_ROW_FIELD_NAMES[f] || String(f)))];
@@ -11935,17 +11940,138 @@ function priceAuditIdentity(mapped, raw) {
   if (resolved && resolved.priceAssisted === true && resolved.verifiedPrice !== true) return null;
   return resolved && resolved.product || null;
 }
+// ===== v367: כמות שמוכחת בחשבון לא דורשת אישור =====
+// מהשטח (גיבוי החנות, 25.9.2026 12:03, אפליקציה v366 / שרת v149): חשבונית 9073807997 (3 עמודים,
+// 22 שורות) נקראה שלוש פעמים. הקריאה שנבחרה (הקריאה הזולה השנייה) קראה כל כמות נכון והנייר
+// שלה מסתכם (Σ שורות = 1717.49 המודפס, Σ יחידות = 285 המודפס). הקריאה הזולה הראשונה חצתה שתי
+// כמויות (3 במקום 6 בשורה 6, 10 במקום 20 בשורה 18; Σ יחידות 272) ונכשלה בבדיקת הנייר; קריאת
+// ההכרעה (המודל החזק) קראה את עמודת המארזים בכל שורה (1, ובשורות 6/18/21 — 2; Σ 25), נכשלה גם
+// היא ולא נבחרה — נכון. אבל לכמות בשורות 6 ו-18 לא הייתה אף קריאה תומכת (fieldSupport.quantity:
+// []), והשרת החזיר needs_review עם issues ['quantity']. האפליקציה הציגה "נשארו 2 שורות לטיפול /
+// צריך להשלים את הבדיקה" וביקשה מהעובד לאשר כמות שהחשבון כבר הוכיח: 6 × 16.03 = 96.18 ו-20 × 12.53
+// = 250.60 בדיוק, ורק הכמויות האלה מביאות את סך היחידות ל-285 המודפס.
+// הכלל (זהה בשרת v150, scan-consensus.js quantityArithmetic): הכמות נחשבת מאומתת בחשבון כאשר
+// (1) היא מספר שלם חיובי ומחיר היחידה חיובי (בזיכוי: לפי ערך מוחלט); (2) למחיר היחידה ולנטו
+// השורה בקריאה שנבחרה יש קריאה תומכת אחת לפחות (fieldSupport), וכך גם לברוטו כשנקרא — אלה
+// השדות שהחשבון נשען עליהם, ולכן הם עצמם אינם המצאה של קריאה אחת; (3) באגורות שלמות:
+// round(כמות × מחיר) = ברוטו, וברוטו − |הנחה| = נטו (הנחה שלא נקראה = 0, כלומר ברוטו = נטו); בלי
+// ברוטו: round(כמות × מחיר) = נטו + |הנחה|; (4) הנייר שנבחר עובר את בדיקת הנייר (Σ שורות =
+// הסיכום, Σ יחידות = סך היחידות המודפס) — כך הכמות מאוששת גם על ידי סך היחידות שהמדפסת סיכמה.
+// כמות כזאת יוצאת מרשימת הבעיות (aiModelReviewIssues), והשורה נחשבת מאושרת בהסכמה
+// (priceAuditConsensusConfirmed) גם כשהשרת (v149) עדיין אמר needs_review. שרת v150 מסמן זאת
+// בעצמו: fieldSupport.quantity מכיל 'arithmetic', modelVerification.arithmetic.quantity נושא את
+// ההוכחה, והסטטוס 'verified' — הסמן מתקבל כמו שהוא. שום ערך OCR אינו משתנה (גם לא רשומת
+// ההסכמה של השרת), ולשורה שהחשבון לא מוכיח נשארים האישור הידני ("כן, הכמות והמחיר נכונים לפי
+// הנייר") ותיקון לפי הנייר, כמו קודם. גם הכרטיס מסביר מעכשיו על איזה שדה הקריאות לא הסכימו,
+// מה כל קריאה ראתה, ולמה החשבון לא מכריע (priceAuditRowDisputeHtml).
+// v367: האם החשבון של ערכי שורה (כפי שנקראו) נסגר: round(כמות × מחיר) = ברוטו וברוטו − |הנחה| =
+// נטו, או בלי ברוטו: round(כמות × מחיר) = נטו + |הנחה|. באגורות שלמות; בזיכוי לפי ערך מוחלט.
+function priceAuditRowArithmeticHolds(values, credit = false) {
+  const num = v => typeof v === 'number' && Number.isFinite(v) ? (credit ? Math.abs(v) : v) : null;
+  const cents = v => v == null ? null : Math.round(v * 100);
+  if (!values || typeof values !== 'object') return false;
+  const qty = num(values.quantity), unit = num(values.unitPriceExVat);
+  const gross = cents(num(values.grossLineTotalExVat)), net = cents(num(values.lineTotalExVat));
+  const discount = Math.abs(cents(num(values.lineDiscountExVat)) || 0);
+  if (!Number.isInteger(qty) || qty <= 0 || !(unit > 0) || net == null || (values.grossLineTotalExVat != null && gross == null)) return false;
+  const product = Math.round(qty * unit * 100);
+  return gross != null ? product === gross && gross - discount === net : product === net + discount;
+}
+// v367: הוכחת הכמות בחשבון לשורה, לפי הכלל למעלה. balanced — בדיקת הנייר של המסמך שנבחר עברה
+// וסך היחידות המודפס נקרא (המתקשר בודק: לחשבונית ולזיכוי בדיקות נייר שונות). מחזירה
+// { proven, server, reasons } ובהוכחה גם { unit, gross, net, printedUnitsBalanced } כמו בשרת.
+// reasons אומר למה החשבון לא מכריע (להסבר בכרטיס): 'support' (אין fieldSupport — שרת ישן),
+// 'values' (כמות או מחיר לא תקינים), 'unit' / 'net' / 'gross' (השדה בלי קריאה תומכת),
+// 'arithmetic' (החשבון לא נסגר), 'paper' (הנייר לא מתאזן). תמיכה היא קריאה אחרת (מספר קריאה);
+// סמן מחרוזת אינו קריאה. סמן השרת (v150: fieldSupport.quantity מכיל 'arithmetic') מתקבל כמו שהוא.
+function priceAuditQuantityArithmetic(row, balanced, credit = false) {
+  const proof = row && row.modelVerification;
+  const support = proof && proof.version === 1 && proof.fieldSupport && typeof proof.fieldSupport === 'object' ? proof.fieldSupport : null;
+  if (!support) return { proven: false, server: false, reasons: ['support'] };
+  if (Array.isArray(support.quantity) && support.quantity.includes('arithmetic')) {
+    const saved = proof.arithmetic && proof.arithmetic.quantity;
+    return { proven: true, server: true, reasons: [], ...(saved && typeof saved === 'object' ? saved : {}) };
+  }
+  const num = v => typeof v === 'number' && Number.isFinite(v) ? (credit ? Math.abs(v) : v) : null;
+  const reasons = [];
+  const qty = num(row.quantity), unit = num(row.unitPriceExVat);
+  if (!Number.isInteger(qty) || qty <= 0 || !(unit > 0) || num(row.lineTotalExVat) == null) reasons.push('values');
+  const supported = field => Array.isArray(support[field]) && support[field].some(Number.isInteger);
+  if (!supported('unitPriceExVat')) reasons.push('unit');
+  if (!supported('lineTotalExVat')) reasons.push('net');
+  if (row.grossLineTotalExVat != null && !supported('grossLineTotalExVat')) reasons.push('gross');
+  if (!reasons.includes('values') && !priceAuditRowArithmeticHolds(row, credit)) reasons.push('arithmetic');
+  if (!balanced) reasons.push('paper');
+  if (reasons.length) return { proven: false, server: false, reasons };
+  return { proven: true, server: false, reasons: [], unit: row.unitPriceExVat, gross: row.grossLineTotalExVat ?? null, net: row.lineTotalExVat, printedUnitsBalanced: true };
+}
+// v367: התעודה (aiScanResponse) שהשורה שייכת לה.
+function priceAuditRowDocument(row) {
+  return aiScanResponse && aiScanResponse.scan && aiScanResponse.scan.documents.find(d => (d.rows || []).includes(row)) || null;
+}
+// v367: לשורת חשבונית — הנייר שנבחר (המקור עם התיקונים שאושרו, כמו בבדיקת ההנחה של v365) מול
+// מספר העמודים שצולמו. בלי תעודה אין נייר ואין הוכחה.
+function priceAuditQuantityProvenByArithmetic(doc, row) {
+  if (!doc || !row) return false;
+  const check = yotvataPaperCheck(priceAuditSource(doc) || doc, priceAuditDocumentPageCount(doc));
+  return priceAuditQuantityArithmetic(row, check.ok && Number.isInteger(check.units) && check.units > 0).proven;
+}
+// v367: הקריאות של השורה (readings של שרת v147+, ממוינות לפי מספר הקריאה). בלי readings — רשימה ריקה.
+function priceAuditRowReadings(row) {
+  const proof = row && row.modelVerification;
+  return (proof && Array.isArray(proof.readings) ? proof.readings : []).filter(r => r && r.values && typeof r.values === 'object' && Number.isInteger(r.read))
+    .sort((a, b) => a.read - b.read);
+}
+// v367: ההסבר בכרטיס "צריך להשלים את הבדיקה" — על איזה שדה הקריאות לא הסכימו, מה כל קריאה ראתה,
+// למה החשבון לא מכריע (הכלל למעלה), והאם הקריאה השלישית (המודל החזק) נכשלה — באותן מילים כמו
+// בפאנל אימות הסיכום (v365). תצוגה בלבד; שום ערך לא משתנה.
+function priceAuditRowDisputeHtml(documentIndex, rowIndex, issues) {
+  const source = aiSourceRow(documentIndex, rowIndex);
+  const fields = (issues || []).filter(f => f !== 'identity' && PAPER_ROW_FIELD_NAMES[f]);
+  if (!source || !fields.length) return '';
+  const row = source.mapped, readings = priceAuditRowReadings(row), lone = readings.length === 1;
+  const names = fields.map(f => PAPER_ROW_FIELD_NAMES[f]);
+  const list = names.length <= 1 ? names.join('') : names.slice(0, -1).join(', ') + ' ועל ' + names[names.length - 1];
+  const label = r => 'קריאה ' + (r.read + 1) + (r.strong === true || r.read >= 2 ? ' (המודל החזק)' : '');
+  const show = (f, v) => v == null ? 'לא נקרא' : typeof v === 'number' && Number.isFinite(v) ? (f === 'quantity' ? String(v) : f === 'unitPriceExVat' ? fmtUnitPrice(v, true) : fmtMoney(v)) : htmlEscape(String(v));
+  const perRead = f => readings.map(r => htmlEscape(label(r)) + ' – ' + show(f, r.values[f])).join(' · ');
+  const line = f => '<p class="mt-1" data-row-dispute-field="' + htmlEscape(f) + '">' + htmlEscape(PAPER_ROW_FIELD_NAMES[f]) + ': ' + perRead(f) + '</p>';
+  const verification = priceAuditDocumentVerification(source.doc), verifier = verification && verification.verifier;
+  const failed = priceAuditVerifierFailed(verification);
+  const disagreed = !failed && !!verifier && verifier.attempted === true && verifier.outcome === 'disagreed';
+  const tail = failed ? ' הקריאה השלישית (המודל החזק) נכשלה, לכן נשארו שתי קריאות שלא הסכימו.'
+    : disagreed ? ' גם הקריאה השלישית (המודל החזק) קראה את הנייר, ועדיין אין שתי קריאות שמסכימות.' : '';
+  let what;
+  if (lone) what = '<p>רק קריאה אחת קראה את השורה הזאת' + (failed ? ' (הקריאה השלישית, המודל החזק, נכשלה)' : '') + ', ולכן אין קריאה נוספת שמאשרת את ' + htmlEscape(list) + '.</p>';
+  else if (!readings.length) what = '<p>הקריאות לא הסכימו על ' + htmlEscape(list) + '.' + tail + '</p>';
+  else if (fields.length === 1) what = '<p data-row-dispute-field="' + htmlEscape(fields[0]) + '">הקריאות לא הסכימו על ' + htmlEscape(list) + ': ' + perRead(fields[0]) + '.' + tail + '</p>';
+  else what = '<p>הקריאות לא הסכימו על ' + htmlEscape(list) + '.' + tail + '</p>' + fields.map(line).join('');
+  // למה החשבון לא מכריע את הכמות — לפי אותה בדיקה בדיוק שמורידה כמות מוכחת מהרשימה.
+  const check = yotvataPaperCheck(source.paper, priceAuditDocumentPageCount(source.doc));
+  const proof = priceAuditQuantityArithmetic(row, check.ok && Number.isInteger(check.units) && check.units > 0);
+  const why = { paper: 'התעודה לא מתאזנת מול הסיכום המודפס', unit: 'מחיר היחידה לא מוסכם בין הקריאות', net: 'סכום השורה לא מוסכם בין הקריאות',
+    gross: 'הסכום לפני הנחה לא מוסכם בין הקריאות', values: 'הכמות או מחיר היחידה לא נקראו כמספר תקין',
+    arithmetic: 'מחיר היחידה × הכמות לא יוצא סכום השורה ' + (readings.some(r => priceAuditRowArithmeticHolds(r.values)) ? 'בקריאה שנבחרה' : 'באף אחת מהקריאות') };
+  const reasons = proof.reasons.filter(code => why[code]).map(code => why[code]);
+  return '<div class="mt-2 text-sm text-slate-700" data-row-dispute>' + what +
+    (reasons.length ? '<p class="mt-1">החשבון לא מכריע: ' + htmlEscape(reasons.join(' · ')) + '.</p>' : '') +
+    // הסיבה הטכנית לכישלון — שורה קטנה משמאל לימין, כמו בפאנל הסיכום.
+    (failed && verifier.error ? '<p class="mt-1 text-[11px] text-slate-400" dir="ltr">' + htmlEscape(String(verifier.error)).slice(0, 80) + '</p>' : '') + '</div>';
+}
 function aiModelReviewIssues(row) {
   const proof = row && row.modelVerification;
   if (!proof || proof.version !== 1) return [];
-  const doc = aiScanResponse && aiScanResponse.scan && aiScanResponse.scan.documents.find(d => (d.rows || []).includes(row));
+  const doc = priceAuditRowDocument(row);
   const corrected = doc && paperRowCorrectionValid(doc, doc.rows.indexOf(row));
   const source = doc && aiSourceRow(doc.noteIndex, doc.rows.indexOf(row));
   const approved = source && row.paperValuesReview && row.paperValuesReview.at > 0 && row.paperValuesReview.token === priceAuditValuesReviewToken(source);
   const resolution = aiResolveInvoiceBarcode(row);
   const identityConfirmed = !!resolution.product && (row.barcodeMatchMethod === 'user_confirmed' || resolution.verifiedPrice === true);
   const financialFields = ['quantity', 'unitPriceExVat', 'grossLineTotalExVat', 'lineDiscountExVat', 'lineTotalExVat'];
-  const issues = (proof.issues || []).filter(f => !(f === 'identity' && identityConfirmed) && !(financialFields.includes(f) && (corrected || approved)));
+  // v367: כמות בלי קריאה תומכת שהחשבון מוכיח על נייר מסתכם אינה בעיה (שרת v149; שרת v150 כבר הוריד אותה בעצמו).
+  const quantityProven = (proof.issues || []).includes('quantity') && priceAuditQuantityProvenByArithmetic(doc, row);
+  const issues = (proof.issues || []).filter(f => !(f === 'identity' && identityConfirmed) && !(financialFields.includes(f) && (corrected || approved))
+    && !(f === 'quantity' && quantityProven));
   if (!corrected && !approved && proof.evidence) for (const key of financialFields) {
     if (JSON.stringify(proof.evidence[key] ?? null) !== JSON.stringify(row[key] ?? null) && !issues.includes(key)) issues.push(key);
   }
@@ -11960,10 +12086,15 @@ function priceAuditDocumentReviewToken(doc) {
 function priceAuditConsensusConfirmed(row) {
   const proof = row && row.modelVerification;
   const resolution = row && aiResolveInvoiceBarcode(row);
+  // v367: כמות שהחשבון הוכיח נחשבת מוסכמת — שרת v149 (needs_review, issues ['quantity'] בלבד:
+  // arithmeticSettled) וגם לצד זהות שהעובד אישר. שרת v150 כבר מחזיר 'verified' עם הסמן.
+  const quantityProven = !!proof && (proof.issues || []).includes('quantity') && priceAuditQuantityProvenByArithmetic(priceAuditRowDocument(row), row);
+  const settled = f => f === 'identity' || (f === 'quantity' && quantityProven);
   const identityReviewed = resolution && resolution.product && row.barcodeMatchMethod === 'user_confirmed'
-    && (proof && proof.issues || []).every(f => f === 'identity');
+    && (proof && proof.issues || []).every(settled);
+  const arithmeticSettled = quantityProven && proof.status === 'needs_review' && (proof.issues || []).every(f => f === 'quantity');
   const priceMatched = resolution && resolution.verifiedPrice === true;
-  return !!(proof && proof.version === 1 && (['agreed', 'verified'].includes(proof.status) || identityReviewed || priceMatched)
+  return !!(proof && proof.version === 1 && (['agreed', 'verified'].includes(proof.status) || arithmeticSettled || identityReviewed || priceMatched)
     && proof.evidence && !aiModelReviewIssues(row).length
     && ['quantity', 'unitPriceExVat', 'grossLineTotalExVat', 'lineDiscountExVat', 'lineTotalExVat']
       .every(key => JSON.stringify(proof.evidence[key] ?? null) === JSON.stringify(row[key] ?? null))
@@ -12690,6 +12821,8 @@ function priceAuditActionCardHtml(r) {
     (r.capability === 'missing_catalog_price' ? 'השלם מחיר במאגר' : 'עדכן מחיר במאגר') + '</button>' : '';
   let action;
   const source = aiSourceRow(r.documentIndex, r.rowIndex);
+  // v367: למה השורה נשארה לטיפול — איזה שדה, מה כל קריאה ראתה, ולמה החשבון לא מכריע.
+  const dispute = r.modelReviewIssues ? priceAuditRowDisputeHtml(r.documentIndex, r.rowIndex, r.modelReviewIssues) : '';
   if (r.modelReviewIssues && priceAuditCanConfirmValues(source)) action = '<p class="mt-2 font-bold">בדוק את הכמות, מחיר היחידה וסכום השורה מול הנייר.</p>' +
     '<button data-role="price-confirm-values" data-doc="' + r.documentIndex + '" data-row="' + r.rowIndex + '" data-review-token="' + htmlEscape(priceAuditValuesReviewToken(source)) + '" class="btn-tap w-full rounded-xl bg-emerald-700 text-white py-3 mt-3 font-black">כן, הכמות והמחיר נכונים לפי הנייר</button>' + paperRowCorrectionButton(r.documentIndex, r.rowIndex);
   else if (difference) action = '<p class="mt-2 font-bold">' + (promoGap ? 'בדוק בתעודה: האם זה הסכום שהספק חייב בפועל?' : 'האם המחיר והכמות כאן הם מה שמודפס בשורה של המוצר שבחרת?') + '</p>' +
@@ -12714,7 +12847,7 @@ function priceAuditActionCardHtml(r) {
     (r.monthlyStatus ? '<div>' + htmlEscape(r.monthlyStatus) + '</div>' : '') + '</details>' : '';
   return shell + '<div class="font-black text-base ' + (difference ? 'text-rose-800' : 'text-amber-900') + '">' +
     (difference ? gapTitle : r.capability === 'missing_catalog_price' ? 'צריך להשלים מחיר למוצר' : 'צריך להשלים את הבדיקה') +
-    '</div><div class="font-black text-lg mt-2">' + htmlEscape(r.name) + '</div>' + comparison +
+    '</div><div class="font-black text-lg mt-2">' + htmlEscape(r.name) + '</div>' + comparison + dispute +
     aiSourceRowHtml(r.documentIndex, r.rowIndex, { uncertain: !r.productId }) + action + calculation + '</article>';
 }
 function receiptPriceAuditHtml(report, { summary = false } = {}) {

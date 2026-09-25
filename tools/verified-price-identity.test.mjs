@@ -99,10 +99,17 @@ test('catalog mismatch, duplicate barcode or unrelated names leave the identity 
 });
 
 test('verified price resolves the name while a real quantity disagreement still blocks receiving', () => {
-  const {c} = setup({change: (data, r) => {
+  const {c} = setup({change: (data, r, doc) => {
     r.modelVerification.issues.push('quantity'); r.modelVerification.fieldSupport.quantity = [];
     r.modelVerification.readings[1].values.quantity = 7;
+    // v367: a quantity the arithmetic proves on a balanced paper is no longer a dispute (6 × 5.24 = 31.44 exactly,
+    // 6 units printed — quantity-arithmetic.test.mjs), so this row's money is printed as 31.40: neither 6 nor 7
+    // times 5.24 gives it, the paper still balances, and the price (5.24, supported) still resolves the name.
+    for (const target of [r, r.modelVerification.evidence, ...r.modelVerification.readings.map(x => x.values)]) target.grossLineTotalExVat = target.lineTotalExVat = 31.4;
+    doc.subtotalExVat = doc.itemsSectionTotalExVat = 31.4;
   }});
+  assert.equal(c.run('yotvataPaperCheck(aiScanResponse.scan.documents[0], 1).ok'), true);
+  assert.equal(c.run('priceAuditQuantityProvenByArithmetic(aiScanResponse.scan.documents[0], ' + row + ')'), false);
   assert.equal(resolution(c).product.id, 'coffee');
   assert.equal(audit(c).capability, 'partial');
   assert.deepEqual(audit(c).modelReviewIssues, ['quantity']);
