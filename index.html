@@ -15532,38 +15532,59 @@ function aiIsPendingBarcodeChoice(suggestion) {
 }
 // שורת חוסר/עודף מפורטת: כמה חויב בתעודה, כמה נסרק בפועל וכמה חסר/עודף.
 // "חסר 12 יח׳" לבד לא אומר למי שעומד מול הסחורה מאיפה המספר הגיע.
+// הפירוט מוצג רק כשהחשבון סוגר (חויב − נסרק = ההפרש). ממצא שהגיע מהמנתח
+// או שנחתך בזיכוי יכול לשאת כמות שאינה ההפרש בין הנייר לסריקה, ואז שלושה
+// מספרים סותרים גרועים משורה אחת — במקרה כזה נשארת השורה הפשוטה. הפירוט
+// הוא תצוגה בלבד: הוא לא נוגע בממצא, בסריקה או בחישוב, וכל תקלה בבנייתו
+// נבלעת וחוזרת לשורה הפשוטה.
 function aiQuantityFindingRowHtml(finding, type, headClass) {
-  const ev = aiScanEvaluation;
-  const pid = String(finding && finding.productId || '');
-  const agg = ev && ev.aggregates instanceof Map ? (ev.aggregates.get(finding.productId) || ev.aggregates.get(pid)) : null;
-  const billed = agg ? (Number(agg.qty) || 0) : (ev && ev.aggregates instanceof Map ? 0 : null);
-  const line = (reconcileData || []).find(l => String(l.productId) === pid);
-  const scanned = line ? (Number(line.received) || 0) : 0;
-  const credited = Math.max(0, Number(finding.creditedQty) || 0);
-  const gap = Number(finding.qty || 0) + credited;
   const shortage = type === 'shortage';
   const label = shortage ? 'חסר' : 'עודף';
+  const head = '<div class="flex items-start justify-between gap-3">' +
+    '<div class="min-w-0 text-sm font-black text-slate-800">' + htmlEscape(finding && finding.name || '') + '</div>' +
+    '<div class="shrink-0 max-w-[60%] text-sm font-black ' + headClass + '">' + (finding && finding.creditRemainderLabel ? htmlEscape(finding.creditRemainderLabel) : label + ' ' + Number(finding && finding.qty || 0) + ' יח׳') + '</div>' +
+  '</div>';
+  let detail = '';
+  try { detail = aiQuantityFindingDetailHtml(finding, shortage, label, headClass); } catch (detailError) { detail = ''; }
+  return '<div class="py-2 border-t border-black/5 first:border-t-0">' + head + detail + '</div>';
+}
+function aiQuantityFindingDetailHtml(finding, shortage, label, headClass) {
+  const ev = aiScanEvaluation;
+  if (!ev || !(ev.aggregates instanceof Map) || !finding || !finding.productId) return '';
+  const pid = String(finding.productId);
+  const agg = ev.aggregates.get(finding.productId) || ev.aggregates.get(pid);
+  const billed = agg ? (Number(agg.qty) || 0) : 0;
+  const line = (reconcileData || []).find(l => l && String(l.productId) === pid);
+  const scanned = line ? (Number(line.received) || 0) : 0;
+  const credited = Math.max(0, Number(finding.creditedQty) || 0);
+  const remainingQty = Number(finding.qty) || 0;
+  const gap = remainingQty + credited;
+  if ((shortage ? billed - scanned : scanned - billed) !== gap) return '';
+  // סל חלקי: שורות שלא זוהו או תעודה שלא נקראה אינן נספרות ב"חויב", ולכן
+  // המספר קטן ממה שמודפס על הנייר — אומרים זאת במקום להציג אותו כעובדה.
+  const partial = ev.basketComplete === false;
   const cell = (title, value, cls) => '<div class="rounded-lg bg-white/80 border border-black/5 py-1.5"><div class="text-[10px] font-bold text-slate-500">' + title + '</div><div class="text-base font-black ' + cls + '">' + value + '</div></div>';
-  const summary = billed == null ? ''
-    : billed === 0 ? 'המוצר לא מופיע בתעודה, ונסרקו ' + scanned + ' יח׳'
+  const summary = billed === 0
+    ? (agg ? 'בתעודה רשומות 0 יח׳, ונסרקו ' + scanned + ' יח׳'
+      : partial ? 'לא זוהה בשורות התעודה שנקראו, ונסרקו ' + scanned + ' יח׳'
+      : 'המוצר לא מופיע בתעודה, ונסרקו ' + scanned + ' יח׳')
     : scanned === 0 ? 'חויבו ' + billed + ' יח׳ בתעודה ולא נסרקה אף יחידה'
-    : 'נסרקו ' + scanned + ' יח׳ מתוך ' + billed + ' שחויבו בתעודה';
+    : shortage ? 'נסרקו ' + scanned + ' יח׳ מתוך ' + billed + ' שחויבו בתעודה'
+    : 'חויבו ' + billed + ' יח׳ בתעודה ונסרקו ' + scanned;
+  const partialLine = partial ? '<div class="mt-1 text-xs font-bold text-amber-700">לא כל התעודה נקראה — "חויב" כולל רק שורות שזוהו</div>' : '';
   const creditLine = credited > 0
-    ? '<div class="mt-1 text-xs font-bold text-emerald-700">מתוכם ' + credited + ' יח׳ בזיכוי · ' + (Number(finding.qty) > 0 ? 'נשארו ' + Number(finding.qty) + ' יח׳ ללא זיכוי' : 'כל החוסר מכוסה') + '</div>'
+    ? '<div class="mt-1 text-xs font-bold text-emerald-700">מתוכם ' + credited + ' יח׳ בזיכוי · ' +
+      (remainingQty > 0 ? 'נשארו ' + remainingQty + ' יח׳ ללא זיכוי'
+        : Number(finding.amount) > 0.01 ? 'כל היחידות בזיכוי, נותרה יתרה של ₪' + fmtMoney(Number(finding.amount))
+        : 'כל החוסר מכוסה') + '</div>'
     : '';
-  return '<div class="py-2 border-t border-black/5 first:border-t-0">' +
-    '<div class="flex items-start justify-between gap-3">' +
-      '<div class="min-w-0 text-sm font-black text-slate-800">' + htmlEscape(finding.name || '') + '</div>' +
-      '<div class="shrink-0 max-w-[60%] text-sm font-black ' + headClass + '">' + (finding.creditRemainderLabel ? htmlEscape(finding.creditRemainderLabel) : label + ' ' + Number(finding.qty || 0) + ' יח׳') + '</div>' +
-    '</div>' +
-    '<div class="mt-1.5 grid grid-cols-3 gap-1.5 text-center">' +
-      cell('חויב בתעודה', billed == null ? '—' : billed, 'text-slate-800') +
+  return '<div class="mt-1.5 grid grid-cols-3 gap-1.5 text-center">' +
+      cell(partial ? 'חויב (שורות שזוהו)' : 'חויב בתעודה', billed, 'text-slate-800') +
       cell('נסרק בפועל', scanned, 'text-slate-800') +
       cell(label, gap, headClass) +
     '</div>' +
-    (summary ? '<div class="mt-1 text-xs font-bold text-slate-600">' + summary + '</div>' : '') +
-    creditLine +
-  '</div>';
+    '<div class="mt-1 text-xs font-bold text-slate-600">' + summary + '</div>' +
+    partialLine + creditLine;
 }
 function aiCompactFindingGroupHtml(type, title, findings, extraRowsHtml, extraCount) {
   const rows = (findings || []).filter(finding => String(finding && finding.type || '') === type);
