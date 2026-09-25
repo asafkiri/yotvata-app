@@ -109,8 +109,10 @@ focus; only the status, quantity-button and price areas are refreshed. See
 
 The photo gate always renders the credit section (`deliveryCreditsHtml({ gate:
 true })`), also for a no-document receipt that came back to its photos; a
-credit photographed there clears `receiptNoDoc` (the receipt has paper), is
-read at once, its card refreshes in place on the gate (worded for the gate:
+credit photographed there clears `receiptNoDoc` (the receipt has paper) — when
+the photo is actually added (`deliveryCreditAddFiles`), not on the tap of the
+green button: a cancelled camera leaves an empty card and the flag, and the
+no-document receipt still finishes "לפי ספירה" — is read at once, its card refreshes in place on the gate (worded for the gate:
 "… אפשר להמשיך לצלם את התעודות וללחוץ "התחל קליטת מוצרים"."), and "התחל קליטת
 מוצרים" keeps it while the invoice uploads queue behind its read ("ממתין
 לסיום קריאת הזיכוי…"). `yotvataPhotoReady()` ignores credits. "אין תעודה

@@ -1536,6 +1536,13 @@ async function deliveryCreditAddFiles(id, files, replace = false) {
     if (deliveryCreditFind(id) !== c) return false;
     if (replace && aiOrientationSession && c.pages.includes(aiOrientationSession.page)) aiCloseOrientationReview();
     deliveryCreditInvalidate(c); if (replace) c.pages = []; c.pages.push(...pages); c.pageCount = c.pages.length;
+    // v366: זיכוי מהנהג שייך לקליטה עם תעודה. מי שמצלם זיכוי במסך הצילום של קליטה שנפתחה
+    // ב"אין תעודה בכלל" (וחזרה לצילום) אומר בזה שיש נייר — הדגל יורד כאן, ולא רק ב"התחל":
+    // כך הכרטיס נראה גם אחרי "הקלדת סכום ויחידות ידנית" ואחרי רענון, והסיום דורש סכום
+    // תעודה במקום לשמור "בלי תעודה" עם זיכוי סמוי (או לפתוח מסך התאמה מול תעודה ₪0).
+    // הדגל יורד רק כשצילום באמת נוסף — לא בלחיצה על הכפתור הירוק: מצלמה שבוטלה משאירה
+    // כרטיס ריק, וקליטה בלי תעודה נשארת כזאת (הסיום שלה לא ידרוש פתאום סכום תעודה שאין).
+    receiptNoDoc = false;
     saveReceiptDraft(); renderReceiving();
     // v364: פותחים לבדיקה את הצילום שזה עתה צולם לזיכוי הזה — גם כשהחשבונית
     // נקראת ברקע. אם חלון אחר כבר פתוח, התור הרגיל ימשיך אחריו.
@@ -1778,11 +1785,8 @@ function deliveryCreditAction(role, id, page, row) {
   if (role === 'delivery-credit-add') {
     if (receiptDeliveryCredits.length >= 4 || !deliveryCreditsAllowed()) return; // v366: הכפתור ממילא לא מוצג כשאסור — שמירה כפולה
     const c = { id: makeOperationId('delivery_credit'), pages: [], status: 'capture', pageCount: 0 };
-    // v366: זיכוי מהנהג שייך לקליטה עם תעודה. מי שמצלם זיכוי במסך הצילום של קליטה שנפתחה
-    // ב"אין תעודה בכלל" (וחזרה לצילום) אומר בזה שיש נייר — הדגל יורד כאן, ולא רק ב"התחל":
-    // כך הכרטיס נראה גם אחרי "הקלדת סכום ויחידות ידנית" ואחרי רענון, והסיום דורש סכום
-    // תעודה במקום לשמור "בלי תעודה" עם זיכוי סמוי (או לפתוח מסך התאמה מול תעודה ₪0).
-    receiptNoDoc = false;
+    // v366: הלחיצה רק פותחת כרטיס ומצלמה. "אין תעודה בכלל" (receiptNoDoc) יורד ב-deliveryCreditAddFiles,
+    // כשצילום באמת נוסף — מצלמה שבוטלה לא הופכת קליטה בלי תעודה לקליטה שדורשת סכום תעודה.
     receiptDeliveryCredits.push(c); saveReceiptDraft(); renderReceiving(); $('creditCam_' + c.id).click(); return;
   }
   const c = deliveryCreditFind(id); if (!c) return;
@@ -1863,8 +1867,10 @@ function deliveryCreditCardHtml(c) {
 //   והכפתור חוזר. זיכוי שכבר צורף מוצג תמיד (להסרה/תיקון), והסיום עוצר עם הסבר עד
 //   שיוסר או שיוקלדו נתוני התעודה (finishReceipt) — מצב שמגיע רק מטיוטה ישנה (ראה למטה).
 // • מסך הצילום — תמיד עם כפתור הזיכוי: מי שמצלם נייר, לקליטה שלו יהיה נייר — ולכן
-//   צילום זיכוי מכבה את הדגל מיד (delivery-credit-add), לא רק "התחל קליטת מוצרים"
-//   (yotvataStartPaperScan). כך "הקלדת סכום ויחידות ידנית" אחרי זיכוי היא קליטה רגילה
+//   צילום זיכוי מכבה את הדגל ברגע שצילום נוסף לכרטיס (deliveryCreditAddFiles), לא רק
+//   "התחל קליטת מוצרים" (yotvataStartPaperScan) — ולא כבר בלחיצה על הכפתור הירוק: מצלמה
+//   שבוטלה משאירה כרטיס ריק ואת הדגל, והקליטה בלי תעודה ממשיכה להיסגר "לפי ספירה".
+//   כך "הקלדת סכום ויחידות ידנית" אחרי זיכוי היא קליטה רגילה
 //   עם נייר: עוגנים חובה, והכרטיס נראה גם אחרי רענון. "אין תעודה בכלל" אחרי זיכוי
 //   שצולם כאן שואל קודם, ואז מוריד את הזיכויים (ראה rc-open-nodoc).
 // • צירוף נייר לקליטה שנשמרה (receiptAttachTarget) — בלי זיכויים בכל מסך (כמו קודם;

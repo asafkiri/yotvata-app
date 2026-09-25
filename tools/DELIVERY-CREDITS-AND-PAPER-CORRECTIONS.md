@@ -209,10 +209,13 @@ cannot be reopened, and `deliveryCreditRead` refuses a busy credit.
   own `savingNoDoc` rule) hides only the add button on the receiving screen
   (no paper → no shortage claim); existing cards are always rendered; the
   gate renders `deliveryCreditsHtml({ gate: true })`.
-  `yotvataResetPhotoReceipt` clears the flag, and so does `delivery-credit-add`
-  (photographing a credit says the receipt has paper — the card stays visible
-  after "הקלדת סכום ויחידות ידנית" and after a reload, and the finish asks for
-  the amount). `finishReceipt` refuses a credit on a receipt without paper
+  `yotvataResetPhotoReceipt` clears the flag, and so does `deliveryCreditAddFiles`
+  once a credit photo is actually added — not the tap on `delivery-credit-add`,
+  which only opens a card and the camera (photographing a credit says the
+  receipt has paper — the card stays visible after "הקלדת סכום ויחידות ידנית"
+  and after a reload, and the finish asks for the amount; a cancelled camera
+  leaves an empty card and the flag, so the no-document receipt still finishes
+  "לפי ספירה" once the empty card is removed — credit-on-gate test j). `finishReceipt` refuses a credit on a receipt without paper
   (old drafts only) with "לקליטה בלי תעודה אי אפשר לצרף זיכוי — הסר את הזיכוי
   או הקלד את נתוני התעודה." instead of opening the reconcile screen. "אין
   תעודה בכלל" after a gate credit asks first ("המשך בלי זיכוי"), then drops

@@ -503,8 +503,10 @@ test('h: a credit photographed on the gate of a no-document receipt makes it a p
   assert.equal(b.c.run('receiptNoDoc && !receiptWithoutPaper()'), true);
   assert.match(app(b.c), CREDIT_BUTTON);
   const id = await addCredit(b.c, b.opened);
+  assert.equal(b.c.run('receiptNoDoc'), true, 'the tap alone photographs nothing — the flag waits for the photo');
+  await photograph(b.c, id, ['slip.jpg']);
   assert.equal(b.c.run('receiptNoDoc'), false, 'a credit photographed on the receiving screen says the same');
-  await photograph(b.c, id, ['slip.jpg']); pressConfirm(b.c); await flush(b.c);
+  pressConfirm(b.c); await flush(b.c);
   assert.equal(creditStatus(b.c), 'confirmed');
   await b.c.click('rc-notes-edit');
   await b.c.click('rc-note-remove', undefined, { idx: '0' });
@@ -567,4 +569,63 @@ test('i: a credit an older draft left on a no-document receipt is shown and remo
   assert.equal(v.run('currentView'), 'receiving');
   assert.deepEqual(v.toasts, [NODOC_TOAST]);
   assert.match(app(v), /id="rcDeliveryCredits"/);
+});
+
+test('j: the green button tapped and the camera cancelled photographs nothing — the no-document receipt stays one, with or without the empty card', async () => {
+  // The camera opened and was dismissed: no change event, an empty capture card, and the flag untouched.
+  const { c, data, opened } = setup();
+  const s = service(c, { answer: req => reply(req.credit ? verifiedCredit(data) : data.paper) });
+  await noDocBackOnGate(c);
+  const id = await addCredit(c, opened);
+  assert.equal(c.run('receiptDeliveryCredits[0].pages.length === 0 && receiptDeliveryCredits[0].status === "capture"'), true);
+  assert.equal(c.run('receiptNoDoc'), true, 'nothing was photographed — the receipt still has no paper');
+  assert.equal(json(c, 'JSON.parse(localStorage.getItem(RECEIPT_DRAFT_KEY))').noDoc, true, 'the draft agrees');
+  assert.match(app(c), GATE);
+  assert.match(app(c), /data-role="delivery-credit-camera"/, 'the empty card offers the camera again');
+  // "הסר זיכוי" on the empty card, then "הקלדת סכום ויחידות ידנית" and the finish: the no-document
+  // summary, exactly as if the button had never been tapped.
+  await c.click('delivery-credit-remove', id);
+  assert.equal(c.run('receiptDeliveryCredits.length'), 0);
+  assert.equal(c.run('receiptNoDoc'), true);
+  await c.click('rc-photo-manual');
+  pressCart(c);
+  const p = json(c, 'pendingReceipt');
+  assert.ok(p, 'the no-document summary opens');
+  assert.equal(p.noDoc, true); assert.equal(p.status, 'open'); assert.equal(p.ex, 45);
+  assert.deepEqual(c.toasts, []);
+  assert.deepEqual(s.kinds(), [], 'no read of any kind');
+  // The empty card left in place: it is on the manual screen with "הסר זיכוי", the finish explains,
+  // and a reload of the draft is still a no-document receipt. The photo, not the tap, drops the flag.
+  const k = setup();
+  service(k.c, { answer: req => reply(req.credit ? verifiedCredit(k.data) : k.data.paper) });
+  await noDocBackOnGate(k.c);
+  const kid = await addCredit(k.c, k.opened);
+  await k.c.click('rc-photo-manual');
+  assert.equal(k.c.run('receiptNoDoc && receiptWithoutPaper()'), true);
+  assert.match(app(k.c), /id="rcDeliveryCredits"/, 'the empty card is on the manual screen');
+  assert.match(app(k.c), /data-role="delivery-credit-remove"/);
+  assert.doesNotMatch(app(k.c), /data-role="delivery-credit-add"/, 'no further credit without paper');
+  pressCart(k.c);
+  assert.equal(k.c.run('pendingReceipt'), null);
+  assert.deepEqual(k.c.toasts, [NODOC_TOAST]);
+  const r = runtime('yotvata', { data: k.data, storage: k.c.storage });
+  r.run("mainMode = 'receiving'; currentView = 'receiving'; receiptDupConfirmed = true; renderReceiving()");
+  assert.equal(r.run('receiptNoDoc'), true);
+  assert.equal(r.run('receiptDeliveryCredits.length'), 1);
+  await photograph(k.c, kid, ['slip.jpg']);
+  assert.equal(k.c.run('receiptNoDoc'), false, 'the photo says the receipt has paper');
+  assert.equal(json(k.c, 'JSON.parse(localStorage.getItem(RECEIPT_DRAFT_KEY))').noDoc, false);
+  pressConfirm(k.c); await flush(k.c);
+  assert.equal(creditStatus(k.c), 'confirmed');
+  pressCart(k.c);
+  assert.equal(k.c.run('currentView'), 'receiving');
+  assert.deepEqual(k.c.toasts, [AMOUNT_TOAST], 'now an ordinary paper receipt: the finish asks for the amount');
+  // A photo that could not be prepared is not a photo either: the flag stays.
+  const f = setup();
+  await noDocBackOnGate(f.c);
+  const fid = await addCredit(f.c, f.opened);
+  f.c.run('aiCompressInvoiceImage = async () => { throw new Error("boom"); }');
+  await photograph(f.c, fid, ['slip.jpg']);
+  assert.equal(f.c.run('receiptDeliveryCredits[0].status === "error" && receiptDeliveryCredits[0].pages.length === 0'), true);
+  assert.equal(f.c.run('receiptNoDoc'), true);
 });
