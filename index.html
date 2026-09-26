@@ -17451,8 +17451,11 @@ function receiptFixLineState(productId) {
 function receiptFixCreditedQty(productId) {
   try {
     const rc = receiptFix ? receipts.find(x => x.id === receiptFix.id) : null;
-    if (!rc || !(Array.isArray(rc.shortCreditNotes) ? rc.shortCreditNotes : []).some(n => n && n.source === 'delivery_credit_scan')) return 0;
-    const cov = receiptShortAfterCredits(receiptDiscrepancyInfo(rc)).byProduct.get(productId);
+    const notes = rc && Array.isArray(rc.shortCreditNotes) ? rc.shortCreditNotes.filter(n => n && (Number(n.amount) || 0) > 0) : [];
+    if (!notes.some(n => n.source === 'delivery_credit_scan')) return 0;
+    // מול השורות כפי שהן עכשיו במסך — שינוי שמפר את ההתאמה לזיכוי מוריד את הסימון מיד,
+    // בדיוק כמו שהתעודה השמורה תראה "פרטי החוסר השתנו" אחרי השמירה.
+    const cov = receiptShortAfterCredits({ ...receiptFixEffectiveInfo(), shortCreditNotes: notes }).byProduct.get(productId);
     return cov ? Math.max(0, Number(cov.credited) || 0) : 0;
   } catch (e) { return 0; }
 }
@@ -17460,10 +17463,13 @@ function receiptFixRowHtml(l) {
   const qty = Number(l.qty) || 0, noteQty = Number(l.noteQty) || 0;
   const ls = receiptFixLineState(l.productId), d = ls.d;
   let tag = '<span class="text-emerald-600 text-[11px] font-bold">תואם</span>';
+  // v369: שורה שהזיכוי מהנהג כיסה במלואה ירוקה כולה — תג, מסגרת ושדות — ולא תג ירוק בתוך אדום.
+  const credited = d > 0 ? Math.min(d, Number(ls.creditedQty) || 0) : 0;
+  const coveredLine = d > 0 && credited >= d;
+  const off = d !== 0 && !coveredLine;
   if (d > 0) {
-    const credited = Math.min(d, Number(ls.creditedQty) || 0);
-    tag = credited >= d ? '<span class="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg font-black text-[11px]"><i class="fa-solid fa-file-invoice-dollar"></i> חסר ' + d + ' · כוסה בזיכוי מהספק</span>'
-      : credited > 0 ? '<span class="text-rose-600 font-black text-[11px]">חסר ' + d + ' <span class="text-emerald-700">(' + credited + ' בזיכוי)</span></span>'
+    tag = coveredLine ? '<span class="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg font-black text-[11px]"><i class="fa-solid fa-file-invoice-dollar"></i> חסר ' + d + ' · מכוסה בזיכוי</span>'
+      : credited > 0 ? '<span class="text-rose-600 font-black text-[11px]">חסר ' + d + ' <span class="text-emerald-700">(' + credited + ' יח׳ בזיכוי)</span></span>'
       : '<span class="text-rose-600 font-black text-[11px]">חסר ' + d + '</span>';
   }
   else if (d < 0) tag = '<span class="text-amber-600 font-black text-[11px]">עודף ' + (-d) + '</span>';
@@ -17475,7 +17481,7 @@ function receiptFixRowHtml(l) {
                : '<span class="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded line-through">מבצע ' + pct + '%</span>') +
     '<button data-role="rc-fix-promo" data-id="' + l.productId + '" class="btn-tap text-[10px] font-black px-2 py-0.5 rounded-lg border ' + (l.promoOn ? 'border-blue-200 text-blue-700 bg-blue-50' : 'border-emerald-200 text-emerald-700 bg-emerald-50') + '">' + (l.promoOn ? 'חשב בלי מבצע' : 'חשב עם מבצע') + '</button>' +
   '</div>') : '';
-  return '<div class="bg-white rounded-2xl border ' + (d !== 0 ? 'border-rose-200' : 'border-slate-200') + ' p-3 shadow-sm" data-id="' + l.productId + '">' +
+  return '<div class="bg-white rounded-2xl border ' + (off ? 'border-rose-200' : coveredLine ? 'border-emerald-200' : 'border-slate-200') + ' p-3 shadow-sm" data-id="' + l.productId + '">' +
     '<div class="flex items-center justify-between gap-2 mb-2"><div class="min-w-0"><div class="font-black text-slate-800 text-sm truncate">' + l.name + '</div>' +
       '<div class="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">₪<input data-role="rc-fix-price" data-id="' + l.productId + '" type="text" inputmode="decimal" value="' + priceFieldVal(l.unitPrice) + '" class="w-14 text-center border border-slate-200 rounded px-1 py-0.5 outline-none focus:border-blue-500"> ליח׳</div>' + promoUi +
     '</div>' + tag + '</div>' +
@@ -17483,7 +17489,7 @@ function receiptFixRowHtml(l) {
       '<span class="text-slate-500 font-bold text-xs">התקבל (בפועל):</span>' +
       '<div class="flex items-center gap-1.5">' +
         '<button data-role="rc-fix-minus" data-id="' + l.productId + '" ' + (ls.locked ? 'disabled' : '') + ' class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center ' + (ls.locked ? 'opacity-35' : '') + '"><i class="fa-solid fa-minus text-xs"></i></button>' +
-        '<input data-role="rc-fix-qty" data-id="' + l.productId + '" type="text" inputmode="numeric" value="' + qty + '" ' + (ls.locked ? 'disabled' : '') + ' class="w-12 h-8 text-center font-black border-2 ' + (d !== 0 ? 'border-rose-300' : 'border-slate-200') + ' rounded-lg outline-none focus:border-blue-500 ' + (ls.locked ? 'opacity-50 bg-slate-100' : '') + '">' +
+        '<input data-role="rc-fix-qty" data-id="' + l.productId + '" type="text" inputmode="numeric" value="' + qty + '" ' + (ls.locked ? 'disabled' : '') + ' class="w-12 h-8 text-center font-black border-2 ' + (off ? 'border-rose-300' : 'border-slate-200') + ' rounded-lg outline-none focus:border-blue-500 ' + (ls.locked ? 'opacity-50 bg-slate-100' : '') + '">' +
         '<button data-role="rc-fix-plus" data-id="' + l.productId + '" ' + (ls.locked ? 'disabled' : '') + ' class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center ' + (ls.locked ? 'opacity-35' : '') + '"><i class="fa-solid fa-plus text-xs"></i></button>' +
       '</div>' +
     '</div>' +
@@ -17491,7 +17497,7 @@ function receiptFixRowHtml(l) {
       '<span class="text-slate-500 font-bold text-xs">בתעודה (בנייר):</span>' +
       '<div class="flex items-center gap-1.5">' +
         '<button data-role="rc-fix-note-minus" data-id="' + l.productId + '" ' + (ls.locked ? 'disabled' : '') + ' class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center ' + (ls.locked ? 'opacity-35' : '') + '"><i class="fa-solid fa-minus text-xs"></i></button>' +
-        '<input data-role="rc-fix-note" data-id="' + l.productId + '" type="text" inputmode="numeric" value="' + noteQty + '" ' + (ls.locked ? 'disabled' : '') + ' class="w-12 h-8 text-center font-black border-2 ' + (d !== 0 ? 'border-rose-300' : 'border-slate-200') + ' rounded-lg outline-none focus:border-blue-500 ' + (ls.locked ? 'opacity-50 bg-slate-100' : '') + '">' +
+        '<input data-role="rc-fix-note" data-id="' + l.productId + '" type="text" inputmode="numeric" value="' + noteQty + '" ' + (ls.locked ? 'disabled' : '') + ' class="w-12 h-8 text-center font-black border-2 ' + (off ? 'border-rose-300' : 'border-slate-200') + ' rounded-lg outline-none focus:border-blue-500 ' + (ls.locked ? 'opacity-50 bg-slate-100' : '') + '">' +
         '<button data-role="rc-fix-note-plus" data-id="' + l.productId + '" ' + (ls.locked ? 'disabled' : '') + ' class="btn-tap w-8 h-8 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center ' + (ls.locked ? 'opacity-35' : '') + '"><i class="fa-solid fa-plus text-xs"></i></button>' +
       '</div>' +
     '</div>' +
@@ -17501,20 +17507,32 @@ function receiptFixRowHtml(l) {
 // v369: שורות שהזיכוי מהנהג כבר כיסה נספרות בכותרת בנפרד — הן הפרש בנייר, לא חוב.
 function receiptFixGapText(di, openLines) {
   if (!openLines) return di.unresolvedUnitsGap ? 'פער של ' + Math.abs(di.unresolvedUnitsGap) + ' יחידות שטרם שויך' : 'פער סכום של ₪' + fmtMoney(Math.abs(di.unresolvedAmountGap || 0)) + ' שטרם שויך';
-  const coveredLines = receiptFixOpenLines().filter(l => { const s = receiptFixLineState(l.productId); return s.d > 0 && (Number(s.creditedQty) || 0) >= s.d; }).length;
-  return openLines + ' שורות עם הפרש' + (coveredLines ? ' · ' + coveredLines + ' מכוסות בזיכוי מהספק' : '');
+  const coveredLines = receiptFixCoveredLines();
+  return openLines + ' שורות עם הפרש' + (coveredLines ? ' · ' + coveredLines + ' מכוסות בזיכוי' : '');
+}
+function receiptFixCoveredLines() {
+  return receiptFixOpenLines().filter(l => { const s = receiptFixLineState(l.productId); return s.d > 0 && (Number(s.creditedQty) || 0) >= s.d; }).length;
+}
+// כותרת המסך: אדומה כשיש הפרש שאינו מכוסה; ירוקה כשכל השורות עם ההפרש מכוסות
+// בזיכוי מהנהג ואין פער יחידות או סכום — כמו שהכרטיס יאמר "החוסר נסגר בזיכוי".
+function receiptFixHeader(di, openLines, open) {
+  const coveredLines = open && openLines > 0 ? receiptFixCoveredLines() : 0;
+  const allCovered = !!(open && coveredLines > 0 && coveredLines === openLines && !di.unresolvedUnitsGap && !di.amountGapOpen);
+  if (!open) return { cls: 'text-emerald-600', html: '<i class="fa-solid fa-circle-check"></i> הכל תואם — אפשר לסגור' };
+  if (allCovered) return { cls: 'text-emerald-600', html: '<i class="fa-solid fa-file-invoice-dollar"></i> ' + openLines + ' שורות עם הפרש — כולן מכוסות בזיכוי' };
+  return { cls: 'text-rose-600', html: '<i class="fa-solid fa-triangle-exclamation"></i> ' + receiptFixGapText(di, openLines) };
 }
 function renderReceiptFix() {
   if (!receiptFix) { setView('receiptsHistory'); return; }
   const t = receiptFixTotals();
   const di = receiptFixEffectiveInfo(), openLines = receiptFixOpenLines().length, open = di.open;
-  const gapTxt = receiptFixGapText(di, openLines);
+  const head = receiptFixHeader(di, openLines, open);
   app.innerHTML =
     '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">עריכת תעודה</h2><div class="text-xs text-slate-400 mt-0.5">עדכן כמה התקבל בפועל וכמה רשום בתעודת הנייר — ההפרש (חסר/עודף) יחושב אוטומטית</div></div>' +
     '<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm mb-3">' +
       (receiptFix.noteTotalInc != null ? '<div class="flex justify-between text-sm font-bold text-slate-600"><span>סכום התעודה (ללא מע״מ)</span><span>₪' + fmtMoney(receiptFix.noteTotalInc) + '</span></div>' : '') +
       '<div class="flex justify-between text-sm font-bold text-slate-800 mt-1"><span>סה"כ שהתקבל (ללא מע"מ)</span><span id="rfInc">₪' + fmtMoney(t.ex) + '</span></div>' +
-      '<div id="rfStatus" class="mt-1.5 pt-1.5 border-t border-slate-100 text-sm font-black ' + (open ? 'text-rose-600' : 'text-emerald-600') + '">' + (open ? '<i class="fa-solid fa-triangle-exclamation"></i> ' + gapTxt : '<i class="fa-solid fa-circle-check"></i> הכל תואם — אפשר לסגור') + '</div>' +
+      '<div id="rfStatus" class="mt-1.5 pt-1.5 border-t border-slate-100 text-sm font-black ' + head.cls + '">' + head.html + '</div>' +
     '</div>' +
     '<div class="space-y-2 mb-3">' + (receiptFix.items || []).map(receiptFixRowHtml).join('') + '</div>' +
     '<div class="bg-white rounded-2xl border border-slate-200 p-3 shadow-sm mb-24">' +
@@ -17531,9 +17549,9 @@ function refreshReceiptFixHeader() {
   const t = receiptFixTotals();
   const inc = $('rfInc'); if (inc) inc.textContent = '₪' + fmtMoney(t.ex);
   const di = receiptFixEffectiveInfo(), openLines = receiptFixOpenLines().length, open = di.open;
-  const gapTxt = receiptFixGapText(di, openLines);
+  const head = receiptFixHeader(di, openLines, open);
   const st = $('rfStatus');
-  if (st) { st.className = 'mt-1.5 pt-1.5 border-t border-slate-100 text-sm font-black ' + (open ? 'text-rose-600' : 'text-emerald-600'); st.innerHTML = open ? '<i class="fa-solid fa-triangle-exclamation"></i> ' + gapTxt : '<i class="fa-solid fa-circle-check"></i> הכל תואם — אפשר לסגור'; }
+  if (st) { st.className = 'mt-1.5 pt-1.5 border-t border-slate-100 text-sm font-black ' + head.cls; st.innerHTML = head.html; }
 }
 function receiptFixStepQty(productId, delta) {
   if (receiptFixLineState(productId).locked) { showToast('השורה נעולה כי קוזזה מול תעודה אחרת', null, null, 2200); return; }
@@ -18319,19 +18337,28 @@ function receiptShortAfterCredits(di) {
   const shortItems = Array.isArray(di && di.shortItems) ? di.shortItems : [];
   const notes = Array.isArray(di && di.shortCreditNotes) ? di.shortCreditNotes : [];
   const byProduct = new Map();
-  const out = { open: [], credited: [], remainder: [], byProduct };
-  if (!shortItems.length || !notes.some(n => n && n.source === 'delivery_credit_scan')) {
+  const out = { open: [], credited: [], remainder: [], invalid: [], byProduct };
+  if (!notes.some(n => n && n.source === 'delivery_credit_scan')) {
     out.open = shortItems.map(cloneReceiptDiffItem);
     return out;
   }
-  const remaining = deliveryCreditCoverage(notes, shortItems).remaining;
+  const coverage = deliveryCreditCoverage(notes, shortItems);
+  const remaining = coverage.remaining;
+  out.invalid = coverage.invalid; // זיכוי שאינו תואם לחוסר — לא כיסה דבר, והכרטיס אומר זאת ליד השורות שלו
+  const linesPerProduct = new Map();
+  shortItems.forEach(it => linesPerProduct.set(it.productId, (linesPerProduct.get(it.productId) || 0) + 1));
   shortItems.forEach(it => {
     const item = cloneReceiptDiffItem(it);
     const left = remaining.get(item.productId);
     const openQty = left ? Math.max(0, Math.min(item.n, r2(left.qty))) : item.n;
     if (left) left.qty = r2(left.qty - openQty);
     const coveredQty = r2(item.n - openQty);
-    if (openQty > 0) out.open.push({ ...item, n: openQty });
+    if (openQty > 0) {
+      const row = { ...item, n: openQty };
+      // הכסף הפתוח של המוצר הוא מה שהזיכוי לא שילם — גם כשזיכה יחידות במחיר נמוך מהנייר.
+      if (left && linesPerProduct.get(item.productId) === 1) row.value = r2(Math.max(0, Number(left.cents) || 0) / 100);
+      out.open.push(row);
+    }
     if (coveredQty > 0) out.credited.push({ ...item, n: coveredQty });
     const cur = byProduct.get(item.productId) || { name: item.name, price: item.price, open: 0, credited: 0, cents: 0 };
     cur.open = r2(cur.open + openQty); cur.credited = r2(cur.credited + coveredQty);
@@ -18339,35 +18366,40 @@ function receiptShortAfterCredits(di) {
   });
   byProduct.forEach((cur, productId) => {
     const left = remaining.get(productId);
-    cur.cents = left && cur.open === 0 ? Math.max(0, Math.round(Number(left.cents) || 0)) : 0;
+    cur.cents = left ? Math.max(0, Math.round(Number(left.cents) || 0)) : 0;
     if (cur.credited > 0 && cur.open === 0 && cur.cents > 1) out.remainder.push({ productId, name: cur.name, price: cur.price, n: 0, cents: cur.cents });
   });
   // אגורות שנותרו אחרי שכל המוצרים כוסו (זיכוי שמעגל כלפי מטה) — החוב הפתוח
-  // של התעודה כולה, כדי שהכרטיס לעולם לא יציג קופסת הפרשים ריקה.
+  // של התעודה כולה. פער סכום שטרם שויך כבר מוצג בשורה משלו ואינו נכפל כאן.
   const moneyLeft = Math.max(0, r2((Number(di.shortValRaw) || 0) - (Number(di.shortCreditEx) || 0)));
-  if (!out.open.length && !out.remainder.length && out.credited.length && !di.shortFullyCredited && moneyLeft > 0.01) {
+  if (!out.open.length && !out.remainder.length && out.credited.length && !di.shortFullyCredited && !di.amountGapOpen && moneyLeft > 0.01) {
     out.remainder.push({ productId: '', name: '', price: 0, n: 0, cents: Math.round(moneyLeft * 100), total: true });
   }
   return out;
 }
+// אותו אוצר מילים כמו במסך הקליטה (deliveryCreditRemainingFindings): "מכוסה
+// בזיכוי", "חסר ללא זיכוי: N יח׳ · ₪X", "יתרה ללא זיכוי · ₪X", "N יח׳ בזיכוי".
 function receiptCreditRemainderRowHtml(item) {
   return '<div class="flex items-center justify-between gap-2 py-1.5 text-rose-700">' +
-    '<div class="min-w-0"><div class="font-bold truncate">' + (item.total ? 'יתרה שלא כוסתה בזיכוי' : 'חסר: ' + htmlEscape(item.name)) + '</div>' +
-    '<div class="text-[11px] opacity-80">' + (item.total ? 'כל היחידות בזיכוי' : 'כל היחידות בזיכוי · נותרה יתרה') + ' · ₪' + fmtMoney((Number(item.cents) || 0) / 100) + '</div></div>' +
+    '<div class="min-w-0"><div class="font-bold truncate">יתרה ללא זיכוי' + (item.total ? '' : ': ' + htmlEscape(item.name)) + '</div>' +
+    '<div class="text-[11px] opacity-80">' + (item.total ? 'אגורות שהזיכוי לא כיסה' : 'כל היחידות בזיכוי') + ' · ₪' + fmtMoney((Number(item.cents) || 0) / 100) + '</div></div>' +
   '</div>';
 }
 // ממצא חוסר של הסריקה שהזיכוי מהנהג כיסה מוצג כמכוסה (ירוק), וממצא שכוסה
-// בחלקו מציג את היתרה. הממצא עצמו אינו משתנה — הוא נשאר בתעודה.
-function receiptCreditedFindingHtml(f, split) {
+// בחלקו מציג את היתרה — הכסף שעוד לא זוכה, גם כשהזיכוי שילם פחות ממחיר
+// הנייר. הממצא עצמו אינו משתנה — הוא נשאר בתעודה. שני ממצאי חוסר לאותו
+// מוצר (טענת חוסר + טענת החלפה) מוצגים פעם אחת, כמו במסך הקליטה.
+function receiptCreditedFindingHtml(f, split, seen) {
   const cov = f && f.type === 'shortage' && split && split.byProduct ? split.byProduct.get(f.productId) : null;
   if (!cov || !(cov.credited > 0)) return '';
+  if (seen) { if (seen.has(f.productId)) return ' '; seen.add(f.productId); }
   const name = htmlEscape(f.name || cov.name || '');
-  if (cov.open === 0 && cov.cents <= 1) return '<div class="font-black mt-1 text-emerald-700">• ' + cov.credited + ' × ' + name + ' — כוסה בזיכוי מהספק ✓</div>';
-  if (cov.open === 0) return '<div class="font-black mt-1 text-rose-700">• ' + name + ' — כל היחידות בזיכוי, נותרה יתרה ₪' + fmtMoney(cov.cents / 100) + '</div>';
-  return '<div class="font-black mt-1 text-rose-700">• חסר ' + cov.open + ' × ' + name + ' <span class="text-emerald-700">(' + cov.credited + ' יח׳ כוסו בזיכוי)</span></div>';
+  if (cov.open === 0 && cov.cents <= 1) return '<div class="font-black mt-1 text-emerald-700">• ' + cov.credited + ' × ' + name + ' — מכוסה בזיכוי ✓</div>';
+  if (cov.open === 0) return '<div class="font-black mt-1 text-rose-700">• ' + name + ' — יתרה ללא זיכוי · ₪' + fmtMoney(cov.cents / 100) + ' <span class="text-emerald-700">(כל היחידות בזיכוי)</span></div>';
+  return '<div class="font-black mt-1 text-rose-700">• ' + name + ' — חסר ללא זיכוי: ' + cov.open + ' יח׳ · ₪' + fmtMoney(cov.cents / 100) + ' <span class="text-emerald-700">(' + cov.credited + ' יח׳ בזיכוי)</span></div>';
 }
 function receiptDiffRowHtml(rc, item, dir) {
-  const side = { qty: Number(item.n) || 0, price: Number(item.price) || 0, value: lineTotalFromUnit(item.price, item.n) };
+  const side = { qty: Number(item.n) || 0, price: Number(item.price) || 0, value: item.value != null ? r2(item.value) : lineTotalFromUnit(item.price, item.n) };
   const isShort = dir === 'short';
   return '<div class="flex items-center justify-between gap-2 py-1.5 ' + (isShort ? 'text-rose-700' : 'text-amber-700') + '">' +
     '<div class="min-w-0"><div class="font-bold truncate">' + (isShort ? 'חסר: ' : 'עודף: ') + htmlEscape(item.name) + '</div><div class="text-[11px] opacity-80">' + offsetSideQtyText(side) + ' · ₪' + fmtMoney(side.value) + '</div></div>' +
@@ -18877,14 +18909,14 @@ function renderReceiptsHistory() {
       : [];
     // v369: חוסר שהזיכוי מהנהג כיסה אינו מוצג כפתוח — לא בשורות ההפרשים ולא
     // בממצאי הסריקה. השורות, הממצאים והתשלום השמורים אינם משתנים.
-    const shortSplit = receiptShortAfterCredits(di);
+    const shortSplit = receiptShortAfterCredits(di), creditedFindingsShown = new Set();
     const aiHistoryHtml = rc.aiAudit
       ? '<div class="mt-2 bg-violet-50 border border-violet-200 rounded-xl p-2.5 text-xs"><div class="font-black text-violet-900 mb-1"><i class="fa-solid fa-shield-halved"></i> פוענח ואושר בסריקת AI</div><div class="text-[11px] font-bold text-violet-700 mb-1">סכום התעודות והיחידות אומתו בדיוק; התמונות לא נשמרו.</div>' +
         (aiHistoryFindings.map(f => {
           const okPromo = aiPriceFindingPromoMatch(f, rc.date || todayStr());
           if (okPromo) return '<div class="font-black mt-1 text-emerald-700">• ' + htmlEscape(f.name || '') + ' — מבצע ' + (Number(okPromo.pct) || 0) + '%: המחיר בנייר תואם למבצע ✓</div>';
-          const credited = receiptCreditedFindingHtml(f, shortSplit);
-          if (credited) return credited;
+          const credited = receiptCreditedFindingHtml(f, shortSplit, creditedFindingsShown);
+          if (credited) return credited.trim();
           return '<div class="font-black mt-1 ' + (f.type === 'shortage' ? 'text-rose-700' : (f.type === 'surplus' ? 'text-amber-700' : 'text-orange-800')) + '">• ' + htmlEscape(f.text || '') + '</div>';
         }).join('') || '<div class="font-black text-emerald-700">לא נמצא פער נוסף.</div>') + '</div>'
       : '';
@@ -18946,6 +18978,10 @@ function renderReceiptsHistory() {
           '<div class="font-black text-rose-700 mb-1"><i class="fa-solid fa-triangle-exclamation"></i> הפרשים מול התעודה</div>' +
           shortSplit.open.map(s => receiptDiffRowHtml(rc, s, 'short')).join('') +
           shortSplit.remainder.map(receiptCreditRemainderRowHtml).join('') +
+          // התעודה פתוחה מסיבה אחרת (ממצא מחיר, דרישת זיכוי, זיכוי נוסף שאינו תואם) אבל
+          // כל החוסר במוצרים כוסה — אומרים זאת במקום להשאיר קופסה אדומה ריקה.
+          (shortSplit.credited.length && !shortSplit.open.length && !shortSplit.remainder.length
+            ? '<div class="py-1.5 font-black text-emerald-700"><i class="fa-solid fa-file-invoice-dollar"></i> החוסר (' + htmlEscape(receiptSideText(shortSplit.credited)) + ') מכוסה בזיכוי ✓</div>' : '') +
           di.overItems.map(s => receiptDiffRowHtml(rc, s, 'over')).join('') +
           (di.unresolvedUnitsGap ? '<div class="flex justify-between text-rose-700 font-black"><span>פער יחידות שטרם שויך</span><span>' + Math.abs(di.unresolvedUnitsGap) + ' (' + (di.unresolvedUnitsGap > 0 ? 'חסרות' : 'עודפות') + ')</span></div>' : '') +
           (di.amountGapOpen ? '<div class="flex justify-between text-rose-700 font-black"><span>פער סכום שטרם שויך</span><span>₪' + fmtMoney(Math.abs(di.unresolvedAmountGap)) + '</span></div>' : '') +
@@ -18962,8 +18998,10 @@ function renderReceiptsHistory() {
             '<div class="font-black mb-1 ' + (di.shortFullyCredited ? 'text-emerald-800' : 'text-amber-800') + '"><i class="fa-solid fa-file-invoice-dollar"></i> ' + (di.deliveryCreditMismatch ? 'פרטי החוסר השתנו — יש לבדוק שוב את הזיכוי המצורף' : di.shortFullyCredited ? 'החוסר נסגר בזיכוי מהספק ✓' : 'זיכוי חלקי מהספק — נותר חוב ₪' + fmtMoney(rem)) + '</div>' +
             di.shortCreditNotes.map(x => '<div class="flex justify-between ' + (di.shortFullyCredited ? 'text-emerald-700' : 'text-amber-700') + '"><span>זיכוי ' + (x.number ? 'מס׳ ' + htmlEscape(x.number) + ' · ' : '') + new Date(Number(x.at) || 0).toLocaleDateString('he-IL') + '</span><span>₪' + fmtMoney(x.amount) + '</span></div>' +
               // v369: זיכוי מהנהג אומר אילו מוצרים הוא כיסה — הכרטיס מציג זאת במקום להשאיר אותם ברשימת ההפרשים.
-              (x.source === 'delivery_credit_scan' && Array.isArray(x.rows) && x.rows.length ? '<div class="text-[11px] font-bold ' + (di.shortFullyCredited ? 'text-emerald-700/80' : 'text-amber-700/80') + ' pr-3">כיסה: ' + x.rows.map(r => (Number(r.qty) || 0) + ' × ' + htmlEscape(r.name || '') + ' · ₪' + fmtMoney(r.amount)).join(' · ') + '</div>' : '')).join('') +
-            '<div class="mt-1 pt-1 border-t ' + (di.shortFullyCredited ? 'border-emerald-200 text-emerald-700/80' : 'border-amber-200 text-amber-700/80') + '">' + (di.deliveryCreditMismatch ? 'הזיכוי שאינו תואם למוצרים ולכמויות החסרים אינו סוגר חוסר אחר.' : 'החוסר המקורי (₪' + fmtMoney(di.shortValRaw) + ') נשמר בתעודה' + (shortSplit.credited.length ? ' ובממצאי הסריקה; מה שהזיכוי כיסה אינו מוצג עוד כהפרש פתוח, והסכום' : '; הסכום') + ' שכוסה בזיכוי לא יקוזז מול תעודה עתידית.') + '</div>' +
+              (x.source === 'delivery_credit_scan' && Array.isArray(x.rows) && x.rows.length
+                ? '<div class="text-[11px] font-bold ' + (shortSplit.invalid.includes(x) ? 'text-rose-700' : di.shortFullyCredited ? 'text-emerald-700/80' : 'text-amber-700/80') + ' pr-3">' + (shortSplit.invalid.includes(x) ? 'אינו תואם לחוסר: ' : 'כיסה: ') + x.rows.map(r => (Number(r.qty) || 0) + ' × ' + htmlEscape(r.name || '') + ' · ₪' + fmtMoney(r.amount)).join(' · ') + '</div>'
+                : '')).join('') +
+            '<div class="mt-1 pt-1 border-t ' + (di.shortFullyCredited ? 'border-emerald-200 text-emerald-700/80' : 'border-amber-200 text-amber-700/80') + '">' + (di.deliveryCreditMismatch ? 'הזיכוי שאינו תואם למוצרים ולכמויות החסרים אינו סוגר חוסר אחר.' : 'החוסר המקורי (₪' + fmtMoney(di.shortValRaw) + ') נשמר בתעודה' + (shortSplit.credited.length ? (rc.aiAudit ? ' ובממצאי הסריקה' : '') + '; מה שהזיכוי כיסה אינו מוצג עוד כהפרש פתוח, והסכום' : '; הסכום') + ' שכוסה בזיכוי לא יקוזז מול תעודה עתידית.') + '</div>' +
           '</div>';
         })() : '') +
         // חוסר ועודף נשארים נפרדים עד אישור קיזוז מפורש של המשתמש.
