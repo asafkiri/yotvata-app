@@ -287,6 +287,27 @@ cannot be reopened, and `deliveryCreditRead` refuses a busy credit.
   Against the v368 `index.html` (`RECEIPT_TEST_APP=…`) most of them fail;
   the two that pass only prove the offsets engine was already right.
 
+### v370: the scan's quantity findings leave the card
+
+- Owner's reaction to v369 on the phone: the violet "פוענח ואושר בסריקת AI"
+  box now only repeated the card — the open shortage sits in "הפרשים מול
+  התעודה" and the credited products in the credit box, so three more lines
+  about the same products were noise.
+- The card shows the violet box only when the scan has **price or promotion
+  findings** (`price`, `promo_missing`) — the findings that have no other
+  home and that keep a receipt open for the scan (`aiAuditOpen`) — and it
+  lists only those. Quantity findings (`shortage`, `surplus`) are not rendered
+  in the card. `receiptCreditedFindingHtml` (v369) went with them.
+- The collapsed "פרטי פענוח התעודה" (`yotvataScanHistoryHtml(audit, scan)`)
+  now also carries the one-line verification ("פוענח ואושר בסריקת AI ✓ · סכום
+  התעודות והיחידות אומתו בדיוק; התמונות לא נשמרו." — omitted when the price
+  box already says it) and the saved quantity findings as one grey line
+  ("ממצאי הכמות שנשמרו בסריקה: חסר 12 × … · חסר 10 × …"), so the audit record
+  is still one tap away. The details block therefore exists for every
+  receipt with an `aiAudit`, not only for those with a scan history.
+- Display only: `rc.aiAudit.findings`, `receiptDiscrepancyInfo`, `aiAuditOpen`
+  and everything saved are unchanged. Tests: `tools/receipt-history-credit.test.mjs`.
+
 ## Correcting an OCR row
 
 “הפענוח שגוי — תקן לפי הנייר” now opens a form for the identified product's
