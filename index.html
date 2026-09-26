@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v368 פירוט חוסרים ועודפים: חויב, נסרק, הפרש</title>
+    <title>הזמנות יטבתה - v369 חוסר שכוסה בזיכוי מהנהג אינו מוצג כפתוח</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v368 פירוט חוסרים ועודפים: חויב, נסרק, הפרש</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v369 חוסר שכוסה בזיכוי מהנהג אינו מוצג כפתוח</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -17443,13 +17443,29 @@ function receiptFixLineState(productId) {
       if (x.productId === productId) internalOffsetQty += Number(x.n) || 0;
     });
   });
-  return { d: sh ? Number(sh.n) || 0 : (ov ? -(Number(ov.n) || 0) : 0), offsets, offsetQty: r2(offsets.reduce((a, x) => a + (Number(x.qty) || 0), 0)), internalOffsetQty: r2(internalOffsetQty), locked: offsets.length > 0 };
+  return { d: sh ? Number(sh.n) || 0 : (ov ? -(Number(ov.n) || 0) : 0), offsets, offsetQty: r2(offsets.reduce((a, x) => a + (Number(x.qty) || 0), 0)), internalOffsetQty: r2(internalOffsetQty), locked: offsets.length > 0, creditedQty: receiptFixCreditedQty(productId) };
+}
+// v369: כמה מהחוסר של המוצר כיסה הזיכוי מהנהג שמצורף לתעודה השמורה. תצוגה
+// בלבד — מסך העריכה ממשיך להציג את הפרש הנייר מול הספירה, אבל אומר שהוא
+// כבר מכוסה, כדי שהעובד לא "יתקן" חוסר שהספק כבר זיכה.
+function receiptFixCreditedQty(productId) {
+  try {
+    const rc = receiptFix ? receipts.find(x => x.id === receiptFix.id) : null;
+    if (!rc || !(Array.isArray(rc.shortCreditNotes) ? rc.shortCreditNotes : []).some(n => n && n.source === 'delivery_credit_scan')) return 0;
+    const cov = receiptShortAfterCredits(receiptDiscrepancyInfo(rc)).byProduct.get(productId);
+    return cov ? Math.max(0, Number(cov.credited) || 0) : 0;
+  } catch (e) { return 0; }
 }
 function receiptFixRowHtml(l) {
   const qty = Number(l.qty) || 0, noteQty = Number(l.noteQty) || 0;
   const ls = receiptFixLineState(l.productId), d = ls.d;
   let tag = '<span class="text-emerald-600 text-[11px] font-bold">תואם</span>';
-  if (d > 0) tag = '<span class="text-rose-600 font-black text-[11px]">חסר ' + d + '</span>';
+  if (d > 0) {
+    const credited = Math.min(d, Number(ls.creditedQty) || 0);
+    tag = credited >= d ? '<span class="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg font-black text-[11px]"><i class="fa-solid fa-file-invoice-dollar"></i> חסר ' + d + ' · כוסה בזיכוי מהספק</span>'
+      : credited > 0 ? '<span class="text-rose-600 font-black text-[11px]">חסר ' + d + ' <span class="text-emerald-700">(' + credited + ' בזיכוי)</span></span>'
+      : '<span class="text-rose-600 font-black text-[11px]">חסר ' + d + '</span>';
+  }
   else if (d < 0) tag = '<span class="text-amber-600 font-black text-[11px]">עודף ' + (-d) + '</span>';
   else if (ls.locked) tag = '<span class="text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-lg font-black text-[11px]"><i class="fa-solid fa-scale-balanced"></i> קוזז ' + ls.offsetQty + ' מול תעודה אחרת</span>';
   else if (ls.internalOffsetQty > 0) tag = '<span class="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg font-black text-[11px]"><i class="fa-solid fa-scale-balanced"></i> קיזוז פנימי ' + ls.internalOffsetQty + '</span>';
@@ -17482,11 +17498,17 @@ function receiptFixRowHtml(l) {
     (ls.locked ? '<div class="mt-2 text-[10px] font-bold text-indigo-600"><i class="fa-solid fa-lock"></i> הכמויות נעולות כדי לשמור על הקיזוז שאושר מול התעודה השנייה</div>' : '') +
   '</div>';
 }
+// v369: שורות שהזיכוי מהנהג כבר כיסה נספרות בכותרת בנפרד — הן הפרש בנייר, לא חוב.
+function receiptFixGapText(di, openLines) {
+  if (!openLines) return di.unresolvedUnitsGap ? 'פער של ' + Math.abs(di.unresolvedUnitsGap) + ' יחידות שטרם שויך' : 'פער סכום של ₪' + fmtMoney(Math.abs(di.unresolvedAmountGap || 0)) + ' שטרם שויך';
+  const coveredLines = receiptFixOpenLines().filter(l => { const s = receiptFixLineState(l.productId); return s.d > 0 && (Number(s.creditedQty) || 0) >= s.d; }).length;
+  return openLines + ' שורות עם הפרש' + (coveredLines ? ' · ' + coveredLines + ' מכוסות בזיכוי מהספק' : '');
+}
 function renderReceiptFix() {
   if (!receiptFix) { setView('receiptsHistory'); return; }
   const t = receiptFixTotals();
   const di = receiptFixEffectiveInfo(), openLines = receiptFixOpenLines().length, open = di.open;
-  const gapTxt = openLines ? openLines + ' שורות עם הפרש' : (di.unresolvedUnitsGap ? 'פער של ' + Math.abs(di.unresolvedUnitsGap) + ' יחידות שטרם שויך' : 'פער סכום של ₪' + fmtMoney(Math.abs(di.unresolvedAmountGap || 0)) + ' שטרם שויך');
+  const gapTxt = receiptFixGapText(di, openLines);
   app.innerHTML =
     '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">עריכת תעודה</h2><div class="text-xs text-slate-400 mt-0.5">עדכן כמה התקבל בפועל וכמה רשום בתעודת הנייר — ההפרש (חסר/עודף) יחושב אוטומטית</div></div>' +
     '<div class="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm mb-3">' +
@@ -17509,7 +17531,7 @@ function refreshReceiptFixHeader() {
   const t = receiptFixTotals();
   const inc = $('rfInc'); if (inc) inc.textContent = '₪' + fmtMoney(t.ex);
   const di = receiptFixEffectiveInfo(), openLines = receiptFixOpenLines().length, open = di.open;
-  const gapTxt = openLines ? openLines + ' שורות עם הפרש' : (di.unresolvedUnitsGap ? 'פער של ' + Math.abs(di.unresolvedUnitsGap) + ' יחידות שטרם שויך' : 'פער סכום של ₪' + fmtMoney(Math.abs(di.unresolvedAmountGap || 0)) + ' שטרם שויך');
+  const gapTxt = receiptFixGapText(di, openLines);
   const st = $('rfStatus');
   if (st) { st.className = 'mt-1.5 pt-1.5 border-t border-slate-100 text-sm font-black ' + (open ? 'text-rose-600' : 'text-emerald-600'); st.innerHTML = open ? '<i class="fa-solid fa-triangle-exclamation"></i> ' + gapTxt : '<i class="fa-solid fa-circle-check"></i> הכל תואם — אפשר לסגור'; }
 }
@@ -18286,6 +18308,64 @@ function receiptDocSplitHtml(rc) {
     '<div class="text-[11px] text-slate-500 font-bold px-1">הפירוט לפי הנייר. התשלום, הזיכויים והקיזוזים מחושבים על הקליטה כולה, כמו קודם.</div>' +
   '</div>';
 }
+// v369: זיכוי מהנהג (delivery_credit_scan) קשור למוצרים ולכמויות שלו, ולכן
+// חוסר שהוא כיסה אינו הפרש פתוח. השורות המקוריות והתשלום (שמפחית את החוסר
+// המקורי פעם אחת) אינם משתנים — הפיצול הוא תצוגה בלבד: בכרטיס התעודה מוצג
+// כפתוח רק מה שהזיכוי לא כיסה, ומה שכוסה מסומן כמכוסה. זיכוי ישן לפי סכום
+// בלבד אינו קשור למוצר ואינו מפצל שורות — הוא נשאר "נותר חוב" כמו קודם.
+// remainder: מוצר שכל יחידותיו בזיכוי אבל הזיכוי קטן ממחיר הנייר (או שנותרו
+// אגורות) — נשארת יתרה כספית שאינה שורת כמות, ולכן אין לה "מצא קיזוז".
+function receiptShortAfterCredits(di) {
+  const shortItems = Array.isArray(di && di.shortItems) ? di.shortItems : [];
+  const notes = Array.isArray(di && di.shortCreditNotes) ? di.shortCreditNotes : [];
+  const byProduct = new Map();
+  const out = { open: [], credited: [], remainder: [], byProduct };
+  if (!shortItems.length || !notes.some(n => n && n.source === 'delivery_credit_scan')) {
+    out.open = shortItems.map(cloneReceiptDiffItem);
+    return out;
+  }
+  const remaining = deliveryCreditCoverage(notes, shortItems).remaining;
+  shortItems.forEach(it => {
+    const item = cloneReceiptDiffItem(it);
+    const left = remaining.get(item.productId);
+    const openQty = left ? Math.max(0, Math.min(item.n, r2(left.qty))) : item.n;
+    if (left) left.qty = r2(left.qty - openQty);
+    const coveredQty = r2(item.n - openQty);
+    if (openQty > 0) out.open.push({ ...item, n: openQty });
+    if (coveredQty > 0) out.credited.push({ ...item, n: coveredQty });
+    const cur = byProduct.get(item.productId) || { name: item.name, price: item.price, open: 0, credited: 0, cents: 0 };
+    cur.open = r2(cur.open + openQty); cur.credited = r2(cur.credited + coveredQty);
+    byProduct.set(item.productId, cur);
+  });
+  byProduct.forEach((cur, productId) => {
+    const left = remaining.get(productId);
+    cur.cents = left && cur.open === 0 ? Math.max(0, Math.round(Number(left.cents) || 0)) : 0;
+    if (cur.credited > 0 && cur.open === 0 && cur.cents > 1) out.remainder.push({ productId, name: cur.name, price: cur.price, n: 0, cents: cur.cents });
+  });
+  // אגורות שנותרו אחרי שכל המוצרים כוסו (זיכוי שמעגל כלפי מטה) — החוב הפתוח
+  // של התעודה כולה, כדי שהכרטיס לעולם לא יציג קופסת הפרשים ריקה.
+  const moneyLeft = Math.max(0, r2((Number(di.shortValRaw) || 0) - (Number(di.shortCreditEx) || 0)));
+  if (!out.open.length && !out.remainder.length && out.credited.length && !di.shortFullyCredited && moneyLeft > 0.01) {
+    out.remainder.push({ productId: '', name: '', price: 0, n: 0, cents: Math.round(moneyLeft * 100), total: true });
+  }
+  return out;
+}
+function receiptCreditRemainderRowHtml(item) {
+  return '<div class="flex items-center justify-between gap-2 py-1.5 text-rose-700">' +
+    '<div class="min-w-0"><div class="font-bold truncate">' + (item.total ? 'יתרה שלא כוסתה בזיכוי' : 'חסר: ' + htmlEscape(item.name)) + '</div>' +
+    '<div class="text-[11px] opacity-80">' + (item.total ? 'כל היחידות בזיכוי' : 'כל היחידות בזיכוי · נותרה יתרה') + ' · ₪' + fmtMoney((Number(item.cents) || 0) / 100) + '</div></div>' +
+  '</div>';
+}
+// ממצא חוסר של הסריקה שהזיכוי מהנהג כיסה מוצג כמכוסה (ירוק), וממצא שכוסה
+// בחלקו מציג את היתרה. הממצא עצמו אינו משתנה — הוא נשאר בתעודה.
+function receiptCreditedFindingHtml(f, split) {
+  const cov = f && f.type === 'shortage' && split && split.byProduct ? split.byProduct.get(f.productId) : null;
+  if (!cov || !(cov.credited > 0)) return '';
+  const name = htmlEscape(f.name || cov.name || '');
+  if (cov.open === 0 && cov.cents <= 1) return '<div class="font-black mt-1 text-emerald-700">• ' + cov.credited + ' × ' + name + ' — כוסה בזיכוי מהספק ✓</div>';
+  if (cov.open === 0) return '<div class="font-black mt-1 text-rose-700">• ' + name + ' — כל היחידות בזיכוי, נותרה יתרה ₪' + fmtMoney(cov.cents / 100) + '</div>';
+  return '<div class="font-black mt-1 text-rose-700">• חסר ' + cov.open + ' × ' + name + ' <span class="text-emerald-700">(' + cov.credited + ' יח׳ כוסו בזיכוי)</span></div>';
+}
 function receiptDiffRowHtml(rc, item, dir) {
   const side = { qty: Number(item.n) || 0, price: Number(item.price) || 0, value: lineTotalFromUnit(item.price, item.n) };
   const isShort = dir === 'short';
@@ -18795,11 +18875,16 @@ function renderReceiptsHistory() {
     const aiHistoryFindings = rc.aiAudit && Array.isArray(rc.aiAudit.findings)
       ? rc.aiAudit.findings.filter(f => ['shortage', 'surplus', 'price', 'promo_missing'].includes(f.type))
       : [];
+    // v369: חוסר שהזיכוי מהנהג כיסה אינו מוצג כפתוח — לא בשורות ההפרשים ולא
+    // בממצאי הסריקה. השורות, הממצאים והתשלום השמורים אינם משתנים.
+    const shortSplit = receiptShortAfterCredits(di);
     const aiHistoryHtml = rc.aiAudit
       ? '<div class="mt-2 bg-violet-50 border border-violet-200 rounded-xl p-2.5 text-xs"><div class="font-black text-violet-900 mb-1"><i class="fa-solid fa-shield-halved"></i> פוענח ואושר בסריקת AI</div><div class="text-[11px] font-bold text-violet-700 mb-1">סכום התעודות והיחידות אומתו בדיוק; התמונות לא נשמרו.</div>' +
         (aiHistoryFindings.map(f => {
           const okPromo = aiPriceFindingPromoMatch(f, rc.date || todayStr());
           if (okPromo) return '<div class="font-black mt-1 text-emerald-700">• ' + htmlEscape(f.name || '') + ' — מבצע ' + (Number(okPromo.pct) || 0) + '%: המחיר בנייר תואם למבצע ✓</div>';
+          const credited = receiptCreditedFindingHtml(f, shortSplit);
+          if (credited) return credited;
           return '<div class="font-black mt-1 ' + (f.type === 'shortage' ? 'text-rose-700' : (f.type === 'surplus' ? 'text-amber-700' : 'text-orange-800')) + '">• ' + htmlEscape(f.text || '') + '</div>';
         }).join('') || '<div class="font-black text-emerald-700">לא נמצא פער נוסף.</div>') + '</div>'
       : '';
@@ -18859,7 +18944,8 @@ function renderReceiptsHistory() {
         '</div>' : '') +
         (fixOpen ? '<div class="mt-2 bg-rose-50 border border-rose-200 rounded-xl p-2.5 text-xs">' +
           '<div class="font-black text-rose-700 mb-1"><i class="fa-solid fa-triangle-exclamation"></i> הפרשים מול התעודה</div>' +
-          di.shortItems.map(s => receiptDiffRowHtml(rc, s, 'short')).join('') +
+          shortSplit.open.map(s => receiptDiffRowHtml(rc, s, 'short')).join('') +
+          shortSplit.remainder.map(receiptCreditRemainderRowHtml).join('') +
           di.overItems.map(s => receiptDiffRowHtml(rc, s, 'over')).join('') +
           (di.unresolvedUnitsGap ? '<div class="flex justify-between text-rose-700 font-black"><span>פער יחידות שטרם שויך</span><span>' + Math.abs(di.unresolvedUnitsGap) + ' (' + (di.unresolvedUnitsGap > 0 ? 'חסרות' : 'עודפות') + ')</span></div>' : '') +
           (di.amountGapOpen ? '<div class="flex justify-between text-rose-700 font-black"><span>פער סכום שטרם שויך</span><span>₪' + fmtMoney(Math.abs(di.unresolvedAmountGap)) + '</span></div>' : '') +
@@ -18874,8 +18960,10 @@ function renderReceiptsHistory() {
           const rem = Math.max(0, r2((Number(di.shortValRaw) || 0) - (Number(di.shortCreditEx) || 0)));
           return '<div class="mt-2 ' + (di.shortFullyCredited ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200') + ' border rounded-xl p-2.5 text-xs">' +
             '<div class="font-black mb-1 ' + (di.shortFullyCredited ? 'text-emerald-800' : 'text-amber-800') + '"><i class="fa-solid fa-file-invoice-dollar"></i> ' + (di.deliveryCreditMismatch ? 'פרטי החוסר השתנו — יש לבדוק שוב את הזיכוי המצורף' : di.shortFullyCredited ? 'החוסר נסגר בזיכוי מהספק ✓' : 'זיכוי חלקי מהספק — נותר חוב ₪' + fmtMoney(rem)) + '</div>' +
-            di.shortCreditNotes.map(x => '<div class="flex justify-between ' + (di.shortFullyCredited ? 'text-emerald-700' : 'text-amber-700') + '"><span>זיכוי ' + (x.number ? 'מס׳ ' + htmlEscape(x.number) + ' · ' : '') + new Date(Number(x.at) || 0).toLocaleDateString('he-IL') + '</span><span>₪' + fmtMoney(x.amount) + '</span></div>').join('') +
-            '<div class="mt-1 pt-1 border-t ' + (di.shortFullyCredited ? 'border-emerald-200 text-emerald-700/80' : 'border-amber-200 text-amber-700/80') + '">' + (di.deliveryCreditMismatch ? 'הזיכוי שאינו תואם למוצרים ולכמויות החסרים אינו סוגר חוסר אחר.' : 'החוסר המקורי (₪' + fmtMoney(di.shortValRaw) + ') נשמר למעלה בהיסטוריה; הסכום שכוסה בזיכוי לא יקוזז מול תעודה עתידית.') + '</div>' +
+            di.shortCreditNotes.map(x => '<div class="flex justify-between ' + (di.shortFullyCredited ? 'text-emerald-700' : 'text-amber-700') + '"><span>זיכוי ' + (x.number ? 'מס׳ ' + htmlEscape(x.number) + ' · ' : '') + new Date(Number(x.at) || 0).toLocaleDateString('he-IL') + '</span><span>₪' + fmtMoney(x.amount) + '</span></div>' +
+              // v369: זיכוי מהנהג אומר אילו מוצרים הוא כיסה — הכרטיס מציג זאת במקום להשאיר אותם ברשימת ההפרשים.
+              (x.source === 'delivery_credit_scan' && Array.isArray(x.rows) && x.rows.length ? '<div class="text-[11px] font-bold ' + (di.shortFullyCredited ? 'text-emerald-700/80' : 'text-amber-700/80') + ' pr-3">כיסה: ' + x.rows.map(r => (Number(r.qty) || 0) + ' × ' + htmlEscape(r.name || '') + ' · ₪' + fmtMoney(r.amount)).join(' · ') + '</div>' : '')).join('') +
+            '<div class="mt-1 pt-1 border-t ' + (di.shortFullyCredited ? 'border-emerald-200 text-emerald-700/80' : 'border-amber-200 text-amber-700/80') + '">' + (di.deliveryCreditMismatch ? 'הזיכוי שאינו תואם למוצרים ולכמויות החסרים אינו סוגר חוסר אחר.' : 'החוסר המקורי (₪' + fmtMoney(di.shortValRaw) + ') נשמר בתעודה' + (shortSplit.credited.length ? ' ובממצאי הסריקה; מה שהזיכוי כיסה אינו מוצג עוד כהפרש פתוח, והסכום' : '; הסכום') + ' שכוסה בזיכוי לא יקוזז מול תעודה עתידית.') + '</div>' +
           '</div>';
         })() : '') +
         // חוסר ועודף נשארים נפרדים עד אישור קיזוז מפורש של המשתמש.

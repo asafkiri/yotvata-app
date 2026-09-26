@@ -232,6 +232,45 @@ cannot be reopened, and `deliveryCreditRead` refuses a busy credit.
   follow-ups: `tools/CREDIT-AUTO-READ-V364.md` (v366 section); tests:
   `tools/credit-on-gate.test.mjs`.
 
+### v369: a shortage the driver's credit covered is not an open discrepancy
+
+- Field report (owner, iPhone, v368): a receipt from 25.9 with three missing
+  products (₪255.94) and a driver's credit (₪155.50) that covered two of them
+  exactly. The card in "תעודות" still listed all three under "הפרשים מול
+  התעודה", each with "מצא קיזוז" (which only toasted "הפער הזה כבר נסגר או
+  השתנה", because `receiptOffsets` already knew the product was credited), and
+  painted all three AI findings red — "a whole mess of shortages that were
+  actually fixed". Only the cheese (₪100.44) was still open. The money was
+  right all along (the credit box said "נותר חוב ₪100.44"); the card was not.
+- `receiptShortAfterCredits(di)` splits `di.shortItems` per product with the
+  same `deliveryCreditCoverage(...).remaining` the offsets engine and the goods
+  completion use: `open` (units the credit did not cover), `credited`,
+  `remainder` (a product whose units are all in the credit but at less than the
+  paper price — a money row with no offset button; plus a receipt-wide row when
+  only agorot remain, so the box is never empty) and a `byProduct` map. It is
+  display only: `receiptDiscrepancyInfo`, `receiptPayableBaseEx` (paper minus
+  the original shortage, once), `receiptOffsets`, `receiptFilterBucket` and
+  everything saved are unchanged.
+- The card renders only `open` rows (+ `remainder` rows) in the discrepancy
+  box; a credited AI shortage finding turns green ("• 10 × מוקה — כוסה בזיכוי
+  מהספק ✓"), a partly credited one shows the rest ("• חסר 5 × מוקה (5 יח׳ כוסו
+  בזיכוי)"); each driver credit lists the products it covered ("כיסה: 2 × ארגז
+  · ₪30.20 · …"); the footer no longer points "up" to rows that are gone. A
+  legacy amount-only credit binds to no product, so it keeps every row and
+  "נותר חוב" as before; a mismatched credit (`deliveryCreditMismatch`) covers
+  nothing and hides nothing.
+- The edit screen ("תקן הפרשים") keeps showing the paper-versus-count
+  difference on every line, but a line the credit covers says so ("חסר 2 ·
+  כוסה בזיכוי מהספק", "חסר 10 (5 בזיכוי)") and the header counts them ("3
+  שורות עם הפרש · 2 מכוסות בזיכוי מהספק"), so the worker does not "fix" a
+  shortage the supplier already credited. Nothing about saving changed:
+  `saveReceiptFix` still never writes `shortCreditNotes`.
+- Tests: `tools/receipt-history-credit.test.mjs` (the field receipt, partial
+  product, legacy credit, mismatch, full coverage, money remainder, offsets
+  agreement, edit screen). Against the v368 `index.html`
+  (`RECEIPT_TEST_APP=…`) 8 of its 10 tests fail; the two that pass only prove
+  the offsets engine was already right.
+
 ## Correcting an OCR row
 
 “הפענוח שגוי — תקן לפי הנייר” now opens a form for the identified product's
