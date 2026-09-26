@@ -11,16 +11,30 @@ import * as harness from './receipt-scan-harness.mjs';
 
 const strip = s => s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 const json = (c, expression) => JSON.parse(c.run('JSON.stringify(' + expression + ')'));
-// The card's sections, in the order the card renders them: the discrepancy box,
-// the AI findings, then (after the scan details) the credit box and its buttons.
-const DIFF = 'הפרשים מול התעודה', AI = 'פוענח ואושר בסריקת AI', CREDIT = 'fa-file-invoice-dollar"></i> ', DATE = 'תאריך התעודה';
+// The card's sections, in the order the card renders them: the discrepancy box
+// (ends with the paper line), the violet price-findings box (v370: only when the
+// scan found a price or promotion issue), the collapsed scan details, then the
+// credit box and its buttons.
+const DIFF = 'הפרשים מול התעודה', AI_BOX = 'bg-violet-50 border border-violet-200', DETAILS = 'פרטי פענוח התעודה', CREDIT = 'fa-file-invoice-dollar"></i> ', DATE = 'תאריך התעודה';
 function section(html, from, to) {
   const i = html.indexOf(from);
   if (i < 0) return '';
   const j = to ? html.indexOf(to, i + from.length) : -1;
   return html.slice(i, j < 0 ? undefined : j);
 }
-const aiBox = html => strip(section(html, AI, 'fa-file-invoice-dollar'));
+function diffBox(html) {
+  const i = html.indexOf(DIFF);
+  if (i < 0) return '';
+  const paper = html.indexOf('לתשלום ₪', i);
+  return strip(html.slice(i, html.indexOf('</div>', paper)));
+}
+function aiBox(html) {
+  const i = html.indexOf(AI_BOX);
+  if (i < 0) return '';
+  const start = html.indexOf('>', i) + 1, end = html.indexOf(DETAILS, start);
+  return strip(html.slice(start, end < 0 ? undefined : end));
+}
+const scanDetails = html => strip(section(html, DETAILS, 'fa-file-invoice-dollar'));
 const creditBox = html => strip(section(html, CREDIT, DATE).slice(CREDIT.length));
 const offsetButtons = html => [...html.matchAll(/rc-offset-choose" data-id="[^"]+" data-product="([^"]+)" data-dir="short"/g)].map(m => m[1]);
 
@@ -62,14 +76,14 @@ function money(c) {
 
 test('the field receipt: only the uncredited cheese is an open discrepancy; the two credited products are shown as covered', () => {
   const { c, html } = render(receipt());
-  const diff = strip(section(html, DIFF, AI));
+  const diff = diffBox(html);
   assert.equal(diff, 'הפרשים מול התעודה חסר: גבינה לבנה 500 12 יח׳ · ₪100.44 מצא קיזוז תעודת ספק ₪1,941.24 (₪1,629.47 + ₪311.77) · לתשלום ₪1,685.30');
   assert.deepEqual(offsetButtons(html), ['cheese'], 'one "find offset" button, for the product that is really open');
-  const ai = aiBox(html);
-  assert.ok(ai.includes('• חסר 12 × גבינה לבנה 500'), ai);
-  assert.ok(ai.includes('• 10 × מוקה שקית (מארז) — מכוסה בזיכוי ✓'), ai);
-  assert.ok(ai.includes('• 2 × ארגז פלסטיק 400*300 — מכוסה בזיכוי ✓'), ai);
-  assert.ok(!ai.includes('חסר 10 ×') && !ai.includes('חסר 2 ×'), 'a credited finding is not painted as a shortage');
+  // v370: no violet box — the scan found no price issue, and its quantity findings only repeat the card.
+  assert.equal(aiBox(html), '');
+  const details = scanDetails(html);
+  assert.ok(details.startsWith('פרטי פענוח התעודה פוענח ואושר בסריקת AI ✓ · סכום התעודות והיחידות אומתו בדיוק; התמונות לא נשמרו. ממצאי הכמות שנשמרו בסריקה: חסר 12 × גבינה לבנה 500 · חסר 10 × מוקה שקית (מארז) · חסר 2 × ארגז פלסטיק 400*300'), details);
+  assert.match(html, /<details [^>]*><summary [^>]*>פרטי פענוח התעודה<\/summary>/, 'the record is one tap away, collapsed');
   const credit = creditBox(html);
   assert.ok(credit.startsWith('זיכוי חלקי מהספק — נותר חוב ₪100.44 זיכוי מס׳ 407300217606 · 25.9.2026 ₪155.50 כיסה: 2 × ארגז פלסטיק 400*300 · ₪30.20 · 10 × מוקה שקית (מארז) · ₪125.30'), credit);
   assert.ok(credit.includes('החוסר המקורי (₪255.94) נשמר בתעודה ובממצאי הסריקה; מה שהזיכוי כיסה אינו מוצג עוד כהפרש פתוח'), credit);
@@ -94,13 +108,11 @@ test('"מצא קיזוז" on a credited product led nowhere: the open side is on
 test('a credit for part of a product leaves the rest open, in the rows and in the finding', () => {
   const half = { ...CREDIT_ROWS.mocha, qty: 5, amount: 62.65 };
   const { c, html } = render(receipt({ shortCreditNotes: [driverCredit([half])] }));
-  const diff = strip(section(html, DIFF, AI));
+  const diff = diffBox(html);
   assert.ok(diff.includes('חסר: מוקה שקית (מארז) 5 יח׳ · ₪62.65'), diff);
   assert.ok(diff.includes('חסר: ארגז פלסטיק 400*300 2 יח׳ · ₪30.20') && diff.includes('חסר: גבינה לבנה 500 12 יח׳ · ₪100.44'), diff);
   assert.deepEqual(offsetButtons(html), ['crate', 'cheese', 'mocha']);
-  const ai = aiBox(html);
-  assert.ok(ai.includes('• מוקה שקית (מארז) — חסר ללא זיכוי: 5 יח׳ · ₪62.65 (5 יח׳ בזיכוי)'), ai);
-  assert.ok(ai.includes('• חסר 12 × גבינה לבנה 500') && ai.includes('• חסר 2 × ארגז פלסטיק 400*300'), ai);
+  assert.equal(aiBox(html), '');
   assert.ok(creditBox(html).includes('נותר חוב ₪193.29 זיכוי מס׳ 407300217606 · 25.9.2026 ₪62.65 כיסה: 5 × מוקה שקית (מארז) · ₪62.65'));
   assert.equal(money(c).payable, 1685.3);
   assert.equal(money(c).shortVal, 193.29);
@@ -109,8 +121,7 @@ test('a credit for part of a product leaves the rest open, in the rows and in th
 test('a legacy amount-only credit binds to no product, so every shortage row stays visible with the remaining debt', () => {
   const { c, html } = render(receipt({ shortCreditNotes: [{ amount: 155.5, at: Date.parse('2026-09-25T15:00:00') }] }));
   assert.deepEqual(offsetButtons(html), ['crate', 'cheese', 'mocha']);
-  const ai = aiBox(html);
-  assert.ok(!ai.includes('בזיכוי'), ai);
+  assert.equal(aiBox(html), '');
   const credit = creditBox(html);
   assert.ok(credit.startsWith('זיכוי חלקי מהספק — נותר חוב ₪100.44 זיכוי 25.9.2026 ₪155.50 החוסר המקורי (₪255.94) נשמר בתעודה; הסכום שכוסה בזיכוי לא יקוזז מול תעודה עתידית.'), credit);
   assert.ok(!credit.includes('כיסה:'), credit);
@@ -121,7 +132,7 @@ test('a credit that no longer matches the missing products covers nothing and hi
   const wrong = { ...CREDIT_ROWS.crate, productId: 'milk', name: REST.name, barcode: REST.barcode };
   const { c, html } = render(receipt({ shortCreditNotes: [driverCredit([wrong, CREDIT_ROWS.mocha])] }));
   assert.deepEqual(offsetButtons(html), ['crate', 'cheese', 'mocha']);
-  assert.ok(!aiBox(html).includes('בזיכוי'));
+  assert.equal(aiBox(html), '');
   const credit = creditBox(html);
   assert.ok(credit.startsWith('פרטי החוסר השתנו — יש לבדוק שוב את הזיכוי המצורף'), credit);
   assert.ok(credit.includes('אינו תואם לחוסר: 2 × חלב 1 ליטר · ₪30.20 · 10 × מוקה שקית (מארז) · ₪125.30'), credit);
@@ -135,7 +146,7 @@ test('the receipt stays open for another reason while every missing unit is cred
   // (a) a second driver credit that no longer matches, next to one that covers everything
   const stale = driverCredit([{ ...CREDIT_ROWS.cheese, productId: 'milk', name: REST.name, barcode: REST.barcode }], '407300217699');
   let { c, html } = render(receipt({ shortCreditNotes: [driverCredit([CREDIT_ROWS.crate, CREDIT_ROWS.cheese, CREDIT_ROWS.mocha]), stale] }));
-  let diff = strip(section(html, DIFF, AI));
+  let diff = diffBox(html);
   assert.ok(diff.startsWith('הפרשים מול התעודה החוסר (2 × ארגז פלסטיק 400*300 + 12 × גבינה לבנה 500 + 10 × מוקה שקית (מארז)) מכוסה בזיכוי ✓ תעודת ספק'), diff);
   assert.ok(!diff.includes('חסר:'), diff);
   assert.deepEqual(offsetButtons(html), []);
@@ -147,20 +158,24 @@ test('the receipt stays open for another reason while every missing unit is cred
   const rc = receipt({ shortCreditNotes: [driverCredit([CREDIT_ROWS.crate, CREDIT_ROWS.cheese, CREDIT_ROWS.mocha])] });
   rc.aiAudit.findings.push({ type: 'price', productId: 'milk', name: REST.name, paperPrice: 5.5, expectedPrice: 5, qty: 312, amount: 156, text: 'חלב 1 ליטר — מחיר בנייר ₪5.50 במקום ₪5.00' });
   ({ c, html } = render(rc));
-  diff = strip(section(html, DIFF, AI));
+  diff = diffBox(html);
   assert.ok(diff.includes('מכוסה בזיכוי ✓ תעודת ספק') && !diff.includes('חסר:'), diff);
   assert.deepEqual(offsetButtons(html), []);
-  assert.ok(aiBox(html).includes('חלב 1 ליטר — מחיר בנייר ₪5.50 במקום ₪5.00'), 'the price finding is still shown');
+  // v370: the violet box exists only for the price finding, and lists only it.
+  const ai = aiBox(html);
+  assert.equal(ai, 'פוענח ואושר בסריקת AI סכום התעודות והיחידות אומתו בדיוק; התמונות לא נשמרו. • חלב 1 ליטר — מחיר בנייר ₪5.50 במקום ₪5.00');
+  const details = scanDetails(html);
+  assert.ok(details.startsWith('פרטי פענוח התעודה ממצאי הכמות שנשמרו בסריקה: חסר 12 ×'), details);
+  assert.ok(!details.includes('פוענח ואושר'), 'the verification line is not repeated under the price box');
   assert.deepEqual([money(c).shortVal, money(c).open, money(c).payable], [0, true, 1685.3]);
 });
 
 test('a credit that covers every missing product closes the card: no discrepancy box, every finding green', () => {
   const { c, html } = render(receipt({ shortCreditNotes: [driverCredit([CREDIT_ROWS.crate, CREDIT_ROWS.cheese, CREDIT_ROWS.mocha])] }));
-  assert.equal(section(html, DIFF, AI), '');
+  assert.equal(diffBox(html), '');
   assert.deepEqual(offsetButtons(html), []);
-  const ai = aiBox(html);
-  assert.equal((ai.match(/מכוסה בזיכוי ✓/g) || []).length, 3, ai);
-  assert.ok(!ai.includes('חסר'), ai);
+  assert.equal(aiBox(html), '');
+  assert.ok(scanDetails(html).includes('ממצאי הכמות שנשמרו בסריקה: חסר 12 × גבינה לבנה 500 · חסר 10 × מוקה שקית (מארז) · חסר 2 × ארגז פלסטיק 400*300'), scanDetails(html));
   assert.match(html, /אומתה · החוסר נסגר בזיכוי/);
   const credit = creditBox(html);
   assert.ok(credit.startsWith('החוסר נסגר בזיכוי מהספק ✓ זיכוי מס׳ 407300217606 · 25.9.2026 ₪255.94 כיסה: 2 × ארגז'), credit);
@@ -171,12 +186,10 @@ test('a credit that covers every missing product closes the card: no discrepancy
 test('all units credited below the paper price: the money remainder is a row without an offset button', () => {
   const cheap = { ...CREDIT_ROWS.cheese, amount: 96 };
   const { c, html } = render(receipt({ shortCreditNotes: [driverCredit([CREDIT_ROWS.crate, cheap, CREDIT_ROWS.mocha])] }));
-  const diff = strip(section(html, DIFF, AI));
+  const diff = diffBox(html);
   assert.ok(diff.startsWith('הפרשים מול התעודה יתרה ללא זיכוי: גבינה לבנה 500 כל היחידות בזיכוי · ₪4.44 תעודת ספק'), diff);
   assert.deepEqual(offsetButtons(html), []);
-  const ai = aiBox(html);
-  assert.ok(ai.includes('• גבינה לבנה 500 — יתרה ללא זיכוי · ₪4.44 (כל היחידות בזיכוי)'), ai);
-  assert.equal((ai.match(/מכוסה בזיכוי ✓/g) || []).length, 2, ai);
+  assert.equal(aiBox(html), '');
   assert.ok(creditBox(html).startsWith('זיכוי חלקי מהספק — נותר חוב ₪4.44'));
   assert.deepEqual(json(c, 'receiptOffsets(receipts[0])'), []);
   assert.equal(money(c).shortVal, 4.44);
@@ -228,9 +241,8 @@ test('the edit screen names the credited lines and keeps the paper difference ed
 test('a credit that pays less per unit than the paper: the open row and the finding carry the money still owed', () => {
   const cheap = { ...CREDIT_ROWS.mocha, qty: 5, amount: 50 };
   const { c, html } = render(receipt({ shortCreditNotes: [driverCredit([cheap])] }));
-  const diff = strip(section(html, DIFF, AI));
+  const diff = diffBox(html);
   assert.ok(diff.includes('חסר: מוקה שקית (מארז) 5 יח׳ · ₪75.30'), diff);
-  assert.ok(aiBox(html).includes('• מוקה שקית (מארז) — חסר ללא זיכוי: 5 יח׳ · ₪75.30 (5 יח׳ בזיכוי)'), aiBox(html));
   assert.ok(creditBox(html).startsWith('זיכוי חלקי מהספק — נותר חוב ₪205.94'), creditBox(html));
   assert.equal(money(c).shortVal, 205.94);
   // The unit price on the paper is still what the offsets engine trades on.
@@ -241,7 +253,7 @@ test('a positive amount gap on a fully credited receipt is listed once, as the g
   const rc = receipt({ shortCreditNotes: [driverCredit([CREDIT_ROWS.crate, CREDIT_ROWS.cheese, CREDIT_ROWS.mocha])], unresolvedAmountGap: 3 });
   rc.noteParts = [{ amount: 1717.49 }, { amount: 311.77 }]; // no printed unit count: the stored gap is the truth
   const { c, html } = render(rc);
-  const diff = strip(section(html, DIFF, AI));
+  const diff = diffBox(html);
   assert.ok(diff.includes('מכוסה בזיכוי ✓'), diff);
   assert.equal((diff.match(/פער סכום שטרם שויך/g) || []).length, 1, diff);
   assert.ok(!diff.includes('יתרה ללא זיכוי') && !diff.includes('חסר:'), diff);
@@ -250,7 +262,8 @@ test('a positive amount gap on a fully credited receipt is listed once, as the g
 
 test('a receipt without an AI audit does not claim its findings keep the shortage', () => {
   const { html } = render(receipt({ aiAudit: null }));
-  assert.equal(section(html, AI, DATE), '');
+  assert.equal(aiBox(html), '');
+  assert.ok(!html.includes(DETAILS), 'nothing was scanned, so there are no scan details');
   const credit = creditBox(html);
   assert.ok(credit.includes('נשמר בתעודה; מה שהזיכוי כיסה אינו מוצג עוד כהפרש פתוח'), credit);
   assert.ok(!credit.includes('ובממצאי הסריקה'), credit);
