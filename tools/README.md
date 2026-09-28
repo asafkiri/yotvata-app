@@ -66,6 +66,7 @@ node --test tools/credit-auto-attach.test.mjs   # זיכוי שהקריאה של
 node --test tools/document-summary-review.test.mjs  # אימות סיכום תעודה רק על מחלוקת אמיתית, עם שם השדה ומה כל קריאה ראתה (v365)
 node --test tools/credit-service-contract.test.mjs  # החוזה מול שרת הסריקה האמיתי (yotvata-ai-scan v149) על זיכוי 22229080 מהגיבוי (v365)
 node --test tools/receipt-history-credit.test.mjs   # חוסר שהזיכוי מהנהג כיסה אינו מוצג כפתוח בכרטיס התעודה ובמסך העריכה (v369)
+node --test tools/return-approve.test.mjs          # אישור תעודת זיכוי בלחיצה אחת, בלי להקליד את הסכום (v371)
 ```
 
 `credit-service-contract` מריצה את קוד השרת עצמו (בלי קריאה בתשלום) מהתיקייה

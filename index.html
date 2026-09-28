@@ -5895,21 +5895,40 @@ function refreshReturnReconcile() { if (currentView === 'returnReconcile') rende
 // שורת האימות נבנית בשני כרטיסים (היסטוריית החזרות, ותעודות הקליטה) —
 // כאן היא פונקציה אחת, כדי ששני העותקים לא ייפרדו זה מזה.
 function retVerifyAmount(r) { return returnTotals(r).ex; }
+// "אישור" אומר "הספק זיכה בדיוק את הסכום הזה", ולכן הוא מוצע רק כשהסכום הוא
+// באמת כל מה שהוחזר. שורה בלי מחיר חסרה ממנו — הזיכוי עליה היה נבלע בשקט —
+// ותעודה כזאת (וגם תעודה של ₪0) נשארת עם הקלדת סכום הנייר בלבד.
+function retVerifyApprovable(r) {
+  if (!(retVerifyAmount(r) > 0)) return false;
+  return ((r && r.items) || []).every(l => !l || l.isDeposit || !((Number(l.qty) || 0) > 0) || Number(l.unitPrice) > 0 || Number(l.lineTotal) > 0);
+}
+// "בדוק": סכום הנייר שהוקלד מול מה שהוחזר. תואם (עד שקל) — התעודה נסגרת;
+// לא תואם — מסך ההתאמה. גם "אישור" מגיע לכאן כשכבר הוקלד סכום בשדה.
+function verifyReturnInline(id) {
+  const inp = $('rvNote_' + id); const v = inp ? parseNoteVal(inp.value) : null;
+  if (v == null) { showToast('הקלד את סכום תעודת הזיכוי', null, null, 2000); return; }
+  const rr = returns.find(x => x.id === id); if (!rr) return;
+  const sentEx = returnTotals(rr).ex;
+  if (Math.abs(v - sentEx) <= 1) markReturnVerified(id, v); else openReturnVerify(id, v);
+}
 function retVerifyRowHtml(r, inReceipts) {
   const amount = retVerifyAmount(r);
-  // תעודה בלי סכום (שורות בלי מחיר) — אין מה לאשר, נשארת הקלדה בלבד
-  const canApprove = amount > 0;
+  const canApprove = retVerifyApprovable(r);
   return '<div class="text-[11px] text-slate-400 font-bold ' + (inReceipts ? 'mt-2 ' : '') + 'mb-1.5"><i class="fa-solid fa-circle-info"></i> הקלד את סכום תעודת הזיכוי <b class="text-slate-600">ללא מע״מ</b>' + (canApprove ? ', או אשר שהוא בדיוק ₪' + fmtMoney(amount) + ' — כל מה שהוחזר' : ' כדי לאמת') + '</div>' +
     '<div class="flex gap-1.5 items-stretch' + (inReceipts ? '' : ' mb-2') + '">' +
-      '<div class="flex-1 min-w-0 flex items-center gap-1 border-2 border-slate-200 rounded-xl px-2 focus-within:border-blue-500"><span class="text-slate-400 font-black text-sm">₪</span><input id="rvNote_' + r.id + '" type="text" inputmode="decimal" placeholder="סכום הזיכוי" class="w-full min-w-0 h-11 text-center text-sm font-black outline-none bg-transparent"></div>' +
+      '<div class="flex-1 min-w-0 flex items-center gap-1 border-2 border-slate-200 rounded-xl px-2 focus-within:border-blue-500"><span class="text-slate-400 font-black text-sm">₪</span><input id="rvNote_' + r.id + '" type="text" inputmode="decimal" placeholder="סכום הזיכוי" class="w-full min-w-0 h-11 text-center text-base font-black outline-none bg-transparent"></div>' +
       '<button data-role="rv-verify-inline" data-id="' + r.id + '" class="btn-tap shrink-0 px-3 rounded-xl font-black text-sm bg-green-600 text-white flex items-center gap-1"><i class="fa-solid fa-check-double"></i> בדוק</button>' +
       (canApprove ? '<button data-role="rv-approve" data-id="' + r.id + '" class="btn-tap shrink-0 px-3 rounded-xl font-black text-sm bg-emerald-700 text-white flex items-center gap-1"><i class="fa-solid fa-stamp"></i> אישור</button>' : '') +
     '</div>';
 }
 function openReturnApproveConfirm(id) {
   const r = returns.find(x => x.id === id); if (!r || r.credited) return;
+  // סכום שכבר הוקלד בשדה הוא סכום הנייר: "אישור" מגיש אותו בדיוק כמו "בדוק",
+  // ולא מחליף אותו בשקט בסך התעודה (זה היה סוגר תעודה עם פער כ"בלי פער")
+  const inp = $('rvNote_' + id);
+  if (inp && parseNoteVal(inp.value) != null) { verifyReturnInline(id); return; }
   const amount = retVerifyAmount(r);
-  if (!(amount > 0)) { showToast('אין סכום לאישור — הקלד את סכום תעודת הזיכוי', null, null, 2600); return; }
+  if (!retVerifyApprovable(r)) { showToast('אין סכום מלא לאישור — הקלד את סכום תעודת הזיכוי', null, null, 2600); return; }
   showConfirm('אישור תעודת זיכוי',
     'לאשר שהספק זיכה בדיוק ₪' + fmtMoney(amount) + ' (ללא מע״מ) — כל מה שהוחזר? התעודה תיסגר בלי פער, בלי להקליד את הסכום.',
     'אשר תעודה', () => approveReturnAsSent(id, amount));
@@ -5918,17 +5937,35 @@ function openReturnApproveConfirm(id) {
 // "בדוק". אם התעודה השתנתה בזמן שהחלון היה פתוח (עריכה ממכשיר אחר), סכום
 // שכבר לא תואם פותח את מסך ההתאמה — ולא נרשם כתעודה "סגורה בלי פער".
 function approveReturnAsSent(id, amount) {
-  const r = returns.find(x => x.id === id); if (!r || r.credited) return;
-  if (Math.abs(amount - returnTotals(r).ex) <= 1) markReturnVerified(id, amount);
-  else openReturnVerify(id, amount);
+  const r = returns.find(x => x.id === id);
+  if (!r || r.credited) { showToast('התעודה כבר אומתה או הוסרה במכשיר אחר', null, null, 2600); return; }
+  if (Math.abs(amount - returnTotals(r).ex) <= 1) { markReturnVerified(id, amount); return; }
+  openReturnVerify(id, amount);
+  showToast('התעודה השתנתה בזמן האישור (עכשיו ₪' + fmtMoney(returnTotals(r).ex) + ') — בדוק מול הנייר', null, null, 3200);
 }
 async function markReturnVerified(id, noteTotal) {
   const r = returns.find(x => x.id === id);
-  if (r) { r.credited = true; r.creditedAt = Date.now(); r.creditNoteTotal = noteTotal; r.creditStatus = 'ok'; }
+  const data = { credited: true, creditedAt: Date.now(), creditNoteTotal: noteTotal, creditStatus: 'ok' };
+  // v371: הזיכוי תואם, ולכן גם השורות סגורות. כמויות זיכוי שנשארו בשורות
+  // מאימות קודם עם פער (שנפתח מחדש) יורדות — כמו ב-addCreditNote — אחרת עריכת
+  // פריטים מאוחרת הייתה מחשבת מהן פער מחדש בתעודה שנסגרה "בלי פער".
+  if (r && (r.items || []).some(l => l && l.noteQty != null)) data.items = r.items.map(l => { const c = { ...l }; delete c.noteQty; return c; });
+  if (r) Object.assign(r, data);
   buzz(18);
   if (currentView === 'returnsHistory') renderReturnsHistory();
   else if (currentView === 'receiptsHistory') renderReceiptsHistory();
-  await runCloudTask('mark return verified', { op: 'update', path: dataPath('returns', id), data: { credited: true, creditedAt: Date.now(), creditNoteTotal: noteTotal, creditStatus: 'ok' }, operationId: makeOperationId('return_verified') });
+  const saved = await runCloudTask('mark return verified', { op: 'update', path: dataPath('returns', id), data, operationId: makeOperationId('return_verified') });
+  if (!saved) return;
+  // v371: הספק זיכה הכל — פער שהועבר קודם לרשימת החזרות (לפני שהתעודה נפתחה
+  // מחדש) חייב לרדת משם, אחרת נתבע את אותו כסף פעמיים. כמו ב-addCreditNote.
+  const undone = await undoReturnCarry(id, { silent: true });
+  if (undone) {
+    if (currentView === 'returnsHistory') renderReturnsHistory();
+    else if (currentView === 'receiptsHistory') renderReceiptsHistory();
+    else if (currentView === 'returns') refreshReturnsList();
+    updateCart();
+    showToast('הזיכוי אומת — הפער ירד גם מרשימת החזרות ✓', null, null, 3200);
+  }
 }
 async function clearReturnVerification(id) {
   const r = returns.find(x => x.id === id);
@@ -23327,7 +23364,7 @@ app.addEventListener('click', (e) => {
   else if (role === 'edit-barcode') openBarcodePrompt(id, true);
   // v371: אישור מהיר — הספק זיכה בדיוק את מה שהוחזר, אין מה להקליד
   else if (role === 'rv-approve') openReturnApproveConfirm(id);
-  else if (role === 'rv-verify-inline') { const inp = $('rvNote_' + id); const v = inp ? parseNoteVal(inp.value) : null; if (v == null) { showToast('הקלד את סכום תעודת הזיכוי', null, null, 2000); return; } const rr = returns.find(x => x.id === id); if (!rr) return; const sentEx = returnTotals(rr).ex; if (Math.abs(v - sentEx) <= 1) markReturnVerified(id, v); else openReturnVerify(id, v); }
+  else if (role === 'rv-verify-inline') verifyReturnInline(id);
   else if (role === 'rv-add-note') { const inp = $('rvAdd_' + id); const v = inp ? parseNoteVal(inp.value) : null; if (v == null) { showToast('הקלד את סכום תעודת הזיכוי המשלימה', null, null, 2200); return; } addCreditNote(id, v); }
   else if (role === 'rv-open') openReturnVerify(id, null);
   else if (role === 'rv-yes') rvDecide(parseInt(id, 10), 'full');
