@@ -100,3 +100,104 @@ test('real scan: every rendered row closes against the engine numbers', async ()
     assert.equal(Number(c[label]), f.qty, f.name);
   }
 });
+
+// v372: the same three numbers wherever a shortage/surplus is shown. When the
+// analyzer ("המנתח") is adopted its claim cards replace the engine rows, so a
+// shortage/surplus claim carries the detail too — under the same rule (the
+// claim's quantity is exactly paper − scan) and only when it is the one
+// quantity claim on that product (a substitution splits into two).
+function scanRow(desc, barcode, line, qty) {
+  return { section: 'items', description: desc, itemCode: String(100 + line), barcode, barcodeObserved: barcode,
+    barcodeReadType: 'full', barcodeMatchMethod: 'exact_full', lineNumber: line, sourcePage: 1, quantity: qty,
+    unitPriceExVat: 5, grossLineTotalExVat: qty * 5, lineTotalExVat: qty * 5, lineDiscountExVat: 0, confidence: .95 };
+}
+// Paper A×paperA and B×paperB at ₪5; the worker scanned A×scanA and B×scanB.
+function twoProductScan({ paperA = 12, paperB = 10, scanA = 4, scanB = 10 } = {}) {
+  const data = harness.fixture('yotvata');
+  data.products = [{ id: 'A', name: 'מוצר א בדיקה', barcode: '7290000000008', price: 5 },
+    { id: 'B', name: 'מוצר ב בדיקה', barcode: '7290000000015', price: 5 }];
+  const rows = [scanRow('מוצר א בדיקה', '7290000000008', 1, paperA), scanRow('מוצר ב בדיקה', '7290000000015', 2, paperB)];
+  const subtotal = (paperA + paperB) * 5;
+  Object.assign(data.paper.scan.documents[0], { subtotalExVat: subtotal, printedUnits: paperA + paperB,
+    itemsPrintedLines: 2, printedLines: 2, itemsSectionTotalExVat: subtotal, rows });
+  data.items = [{ productId: 'A', name: 'מוצר א בדיקה', barcode: '7290000000008', qty: scanA },
+    { productId: 'B', name: 'מוצר ב בדיקה', barcode: '7290000000015', qty: scanB }];
+  return data;
+}
+async function analyzerCard(claims, scan) {
+  const r = harness.runtime('yotvata', { data: twoProductScan(scan) });
+  await r.scan();
+  r.run("receiptDupConfirmed=true; showConfirm=(title,text,label,fn)=>fn(); finishReceipt();");
+  assert.equal(r.run('rcStep'), 'ai');
+  r.context.fetch = async (url, options) => {
+    if (options && options.body && JSON.parse(options.body).mode === 'analyze') return harness.reply({ ok: true, analysis: { claims, summary: 'fixture' } });
+    throw new Error('Unexpected network request: ' + url);
+  };
+  await r.run('auditOriginalAnalyzer()');
+  assert.equal(r.run('!!(aiAnalyzeResult && aiAnalyzeResult.accepted && aiScanEvaluation.analyzerLed)'), true, 'the analyzer leads');
+  r.run('renderReconcile()');
+  const html = r.node('app').innerHTML;
+  const start = html.indexOf('אלה הבעיות שנמצאו');
+  assert.ok(start > 0, 'the claims box is shown');
+  assert.ok(html.slice(start, start + 400).includes('נסגר בדיוק ✓'));
+  const box = html.slice(start, html.indexOf('המנתח הוביל', start));
+  // One card per claim, in order: split on the card's outer div.
+  const CARD = '<div class="rounded-xl border p-2.5 ';
+  const cards = box.split(CARD).slice(1).map(card => CARD + card);
+  return { r, html, box, cards };
+}
+
+test('analyzer-led card: a shortage claim that is exactly paper − scan shows billed, scanned and the gap', async () => {
+  const { r, html, cards } = await analyzerCard([{ kind: 'shortage', productId: 'A', quantity: 8, amountExVat: 40, evidence: 'נייר 12, נסרקו 4' }]);
+  assert.equal(cards.length, 1);
+  assert.deepEqual(cells(cards[0]), { 'חויב בתעודה': '12', 'נסרק בפועל': '4', 'חסר': '8' });
+  const text = strip(cards[0]);
+  assert.ok(text.startsWith('חוסר חוסר: 8 × מוצר א בדיקה · ₪40.00 ₪40.00 חויב בתעודה 12 נסרק בפועל 4 חסר 8 נסרקו 4 יח׳ מתוך 12 שחויבו בתעודה'), text);
+  assert.ok(text.includes('נייר 12, נסרקו 4'), 'the evidence line stays');
+  // The engine rows stay replaced, and the claim itself is unchanged.
+  assert.ok(!html.includes('<div class="py-2 border-t border-black/5 first:border-t-0">'), 'no engine rows under the analyzer');
+  assert.equal(r.run('aiAnalyzeClaimsPlainText()').split('\n')[1], '· חוסר: 8 × מוצר א בדיקה · ₪40.00');
+  assert.deepEqual(JSON.parse(r.run('JSON.stringify(aiScanEvaluation.findings.filter(f=>f.type==="shortage").map(f=>[f.productId,f.qty,f.claimId]))')), [['A', 8, 'claim-0']]);
+});
+
+test('analyzer-led card: shortage and surplus claims each get their own numbers', async () => {
+  const { cards } = await analyzerCard([
+    { kind: 'shortage', productId: 'A', quantity: 8, amountExVat: 40 },
+    { kind: 'surplus', productId: 'B', quantity: 2, amountExVat: 10 }], { scanB: 12 });
+  assert.equal(cards.length, 2);
+  assert.deepEqual(cells(cards[0]), { 'חויב בתעודה': '12', 'נסרק בפועל': '4', 'חסר': '8' });
+  assert.deepEqual(cells(cards[1]), { 'חויב בתעודה': '10', 'נסרק בפועל': '12', 'עודף': '2' });
+  assert.ok(strip(cards[1]).includes('חויבו 10 יח׳ בתעודה ונסרקו 12'));
+});
+
+test('analyzer-led card: a claim that closes overall but is not paper − scan for its product keeps the plain card', async () => {
+  // Paper A12/B10, scanned A4/B12: the paper gap of A is 8, the claim says 6.
+  const { cards } = await analyzerCard([{ kind: 'shortage', productId: 'A', quantity: 6, amountExVat: 30 }], { scanB: 12 });
+  assert.equal(cards.length, 1);
+  assert.deepEqual(cells(cards[0]), {});
+  assert.ok(!/חויב בתעודה|נסרק בפועל/.test(cards[0]));
+  assert.ok(strip(cards[0]).includes('חוסר: 6 × מוצר א בדיקה · ₪30.00'));
+});
+
+test('analyzer-led card: two quantity claims on one product (a substitution split) show no numbers for either', async () => {
+  // Without the guard, "shortage 8 × A" (12 − 4) and "surplus 2 × B" (12 − 10) would each close on
+  // their own, next to a substitution that moves two more units between the same products.
+  const { cards } = await analyzerCard([
+    { kind: 'shortage', productId: 'A', quantity: 8, amountExVat: 40 },
+    { kind: 'substitution', productId: 'A', substituteProductId: 'B', quantity: 2 },
+    { kind: 'surplus', productId: 'B', quantity: 2, amountExVat: 10 }], { scanB: 12 });
+  assert.equal(cards.length, 3);
+  cards.forEach(card => assert.deepEqual(cells(card), {}, strip(card)));
+  assert.ok(strip(cards[1]).startsWith('החלפה החלפה: חויב 2 × מוצר א בדיקה, סופק מוצר ב בדיקה'), strip(cards[1]));
+});
+
+test('engine rows: a second quantity finding on the same product drops the numbers', () => {
+  const r = create();
+  r.context.rowFinding = { type: 'shortage', productId: 'p1', name: 'חלב', qty: 8 };
+  const h = r.run(`aiScanEvaluation = { aggregates: new Map([['p1', { qty: 12 }]]), basketComplete: true,
+      findings: [rowFinding, { type: 'shortage', productId: 'p1', name: 'חלב', qty: 2, claimId: 'claim-1', claimPart: 'billed' }] };
+    reconcileData = [{ productId: 'p1', received: 4 }];
+    aiQuantityFindingRowHtml(rowFinding, 'shortage', 'head')`);
+  assert.deepEqual(cells(h), {});
+  assert.equal(strip(h), 'חלב חסר 8 יח׳');
+});

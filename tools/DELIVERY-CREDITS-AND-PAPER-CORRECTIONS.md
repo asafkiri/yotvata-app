@@ -308,6 +308,29 @@ cannot be reopened, and `deliveryCreditRead` refuses a busy credit.
 - Display only: `rc.aiAudit.findings`, `receiptDiscrepancyInfo`, `aiAuditOpen`
   and everything saved are unchanged. Tests: `tools/receipt-history-credit.test.mjs`.
 
+### v372: billed, scanned and the gap wherever a shortage is shown
+
+- The owner asked to see three numbers next to every shortage/surplus: billed
+  on the supplier document (חויב בתעודה), actually scanned (נסרק בפועל) and
+  the gap. v368 showed them only on the engine rows of the scan result.
+- Analyzer card ("אלה הבעיות שנמצאו"): a shortage/surplus claim gets the same
+  3-cell detail (`aiQuantityFindingNumbers` → `aiQuantityFindingDetailHtml`),
+  only when the claim's quantity is exactly paper − scan and it is the only
+  quantity claim on that product (a substitution splits into two). The same
+  guard now applies to the engine rows.
+- Close summary: a line with a difference reads "חויב בתעודה 12 · נסרק בפועל
+  4 × ₪5.00 · חסר 8"; the driver-credit tag stays as it was ("6 בזיכוי", never
+  "חסר 6" for a covered line).
+- Saved card, "הפרשים מול התעודה" (`receiptDiffPaperNumbers`): "חויב בתעודה 12
+  · נסרק בפועל 4 · חסר 8 יח׳ · ₪40.00" — only when the product's saved lines
+  (without deposits) close exactly on the gap the row shows plus what the
+  driver's credit covered for that product. A partly credited row keeps its
+  open part and adds "חויב בתעודה 20 · נסרק בפועל 10 · חסר 10 (5 יח׳ בזיכוי)".
+  Offsets, goods completions, legacy price offsets, fractions and a product
+  with two difference rows keep today's row. No violet box (v370 stays).
+- Display only. Tests: `tools/quantity-finding-row.test.mjs`,
+  `tools/receipt-quantity-detail.test.mjs`, `tools/receipt-history-credit.test.mjs`.
+
 ## Correcting an OCR row
 
 “הפענוח שגוי — תקן לפי הנייר” now opens a form for the identified product's
