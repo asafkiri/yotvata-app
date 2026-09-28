@@ -68,6 +68,7 @@ node --test tools/credit-service-contract.test.mjs  # החוזה מול שרת �
 node --test tools/receipt-history-credit.test.mjs   # חוסר שהזיכוי מהנהג כיסה אינו מוצג כפתוח בכרטיס התעודה ובמסך העריכה (v369)
 node --test tools/return-approve.test.mjs          # אישור תעודת זיכוי בלחיצה אחת, בלי להקליד את הסכום (v371)
 node --test tools/receipt-quantity-detail.test.mjs  # חויב בתעודה · נסרק בפועל · חסר — בסיכום התעודה ובכרטיס התעודה השמורה (v372)
+node --test tools/credit-claim-arrived-units.test.mjs  # דרישת זיכוי על מחיר/מבצע רק על יחידות שחויבו והגיעו, לכל מוצר ולפי הנייר גם כשהמנתח הוביל; סחורה שהגיעה אחר כך מחזירה את ההפרש לדרישה; תעודה בלי עוגן יחידות נסגרת גם אחרי המנתח (v373)
 ```
 
 `credit-service-contract` מריצה את קוד השרת עצמו (בלי קריאה בתשלום) מהתיקייה

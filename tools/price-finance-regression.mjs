@@ -32,6 +32,11 @@ try{
  const promo={id:'p1',name:'מבצע רציף',productIds:['milk'],pct:20,start:'2020-01-01',end:'2099-12-31',minQty:1};
  for(const promos of [[],[promo]])for(const unit of [5,6])for(const count of [9,10,11]){
   const old=await run(true,unit,count,promos),next=await run(false,unit,count,promos);
-  assert.deepEqual(next,old);console.log('PASS',supplier,'printed price',unit,'counted',count,promos.length?'with an active promotion':'without a promotion','payable',next.ex,'identical to',base.slice(0,7));
+  // v373: a price/promo credit claim covers only the billed units that arrived — the
+  // missing unit is already deducted at the paper price. Counted 9 of 10: the claim is
+  // 9/10 of the old one; everything else stays identical to the baseline.
+  const want=structuredClone(old),v373=!!(want.supplierCreditClaim&&count<10);
+  if(v373){const c=want.supplierCreditClaim;c.items.forEach(i=>{i.amount=Math.round(i.amount/i.qty*count*100)/100;i.qty=count;});c.amount=Math.round(c.items.reduce((a,i)=>a+i.amount,0)*100)/100;}
+  assert.deepEqual(next,want);console.log('PASS',supplier,'printed price',unit,'counted',count,promos.length?'with an active promotion':'without a promotion','payable',next.ex,'identical to',base.slice(0,7)+(v373?' except the claim on the '+count+' that arrived: ₪'+want.supplierCreditClaim.amount:''));
  }
 }finally{delete process.env[key];fs.rmSync(temp,{recursive:true,force:true});}

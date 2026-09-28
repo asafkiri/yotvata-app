@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v372 כמה חויב, כמה נסרק וכמה חסר</title>
+    <title>הזמנות יטבתה - v373 זיכוי מחיר רק על מה שהגיע</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v372 כמה חויב, כמה נסרק וכמה חסר</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v373 זיכוי מחיר רק על מה שהגיע</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -9636,8 +9636,12 @@ function manualTogglePromoClaim(pid) {
   }
   if (!l.promoOn) return; // מבצעי מרכזת וכד' לא מטופלים בבדיקת תעודה
   if (reconcileSupplierCreditClaim && reconcileSupplierCreditClaim.source !== 'manual_line') { showToast('כבר קיימת דרישת זיכוי לתעודה הזאת — נהל אותה במסך המבצעים', null, null, 3000); return; }
-  const qty = Math.max(Number(l.noteQty) || 0, Number(l.received) || 0);
-  if (!qty) { showToast('אין כמות בשורה', null, null, 2000); return; }
+  // v373: הזיכוי רק על יחידות שחויבו וגם הגיעו. השורה עוברת כאן למחיר מלא, ולכן
+  // יחידה חסרה כבר יורדת כחוסר במחיר המלא — כולל המבצע שלא ניתן. עם max(נייר, נסרק)
+  // חוסר ששויך לפני הסימון (חויבו 12, הגיעו 4) נתבע שוב: ₪12 במקום ₪4, ואותה
+  // תעודה בדיוק יצאה ₪4 כשסימנו קודם ושייכו אחר כך.
+  const qty = Math.min(Number(l.noteQty) || 0, Number(l.received) || 0);
+  if (!qty) { showToast('אין בשורה יחידות שחויבו והגיעו', null, null, 2000); return; }
   const base = r2(Number(l.basePrice) || Number(l.price) || 0);
   const disc = r2((base - (Number(l.price) || 0)) * qty);
   if (disc <= 0) { showToast('לא נמצא הפרש מבצע בשורה', null, null, 2200); return; }
@@ -14503,6 +14507,7 @@ function aiEvaluateInvoiceScan(payload, receivedRows = reconcileData || []) {
     const expected = paperPromoTriggered(productPromo)
       ? discountedUnitPrice(Number(a.product.price) || 0, Number(productPromo.pct) || 0)
       : r2(Number(a.product.price) || 0);
+    a.expectedUnitPrice = expected; // v373: המחיר הצפוי נוסע להחלה — תקרת דרישת הזיכוי נמדדת מולו
     const quantityDiff = a.qty - received;
     if (quantityDiff > 0) findings.push({ type: 'shortage', productId: a.product.id, name: a.product.name, qty: quantityDiff, expectedPrice: expected, text: 'חסר ' + quantityDiff + ' × ' + a.product.name });
     else if (quantityDiff < 0 && basketComplete) findings.push({ type: 'surplus', productId: a.product.id, name: a.product.name, qty: -quantityDiff, expectedPrice: expected, text: 'עודף ' + (-quantityDiff) + ' × ' + a.product.name });
@@ -15520,11 +15525,15 @@ function aiAdoptAnalyzerResult(ev, result) {
   ev.closure = result.closure;
   ev.analyzerLed = true;
   if (engineReason) ev.errors = (Array.isArray(ev.errors) ? ev.errors : []).filter(error => error !== engineReason);
+  // v373: אותו כלל יחידות כמו המנוע (aiEvaluateInvoiceScan): תעודה בלי שום
+  // עוגן כמות ("אין בנייר — המשך בלי") ניתנת להחלה. unitsVerified לבדו נעל
+  // תעודה שהמנוע עצמו סוגר ברגע שהמנתח אישר טענה נכונה — בלי שום סיבה על המסך.
+  // (טענת "מחיר" שהנייר אינו מראה אינה פותחת דרישת זיכוי — התקרה בהחלה.)
   ev.valid = ev.errors.length === 0
     && (Array.isArray(ev.barcodeSuggestions) ? ev.barcodeSuggestions.length === 0 : true)
     && ev.findingsReady === true
     && ev.aggregates instanceof Map && ev.aggregates.size > 0
-    && ev.totalVerified === true && ev.unitsVerified === true
+    && ev.totalVerified === true && (ev.unitsVerified === true || ev.unitsAnchorless === true)
     && result.closure.ok === true;
   return true;
 }
@@ -16405,9 +16414,76 @@ function aiApplyInvoiceResult() {
   reconcileSupplierDiscount = r2(ev.supplierDiscount || 0);
   reconcileSupplierPromoItems = [];
   reconcilePromoMismatchItems = ev.findings.filter(f => f.type === 'promo_missing').map(f => ({ productId: f.productId, name: f.name, qty: f.qty, expectedPrice: f.expectedPrice, chargedPrice: f.paperPrice, expectedDiscount: Math.max(0, r2(f.amount || 0)) }));
-  const claims = ev.findings.filter(f => (f.type === 'promo_missing' || f.type === 'price') && Number(f.amount) > 0.02);
+  // v373: דרישת זיכוי על מחיר/מבצע — רק על יחידות שחויבו וגם הגיעו, ורק בגובה
+  // ההפרש שהנייר עצמו מראה. כל מוצר שבנייר נכתב למעלה במחיר הנייר, ולכן יחידה
+  // שחסרה כבר יורדת מהתשלום כחוסר במחיר הנייר — כולל ההפרש. תביעת ההפרש על
+  // כל הכמות שחויבה הורידה אותו פעם שנייה: 12 חויבו ב-₪5.50 במקום ₪5 והגיעו 4
+  // → חוסר 8 × 5.50 = 44 ועוד דרישה 12 × 0.50 = 6, ₪4 יותר מדי (נכון: 4 × 0.50
+  // = 2). והתקרה נמדדת מהנייר, לא מהטענה: בלי עוגן יחידות השער של המנתח שוקל
+  // כסף בלבד, וטענת "מחיר" על מוצר שחויב בדיוק במחיר הצפוי הייתה פותחת דרישה
+  // על אותו כסף שכבר ירד כחוסר. התקרה: (מחיר הנייר − המחיר הצפוי) ×
+  // min(חויב, נסרק). ממצא שנכנס מתחת לתקרה (הכול הגיע) — בדיוק כמו קודם.
+  // התקרה היא לכל מוצר ולא לכל טענה, ונמדדת מהמחיר שנכתב לשורה: כמה טענות
+  // מחיר על מוצר אחד (שורה לכל מחיר, או פיצול) לא יקבלו כל אחת את כל התקרה.
+  // וכשהמנתח הוביל, הדרישה נבנית מממצאי המנוע (ev.engineFindings) — ממצא אחד
+  // לכל מוצר, מחושב משורות הנייר. השער שוקל יחידות וכסף בסך הכול (ובלי עוגן
+  // יחידות — כסף בלבד) ואינו יודע איזה מוצר נושא את ההפרש: טענה "מחיר ב ₪6"
+  // כשהנייר מראה את ההפרש על א נסגרת באותה מידה, ותקרה לפי המוצר שבטענה (ב:
+  // אפס) מחקה ₪6 אמיתיים. טענות המנתח נשארות ההסבר שעל המסך ובהיסטוריה.
+  const aggregateOf = id => Array.from(ev.aggregates.values()).find(a => String(a.product.id) === String(id));
+  const priceTypes = f => !!f && (f.type === 'promo_missing' || f.type === 'price');
+  const claimSource = ev.analyzerLed === true && Array.isArray(ev.engineFindings) ? ev.engineFindings : ev.findings;
+  const claimedByProduct = new Map();
+  claimSource.filter(priceTypes).forEach(f => {
+    const id = String(f.productId == null ? '' : f.productId);
+    if (!claimedByProduct.has(id)) claimedByProduct.set(id, []);
+    claimedByProduct.get(id).push(f);
+  });
+  const productClaim = new Map();
+  claimedByProduct.forEach((list, id) => {
+    const a = aggregateOf(id);
+    const line = reconcileData.find(l => String(l.productId) === id);
+    const billed = a ? Number(a.qty) || 0 : 0;
+    const arrivedBilled = Math.max(0, Math.min(billed, Number(line && line.received) || 0));
+    const expected = a && Number(a.expectedUnitPrice) > 0 ? Number(a.expectedUnitPrice) : Number(list[0].expectedPrice);
+    // מה שהשורה גובה מעל המחיר הצפוי (השורה נכתבה למעלה במחיר הנייר).
+    const lineGap = a && line ? (Number(line.price) || 0) - expected : NaN;
+    const cap = isFinite(lineGap) && lineGap > 0 ? lineGap * arrivedBilled : 0;
+    const asked = list.filter(f => Number(f.amount) > 0.02);
+    const askedAmount = asked.reduce((sum, f) => sum + Number(f.amount), 0);
+    // אגורה של סבילות: כשהכול הגיע הממצא הוא בדיוק התקרה, וחישוב בדרך אחרת
+    // (מחיר ממוצע × כמות מול סכום − מחיר × כמות) יכול ליפול לצד השני של חצי אגורה.
+    const items = askedAmount <= cap + 0.01 + 1e-9 ? asked
+      : (cap > 0.02 ? [Object.assign({}, asked[0], { qty: arrivedBilled, amount: r2(cap), expectedPrice: expected, paperPrice: Number(line.price) })] : []);
+    productClaim.set(id, items);
+  });
+  const claims = [];
+  productClaim.forEach(items => claims.push(...items));
+  // ממצא שהיה נפתח עליו זיכוי והתקרה איפסה (כל מה שחויב חסר, או שבנייר אין
+  // הפרש מחיר) נשמר בהיסטוריה, אבל אינו משאיר את התעודה פתוחה לנצח: אין
+  // דרישה שאפשר לסגור, והחוסר עצמו כבר בשורות.
+  const noClaimFindings = new Set(ev.findings.filter(f => priceTypes(f) && Number(f.amount) > 0.02
+    && !((productClaim.get(String(f.productId == null ? '' : f.productId)) || []).length)));
   reconcileSupplierCreditClaim = claims.length ? { status: 'open', source: 'ai_invoice_scan', amount: r2(claims.reduce((sum, f) => sum + Number(f.amount || 0), 0)), items: claims.map(f => ({ productId: f.productId, name: f.name, qty: f.qty, expectedUnitPrice: f.expectedPrice, chargedUnitPrice: f.paperPrice, amount: r2(f.amount || 0), reason: f.type })) } : null;
-  const safeFindings = ev.findings.map(f => ({ type: f.type, productId: f.productId || null, name: f.name || '', qty: f.qty != null ? f.qty : null, amount: f.amount != null ? f.amount : null, expectedPrice: f.expectedPrice != null ? f.expectedPrice : null, paperPrice: f.paperPrice != null ? f.paperPrice : null, text: f.text || '' }));
+  // v373: כשהמנתח הוביל, ממצאי הכמות שנשמרים הם הטענות שלו — כל עוד הן
+  // מסתכמות בכל מוצר בדיוק למה שהנייר מראה (ev.engineFindings: נייר פחות
+  // נסרק). השער שוקל יחידות וכסף בסך הכול, ולכן שני מוצרים באותו מחיר יכולים
+  // להחליף ביניהם כמות ("חסר 4 × ב" כשב-ב אין חוסר). השורות נכתבות מהנייר
+  // בכל מקרה; כאן רק מוודאים שגם ממצאי הכמות שנשמרו אינם סותרים אותן.
+  const quantityNet = list => {
+    const net = new Map();
+    (list || []).forEach(f => { if (f && (f.type === 'shortage' || f.type === 'surplus')) net.set(String(f.productId), (net.get(String(f.productId)) || 0) + (f.type === 'shortage' ? 1 : -1) * (Number(f.qty) || 0)); });
+    return net;
+  };
+  let auditFindings = ev.findings;
+  if (ev.analyzerLed === true && Array.isArray(ev.engineFindings)) {
+    const claimed = quantityNet(ev.findings), paper = quantityNet(ev.engineFindings);
+    if (Array.from(new Set([...claimed.keys(), ...paper.keys()])).some(id => (claimed.get(id) || 0) !== (paper.get(id) || 0))) {
+      auditFindings = ev.findings.filter(f => f.type !== 'shortage' && f.type !== 'surplus').concat(ev.engineFindings.filter(f => f.type === 'shortage' || f.type === 'surplus'));
+    }
+  }
+  const safeFindings = auditFindings.map(f => Object.assign({ type: f.type, productId: f.productId || null, name: f.name || '', qty: f.qty != null ? f.qty : null, amount: f.amount != null ? f.amount : null, expectedPrice: f.expectedPrice != null ? f.expectedPrice : null, paperPrice: f.paperPrice != null ? f.paperPrice : null, text: f.text || '' },
+    noClaimFindings.has(f) ? { noClaim: true, text: (f.text || '') + ' — בלי דרישת זיכוי: בנייר אין הפרש מחיר על יחידה שהגיעה' } : {}));
   const confirmedMappings = aiConfirmedMappingsAudit();
   const automaticMappings = aiAutomaticNamePriceMappingsAudit();
   reconcileAiAudit = { version: 6, scannedAt: Date.now(), model: aiScanResponse && aiScanResponse.model || 'unknown', requestId: aiScanResponse && aiScanResponse.requestId || null, attempts: aiScanAttemptCount || 1, autoRotation: aiScanAutoRotationNote || '', totalVerified: !!ev.totalVerified, unitsVerified: !!ev.unitsVerified, unitsAnchorless: !!ev.unitsAnchorless, documents: ev.docSummaries, confirmedMappings, automaticMappings, clientAutoResolutions: (Array.isArray(ev.autoResolutions) ? ev.autoResolutions : []).slice(0, 200), perDocument: (aiScanResponse && aiScanResponse.perDocument) || null, findings: safeFindings, hasDiscrepancy: safeFindings.some(f => ['shortage', 'surplus', 'price', 'promo_missing'].includes(f.type)) };
@@ -18224,7 +18300,9 @@ function receiptDiscrepancyInfo(rc, opts) {
   // v201: ממצא מחיר שהבדיקה מוכיחה שנבע ממבצע שלא נתפס אינו "טיפול נדרש"
   // ואינו משאיר את התעודה אדומה לנצח.
   const aiAuditDay = (rc && rc.date) || todayStr();
-  const aiHasNonQuantityFinding = aiFindings.some(f => f && (f.type === 'price' || f.type === 'promo_missing') && !aiPriceFindingPromoMatch(f, aiAuditDay));
+  // v373: ממצא שנשמר בלי דרישת זיכוי (noClaim — בנייר אין הפרש על יחידה שהגיעה)
+  // אינו "טיפול נדרש": אין דרישה לסגור, והחוסר עצמו פותח את התעודה משורותיה.
+  const aiHasNonQuantityFinding = aiFindings.some(f => f && (f.type === 'price' || f.type === 'promo_missing') && f.noClaim !== true && !aiPriceFindingPromoMatch(f, aiAuditDay));
   const aiAuditOpen = !!(rc && rc.aiAudit && rc.aiAudit.hasDiscrepancy && (aiHasNonQuantityFinding || (!aiFindings.length && !(priceOffsets.length && !finalShort.length && !finalOver.length))));
   // חוסר שנסגר במלואו בזיכוי אינו פותח את התעודה; פער סכום חיובי (בכיוון
   // חוסר) נבלע גם הוא בזיכוי. עודף, פער יחידות וממצאי AI אינם נסגרים בכסף.
@@ -18259,13 +18337,51 @@ function openShortGoodsConfirm(rcId) {
   const val = r2(items.reduce((a, x) => a + lineTotalFromUnit(x.price, x.n), 0));
   showConfirm('התקבל זיכוי בסחורה', 'הספק השלים את הסחורה החסרה: ' + receiptSideText(items) + ' (₪' + fmtMoney(val) + '). ' + (hasDeliveryCredit ? 'הפריטים האלה יתווספו לתשלום; הזיכוי הכספי שכבר התקבל נשמר. לאשר?' : 'התעודה תשולם במלואה לפי הנייר ולא יידרש זיכוי כספי. לאשר?'), 'כן, הסחורה הגיעה', () => saveShortGoods(rcId, items));
 }
+// v373: דרישת זיכוי על מחיר/מבצע נפתחת רק על יחידות שחויבו וגם הגיעו — יחידה
+// חסרה יורדת מהתשלום כחוסר במחיר הנייר, כולל ההפרש. כשהחוסר מושלם בסחורה
+// היחידות האלה כבר משולמות במחיר הנייר, ולכן ההפרש עליהן חוזר לדרישה: חויבו
+// 12 ב-₪5.50 במקום ₪5, הגיעו 4 (דרישה ₪2), ו-8 הגיעו אחר כך — הדרישה ₪6 והחודש
+// משלם ₪110 ולא ₪114. goods: [{ productId, qty }]. דרישה שכבר אומתה, קוזזה או
+// בוטלה אינה נפתחת מחדש כאן.
+function supplierCreditClaimGoodsTopUp(rc, goods) {
+  const c = rc && rc.supplierCreditClaim;
+  if (!c || !Array.isArray(c.items) || !['open', 'partial', 'deferred'].includes(c.status)) return null;
+  if (c.source !== 'ai_invoice_scan' && c.source !== 'manual_line') return null;
+  const claim = cloneSafe(c), added = [];
+  (goods || []).forEach(g => {
+    const id = String(g && g.productId != null ? g.productId : ''), n = Number(g && g.qty) || 0;
+    if (!id || !(n > 0)) return;
+    const own = claim.items.filter(it => it && String(it.productId) === id && (Number(it.qty) || 0) > 0);
+    if (!own.length) return;
+    const item = own[0], field = item.amount != null ? 'amount' : 'expectedDiscount';
+    const line = (rc.items || []).find(l => l && String(l.productId) === id);
+    const billed = line ? Number(line.noteQty != null ? line.noteQty : line.qty) || 0 : 0;
+    const qty = r2(Math.min(n, Math.max(0, billed - own.reduce((sum, it) => sum + (Number(it.qty) || 0), 0))));
+    const unit = (Number(item[field]) || 0) / (Number(item.qty) || 1);
+    const extra = unit > 0 ? r2(unit * qty) : 0;
+    if (!(qty > 0) || !(extra > 0)) return;
+    item.qty = r2((Number(item.qty) || 0) + qty);
+    item[field] = r2((Number(item[field]) || 0) + extra);
+    added.push({ productId: id, qty, amount: extra });
+  });
+  if (!added.length) return null;
+  claim.amount = r2((Number(claim.amount) || 0) + added.reduce((sum, x) => sum + x.amount, 0));
+  if (claim.status === 'partial') claim.remainingAmount = r2(Math.max(0, claim.amount - (Number(claim.receivedAmount) || 0)));
+  return { claim, added };
+}
 async function saveShortGoods(rcId, items) {
   const rc = receipts.find(x => x.id === rcId); if (!rc) return;
   const at = Date.now();
-  const notes = (Array.isArray(rc.shortGoodsNotes) ? rc.shortGoodsNotes : []).concat(items.map(x => ({ productId: x.productId || '', name: x.name || '', qty: Number(x.n) || 0, price: Number(x.price) || 0, at })));
-  const saved = await runCloudTask('close shortage by goods', { op: 'update', path: dataPath('receipts', rc.id), data: { shortGoodsNotes: cloneSafe(notes) }, operationId: makeOperationId('short_goods') });
+  const topUp = supplierCreditClaimGoodsTopUp(rc, items.map(x => ({ productId: x.productId, qty: Number(x.n) || 0 })));
+  const topUpOf = id => topUp ? topUp.added.find(x => x.productId === String(id)) : null;
+  const notes = (Array.isArray(rc.shortGoodsNotes) ? rc.shortGoodsNotes : []).concat(items.map(x => Object.assign({ productId: x.productId || '', name: x.name || '', qty: Number(x.n) || 0, price: Number(x.price) || 0, at },
+    topUpOf(x.productId) ? { claimTopUp: topUpOf(x.productId) } : {})));
+  const data = { shortGoodsNotes: cloneSafe(notes) };
+  if (topUp) data.supplierCreditClaim = cloneSafe(topUp.claim);
+  const saved = await runCloudTask('close shortage by goods', { op: 'update', path: dataPath('receipts', rc.id), data, operationId: makeOperationId('short_goods') });
   if (!saved) return;
   rc.shortGoodsNotes = notes;
+  if (topUp) rc.supplierCreditClaim = topUp.claim;
   buzz(18);
   showToast((rc.shortCreditNotes || []).some(n => n.source === 'delivery_credit_scan') ? 'השלמת הסחורה נרשמה. התשלום והחוסר שנותר עודכנו.' : 'החוסר הושלם בסחורה ✓ התעודה משולמת במלואה', null, null, 3000);
   if (currentView === 'receiptsHistory') renderReceiptsHistory();
