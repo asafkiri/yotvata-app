@@ -77,7 +77,8 @@ function money(c) {
 test('the field receipt: only the uncredited cheese is an open discrepancy; the two credited products are shown as covered', () => {
   const { c, html } = render(receipt());
   const diff = diffBox(html);
-  assert.equal(diff, 'הפרשים מול התעודה חסר: גבינה לבנה 500 12 יח׳ · ₪100.44 מצא קיזוז תעודת ספק ₪1,941.24 (₪1,629.47 + ₪311.77) · לתשלום ₪1,685.30');
+  // v372: the open row also says what the paper billed and what was scanned (12 − 0 = 12).
+  assert.equal(diff, 'הפרשים מול התעודה חסר: גבינה לבנה 500 חויב בתעודה 12 · נסרק בפועל 0 · חסר 12 יח׳ · ₪100.44 מצא קיזוז תעודת ספק ₪1,941.24 (₪1,629.47 + ₪311.77) · לתשלום ₪1,685.30');
   assert.deepEqual(offsetButtons(html), ['cheese'], 'one "find offset" button, for the product that is really open');
   // v370: no violet box — the scan found no price issue, and its quantity findings only repeat the card.
   assert.equal(aiBox(html), '');
@@ -109,8 +110,9 @@ test('a credit for part of a product leaves the rest open, in the rows and in th
   const half = { ...CREDIT_ROWS.mocha, qty: 5, amount: 62.65 };
   const { c, html } = render(receipt({ shortCreditNotes: [driverCredit([half])] }));
   const diff = diffBox(html);
-  assert.ok(diff.includes('חסר: מוקה שקית (מארז) 5 יח׳ · ₪62.65'), diff);
-  assert.ok(diff.includes('חסר: ארגז פלסטיק 400*300 2 יח׳ · ₪30.20') && diff.includes('חסר: גבינה לבנה 500 12 יח׳ · ₪100.44'), diff);
+  // v372: the partly credited row keeps its open part and adds the whole paper gap under it.
+  assert.ok(diff.includes('חסר: מוקה שקית (מארז) 5 יח׳ · ₪62.65 חויב בתעודה 20 · נסרק בפועל 10 · חסר 10 (5 יח׳ בזיכוי)'), diff);
+  assert.ok(diff.includes('חסר: ארגז פלסטיק 400*300 חויב בתעודה 2 · נסרק בפועל 0 · חסר 2 יח׳ · ₪30.20') && diff.includes('חסר: גבינה לבנה 500 חויב בתעודה 12 · נסרק בפועל 0 · חסר 12 יח׳ · ₪100.44'), diff);
   assert.deepEqual(offsetButtons(html), ['crate', 'cheese', 'mocha']);
   assert.equal(aiBox(html), '');
   assert.ok(creditBox(html).includes('נותר חוב ₪193.29 זיכוי מס׳ 407300217606 · 25.9.2026 ₪62.65 כיסה: 5 × מוקה שקית (מארז) · ₪62.65'));
