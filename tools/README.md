@@ -67,6 +67,7 @@ node --test tools/document-summary-review.test.mjs  # אימות סיכום תע
 node --test tools/credit-service-contract.test.mjs  # החוזה מול שרת הסריקה האמיתי (yotvata-ai-scan v149) על זיכוי 22229080 מהגיבוי (v365)
 node --test tools/receipt-history-credit.test.mjs   # חוסר שהזיכוי מהנהג כיסה אינו מוצג כפתוח בכרטיס התעודה ובמסך העריכה (v369)
 node --test tools/return-approve.test.mjs          # אישור תעודת זיכוי בלחיצה אחת, בלי להקליד את הסכום (v371)
+node --test tools/auto-offset.test.mjs             # קיזוז אוטומטי בין תעודות — רק ב-9 התעודות האחרונות, כולל כמויות משקל (v373)
 node --test tools/receipt-quantity-detail.test.mjs  # חויב בתעודה · נסרק בפועל · חסר — בסיכום התעודה ובכרטיס התעודה השמורה (v372)
 ```
 
