@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v372 כמה חויב, כמה נסרק וכמה חסר</title>
+    <title>הזמנות יטבתה - v373 קיזוז אוטומטי רק ב-9 התעודות האחרונות</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v372 כמה חויב, כמה נסרק וכמה חסר</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v373 קיזוז אוטומטי רק ב-9 התעודות האחרונות</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -18603,6 +18603,10 @@ function crossOffsetId(aId, bId, productId, otherProductId) {
 // זהה בתעודה חדשה נשאר קודם "הצעה לאישור" והמשתמש נאלץ לאשר ביד. עכשיו כל
 // זוג מדויק בין כל התעודות הטעונות מתקזז לבד. הסריקה מעדיפה זוגות קרובים
 // בזמן: כל תעודה נבדקת קודם מול התעודות הסמוכות לה.
+// v373: החלון של 9 התעודות האחרונות חזר, כמו בתנובה — קיזוז שקט מול תעודה
+// ישנה קשה לזהות ולבקר, ולכן זוג מדויק שאחד מצדדיו מחוץ לחלון נשאר הצעה
+// לאישור ידני בכרטיס התעודה. ההשוואה הסובלנית לכמויות משקל נשארת.
+const AUTO_OFFSET_RECENT_DOCS = 9;
 let autoOffsetBusy = false;
 function autoOffsetDismissed(rc, other, oid) {
   return (Array.isArray(rc.canceledOffsetIds) && rc.canceledOffsetIds.includes(oid)) ||
@@ -18614,8 +18618,9 @@ function sameOffsetQty(a, b) {
   return Math.abs((Number(a) || 0) - (Number(b) || 0)) < 0.000001;
 }
 function findAutoOffsetPair() {
-  // receipts כבר ממוין מהחדשה לישנה — כל תעודה נבדקת מול כל התעודות שאחריה.
-  const recent = receipts
+  // receipts כבר ממוין מהחדשה לישנה — 9 הראשונות הן "ההזמנות האחרונות",
+  // וכל אחת מהן נבדקת מול התעודות שאחריה בתוך החלון.
+  const recent = receipts.slice(0, AUTO_OFFSET_RECENT_DOCS)
     .filter(rc => !(rc.offsetClosed && Number(rc.offsetSchemaVersion || 0) < 2));
   const sides = recent.map(rc => receiptOffsets(rc));
   for (let i = 0; i < recent.length; i++) {
@@ -18669,9 +18674,9 @@ async function autoApplyExactOffsets() {
   autoOffsetBusy = true;
   const applied = [];
   try {
-    // v269: בלי חלון תעודות ייתכנו יותר זוגות בסריקה הראשונה — התקרה הוגדלה;
+    // v373: עם חלון של 9 תעודות אין צורך בתקרה של 60 (v269) — 15 כמו בתנובה;
     // מה שנשאר ייתפס בסנכרון הבא, כי כל כתיבה מפעילה סריקה נוספת.
-    for (let guard = 0; guard < 60; guard++) {
+    for (let guard = 0; guard < 15; guard++) {
       const p = findAutoOffsetPair();
       if (!p) break;
       const ok = await applyAutoOffsetPair(p);
