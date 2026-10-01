@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v378 היסטוריית חזרות ותעודות במסך אחד</title>
+    <title>הזמנות יטבתה - v379 כפתור ביטול אימות אחד בכרטיס החזרה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -124,7 +124,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v378 היסטוריית חזרות ותעודות במסך אחד</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v379 כפתור ביטול אימות אחד בכרטיס החזרה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -17988,11 +17988,11 @@ function returnCardInReceipts(r) {
       '<button data-role="del-return" data-id="' + r.id + '" class="btn-tap w-full mt-2 bg-white border border-rose-200 text-rose-600 rounded-xl py-2 font-black text-[11px]"><i class="fa-solid fa-trash-can"></i> מחק תעודה</button>' // v378
     : '<div class="mt-2">' + breakdown + retCarryBoxHtml(r) + creditPartsInfoHtml(r) + (openGap ? creditAddNoteHtml(r) : '') +
       (openGap ? retCarryBtnHtml(r) : '') +
-      '<button data-role="uncredit" data-id="' + r.id + '" class="btn-tap w-full bg-white border border-slate-300 text-slate-500 rounded-xl py-2 font-black text-[11px] mt-2"><i class="fa-solid fa-rotate-left"></i> בטל אימות — פתח מחדש לתיקון</button></div>' +
-      '<div class="flex gap-2">' +
-        '<button data-role="rv-open" data-id="' + r.id + '" class="btn-tap flex-1 font-black py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 ' + (openGap ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700') + '"><i class="fa-solid ' + (openGap ? 'fa-wrench' : 'fa-pen') + '"></i> ' + (openGap ? 'תקן פער' : 'ערוך אימות') + '</button>' +
-        '<button data-role="uncredit" data-id="' + r.id + '" class="btn-tap px-3 font-bold py-2.5 rounded-xl text-sm bg-slate-100 text-slate-500" title="בטל אימות"><i class="fa-solid fa-rotate-left"></i></button>' +
-      '</div>' + '<button data-role="ret-edit-items" data-id="' + r.id + '" class="btn-tap w-full mt-2 bg-white border border-indigo-200 text-indigo-700 rounded-xl py-2 font-black text-[11px]"><i class="fa-solid fa-pen-to-square"></i> ערוך פריטים בתעודה</button>';
+      '</div>' +
+      // v379: פעולת האימות הראשית ברוחב מלא, ומתחתיה כפתור "בטל אימות" אחד עם טקסט — האייקון הבודד שישב לצידה ירד
+      '<button data-role="rv-open" data-id="' + r.id + '" class="btn-tap w-full font-black py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 ' + (openGap ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700') + '"><i class="fa-solid ' + (openGap ? 'fa-wrench' : 'fa-pen') + '"></i> ' + (openGap ? 'תקן פער' : 'ערוך אימות') + '</button>' +
+      '<button data-role="uncredit" data-id="' + r.id + '" class="btn-tap w-full mt-2 bg-white border border-slate-300 text-slate-500 rounded-xl py-2 font-black text-[11px]"><i class="fa-solid fa-rotate-left"></i> בטל אימות — פתח מחדש לתיקון</button>' +
+      '<button data-role="ret-edit-items" data-id="' + r.id + '" class="btn-tap w-full mt-2 bg-white border border-indigo-200 text-indigo-700 rounded-xl py-2 font-black text-[11px]"><i class="fa-solid fa-pen-to-square"></i> ערוך פריטים בתעודה</button>';
   return '<details class="bg-white rounded-2xl border-2 ' + borderCls + ' shadow-sm overflow-hidden">' +
     '<summary class="cursor-pointer">' +
       '<div class="' + barCls + ' px-4 py-2 flex items-center justify-between gap-2 font-black text-[13px]">' +
