@@ -527,3 +527,23 @@ test('הגרסה: הכותרת, התג בפינה ושם המטמון של ה-se
   assert.equal(cache[1], title[1], 'ה-service worker מרענן את המטמון עם אותה גרסה');
   assert.ok(Number(title[1].slice(1)) >= 378, 'הגרסה שאיחדה את המסכים או מאוחרת ממנה');
 });
+
+// ===== ז. v379: כפתור "בטל אימות" אחד =====
+// בכרטיס מאומת היו שני כפתורים לאותה פעולה: טקסט מלא, ולצד "ערוך אימות" גם
+// אייקון חץ בודד. נשאר הטקסט — הוא אומר מה יקרה — מתחת לפעולה הראשית.
+test('v379: בכרטיס מאומת יש כפתור "בטל אימות" אחד — עם טקסט, אחרי פעולת האימות הראשית', () => {
+  const c = setup();
+  c.run("setView('receiptsHistory')");
+  for (const id of ['ret-ok', 'ret-gap']) {
+    const html = card(c, id);
+    assert.equal(html.split('data-role="uncredit"').length - 1, 1, id + ': כפתור ביטול אימות אחד');
+    assert.ok(html.includes('<i class="fa-solid fa-rotate-left"></i> בטל אימות — פתח מחדש לתיקון'), id + ': עם טקסט שמסביר');
+    assert.ok(!html.includes('title="בטל אימות"'), id + ': האייקון הבודד ירד');
+    assert.ok(html.indexOf('data-role="rv-open"') < html.indexOf('data-role="uncredit"'), id + ': מתחת לפעולה הראשית');
+    assert.ok(html.indexOf('data-role="uncredit"') < html.indexOf('data-role="ret-edit-items"'), id + ': ולפני עריכת הפריטים');
+  }
+  assert.ok(!card(c, 'ret-pending').includes('data-role="uncredit"'), 'תעודה ממתינה — אין מה לבטל');
+  // והכפתור עדיין חי: שואל קודם
+  c.click('uncredit', 'ret-ok');
+  assert.deepEqual(json(c, 'testConfirms.map(x => x.title)'), ['ביטול אימות']);
+});
