@@ -18120,7 +18120,7 @@ function consumeStoredReceiptOffsets(rc, shortItems, overItems) {
         // v375: קיזוז לפי שווי שהשאיר בשורה פחות מחצי אגורה סגר אותה. מחירי
         // יחידה שנבדלים בשבר אגורה (3.1617 מול 3.162) הותירו 0.001265 יח׳ "פונצ
         // בננה" בשווי ₪0.00, והתעודה נשארה פתוחה על "עודף" שאין מה לעשות איתו.
-        if (precise && it.n > 0 && lineTotalFromUnit(it.price, it.n) === 0) { used = roundQty(used + it.n); it.n = 0; }
+        if (precise && it.n > 0 && Number(it.price) > 0 && lineTotalFromUnit(it.price, it.n) === 0) { used = roundQty(used + it.n); it.n = 0; }
       }
     });
     if (used > 0) applied.push({ ...x, id: key, qty: used });
