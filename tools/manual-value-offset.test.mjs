@@ -42,7 +42,7 @@ const FIELD_OFFSETS = [
 ];
 function load(rc, view = 'receiving') {
   const c = harness.runtime('yotvata');
-  c.context.fixture = rc;
+  c.context.fixture = structuredClone(rc); // הבדיקות משוות לתעודה המקורית — לא לאותו אובייקט
   c.run(`receipts = [fixture]; returns = []; currentView = '${view}';`);
   if (view === 'receiptsHistory') c.run('renderReceiptsHistory()');
   return c;
@@ -129,4 +129,16 @@ test('שארית בשורה שאינה מקיזוז לפי שווי לא נסג�
   const w = { productId: 'w', name: 'גבינה במשקל', qty: 0, noteQty: 12, unitPrice: 0.3, lineTotal: 0 };
   const c = load(receipt([w], { externalOffsets: [{ id: 'xo2|rc-0|rc-1|w', otherId: 'rc-0', productId: 'w', name: w.name, qty: 11.99, dir: 'short', at: 1, source: 'manual' }] }));
   assert.deepEqual(state(c).short, ['w:0.01']);
+});
+
+test('שורה במחיר 0 של אותו מוצר אינה נבלעת בכלל השארית', async () => {
+  // 5 יח׳ במתנה (₪0) ו-5 יח׳ ב-₪3 חסרות; 3 יח׳ של מוצר אחר ב-₪3 הגיעו בעודף. קיזוז של ₪9
+  // צורך 3 יח׳ — יחידות המתנה אינן "שוות ₪0.00 ולכן סגורות".
+  const free = { productId: 'x', name: 'מוצר במתנה', qty: 0, noteQty: 5, unitPrice: 0, lineTotal: 0 };
+  const paid = { productId: 'x', name: 'מוצר במתנה', qty: 0, noteQty: 5, unitPrice: 3, lineTotal: 0 };
+  const extra = { productId: 'y', name: 'מוצר אחר', qty: 3, noteQty: 0, unitPrice: 3, lineTotal: 9 };
+  const c = load(receipt([free, paid, extra]));
+  await c.run(`applyManualValueOffset(findOpenOffsetSide('rc-1', 'x', 'short'), findOpenOffsetSide('rc-1', 'y', 'over'), 9)`);
+  assert.deepEqual(json(c, "receiptDiscrepancyInfo(receipts[0]).externalOffsets.map(x => [x.dir, x.productId, x.qty])"), [['short', 'x', 3], ['over', 'y', 3]]);
+  assert.deepEqual(state(c).short, ['x:2', 'x:5']);
 });

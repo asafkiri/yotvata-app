@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v375 קיזוז לפי שווי סוגר את השורה עד הסוף</title>
+    <title>הזמנות יטבתה - v376 דף המבצעים גם כקובץ אקסל</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v375 קיזוז לפי שווי סוגר את השורה עד הסוף</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v376 דף המבצעים גם כקובץ אקסל</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -18120,6 +18120,7 @@ function consumeStoredReceiptOffsets(rc, shortItems, overItems) {
         // v375: קיזוז לפי שווי שהשאיר בשורה פחות מחצי אגורה סגר אותה. מחירי
         // יחידה שנבדלים בשבר אגורה (3.1617 מול 3.162) הותירו 0.001265 יח׳ "פונצ
         // בננה" בשווי ₪0.00, והתעודה נשארה פתוחה על "עודף" שאין מה לעשות איתו.
+        // שורה במחיר 0 "שווה" תמיד ₪0.00, ולכן אינה נבלעת כאן — היתרה שלה נשארת.
         if (precise && it.n > 0 && Number(it.price) > 0 && lineTotalFromUnit(it.price, it.n) === 0) { used = roundQty(used + it.n); it.n = 0; }
       }
     });
@@ -20342,39 +20343,265 @@ function promoImportExistingPromo(group, sheet) {
     && r2(pr.pct) === pct
     && Array.isArray(pr.productIds) && ids.some(id => pr.productIds.indexOf(id) !== -1));
 }
+// ===== v376: דף המבצעים כקובץ אקסל =====
+// באוקטובר 2026 הדף הגיע מהספק כ-XLSX במקום PDF, והאייפון האפיר אותו בבורר:
+// הכפתור ביקש רק PDF ותמונות. XLSX הוא ZIP של XML, כמו המצגת (v277), ולכן
+// הוא נפתח כאן במכשיר ונקרא ישירות מהתאים — הברקודים, המק"טים, המחירים
+// והאחוזים הם ערכי הגיליון עצמם, בלי שרת ובלי OCR. הדף בנוי טבלאות: כותרת
+// קבוצה ("נמס ICE :"), שורת כותרות (ברקוד · מק"ט · תיאור מוצר · גורם אירוז ·
+// מחיר קמעונאי · הנחה) ושורות מוצרים, כשגורם האירוז, המחיר וההנחה כתובים
+// פעם אחת לכל הטבלה (תא ממוזג). התוצאה בנויה בדיוק כמו מה שהשרת מחזיר
+// מ-PDF, ומכאן אותו מסלול: התאמה למאגר, אשף מוצרים חסרים וסיכום לאישור.
+function promoImportIsXlsx(file) {
+  // .xlsm (עם מאקרו) בנוי בדיוק כמו .xlsx
+  return /\.xls[xm]$/i.test((file && file.name) || '') || /spreadsheetml\.sheet|sheet\.macroEnabled/i.test((file && file.type) || '');
+}
+function xlsxColIndex(letters) {
+  let n = 0;
+  for (const ch of String(letters || '').toUpperCase()) if (ch >= 'A' && ch <= 'Z') n = n * 26 + (ch.charCodeAt(0) - 64);
+  return n - 1;
+}
+function xlsxText(xml) {
+  // כל ריצות ה-<t> של מחרוזת (גם טקסט מעוצב), בלי שורות ההגייה (rPh)
+  const body = String(xml || '').replace(/<rPh\b[\s\S]*?<\/rPh>/g, '');
+  const re = /<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g;
+  let out = '', m;
+  while ((m = re.exec(body))) out += m[1];
+  return pptxDecodeXml(out);
+}
+function xlsxSharedStrings(xml) {
+  const out = [], re = /<si\s*\/>|<si\b[^>]*>([\s\S]*?)<\/si>/g;
+  let m;
+  while ((m = re.exec(String(xml || '')))) out.push(m[1] != null ? xlsxText(m[1]) : '');
+  return out;
+}
+// גיליון → מערך שורות של מחרוזות לפי עמודה (A=0). תא ממוזג מקבל את ערך התא
+// הראשון שלו בכל הטווח — כך שגורם האירוז, המחיר וההנחה יושבים בכל שורת מוצר.
+// תא מספרי נשמר בצורה קנונית: כלים שאינם אקסל (ייצוא ממערכות) כותבים
+// 7.29011056436E12 או 329102.0, והספרות לבדן היו נותנות ברקוד ומק"ט מזויפים.
+// שורה מוסתרת אינה מודפסת גם ב-PDF, ולכן היא יוצאת מהגיליון — לא מתרוקנת,
+// כי שורה ריקה באמצע טבלה מסיימת אותה.
+function xlsxSheetRows(xml, shared) {
+  xml = String(xml || '');
+  shared = shared || [];
+  const rows = [], hidden = new Set();
+  const rowRe = /<row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/row>)/g;
+  let r, nextRow = 0;
+  while ((r = rowRe.exec(xml))) {
+    const rn = /\br="(\d+)"/.exec(r[1]);
+    const ri = rn ? parseInt(rn[1], 10) - 1 : nextRow;
+    nextRow = ri + 1;
+    if (/\bhidden="(?:1|true)"/.test(r[1])) hidden.add(ri);
+    const cells = [];
+    const cellRe = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
+    let c, nextCol = 0;
+    while ((c = cellRe.exec(r[2] || ''))) {
+      const ref = /\br="([A-Z]+)\d*"/i.exec(c[1]);
+      const ci = ref ? xlsxColIndex(ref[1]) : nextCol;
+      nextCol = ci + 1;
+      const type = (/\bt="([^"]+)"/.exec(c[1]) || [])[1] || '';
+      const inner = c[2] || '';
+      const v = /<v>([\s\S]*?)<\/v>/.exec(inner);
+      let val = '';
+      if (type === 's') val = v ? (shared[parseInt(v[1], 10)] || '') : '';
+      else if (type === 'inlineStr') val = xlsxText((/<is>([\s\S]*?)<\/is>/.exec(inner) || [])[1]);
+      else if (v) {
+        const raw = pptxDecodeXml(v[1]);
+        const n = (type === '' || type === 'n') && raw.trim() !== '' ? Number(raw) : NaN;
+        val = Number.isFinite(n) ? (Number.isInteger(n) && Math.abs(n) < 1e21 ? n.toFixed(0) : String(n)) : raw;
+      }
+      cells[ci] = val;
+    }
+    rows[ri] = cells;
+  }
+  const mergeRe = /<mergeCell\b[^>]*\bref="([A-Z]+)(\d+):([A-Z]+)(\d+)"/gi;
+  let mg;
+  while ((mg = mergeRe.exec(xml))) {
+    const c0 = xlsxColIndex(mg[1]), r0 = parseInt(mg[2], 10) - 1;
+    const c1 = Math.min(xlsxColIndex(mg[3]), c0 + 30), r1 = Math.min(parseInt(mg[4], 10) - 1, r0 + 200, rows.length - 1);
+    const val = rows[r0] && rows[r0][c0];
+    if (val == null || val === '') continue;
+    for (let ri = r0; ri <= r1; ri++) for (let ci = c0; ci <= c1; ci++) {
+      rows[ri] = rows[ri] || [];
+      if (rows[ri][ci] == null || rows[ri][ci] === '') rows[ri][ci] = val;
+    }
+  }
+  return Array.from(rows, row => Array.from(row || [], v => v == null ? '' : String(v))).filter((row, ri) => !hidden.has(ri));
+}
+// השורות → { validFrom, validTo, groups } באותו מבנה שהשרת מחזיר מ-PDF
+// (cleanPromoSheetResult): אחוז בין 0 ל-100, ברקוד של 8–14 ספרות ושם חובה.
+// מה שלא כתוב בקובץ נשאר null — שום דבר לא מנוחש.
+function promoSheetFromXlsxRows(rows) {
+  const norm = v => String(v == null ? '' : v).replace(/[‎‏‪-‮⁦-⁩]/g, '').replace(/\s+/g, ' ').trim();
+  const digits = v => String(v == null ? '' : v).replace(/\D/g, '');
+  // ברקוד שנכתב כטקסט "7290003029792.0" הוא המספר השלם. "7.29E+12" בתא טקסט
+  // הוא תצוגה מעוגלת שאיבדה ספרות — אי אפשר לקרוא ממנו ברקוד, והשורה מדולגת.
+  const code = v => /^\d+\.0+$/.test(v) ? v.split('.')[0] : (/\de[+-]?\d/i.test(v) ? '' : digits(v));
+  // "12,5%" / "9,98" — פסיק עשרוני; "1+1" אינו מספר ואינו אחוז
+  const num = v => {
+    const s = String(v == null ? '' : v);
+    if (/\d\s*\+\s*\d/.test(s)) return NaN;
+    return parseFloat(s.replace(/(\d),(\d{1,2})(?!\d)/g, '$1.$2').replace(/[^\d.]/g, ''));
+  };
+  const texts = (rows || []).map(row => Array.from(row || [], norm));
+  const filled = t => t.filter(Boolean);
+  const distinct = t => Array.from(new Set(filled(t)));
+  const isHeader = t => t.some(x => /^ברקוד/.test(x)) && t.some(x => /תי?אור/.test(x));
+  const isoDate = (d, m, y) => {
+    const year = y.length === 2 ? 2000 + parseInt(y, 10) : parseInt(y, 10);
+    if (!(m >= 1 && m <= 12 && d >= 1 && d <= 31)) return null;
+    return year + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+  };
+  const datesIn = line => {
+    const out = [], re = /(\d{1,2})[./](\d{1,2})[./](\d{4}|\d{2})(?![\d.])/g;
+    let m;
+    while ((m = re.exec(line))) { const iso = isoDate(parseInt(m[1], 10), parseInt(m[2], 10), m[3]); if (iso) out.push(iso); }
+    return out;
+  };
+  // "תחילת פעילות מתאריך 04.10.2026 ועד לתאריך 31.10.2026". שורה ממוזגת חוזרת
+  // בכל עמודה — נספרת פעם אחת, אחרת תאריך אחד נקרא כ"מתאריך" וגם כ"עד תאריך".
+  let validFrom = null, validTo = null;
+  const lines = texts.map(t => distinct(t).join(' '));
+  const dateLine = lines.find(l => /תאריך/.test(l) && datesIn(l).length >= 2) || lines.find(l => datesIn(l).length >= 2);
+  if (dateLine) [validFrom, validTo] = datesIn(dateLine);
+  const groups = [];
+  for (let i = 0; i < texts.length; i++) {
+    const head = texts[i];
+    if (!isHeader(head)) continue;
+    const col = (re, not) => head.findIndex(x => re.test(x) && !(not && not.test(x)));
+    const cBarcode = col(/^ברקוד/), cName = col(/תי?אור/), cSku = col(/מק["'״׳]?ט/);
+    // "גורם אירוז" בדף של אוקטובר — וגם "גורם אריזה", "יח' באריזה", "בקרטון"
+    const cPack = col(/גורם|אי?רי?ו?ז|קרטון/, /מחיר|הנחה/);
+    // "מחיר לאחר הנחה" / "מחיר מבצע" אינם האחוז ואינם המחיר הקמעונאי
+    const cPct = col(/הנחה/, /מחיר|₪|סכום/);
+    const cRetail = col(/קמעונא/);
+    const cPrice = cRetail >= 0 ? cRetail : col(/מחיר/, /הנחה|מבצע|נטו|לאחר|אחרי|סופי/);
+    // כותרת הקבוצה: השורה הלא-ריקה הראשונה מעל שורת הכותרות, כשיש בה טקסט אחד בלבד
+    let name = '';
+    for (let k = i - 1; k >= 0; k--) {
+      const vals = distinct(texts[k]);
+      if (!vals.length) continue;
+      if (vals.length === 1 && digits(vals[0]).length < 8) name = vals[0].replace(/\s*[:：]\s*$/, '');
+      break;
+    }
+    const products = [];
+    let pack = null, price = null, pct = null, j = i + 1;
+    for (; j < texts.length; j++) {
+      const t = texts[j];
+      if (isHeader(t)) break;
+      const barcode = code(t[cBarcode] || '');
+      const productName = cName >= 0 ? (t[cName] || '') : '';
+      if (barcode.length < 8 || barcode.length > 14 || !productName) {
+        // שורה ריקה, או טקסט אחד לרוחב השורה (כותרת הקבוצה הבאה, הערה) — סוף הטבלה.
+        // שורת מוצר פגומה (ברקוד חסר או לא קריא) מדולגת לבדה, כמו בניקוי של השרת ל-PDF.
+        if (products.length && distinct(t).length <= 1) break;
+        continue;
+      }
+      const sku = cSku >= 0 ? (/^\d+\.0+$/.test(t[cSku] || '') ? t[cSku].split('.')[0] : (t[cSku] || '')) : '';
+      products.push({ barcode, name: productName.slice(0, 80), supplierItemCode: sku ? sku.slice(0, 20) : null });
+      if (pack == null && cPack >= 0) { const n = num(t[cPack]); if (n >= 1) pack = Math.round(n); }
+      if (price == null && cPrice >= 0) { const n = num(t[cPrice]); if (n > 0) price = n; }
+      if (pct == null && cPct >= 0) {
+        const raw = t[cPct] || '', n = num(raw);
+        if (n > 0) pct = /%/.test(raw) || n > 1 ? n : n * 100; // 0.15 בתא אחוזים = 15%
+      }
+    }
+    i = j - 1;
+    if (!products.length || !(pct > 0 && pct <= 100)) continue;
+    const discountPct = Math.round(pct * 100) / 100;
+    groups.push({
+      name: (name || ('מבצע ' + discountPct + '%')).slice(0, 60),
+      discountPct,
+      packUnits: pack >= 1 ? pack : null,
+      unitPriceExVat: price > 0 ? Math.round(price * 100) / 100 : null,
+      products
+    });
+  }
+  return groups.length ? { validFrom, validTo, groups } : null;
+}
+async function promoSheetFromXlsx(file) {
+  if (file.size > 15 * 1024 * 1024) throw new Error('קובץ האקסל גדול מדי (מעל 15MB)');
+  const unreadable = reason => new Error('לא הצלחתי לפתוח את קובץ האקסל' + (reason || '') + '. שמור אותו כ-PDF ונסה שוב.');
+  let zip;
+  // checkCRC32: קובץ שירד חלקית (מייל, וואטסאפ) נתפס כאן ולא כשגיאה באנגלית באמצע הקריאה
+  try { await ensureJsZip(); zip = await window.JSZip.loadAsync(file, { checkCRC32: true }); }
+  catch (e) { throw unreadable(e && e.message === 'script load failed' ? ' — אין חיבור לרשת לטעינת הקורא' : ''); }
+  const readText = async (name) => {
+    const f = zip.file(name);
+    if (!f) return '';
+    try { return await f.async('string'); } catch (e) { throw unreadable(''); }
+  };
+  const shared = xlsxSharedStrings(await readText('xl/sharedStrings.xml'));
+  // סדר הגיליונות האמיתי: workbook → rels → קובץ. גיליון מוסתר אינו חלק מהדף.
+  const book = await readText('xl/workbook.xml'), rels = await readText('xl/_rels/workbook.xml.rels');
+  const relMap = {};
+  const relRe = /<Relationship\b[^>]*>/g;
+  let r;
+  while ((r = relRe.exec(rels))) {
+    const id = /\bId="([^"]+)"/.exec(r[0]), target = /\bTarget="([^"]+)"/.exec(r[0]);
+    if (id && target && /worksheets\/[^"]+\.xml$/i.test(target[1])) relMap[id[1]] = 'xl/' + target[1].replace(/^\/?xl\//, '');
+  }
+  let tabs = [];
+  const sheetRe = /<sheet\b[^>]*>/g;
+  let s;
+  while ((s = sheetRe.exec(book))) {
+    const rid = /\s[A-Za-z_][\w.-]*:id="([^"]+)"/.exec(s[0]);
+    if (/\bstate="(?:hidden|veryHidden)"/.test(s[0])) continue;
+    if (rid && relMap[rid[1]]) tabs.push({ path: relMap[rid[1]], name: pptxDecodeXml((/\bname="([^"]*)"/.exec(s[0]) || [])[1] || '') });
+  }
+  if (!tabs.length && !/<sheet\b/.test(book)) {
+    tabs = Object.keys(zip.files).filter(n => /^xl\/worksheets\/sheet\d+\.xml$/i.test(n))
+      .sort((a, b) => parseInt(a.match(/\d+/)[0], 10) - parseInt(b.match(/\d+/)[0], 10)).map(path => ({ path, name: path }));
+  }
+  // כל גיליון נקרא לבד. שני גיליונות עם טבלאות מבצע (דרג חנות אחר, החודש הקודם)
+  // היו נפתחים יחד כמבצעים חופפים עם התאריכים של הראשון — לכן לא מנחשים.
+  const found = [];
+  for (const tab of tabs) {
+    const one = promoSheetFromXlsxRows(xlsxSheetRows(await readText(tab.path), shared));
+    if (one) found.push({ name: tab.name, sheet: one });
+  }
+  if (!found.length) throw new Error('בקובץ האקסל לא נמצאה טבלת מבצעים (שורת כותרות עם "ברקוד" ו"תיאור מוצר", ואחוז הנחה). שמור אותו כ-PDF ונסה שוב.');
+  if (found.length > 1) throw new Error('בקובץ האקסל יש ' + found.length + ' גיליונות עם טבלאות מבצע (' + found.map(f => f.name).join(' · ') + ') ולא ברור איזה מהם הוא הדף שלך. שמור כ-PDF רק את הגיליון הנכון ונסה שוב.');
+  return found[0].sheet;
+}
+async function promoImportReadOnServer(list) {
+  // v194: אם נבחר PDF — הוא נשלח כמו שהוא (הדף מגיע מהספק כ-PDF).
+  // אחרת: עד 4 תמונות, מוקטנות כרגיל.
+  const pdfFile = list.find(f => f.type === 'application/pdf' || /\.pdf$/i.test(f.name || ''));
+  let requestBody;
+  if (pdfFile) {
+    if (pdfFile.size > 15 * 1024 * 1024) throw new Error('קובץ ה-PDF גדול מדי (מעל 15MB) — צלם את העמודים כתמונות במקום');
+    requestBody = { mode: 'promoSheet', pdf: await promoImportFileRaw(pdfFile) };
+  } else {
+    if (list.some(f => /\.xls$/i.test(f.name || ''))) throw new Error('קובץ XLS בפורמט הישן אינו נתמך — שמור אותו כ-XLSX או כ-PDF');
+    const pages = [];
+    for (const file of list.slice(0, 4)) pages.push(await promoImportFileToDataUrl(file));
+    requestBody = { mode: 'promoSheet', pages: pages };
+  }
+  const token = await auth.currentUser.getIdToken();
+  const response = await aiFetchWithRetry(AI_SCAN_WORKER_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+    body: JSON.stringify(requestBody)
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload.ok || !payload.sheet) {
+    const code = payload.error || '';
+    if (code === 'invalid_document_count' || code === 'invalid_promo_sheet_input') throw new Error('שירות הסריקה עדיין בגרסה ישנה שאינה כוללת ייבוא מבצעים — יש להעלות קודם את server.js החדש.');
+    if (code === 'rate_limited') throw new Error('בוצעו יותר מדי ניסיונות. המתן 10 דקות ונסה שוב.');
+    throw new Error('קריאת הדף לא הצליחה. נסה שוב עם צילום חד יותר.');
+  }
+  return payload.sheet;
+}
 async function promoImportStart(files) {
   if (!files || !files.length) return;
   if (!auth || !auth.currentUser) { showToast('עדיין אין חיבור מאובטח — המתן רגע ונסה שוב', null, null, 3000); return; }
   promoImport = { stage: 'reading', sheet: null, missing: [], error: '' };
   renderPromos();
   try {
-    // v194: אם נבחר PDF — הוא נשלח כמו שהוא (הדף מגיע מהספק כ-PDF).
-    // אחרת: עד 4 תמונות, מוקטנות כרגיל.
     const list = Array.from(files);
-    const pdfFile = list.find(f => f.type === 'application/pdf' || /\.pdf$/i.test(f.name || ''));
-    let requestBody;
-    if (pdfFile) {
-      if (pdfFile.size > 15 * 1024 * 1024) throw new Error('קובץ ה-PDF גדול מדי (מעל 15MB) — צלם את העמודים כתמונות במקום');
-      requestBody = { mode: 'promoSheet', pdf: await promoImportFileRaw(pdfFile) };
-    } else {
-      const pages = [];
-      for (const file of list.slice(0, 4)) pages.push(await promoImportFileToDataUrl(file));
-      requestBody = { mode: 'promoSheet', pages: pages };
-    }
-    const token = await auth.currentUser.getIdToken();
-    const response = await aiFetchWithRetry(AI_SCAN_WORKER_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-      body: JSON.stringify(requestBody)
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || !payload.ok || !payload.sheet) {
-      const code = payload.error || '';
-      if (code === 'invalid_document_count' || code === 'invalid_promo_sheet_input') throw new Error('שירות הסריקה עדיין בגרסה ישנה שאינה כוללת ייבוא מבצעים — יש להעלות קודם את server.js החדש.');
-      if (code === 'rate_limited') throw new Error('בוצעו יותר מדי ניסיונות. המתן 10 דקות ונסה שוב.');
-      throw new Error('קריאת הדף לא הצליחה. נסה שוב עם צילום חד יותר.');
-    }
-    const sheet = payload.sheet;
+    const xlsxFile = list.find(promoImportIsXlsx); // v376: אקסל נקרא כאן במכשיר
+    const sheet = xlsxFile ? await promoSheetFromXlsx(xlsxFile) : await promoImportReadOnServer(list);
     promoImportLabelGroups(sheet); // v263: כותרות כפולות בדף מקבלות שם ייחודי
     promoSkuPending = [];          // v317: מתחילים איסוף מק"טים נקי
     const missing = promoImportMatch(sheet);
@@ -20528,7 +20755,9 @@ function promoImportHtml() {
 function promoImportPick() {
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = 'image/*,application/pdf';
+  // v376: גם אקסל — באייפון קובץ שאינו ברשימה אפור ואי אפשר לבחור אותו
+  // .xls הישן נבחר כדי לקבל הודעה ברורה במקום קובץ אפור בלי הסבר
+  input.accept = 'image/*,application/pdf,.xlsx,.xlsm,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroEnabled.12,application/vnd.ms-excel';
   input.multiple = true;
   input.onchange = () => promoImportStart(input.files);
   input.click();
