@@ -69,7 +69,12 @@ node --test tools/receipt-history-credit.test.mjs   # חוסר שהזיכוי מ
 node --test tools/return-approve.test.mjs          # אישור תעודת זיכוי בלחיצה אחת, בלי להקליד את הסכום (v371)
 node --test tools/auto-offset.test.mjs             # קיזוז אוטומטי בין תעודות — רק ב-9 התעודות האחרונות, כולל כמויות משקל (v373)
 node --test tools/receipt-quantity-detail.test.mjs  # חויב בתעודה · נסרק בפועל · חסר — בסיכום התעודה ובכרטיס התעודה השמורה (v372)
+node --test tools/sign-small-layout.test.mjs       # שלטים "2 בדף (קטן)" — כל עמוד הוא "2 בדף (גדול)" מוקטן ל-88%, כולל ברקודים לקופה ושיתוף (v374)
 ```
+
+`sign-small-layout` מריצה את האפליקציה בדפדפן אמיתי (Playwright + Chromium) ומשווה
+פיקסלים של עמודי השלטים; בלי Playwright היא מדלגת עם הודעה. `SIGN_TEST_SHOTS` שומר
+את תמונות העמודים, ו-`SIGN_TEST_APP` מריץ אותה על עותק אחר של `index.html`.
 
 `credit-service-contract` מריצה את קוד השרת עצמו (בלי קריאה בתשלום) מהתיקייה
 שליד הריפו — `../yotvata-ai-scan` — או מהנתיב ב-`YOTVATA_AI_SCAN`; בלעדיו היא
