@@ -32,7 +32,8 @@ function setup(extra) {
       { id: 'p-cottage', name: 'קוטג׳ בדיקה', barcode: '7290000000015', price: 4.6 }
     ];
     returns = [${JSON.stringify(ret)}];
-    currentView = 'returnsHistory';
+    receipts = []; receiptsHistoryFilter = 'all';
+    currentView = 'receiptsHistory'; // v378: היסטוריית החזרות חיה בתוך מסך התעודות המאוחד
     showConfirm = (title, msg, okText, cb) => { testConfirms.push({ title, msg, okText, cb }); };
   `);
   return c;
@@ -40,26 +41,26 @@ function setup(extra) {
 const writesFor = c => json(c, "testWrites.filter(w => w.op === 'update' && String(w.path).indexOf('ret-1') > -1)");
 const withoutTime = data => { const d = Object.assign({}, data); delete d.creditedAt; return d; };
 
-test('כרטיס שטרם אומת מציע "אישור" לצד "בדוק" — בשני המסכים, עם הסכום מראש', () => {
+test('כרטיס שטרם אומת מציע "אישור" לצד "בדוק" — במסך התעודות המאוחד ובכרטיס עצמו, עם הסכום מראש', () => {
   const c = setup();
   const money = c.run('fmtMoney(' + SENT_EX + ')');
-  c.run('renderReturnsHistory()');
+  c.run('renderReceiptsHistory()');
   const history = c.run("$('app').innerHTML");
   const receipts = c.run('returnCardInReceipts(returns[0])');
-  for (const [where, html] of [['היסטוריית חזרות', history], ['תעודות', receipts]]) {
+  for (const [where, html] of [['היסטוריית תעודות', history], ['כרטיס', receipts]]) {
     assert.ok(html.includes('data-role="rv-approve" data-id="ret-1"'), where + ': כפתור האישור קיים');
     assert.ok(html.includes('data-role="rv-verify-inline" data-id="ret-1"'), where + ': ההקלדה נשארת לצידו');
     assert.ok(html.includes('id="rvNote_ret-1"'), where + ': שדה הסכום נשאר');
     assert.ok(html.includes('או אשר שהוא בדיוק ₪' + money), where + ': הסכום לאישור נאמר מראש');
   }
-  // שורת האימות נבנית בפונקציה אחת — שני המסכים זהים, מלבד המרווח העליון בכרטיס התעודות
+  // שורת האימות נבנית בפונקציה אחת — שתי הגרסאות זהות, מלבד המרווח העליון בכרטיס התעודות
   assert.equal(c.run('retVerifyRowHtml(returns[0])').replace(' mb-2"', '"'), c.run('retVerifyRowHtml(returns[0], true)').replace('font-bold mt-2 mb-1.5', 'font-bold mb-1.5'));
   assert.ok(c.run('returnCardInReceipts(returns[0])').includes('font-bold mt-2 mb-1.5'), 'המרווח העליון בכרטיס התעודות נשמר');
 });
 
 test('תעודה מאומתת אינה מציעה אישור', () => {
   const c = setup({ credited: true, creditedAt: Date.now(), creditNoteTotal: SENT_EX, creditStatus: 'ok' });
-  c.run('renderReturnsHistory()');
+  c.run('renderReceiptsHistory()');
   assert.ok(!c.run("$('app').innerHTML").includes('rv-approve'));
   assert.ok(!c.run('returnCardInReceipts(returns[0])').includes('rv-approve'));
   c.click('rv-approve', 'ret-1');
@@ -85,8 +86,8 @@ test('"אישור" רושם בדיוק את מה שהוחזר וסוגר את ה
   assert.equal(r.creditNoteTotal, SENT_EX);
   assert.equal(r.creditStatus, 'ok');
   assert.equal(json(c, 'returnsBalance().bal'), 0, 'אין חוב זיכוי פתוח');
-  c.run('renderReturnsHistory()');
-  assert.ok(c.run("$('app').innerHTML").includes('הזיכוי אומת'), 'הכרטיס עובר לירוק');
+  c.run('renderReceiptsHistory()');
+  assert.ok(c.run("$('app').innerHTML").includes('<i class="fa-solid fa-circle-check"></i> אומתה'), 'הכרטיס עובר לירוק');
 });
 
 test('אישור זהה לחלוטין להקלדה ידנית של אותו סכום', () => {
@@ -294,12 +295,15 @@ test('לחיצה ישנה על תעודה שנמחקה במכשיר אחר — �
   assert.equal(writesFor(c).length, 0);
 });
 
-test('המרווחים של כל מסך נשמרו', () => {
+test('המרווחים של כל גרסה נשמרו', () => {
   const c = setup();
   const history = c.run('retVerifyRowHtml(returns[0])');
   const receipts = c.run('retVerifyRowHtml(returns[0], true)');
-  assert.ok(history.includes('font-bold mb-1.5"') && history.includes('items-stretch mb-2"'), 'היסטוריה: בלי מרווח עליון, עם מרווח תחתון');
-  assert.ok(receipts.includes('font-bold mt-2 mb-1.5"') && receipts.includes('items-stretch"'), 'תעודות: מרווח עליון, בלי תחתון');
-  c.run('renderReturnsHistory()');
-  assert.ok(c.run("$('app').innerHTML").includes('items-stretch mb-2"'), 'והיסטוריית החזרות בונה את השורה בגרסת ההיסטוריה');
+  assert.ok(history.includes('font-bold mb-1.5"') && history.includes('items-stretch mb-2"'), 'גרסת ההיסטוריה: בלי מרווח עליון, עם מרווח תחתון');
+  assert.ok(receipts.includes('font-bold mt-2 mb-1.5"') && receipts.includes('items-stretch"'), 'כרטיס התעודות: מרווח עליון, בלי תחתון');
+  // v378: מסך התעודות המאוחד הוא המסך היחיד — הוא בונה את השורה בגרסת הכרטיס
+  c.run('renderReceiptsHistory()');
+  const screen = c.run("$('app').innerHTML");
+  assert.ok(screen.includes('font-bold mt-2 mb-1.5"'), 'מסך התעודות בונה את השורה בגרסת הכרטיס');
+  assert.ok(!screen.includes('items-stretch mb-2"'), 'ולא בגרסת ההיסטוריה הישנה');
 });

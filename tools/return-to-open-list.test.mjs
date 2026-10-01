@@ -11,7 +11,7 @@ function setup(items, opts) {
   const c = runtime('yotvata');
   c.context.testDeleted = [];
   c.run(`
-    currentView = 'returnsHistory';
+    currentView = 'receiptsHistory';
     products = [
       { id: 'p-milk', name: 'חלב בדיקה', barcode: '7290000000008', price: 6, creditPrice: 5, deposit: 0 },
       { id: 'p-bottle', name: 'בקבוק בדיקה', barcode: '7290000000015', price: 4, creditPrice: 4, deposit: 1.2 }
@@ -19,7 +19,7 @@ function setup(items, opts) {
     returnsList = ${JSON.stringify(opts.openList || [])};
     returns = [{ id: 'ret-1', timestamp: Date.now(), docDate: '2026-09-19', credited: ${!!opts.credited}, totalExVat: 0, totalIncVat: 0, items: ${JSON.stringify(items)} }];
     hardDeleteDocWithBackup = async (name, id, backup) => { testDeleted.push({ name, id, backup }); return true; };
-    renderReturnsHistory = () => {}; renderReceiptsHistory = () => {}; refreshReturnsList = () => {}; updateCart = () => {}; logAction = async () => {};
+    renderReceiptsHistory = () => {}; refreshReturnsList = () => {}; updateCart = () => {}; logAction = async () => {};
   `);
   return c;
 }
@@ -115,7 +115,7 @@ test('תעודה מאומתת — אין החזרה, גם אם קוראים יש
   assert.equal(json(c, 'testWrites.filter(w => w.op === "update").length'), 0);
 });
 
-test('הכפתור מופיע רק בתעודה שטרם אומתה, בשני מסכי התעודות', () => {
+test('הכפתור מופיע רק בתעודה שטרם אומתה, בכרטיס שבמסך התעודות המאוחד', () => {
   const c = setup([{ name: 'חלב בדיקה', barcode: '7290000000008', qty: 6, unitPrice: 5, lineTotal: 30 }]);
   const openHtml = c.run('returnCardInReceipts(returns[0])');
   assert.match(openHtml, /data-role="ret-return-open" data-id="ret-1"/);
