@@ -12,7 +12,7 @@ function setup(noteTotal) {
   const c = runtime('yotvata');
   c.context.testConfirms = [];
   c.run(`
-    currentView = 'returnsHistory';
+    currentView = 'receiptsHistory'; receipts = []; receiptsHistoryFilter = 'all'; // v378: מסך התעודות המאוחד
     returns = [{ id: 'ret-1', timestamp: Date.now(), credited: false, totalExVat: ${RETURN_EX}, totalIncVat: ${RETURN_EX},
       items: [{ name: 'חלב בדיקה', barcode: '7290000000008', qty: 10, unitPrice: 5, lineTotal: 50 },
               { name: 'קפה בדיקה', barcode: '7290000000015', qty: 10, unitPrice: 5, lineTotal: 50 }] }];
@@ -119,7 +119,7 @@ function realDoc(noteTotal) {
   c.context.testConfirms = [];
   c.context.testDoc = REAL_DOC.map(([name, qty, unitPrice]) => ({ name, barcode: '', qty, unitPrice }));
   c.run(`
-    currentView = 'returnsHistory';
+    currentView = 'receiptsHistory'; receipts = []; receiptsHistoryFilter = 'all'; // v378: מסך התעודות המאוחד
     const ex = r2(testDoc.reduce((a, l) => a + l.unitPrice * l.qty, 0));
     returns = [{ id: 'ret-1', timestamp: Date.now(), credited: false, totalExVat: ex, totalIncVat: ex, items: testDoc }];
     showConfirm = (title, msg, label, fn) => { testConfirms.push({ title, msg, label }); fn(); };
