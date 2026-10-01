@@ -70,6 +70,7 @@ node --test tools/return-approve.test.mjs          # אישור תעודת זי�
 node --test tools/auto-offset.test.mjs             # קיזוז אוטומטי בין תעודות — רק ב-9 התעודות האחרונות, כולל כמויות משקל (v373)
 node --test tools/receipt-quantity-detail.test.mjs  # חויב בתעודה · נסרק בפועל · חסר — בסיכום התעודה ובכרטיס התעודה השמורה (v372)
 node --test tools/sign-small-layout.test.mjs       # שלטים "2 בדף (קטן)" — כל עמוד הוא "2 בדף (גדול)" מוקטן ל-88%, כולל ברקודים לקופה ושיתוף (v374)
+node --test tools/manual-value-offset.test.mjs     # קיזוז לפי שווי בין מחירים שנבדלים בשבר אגורה אינו משאיר שארית של ₪0.00 שמחזיקה את התעודה פתוחה (v375)
 ```
 
 `sign-small-layout` מריצה את האפליקציה בדפדפן אמיתי (Playwright + Chromium) ומשווה

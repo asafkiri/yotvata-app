@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v374 שלטים: 2 בדף (קטן)</title>
+    <title>הזמנות יטבתה - v375 קיזוז לפי שווי סוגר את השורה עד הסוף</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v374 שלטים: 2 בדף (קטן)</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v375 קיזוז לפי שווי סוגר את השורה עד הסוף</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -18117,6 +18117,10 @@ function consumeStoredReceiptOffsets(rc, shortItems, overItems) {
         const precise = x.source === 'manual-value';
         const roundQty = v => precise ? Math.round(v * 1000000) / 1000000 : r2(v);
         it.n = roundQty((Number(it.n) || 0) - take); left = roundQty(left - take); used = roundQty(used + take);
+        // v375: קיזוז לפי שווי שהשאיר בשורה פחות מחצי אגורה סגר אותה. מחירי
+        // יחידה שנבדלים בשבר אגורה (3.1617 מול 3.162) הותירו 0.001265 יח׳ "פונצ
+        // בננה" בשווי ₪0.00, והתעודה נשארה פתוחה על "עודף" שאין מה לעשות איתו.
+        if (precise && it.n > 0 && lineTotalFromUnit(it.price, it.n) === 0) { used = roundQty(used + it.n); it.n = 0; }
       }
     });
     if (used > 0) applied.push({ ...x, id: key, qty: used });
@@ -18357,6 +18361,15 @@ function manualOffsetEntry(groupId, own, other, amount, qty) {
     shortProductId: own.dir === 'short' ? own.productId : other.productId,
     overProductId: own.dir === 'over' ? own.productId : other.productId
   };
+}
+// v375: הכמות שקיזוז לפי שווי צורך מצד אחד. סכום שמכסה את כל שווי הצד (עד
+// חצי אגורה) צורך את כל הכמות שלו — 37.94 ÷ 3.162 = 11.998735 נשמר קודם, ו-12
+// "פונצ בננה" נשארו עם שארית של 0.001265 יח׳.
+function manualValueOffsetQty(side, amount) {
+  const qty = Number(side && side.qty) || 0, price = Number(side && side.price) || 0;
+  if (!(qty > 0) || !(price > 0)) return 0;
+  const take = Math.min(qty, (Number(amount) || 0) / price);
+  return lineTotalFromUnit(price, qty - take) === 0 ? qty : take;
 }
 function manualOffsetSummary(entry) {
   return 'קיזוז ידני: ' + htmlEscape(entry.shortName || '') + ' ⇄ ' + htmlEscape(entry.overName || '') + ' · ₪' + fmtMoney(entry.amountEx || 0);
@@ -18907,7 +18920,7 @@ async function applyManualValueOffset(shortSide, overSide, requestedAmount) {
   const maxAmount = r2(Math.min(currentShort.value, currentOver.value));
   const amount = r2(Number(requestedAmount) || 0);
   if (!(amount > 0) || amount > maxAmount + 0.01) { showToast('סכום הקיזוז כבר אינו זמין', null, null, 2600); return; }
-  const shortQty = amount / currentShort.price, overQty = amount / currentOver.price;
+  const shortQty = manualValueOffsetQty(currentShort, amount), overQty = manualValueOffsetQty(currentOver, amount);
   const groupId = manualOffsetGroupId(currentShort, currentOver);
   const shortEntry = manualOffsetEntry(groupId, currentShort, currentOver, amount, shortQty);
   const overEntry = manualOffsetEntry(groupId, currentOver, currentShort, amount, overQty);
