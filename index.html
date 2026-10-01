@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v376 דף המבצעים גם כקובץ אקסל</title>
+    <title>הזמנות יטבתה - v377 כותרת השלט בשורה אחת</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v376 דף המבצעים גם כקובץ אקסל</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v377 כותרת השלט בשורה אחת</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -21811,6 +21811,24 @@ function signWrapText(ctx, text, maxW) {
   if (cur) lines.push(cur);
   return lines;
 }
+// v377: כל שורת כותרת נוספת גוזלת גובה מהמחיר — "חומוס תוספות 400 שטראוס" בשלט
+// 1 בדף נשבר ל-2 שורות והמחיר ירד מ-544 ל-338. לכן קודם מקטינים את הכתב, ויורדים
+// שורה רק אם בפחות שורות הכתב היה קטן מ-55% מגודל הכותרת לפני שהשלט התכווץ —
+// כלומר רק כותרת ארוכה באמת (בשלט 1 או 2 בדף — בערך מ-27 תווים).
+const SIGN_TITLE_SHRINK_FLOOR = 0.55;
+// v377: הגופן הגדול ביותר (minF..maxF) שבו הכותרת נכנסת בעד k שורות וכל שורה ברוחב; 0 אם אין
+function signTitleFontFor(ctx, text, maxW, k, maxF, minF) {
+  ctx.font = '900 ' + maxF + 'px Heebo, Arial';
+  // רוחב הטקסט כמעט לינארי בגופן, ו-k שורות לא צרות מ-(סך הרוחב פחות רווחי השבירה)/k —
+  // מתחילים מהגבול הזה ולא מ-maxF, כדי לא למדוד עשרות גדלים בכל הקשה
+  const sum = ctx.measureText((text || '').split(/\s+/).filter(Boolean).join(' ')).width - (k - 1) * ctx.measureText(' ').width;
+  for (let sz = Math.min(maxF, Math.floor(maxF * maxW * k / Math.max(1, sum)) + 1); sz >= minF; sz--) {
+    ctx.font = '900 ' + sz + 'px Heebo, Arial';
+    const tl = signWrapText(ctx, text, maxW);
+    if (tl.length <= k && tl.every(ln => ctx.measureText(ln).width <= maxW)) return sz;
+  }
+  return 0;
+}
 function drawSignSlot(ctx, s, y0, slotH, W) {
   const pad = 40;
     const x0 = pad, x1 = W - pad, cx = W / 2;
@@ -21854,7 +21872,8 @@ function drawSignSlot(ctx, s, y0, slotH, W) {
     // קנה-מידה רציף: מתחילים גדול ומקטינים רק עד שהכל נכנס — הפונט תמיד הגדול ביותר האפשרי
     const B = { title: 58, titleLH: 62, big: 96, bigPad: 26, bigAfter: 44, old: 30, note: 30, listHead: 24, list: 24, listSmall: 22, listLH: 30, topPad: 78 }; // v226: ברקודים גדולים יותר
     let M = null, titleLines = null, fitsAll = false, linesOut = [], lineCounts = [], brandShift = 0, titleCx = cx;
-    for (let f = r2(slotScale); f >= 0.4; f = r2(f * 0.92)) {
+    let F0 = 0; // v377: גודל הכותרת בקנה המידה הראשון — הבסיס לשאלה "כמה מקטינים כדי לחסוך שורה"
+    for (let f = r2(slotScale), fewer = false; f >= 0.4; ) {
       const m = {}; Object.keys(B).forEach(k => m[k] = Math.max(10, Math.round(B[k] * f)));
       const listF = Math.min(f, 1.6); // רשימת הברקודים לא מתנפחת כמו הכותרת — נשארת כתב קטן וקריא
       ['listHead', 'list', 'listSmall', 'listLH'].forEach(k => m[k] = Math.max(10, Math.round(B[k] * listF)));
@@ -21869,6 +21888,18 @@ function drawSignSlot(ctx, s, y0, slotH, W) {
         if ((tl.length <= 3 && widest <= widthAvail) || m.title <= 26) break;
         m.title = Math.max(26, Math.round(m.title * 0.88));
         m.titleLH = Math.round(m.title * 1.07);
+      }
+      if (!F0) F0 = m.title;
+      // v377: הלולאה למעלה מגדילה את הכתב גם במחיר שורה נוספת. בסבב החוזר (fewer) מנסים
+      // פחות שורות בכתב קטן יותר — k הקטן ביותר שבו הכתב נשאר ≥ SIGN_TITLE_SHRINK_FLOOR מ-F0
+      const many = tl.length > 1 && tl.length <= 3;
+      if (fewer && many) {
+        for (let k = 1; k < tl.length; k++) {
+          const fk = signTitleFontFor(ctx, s.title || '', widthAvail, k, m.title, Math.max(26, Math.ceil(F0 * SIGN_TITLE_SHRINK_FLOOR)));
+          if (fk) { m.title = fk; m.titleLH = Math.round(fk * 1.07); break; }
+        }
+        ctx.font = '900 ' + m.title + 'px Heebo, Arial';
+        tl = signWrapText(ctx, s.title || '', widthAvail);
       }
       if (tl.length > 3) { tl = tl.slice(0, 3); tl[2] = tl[2].replace(/\s+\S*$/, '') + '…'; } // רק אם גם בפונט המינימלי לא נכנס
       // התנגשות בתג/בתוקף: קודם מנסים להסיט שמאלה למרווח הפנוי; יורדים שורה רק אם אין ברירה
@@ -21889,7 +21920,13 @@ function drawSignSlot(ctx, s, y0, slotH, W) {
       const top = shift + m.topPad + tl.length * m.titleLH + (big ? m.bigPad + m.bigAfter : 0) + (s.note ? 20 : 0);
       const listH = prods.length ? 12 + (m.listHead - 6 + m.listLH) + bl.out.length * m.listLH + 14 : 0;
       M = m; titleLines = tl; linesOut = bl.out; lineCounts = bl.counts; brandShift = shift; titleCx = tCx;
-      if (top + listH <= innerH) { fitsAll = true; break; }
+      const fits = top + listH <= innerH;
+      // v377: ההקטנה נעשית רק בקנה המידה שבו השלט כבר נכנס (או באחרון) — חוזרים עליו עם
+      // fewer. כך השורה שנחסכה הולכת כולה למחיר; הקטנה בכל סבב עצרה את הלולאה מוקדם, בקנה
+      // מידה שמנפח ריווחים ואת "במקום" — והמחיר דווקא קטן
+      if (!fewer && many && (fits || r2(f * 0.92) < 0.4)) { fewer = true; continue; }
+      if (fits) { fitsAll = true; break; }
+      f = r2(f * 0.92);
     }
     // תג המיתוג — קופסה מעוגלת צפה בפינה הימנית העליונה (גודל קבוע)
     ctx.fillStyle = '#fff1f2';
