@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v373 קיזוז אוטומטי רק ב-9 התעודות האחרונות</title>
+    <title>הזמנות יטבתה - v374 שלטים: 2 בדף (קטן)</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,7 +123,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v373 קיזוז אוטומטי רק ב-9 התעודות האחרונות</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v374 שלטים: 2 בדף (קטן)</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -21079,8 +21079,11 @@ function shareCanvasPng(cv, name) {
 // להדפיס. כל עמוד ביחס A4 (150dpi), מבצע ארוך נשבר לעמוד הבא עם "(המשך)",
 // והשיתוף שולח את כל העמודים יחד.
 // v255: בניית העמודים הופרדה מהשיתוף — כדי שגם מחולל השלטים יוכל לצרף
-// ===== הכנת שלטי מבצע (1/2/4 בדף, ייצוא PNG) =====
+// ===== הכנת שלטי מבצע (1/2/2 קטן/4 בדף, ייצוא PNG) =====
 const SIGN_MAX = 4;
+// v374: "2 בדף (קטן)" — כל עמוד של "2 בדף (גדול)" מוקטן סביב מרכז ה-A4. לפי
+// הדוגמה מ־1.10.2026: השלט יוצא כ־17.3×12.3 ס״מ במקום 19.6×14 ס״מ.
+const SIGN_SMALL_SCALE = 0.88;
 function signMarginFactor() { return 1 + (Number(signMarginPct) || 0) / 100; }
 async function saveAppConfig() {
   const vEl = $('cfgVat'), mEl = $('cfgMargin'), sEl = $('cfgStore');
@@ -21522,15 +21525,19 @@ function signEditCard(s, idx) {
     (s.promoId ? '<button data-role="sign-with-barcodes" data-id="' + idx + '" class="btn-tap w-full bg-slate-50 border border-slate-200 rounded-xl p-2.5 flex items-center gap-2 text-right"><i class="fa-solid ' + (s.withBarcodes ? 'fa-square-check text-rose-600' : 'fa-square text-slate-300') + ' text-xl shrink-0"></i><span class="font-black text-xs text-slate-600">צרף דף ברקודים לקופה למבצע הזה</span></button>' : '') +
   '</div>';
 }
+function signSmallPage() { return !!(signMaker && signMaker.perPage === 2 && signMaker.small); }
+function signLayoutBtn(pp, small, label) {
+  const on = signMaker.perPage === pp && signSmallPage() === small;
+  return '<button data-role="sign-pp" data-pp="' + pp + '"' + (small ? ' data-small="1"' : '') + ' class="btn-tap px-1 py-1.5 rounded-lg text-[11px] font-black ' + (on ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-600') + '">' + label + '</button>';
+}
 function renderSignPreview() {
   const cards = signMaker.signs.map(signEditCard).join('');
   app.innerHTML =
     '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">עריכת שלטים</h2><div class="text-xs text-slate-400 mt-0.5">מלא את הפרטים — התצוגה למטה מתעדכנת חי. המספרים לא נמשכים מהמבצע.</div></div>' +
     cards +
-    '<div class="px-1 mt-4 mb-1.5 flex items-center justify-between"><div class="text-xs font-black text-slate-500"><i class="fa-solid fa-eye"></i> תצוגה מקדימה של הדף</div>' +
-      '<div class="flex gap-1"><button data-role="sign-pp" data-pp="4" class="btn-tap px-3 py-1.5 rounded-lg text-[11px] font-black ' + (signMaker.perPage === 4 ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-600') + '">4 בדף</button>' +
-      '<button data-role="sign-pp" data-pp="2" class="btn-tap px-3 py-1.5 rounded-lg text-[11px] font-black ' + (signMaker.perPage === 2 ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-600') + '">2 בדף (גדול)</button>' +
-      '<button data-role="sign-pp" data-pp="1" class="btn-tap px-3 py-1.5 rounded-lg text-[11px] font-black ' + (signMaker.perPage === 1 ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-600') + '">1 בדף (רוחב)</button></div></div>' +
+    // v374: ארבעה כפתורים כבר לא נכנסים לצד הכותרת בטלפון — שורה משלהם
+    '<div class="px-1 mt-4 mb-1.5"><div class="text-xs font-black text-slate-500 mb-1.5"><i class="fa-solid fa-eye"></i> תצוגה מקדימה של הדף</div>' +
+      '<div class="grid grid-cols-4 gap-1">' + signLayoutBtn(4, false, '4 בדף') + signLayoutBtn(2, true, '2 בדף (קטן)') + signLayoutBtn(2, false, '2 בדף (גדול)') + signLayoutBtn(1, false, '1 בדף (רוחב)') + '</div></div>' +
     '<div id="signPages" class="bg-slate-200 rounded-2xl p-2.5 mb-3 space-y-1"></div>' +
     '<div class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 p-3 flex gap-2 z-40">' +
       '<button data-role="sign-back" class="btn-tap px-4 py-3 rounded-xl font-black bg-slate-100 text-slate-600"><i class="fa-solid fa-arrow-right"></i></button>' +
@@ -21770,6 +21777,13 @@ function drawSignCanvas() {
     const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
     st.ctx = cv.getContext('2d');
     st.ctx.fillStyle = '#ffffff'; st.ctx.fillRect(0, 0, W, H);
+    // v374: "2 בדף (קטן)" מצייר כל עמוד של "2 בדף (גדול)" בדיוק — כולל רצועות
+    // הברקודים והמעבר לעמוד הבא — בקנה מידה קטן סביב מרכז הדף, עם שוליים לבנים.
+    // כל עמוד הוא קנבס חדש, כך שההקטנה לא מצטברת בציור מחדש.
+    if (signSmallPage()) {
+      st.ctx.translate(Math.round(W * (1 - SIGN_SMALL_SCALE) / 2), Math.round(H * (1 - SIGN_SMALL_SCALE) / 2));
+      st.ctx.scale(SIGN_SMALL_SCALE, SIGN_SMALL_SCALE);
+    }
     st.ctx.textAlign = 'center'; st.ctx.direction = 'rtl';
     pages.push(cv); st.y = pad;
   };
@@ -23842,7 +23856,7 @@ app.addEventListener('click', (e) => {
   else if (role === 'sign-download') downloadSignImage();
   else if (role === 'sign-with-barcodes') { if (signMaker) { const s = signMaker.signs[parseInt(id, 10)]; if (s) { s.withBarcodes = !s.withBarcodes; const ic = t.querySelector('i'); if (ic) ic.className = 'fa-solid ' + (s.withBarcodes ? 'fa-square-check text-rose-600' : 'fa-square text-slate-300') + ' text-xl shrink-0'; buzz(10); drawSignCanvas(); } } }
   else if (role === 'sign-apply-rec') { if (signMaker) { const s = signMaker.signs[parseInt(id, 10)]; if (s) { const rec = signRecommend(s); if (rec) { if (rec.type === 'pct') s.pct = String(rec.value); else s.price = String(rec.value); renderSignMaker(); } } } }
-  else if (role === 'sign-pp') { if (signMaker) { const pp = parseInt(t.dataset.pp, 10); if (signMaker.signs.length > pp) { showToast('בחרת ' + signMaker.signs.length + ' מבצעים — הסר כדי לעבור ל-' + pp + ' בדף', null, null, 2800); } else { signMaker.perPage = pp; renderSignMaker(); } } }
+  else if (role === 'sign-pp') { if (signMaker) { const pp = parseInt(t.dataset.pp, 10); if (signMaker.signs.length > pp) { showToast('בחרת ' + signMaker.signs.length + ' מבצעים — הסר כדי לעבור ל-' + pp + ' בדף', null, null, 2800); } else { signMaker.perPage = pp; signMaker.small = t.dataset.small === '1'; renderSignMaker(); } } }
   else if (role === 'cfg-save') saveAppConfig();
   else if (role === 'promo-open') openPromoEdit(id);
   else if (role === 'promo-barcodes') openPromoBarcodes(id);
