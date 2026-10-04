@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v379 כפתור ביטול אימות אחד בכרטיס החזרה</title>
+    <title>הזמנות יטבתה - v380 חילוף מוצר במסך אימות הזיכוי</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -124,7 +124,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v379 כפתור ביטול אימות אחד בכרטיס החזרה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v380 חילוף מוצר במסך אימות הזיכוי</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -5581,7 +5581,11 @@ function openReturnVerify(id, presetNoteTotal) {
     id: r.id,
     noteTotal: (presetNoteTotal != null ? presetNoteTotal : (r.creditNoteTotal != null ? r.creditNoteTotal : null)),
     // checked = "הכרעתי על השורה הזאת". תעודה שכבר אומתה חוזרת עם ההכרעות הקודמות.
-    items: (r.items || []).map(l => ({ name: l.name, barcode: l.barcode || '', qty: Number(l.qty) || 0, noteQty: (l.noteQty != null ? Number(l.noteQty) : (Number(l.qty) || 0)), unitPrice: r2(Number(l.unitPrice) || 0), checked: !!(r.credited || l.noteQty != null) }))
+    // v380: productId ו-isDeposit נוסעים עם השורה (עד כה נשמטו בשמירה), ושורה
+    // שהוחלפה באימות קודם חוזרת עם המקור שלה (orig) כדי שאפשר יהיה לבטל.
+    items: (r.items || []).map(l => ({ productId: l.productId || '', name: l.name, barcode: l.barcode || '', qty: Number(l.qty) || 0, noteQty: (l.noteQty != null ? Number(l.noteQty) : (Number(l.qty) || 0)), unitPrice: r2(Number(l.unitPrice) || 0), isDeposit: !!l.isDeposit, orig: rvSwapOrigFrom(l.swappedFrom), checked: !!(r.credited || l.noteQty != null) })),
+    swapIdx: -1,
+    swapQuery: ''
   };
   rvSolveCache = null;
   setView('returnReconcile');
@@ -5764,28 +5768,126 @@ function rvSetPriceLive(idx, val) {
   const l = (returnVerify.items || [])[idx]; if (!l) return;
   const n = parseFloat((val || '').toString().replace(',', '.').replace(/[^0-9.]/g, '')); l.unitPrice = isFinite(n) && n >= 0 ? r2(n) : 0; refreshRvHeader();
 }
-// ארבעה מצבים לשורה: טרם הוכרעה, זוכה במלואה, לא זוכה כלל, זוכה חלקית.
+// ===== v380: חילוף מוצר במסך האימות =====
+// הנהג לא תמיד מזכה את המוצר שסרקנו: מילקי שנסרק כבודד הוא מזכה כמארז (כי
+// כך הוא מוריד לנו אותו), ואז בנייר יש "פריט חזרות כללי" במחיר אחר ואצלנו
+// שורה אדומה של "לא זוכה" שאינה נכונה — הוא כן זיכה, רק מוצר אחר. "חילוף
+// מוצר" אומר בדיוק את זה: השורה הייתה טעות שלנו, והמוצר שבאמת חזר הוא X.
+// השורה מקבלת את המוצר החדש ואת מחיר הזיכוי שלו, הכמות נשארת, והיא נספרת
+// כזוכה במלואה; המקור נשמר (orig / swappedFrom) כדי שאפשר יהיה לבטל ולראות
+// בכרטיס מה היה כתוב קודם. זה אותו תיקון שמסך "עריכת פריטים" עושה, בלי
+// לצאת מהאימות באמצע.
+function rvSwapOrigFrom(sf) {
+  if (!sf || !sf.name) return null;
+  return { productId: sf.productId || '', name: sf.name, barcode: sf.barcode || '', unitPrice: r2(Number(sf.unitPrice) || 0) };
+}
+function rvSwapStart(idx) {
+  if (!returnVerify || !(returnVerify.items || [])[idx]) return;
+  returnVerify.swapIdx = idx; returnVerify.swapQuery = '';
+  renderReturnReconcile();
+  setTimeout(() => { const i = $('rvSwapSearch'); if (i) i.focus(); }, 80);
+}
+function rvSwapCancel() {
+  if (!returnVerify) return;
+  returnVerify.swapIdx = -1; returnVerify.swapQuery = '';
+  renderReturnReconcile();
+}
+// הצעות בלחיצה אחת: המארז של הבודד (billingPackId) והבודד של המארז — זה
+// המקרה השכיח, ולא צריך לחפש אותו.
+function rvSwapSuggestions(l) {
+  const p = retEditProductFor(l), out = [];
+  if (!p) return out;
+  if (p.billingPackId) {
+    const pack = products.find(x => x.id === p.billingPackId);
+    const size = parseInt(p.billingPackSize, 10) || 0;
+    if (pack && pack.id !== p.id) out.push({ p: pack, why: 'המארז של המוצר' + (size > 1 ? ' (' + size + ' יח׳)' : '') });
+  }
+  products.filter(x => x.billingPackId === p.id && x.id !== p.id).forEach(s => out.push({ p: s, why: 'הבודד של המארז' }));
+  return out;
+}
+function rvSwapPick(pid) {
+  if (!returnVerify) return;
+  const l = (returnVerify.items || [])[returnVerify.swapIdx]; const p = products.find(x => x.id === pid);
+  if (!l || !p) return;
+  const origId = l.orig ? l.orig.productId : l.productId;
+  const origName = l.orig ? l.orig.name : l.name;
+  // חזרה למוצר המקורי היא ביטול החילוף, לא חילוף נוסף
+  if ((origId && p.id === origId) || (!origId && p.name === origName)) { rvSwapUndo(returnVerify.swapIdx); return; }
+  if (!l.orig) l.orig = { productId: l.productId || '', name: l.name, barcode: l.barcode || '', unitPrice: r2(Number(l.unitPrice) || 0), isDeposit: !!l.isDeposit };
+  l.productId = p.id; l.name = p.name; l.barcode = p.barcode || ''; l.isDeposit = false;
+  const u = retCreditUnit(p); if (u > 0) l.unitPrice = u;
+  // המוצר שהספק זיכה — זוכה במלואו, בכמות שהוחזרה
+  l.noteQty = Number(l.qty) || 0; l.checked = true;
+  returnVerify.swapIdx = -1; returnVerify.swapQuery = '';
+  rvSolveCache = null;
+  buzz(18);
+  renderReturnReconcile();
+  showToast('הוחלף ל: ' + p.name + (u > 0 ? ' · ₪' + fmtMoney(u) : '') + ' — אפשר לתקן מחיר וכמות בשורה', null, null, 3200);
+}
+function rvSwapUndo(idx) {
+  const l = ((returnVerify && returnVerify.items) || [])[idx]; if (!l || !l.orig) return;
+  l.productId = l.orig.productId || ''; l.name = l.orig.name; l.barcode = l.orig.barcode || ''; l.unitPrice = l.orig.unitPrice; l.isDeposit = !!l.orig.isDeposit;
+  l.orig = null;
+  returnVerify.swapIdx = -1; returnVerify.swapQuery = '';
+  rvSolveCache = null;
+  buzz(10);
+  renderReturnReconcile();
+  showToast('החילוף בוטל — השורה חזרה ל: ' + l.name, null, null, 2600);
+}
+function refreshRvSwapList(q) {
+  const box = $('rvSwapList'); if (!box || !returnVerify) return;
+  q = (q || '').trim();
+  if (!q) { box.innerHTML = ''; return; }
+  const l = (returnVerify.items || [])[returnVerify.swapIdx];
+  const have = {}; if (l && l.productId) have[l.productId] = 1;
+  const list = addListFilter(q, have).slice(0, 8);
+  box.innerHTML = list.map(p => addListRowHtml(p, 'rv-swap-pick', q)).join('') || '<div class="text-center text-slate-400 py-2 text-xs">לא נמצא</div>';
+}
+function rvSwapPickerHtml(l, idx) {
+  const sugg = rvSwapSuggestions(l);
+  return '<div data-rvswap="' + idx + '" class="bg-indigo-50 border border-indigo-200 rounded-xl p-2.5 mt-2">' +
+    '<div class="text-[11px] font-black text-indigo-900 mb-1.5"><i class="fa-solid fa-right-left"></i> איזה מוצר הספק זיכה במקום "' + retEditEsc(l.name) + '"? הכמות (' + (Number(l.qty) || 0) + ') נשמרת, המחיר יתעדכן למחיר הזיכוי של המוצר שתבחר</div>' +
+    (sugg.length ? '<div class="space-y-1.5 mb-2">' + sugg.map(s =>
+      '<button data-role="rv-swap-pick" data-id="' + s.p.id + '" class="btn-tap w-full flex items-center justify-between gap-2 p-2.5 rounded-xl border-2 border-indigo-300 bg-white">' +
+        '<div class="min-w-0 text-right"><div class="font-black text-indigo-800 text-sm truncate">📦 ' + retEditEsc(s.p.name) + '</div><div class="text-[11px] text-indigo-500 font-bold">' + s.why + (retCreditUnit(s.p) > 0 ? ' · ₪' + fmtMoney(retCreditUnit(s.p)) + ' ליח׳' : '') + '</div></div>' +
+        '<i class="fa-solid fa-check text-indigo-600"></i></button>').join('') + '</div>' : '') +
+    '<input id="rvSwapSearch" type="text" value="' + retEditEsc(returnVerify.swapQuery || '') + '" placeholder="חפש מוצר אחר בשם או בספרות הברקוד" class="w-full p-2.5 rounded-xl border-2 border-indigo-200 outline-none text-sm font-bold focus:border-indigo-500 bg-white">' +
+    '<div id="rvSwapList" class="space-y-1.5 mt-1.5"></div>' +
+    '<button data-role="rv-swap-cancel" class="btn-tap w-full mt-2 py-2 rounded-xl font-black bg-white border border-slate-200 text-slate-600 text-xs">ביטול</button>' +
+  '</div>';
+}
+// חמישה מצבים לשורה: טרם הוכרעה, זוכה במלואה, לא זוכה כלל, זוכה חלקית,
+// והוחלפה (v380: הספק זיכה מוצר אחר במקומה — נספרת כזוכה במלואה).
 function rvRowState(l) {
   const sent = Number(l.qty) || 0, noteQty = Number(l.noteQty) || 0;
   if (!l.checked) return 'todo';
+  if (l.orig && noteQty === sent) return 'swap';
   if (noteQty === sent) return 'full';
   if (noteQty === 0) return 'none';
   return 'partial';
 }
 function rvRowHtml(l, idx) {
   const sent = Number(l.qty) || 0, noteQty = Number(l.noteQty) || 0, st = rvRowState(l);
-  const card = st === 'full' ? 'bg-emerald-50 border-emerald-200' : (st === 'none' ? 'bg-rose-50 border-rose-300' : (st === 'partial' ? 'bg-amber-50 border-amber-300' : 'bg-white border-slate-200'));
+  const swapped = !!l.orig, picking = !!(returnVerify && returnVerify.swapIdx === idx);
+  const card = st === 'full' ? 'bg-emerald-50 border-emerald-200' : (st === 'none' ? 'bg-rose-50 border-rose-300' : (st === 'partial' ? 'bg-amber-50 border-amber-300' : (st === 'swap' ? 'bg-indigo-50 border-indigo-300' : 'bg-white border-slate-200')));
   const tag = st === 'full' ? '<span class="text-emerald-700 font-black text-[11px] shrink-0">זוכה במלואו ✓</span>'
+    : st === 'swap' ? '<span class="text-indigo-700 font-black text-[11px] shrink-0">הוחלף · זוכה ✓</span>'
     : st === 'none' ? '<span class="text-rose-600 font-black text-[11px] shrink-0">לא זוכה</span>'
     : st === 'partial' ? '<span class="text-amber-700 font-black text-[11px] shrink-0">' + (noteQty > sent ? 'זוכה יתר ' + (noteQty - sent) : 'זוכה ' + noteQty + ' מתוך ' + sent) + '</span>'
     : '<span class="text-slate-400 font-bold text-[11px] shrink-0">ממתין להכרעה</span>';
   const noCls = st === 'none' ? 'bg-rose-500 text-white border-2 border-rose-500' : 'bg-white text-slate-500 border-2 border-slate-200';
   const yesCls = st === 'full' ? 'bg-emerald-500 text-white border-2 border-emerald-500' : 'bg-white text-slate-500 border-2 border-slate-200';
-  const inpCls = st === 'none' ? 'border-rose-300' : (st === 'partial' ? 'border-amber-400' : (st === 'full' ? 'border-emerald-300' : 'border-slate-200'));
+  const swapCls = (swapped || picking) ? 'bg-indigo-600 text-white border-2 border-indigo-600' : 'bg-white text-indigo-700 border-2 border-indigo-200';
+  const inpCls = st === 'none' ? 'border-rose-300' : (st === 'partial' ? 'border-amber-400' : (st === 'full' ? 'border-emerald-300' : (st === 'swap' ? 'border-indigo-300' : 'border-slate-200')));
+  // v380: שורה שהוחלפה אומרת מה היה כתוב קודם, ומציעה לבטל
+  const origLine = swapped
+    ? '<div class="text-[10px] text-indigo-700 font-bold mt-1 flex items-center gap-1 flex-wrap"><i class="fa-solid fa-right-left"></i> במקום: <span class="line-through text-slate-400">' + retEditEsc(l.orig.name) + '</span> · ₪' + fmtMoney(l.orig.unitPrice) + ' <button data-role="rv-swap-undo" data-id="' + idx + '" class="btn-tap underline decoration-indigo-300 text-indigo-700 font-black mr-1">בטל חילוף</button></div>'
+    : '';
   return '<div data-rvcard="' + idx + '" class="' + card + ' rounded-2xl border p-3 shadow-sm">' +
     '<div class="flex items-start justify-between gap-2 mb-2">' +
       '<div class="min-w-0"><div class="font-black text-slate-800 text-sm truncate">' + retEditEsc(l.name) + '</div>' +
         '<div class="text-[10px] text-slate-400 flex items-center gap-1 mt-0.5">הוחזר <b class="text-slate-600">' + sent + '</b> · מחיר ₪<input data-role="rv-price" data-id="' + idx + '" type="text" inputmode="decimal" value="' + priceFieldVal(l.unitPrice) + '" class="w-14 text-center border border-slate-300 rounded px-1 py-0.5 outline-none focus:border-blue-500 bg-white"></div>' +
+        origLine +
       '</div>' + tag +
     '</div>' +
     '<div class="flex items-center gap-2">' +
@@ -5797,6 +5899,10 @@ function rvRowHtml(l, idx) {
       '</div>' +
       '<button data-role="rv-yes" data-id="' + idx + '" class="btn-tap flex-1 h-10 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 ' + yesCls + '"><i class="fa-solid fa-check"></i> זוכה הכל</button>' +
     '</div>' +
+    // v380: האופציה השלישית — הספק זיכה מוצר אחר במקום השורה הזאת (טעות סריקה / בודד מול מארז)
+    (picking
+      ? rvSwapPickerHtml(l, idx)
+      : '<button data-role="rv-swap" data-id="' + idx + '" class="btn-tap w-full mt-2 h-9 rounded-xl font-black text-[11px] flex items-center justify-center gap-1.5 ' + swapCls + '"><i class="fa-solid fa-right-left"></i> ' + (swapped ? 'חילוף מוצר — בחר מוצר אחר' : 'חילוף מוצר — הספק זיכה מוצר אחר במקומו') + '</button>') +
   '</div>';
 }
 function renderReturnReconcile() {
@@ -5804,7 +5910,7 @@ function renderReturnReconcile() {
   const note = returnVerify.noteTotal;
   const gap = rvGap();
   app.innerHTML =
-    '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">אימות זיכוי</h2><div class="text-xs text-slate-400 mt-0.5">הכרע לכל מוצר מה הספק זיכה — <b class="text-emerald-600">הכל</b>, <b class="text-rose-500">לא זוכה</b>, או כמות באמצע. ההפרש בכרטיס הצהוב יתאפס כשההכרעות יתאימו לתעודה</div></div>' +
+    '<div class="px-1 py-1 mb-2"><h2 class="font-black text-2xl text-slate-800">אימות זיכוי</h2><div class="text-xs text-slate-400 mt-0.5">הכרע לכל מוצר מה הספק זיכה — <b class="text-emerald-600">הכל</b>, <b class="text-rose-500">לא זוכה</b>, כמות באמצע, או <b class="text-indigo-600">חילוף מוצר</b> אם זיכה מוצר אחר במקומו (למשל מארז במקום בודד). ההפרש בכרטיס הצהוב יתאפס כשההכרעות יתאימו לתעודה</div></div>' +
     '<div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-sm mb-3">' +
       '<div class="flex justify-between text-sm font-bold text-amber-900"><span>תעודת הזיכוי (ללא מע״מ)</span><span>₪' + fmtMoney(note || 0) + '</span></div>' +
       '<div class="flex justify-between text-sm font-bold text-amber-900 mt-1"><span>שוחזר מהשורות</span><span id="rvReconNote">₪' + fmtMoney(rvNoteEx()) + '</span></div>' +
@@ -5928,7 +6034,12 @@ async function saveReturnVerify(opts) {
   }
   const outItems = items.map(l => {
     const line = { name: l.name, barcode: l.barcode || '', qty: Number(l.qty) || 0, unitPrice: r2(Number(l.unitPrice) || 0), lineTotal: r2((Number(l.unitPrice) || 0) * (Number(l.qty) || 0)) };
+    // v380: productId ו-isDeposit נשמרים כמו במסך עריכת הפריטים — עד כה נשמטו כאן
+    if (l.productId) line.productId = l.productId;
+    if (l.isDeposit) line.isDeposit = true;
     if (Number(l.noteQty) !== Number(l.qty)) line.noteQty = Number(l.noteQty) || 0;
+    // v380: שורה שהוחלפה זוכרת מה היה כתוב בה לפני — לכרטיס ולביטול באימות הבא
+    if (l.orig && l.orig.name) { line.swappedFrom = { name: l.orig.name, barcode: l.orig.barcode || '', unitPrice: r2(Number(l.orig.unitPrice) || 0) }; if (l.orig.productId) line.swappedFrom.productId = l.orig.productId; }
     return line;
   });
   // הזיכוי שמגיע לך = מה שהחזרת בפועל (לפי הכמות שסרקת), לא מה שהספק רשם בתעודה
@@ -17964,7 +18075,10 @@ function returnCardInReceipts(r) {
   // החזרות שאוחד לתוך המסך הזה, כדי שלא יאבד דבר במעבר.
   const rows = (r.items || []).map(it =>
     '<div class="flex items-center justify-between gap-2 py-1 border-b border-slate-100 last:border-0">' +
-      '<div class="min-w-0"><div class="text-sm font-bold text-slate-700 truncate">' + htmlEscape(it.name) + (it.carriedClaim ? ' <span class="text-[10px] font-black bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded whitespace-nowrap">תביעת זיכוי</span>' : '') + '</div><div class="text-[11px] text-slate-400"><i class="fa-solid fa-barcode"></i> ' + htmlEscape(it.barcode || '—') + '</div></div>' +
+      '<div class="min-w-0"><div class="text-sm font-bold text-slate-700 truncate">' + htmlEscape(it.name) + (it.carriedClaim ? ' <span class="text-[10px] font-black bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded whitespace-nowrap">תביעת זיכוי</span>' : '') + '</div><div class="text-[11px] text-slate-400"><i class="fa-solid fa-barcode"></i> ' + htmlEscape(it.barcode || '—') + '</div>' +
+        // v380: שורה שהוחלפה באימות — מה היה כתוב בה כשנשלחה
+        (it.swappedFrom && it.swappedFrom.name ? '<div class="text-[10px] text-indigo-700 font-bold"><i class="fa-solid fa-right-left"></i> הוחלף באימות · במקום: ' + htmlEscape(it.swappedFrom.name) + '</div>' : '') +
+      '</div>' +
       '<div class="text-left shrink-0"><div class="text-sm font-black text-slate-600">' + (it.qty != null ? it.qty + ' יח׳' : '') + '</div>' + (it.unitPrice != null ? '<div class="text-[11px] text-slate-400">₪' + fmtMoney(it.lineTotal != null ? it.lineTotal : it.unitPrice * (it.qty || 0)) + '</div>' : '') + '</div>' +
     '</div>'
   ).join('');
@@ -23380,6 +23494,7 @@ app.addEventListener('input', (e) => {
   if (role === 're-price') { retEditSetPriceLive(parseInt(t.dataset.id, 10), t.value); return; }
   if (role === 're-name') { retEditSetNameLive(parseInt(t.dataset.id, 10), t.value); return; }
   if (t.id === 'reAddSearch') { if (returnEdit) returnEdit.addQuery = t.value; refreshRetEditAddList(t.value); return; }
+  if (t.id === 'rvSwapSearch') { if (returnVerify) returnVerify.swapQuery = t.value; refreshRvSwapList(t.value); return; } // v380
   if (t.id === 'signProdSearch') { if (signMaker) { signMaker.query = t.value; refreshSignProdList(t.value); } return; }
   if (role === 'sign-if') { if (signMaker) { const s = signInternalCurrent(); if (s) s[t.dataset.f] = t.value; } return; }
   if (role === 'sign-f') { if (signMaker) { const si = parseInt(t.dataset.id, 10); const s = signMaker.signs[si]; if (s) { s[t.dataset.f] = t.value; drawSignCanvas(); const rc = $('signRec_' + si); if (rc) rc.innerHTML = signRecInnerHtml(s, si); } } return; }
@@ -23710,6 +23825,11 @@ app.addEventListener('click', (e) => {
   else if (role === 'rv-apply-solve') rvApplyGapSolution();
   else if (role === 'rv-minus') rvStepNote(parseInt(id, 10), -1);
   else if (role === 'rv-plus') rvStepNote(parseInt(id, 10), 1);
+  // v380: חילוף מוצר — הספק זיכה מוצר אחר במקום השורה
+  else if (role === 'rv-swap') rvSwapStart(parseInt(id, 10));
+  else if (role === 'rv-swap-cancel') rvSwapCancel();
+  else if (role === 'rv-swap-pick') rvSwapPick(id);
+  else if (role === 'rv-swap-undo') rvSwapUndo(parseInt(id, 10));
   else if (role === 'rv-cancel') { returnVerify = null; setView('receiptsHistory'); }
   else if (role === 'rv-save') saveReturnVerify();
   else if (role === 'rc-short-credit') openShortCreditPrompt(id);

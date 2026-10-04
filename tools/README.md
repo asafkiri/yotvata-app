@@ -72,6 +72,7 @@ node --test tools/receipt-quantity-detail.test.mjs  # חויב בתעודה · �
 node --test tools/sign-small-layout.test.mjs       # שלטים "2 בדף (קטן)" — כל עמוד הוא "2 בדף (גדול)" מוקטן ל-88%, כולל ברקודים לקופה ושיתוף (v374)
 node --test tools/manual-value-offset.test.mjs     # קיזוז לפי שווי בין מחירים שנבדלים בשבר אגורה אינו משאיר שארית של ₪0.00 שמחזיקה את התעודה פתוחה (v375)
 node --test tools/promo-xlsx-import.test.mjs       # דף המבצעים החודשי כקובץ אקסל — נקרא במכשיר מהתאים, בלי שרת, ומשם אותו מסלול כמו PDF (v376)
+node --test tools/return-swap.test.mjs             # חילוף מוצר במסך אימות הזיכוי — הספק זיכה מארז במקום בודד; המקור נשמר, ביטול, והכרטיס אומר מה היה (v380)
 ```
 
 `sign-small-layout` מריצה את האפליקציה בדפדפן אמיתי (Playwright + Chromium) ומשווה
