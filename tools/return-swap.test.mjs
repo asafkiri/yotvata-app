@@ -56,7 +56,7 @@ test('כל שורה במסך האימות מציעה "חילוף מוצר" לצ�
   assert.deepEqual(json(c, 'returnVerify.items.map(l => l.productId)'), ['p-top', 'p-single'], 'productId נוסע עם השורות');
 });
 
-test('לחיצה על חילוף פותחת בוחר בתוך השורה, עם המארז של הבודד כהצעה בלחיצה אחת וחיפוש', () => {
+test('לחיצה על חילוף פותחת בוחר בתוך השורה: פריט החזרות הכללי עם מחיר, וחיפוש — בלי הצעת מארז (v381)', () => {
   const c = setup();
   c.run("openReturnVerify('ret-1', " + NOTE_WITH_PACK + ")");
   c.click('rv-swap', '1');
@@ -64,8 +64,12 @@ test('לחיצה על חילוף פותחת בוחר בתוך השורה, עם �
   const html = c.run("$('app').innerHTML");
   assert.ok(html.includes('data-rvswap="1"'), 'הבוחר נפתח בשורת המילקי');
   assert.ok(!html.includes('data-rvswap="0"'), 'ולא בשורה אחרת');
-  assert.ok(html.includes('data-role="rv-swap-pick" data-id="p-pack"'), 'המארז מוצע בלחיצה אחת');
-  assert.ok(html.includes('המארז של המוצר (8 יח׳)') && html.includes('₪' + c.run('fmtMoney(16.03)')), 'עם ההסבר והמחיר');
+  // v381: חילוף הוא יחידה ביחידה — בודד אחד אינו הופך לשמינייה, ולכן המארז אינו מוצע מעצמו
+  assert.ok(!html.includes('data-role="rv-swap-pick" data-id="p-pack"'), 'המארז של הבודד אינו מוצע אוטומטית');
+  assert.ok(!html.includes('המארז של המוצר'), 'אין טקסט הצעת מארז');
+  assert.ok(html.includes('data-role="rv-swap-generic" data-id="1"') && html.includes('id="rvSwapGenPrice"'), 'פריט החזרות הכללי עם שדה מחיר');
+  assert.ok(html.includes('value="2.14"'), 'המחיר בשדה מתחיל ממחיר השורה');
+  assert.ok(html.includes('יחידה במקום יחידה'), 'ההסבר אומר שהחילוף הוא יחידה ביחידה');
   assert.ok(html.includes('id="rvSwapSearch"') && html.includes('data-role="rv-swap-cancel"'), 'חיפוש וביטול');
   // חיפוש: לפי שם, בלי המוצר של השורה עצמה
   typeSwap(c, 'מילקי');
@@ -209,16 +213,159 @@ test('שורה שהוחלפה ואז הוכרעה חלקית נשארת עם ה�
   assert.equal(c.run('rvRowState(returnVerify.items[1])'), 'swap');
 });
 
-test('מוצר בלי מארז מוגדר — אין הצעה, נשאר החיפוש; מארז מציע את הבודד שלו', () => {
+// ===== v381: פריט החזרות הכללי =====
+// מהנייר של 3.10: שוקו שקית (7290000042855) זוכה כ"*פריט החזרות*" ב-₪1.96 במקום
+// ₪1.99 — אותו ברקוד, שם כללי, מחיר שהנהג קבע.
+
+const SHOKO = { productId: 'p-shoko', name: 'שוקו שקית(בודד)', barcode: '7290000042855', qty: 1, unitPrice: 1.99, lineTotal: 1.99 };
+function setupShoko(extra) {
+  const c = setup(Object.assign({ items: [LINES[0], SHOKO], totalExVat: 32.32, totalIncVat: 32.32 }, extra || {}));
+  c.run("products.push({ id: 'p-shoko', name: 'שוקו שקית(בודד)', barcode: '7290000042855', price: 1.99 })");
+  return c;
+}
+
+test('פריט החזרות כללי: הברקוד נשאר, השם הופך לכללי, המחיר מהנייר — והפער נסגר', async () => {
+  const c = setupShoko();
+  c.run("openReturnVerify('ret-1', 32.29)"); // 30.33 + 1.96
+  c.click('rv-yes', '0');
+  c.click('rv-swap', '1');
+  c.run("$('rvSwapGenPrice').value = '1.96'");
+  c.click('rv-swap-generic', '1');
+  const l = json(c, 'returnVerify.items[1]');
+  assert.equal(l.name, 'פריט החזרות');
+  assert.equal(l.barcode, '7290000042855', 'הברקוד נשאר כמו בנייר');
+  assert.equal(l.productId, '', 'אין מוצר מהקטלוג');
+  assert.equal(l.unitPrice, 1.96);
+  assert.equal(l.qty, 1); assert.equal(l.noteQty, 1); assert.equal(l.checked, true);
+  assert.deepEqual(l.orig, { productId: 'p-shoko', name: 'שוקו שקית(בודד)', barcode: '7290000042855', unitPrice: 1.99, isDeposit: false });
+  assert.equal(c.run('rvRowState(returnVerify.items[1])'), 'swap');
+  assert.equal(json(c, 'rvGap()'), 0, 'הנייר מוסבר במלואו');
+  const html = c.run("$('app').innerHTML");
+  assert.ok(html.includes('במקום: <span class="line-through text-slate-400">שוקו שקית(בודד)</span>'));
+  // שורה שכבר כללית אינה מציעה שוב "פריט החזרות" בבוחר
+  c.click('rv-swap', '1');
+  assert.ok(!c.run("$('app').innerHTML").includes('rv-swap-generic'), 'אין פריט החזרות על פריט החזרות');
+  c.click('rv-swap-cancel');
+  await c.run('saveReturnVerify()');
+  const d = writesFor(c).at(-1).data;
+  assert.equal(d.creditStatus, 'ok');
+  assert.deepEqual(d.items[1], { name: 'פריט החזרות', barcode: '7290000042855', qty: 1, unitPrice: 1.96, lineTotal: 1.96, swappedFrom: { name: 'שוקו שקית(בודד)', barcode: '7290000042855', unitPrice: 1.99, productId: 'p-shoko' } });
+  assert.equal(d.totalExVat, 32.29);
+  assert.ok(c.run('returnCardInReceipts(returns[0])').includes('הוחלף באימות · במקום: שוקו שקית(בודד)'));
+});
+
+test('פריט החזרות בלי מחיר — לא מחליפים, מבקשים את המחיר מהנייר; "בטל חילוף" מחזיר את השוקו', () => {
+  const c = setupShoko();
+  c.run("openReturnVerify('ret-1', null)");
+  c.click('rv-swap', '1');
+  c.run("$('rvSwapGenPrice').value = ''");
+  c.click('rv-swap-generic', '1');
+  assert.equal(json(c, 'returnVerify.items[1].name'), 'שוקו שקית(בודד)', 'לא הוחלף');
+  assert.equal(json(c, 'returnVerify.swapIdx'), 1, 'הבוחר נשאר פתוח');
+  assert.match(json(c, 'testToasts.at(-1)'), /הקלד את המחיר/);
+  c.run("$('rvSwapGenPrice').value = '1,96'");
+  c.click('rv-swap-generic', '1');
+  assert.equal(json(c, 'returnVerify.items[1].unitPrice'), 1.96, 'פסיק עשרוני מתקבל');
+  c.click('rv-swap-undo', '1');
+  const l = json(c, 'returnVerify.items[1]');
+  assert.equal(l.name, 'שוקו שקית(בודד)'); assert.equal(l.productId, 'p-shoko'); assert.equal(l.unitPrice, 1.99); assert.equal(l.orig, null);
+});
+
+// ===== v381: הוספת מוצר שלא נרשם =====
+
+test('כרטיס "הספק זיכה מוצר שלא רשמנו" בתחתית המסך: חיפוש מהקטלוג ופריט החזרות הכללי', () => {
   const c = setup();
   c.run("openReturnVerify('ret-1', null)");
-  c.click('rv-swap', '0');
   const html = c.run("$('app').innerHTML");
-  assert.ok(html.includes('data-rvswap="0"') && html.includes('id="rvSwapSearch"'));
-  assert.ok(!html.includes('המארז של המוצר') && !html.includes('הבודד של המארז'), 'למילקי טופ אין מארז מוגדר');
-  // שורה של מארז מציעה את הבודד
-  c.run("returnVerify.items[0] = { productId: 'p-pack', name: 'מארז 8 מילקי בטעם שוקולד', barcode: '7290104726712', qty: 2, noteQty: 2, unitPrice: 16.03, isDeposit: false, orig: null, checked: false }");
-  c.click('rv-swap', '0');
-  assert.ok(c.run("$('app').innerHTML").includes('הבודד של המארז'), 'ההצעה ההפוכה');
-  assert.ok(c.run("$('app').innerHTML").includes('data-role="rv-swap-pick" data-id="p-single"'));
+  assert.ok(html.includes('id="rvAddBox"') && html.includes('id="rvAddSearch"') && html.includes('id="rvAddList"'));
+  assert.ok(html.includes('data-role="rv-add-generic"') && html.includes('id="rvAddGenPrice"'));
+  assert.ok(html.includes('אם הספק פשוט זיכה יותר מדי, אל תוסיף'), 'ההבדל מ"זיכה יותר" נאמר');
+  c.events.get('app:input')({ target: { id: 'rvAddSearch', value: 'וניל', dataset: {}, closest: () => null } });
+  const list = c.run("$('rvAddList').innerHTML");
+  assert.ok(list.includes('data-role="rv-add-pick" data-id="p-other"'), 'תוצאת חיפוש היא כפתור הוספה');
+  assert.ok(!list.includes('data-id="p-top"') && !list.includes('data-id="p-single"'), 'מוצרים שכבר בתעודה אינם מוצעים');
+  assert.equal(json(c, 'returnVerify.addQuery'), 'וניל');
+});
+
+test('הוספת מוצר מהקטלוג: שורה חדשה בכמות 1 במחיר הזיכוי, מסומנת "נוסף באימות"; החיצים מזיזים הוחזר וזוכה יחד', () => {
+  const c = setup();
+  c.run("openReturnVerify('ret-1', 36.75)"); // 30.33 + 2.14 + 2 × 2.14 מילקי וניל שלא נרשם
+  c.click('rv-yes', '0'); c.click('rv-yes', '1');
+  assert.ok(Math.abs(json(c, 'rvGap()') - 4.28) < 0.01, 'לפני ההוספה הנייר גדול ב-₪4.28');
+  c.click('rv-add-pick', 'p-other');
+  let items = json(c, 'returnVerify.items');
+  assert.equal(items.length, 3);
+  const a = items[2];
+  assert.equal(a.productId, 'p-other'); assert.equal(a.name, 'מילקי וניל'); assert.equal(a.barcode, '72940754');
+  assert.equal(a.qty, 1); assert.equal(a.noteQty, 1); assert.equal(a.unitPrice, 2.14); assert.equal(a.added, true); assert.equal(a.checked, true);
+  assert.equal(c.run('rvRowState(returnVerify.items[2])'), 'added');
+  const html = c.run("$('app').innerHTML");
+  assert.ok(html.includes('נוסף באימות ✓') && html.includes('data-role="rv-added-remove" data-id="2"'), 'תג והסרה');
+  assert.ok(!html.includes('data-role="rv-yes" data-id="2"') && !html.includes('data-role="rv-swap" data-id="2"'), 'בשורה שנוספה אין הכרעה או חילוף — היא לפי הנייר');
+  assert.equal(json(c, 'returnVerify.addQuery'), '', 'החיפוש התנקה');
+  // חץ + משנה גם את מה שהוחזר
+  c.click('rv-plus', '2');
+  items = json(c, 'returnVerify.items');
+  assert.equal(items[2].qty, 2); assert.equal(items[2].noteQty, 2);
+  assert.equal(json(c, 'rvGap()'), 0, 'הנייר מוסבר');
+  // הקלדה ישירה
+  c.events.get('app:input')({ target: { dataset: { role: 'rv-note', id: '2' }, value: '3', getAttribute: n => n === 'data-role' ? 'rv-note' : null, closest: () => null } });
+  items = json(c, 'returnVerify.items');
+  assert.equal(items[2].qty, 3); assert.equal(items[2].noteQty, 3);
+  // שורה רגילה: החיצים אינם נוגעים ב"הוחזר"
+  c.click('rv-minus', '0');
+  items = json(c, 'returnVerify.items');
+  assert.equal(items[0].qty, 9); assert.equal(items[0].noteQty, 8);
+});
+
+test('הסרת שורה שנוספה לפני השמירה', () => {
+  const c = setup();
+  c.run("openReturnVerify('ret-1', null)");
+  c.click('rv-add-pick', 'p-other');
+  c.click('rv-added-remove', '2');
+  assert.equal(json(c, 'returnVerify.items.length'), 2);
+  // שורה מקורית אינה ניתנת להסרה בדרך הזאת
+  c.click('rv-added-remove', '0');
+  assert.equal(json(c, 'returnVerify.items.length'), 2);
+});
+
+test('שמירה עם שורה שנוספה: addedAtVerify, הסכום שהוחזר גדל, הכרטיס מסמן; בפתיחה מחדש היא שורה רגילה שעדיין מסומנת', async () => {
+  const c = setup();
+  c.run("openReturnVerify('ret-1', 36.75)");
+  c.click('rv-yes', '0'); c.click('rv-yes', '1');
+  c.click('rv-add-pick', 'p-other');
+  c.click('rv-plus', '2');
+  await c.run('saveReturnVerify()');
+  assert.deepEqual(json(c, 'testConfirms.map(x => x.title)'), []);
+  const d = writesFor(c).at(-1).data;
+  assert.equal(d.creditStatus, 'ok');
+  assert.equal(d.totalExVat, 36.75);
+  assert.deepEqual(d.items[2], { name: 'מילקי וניל', barcode: '72940754', qty: 2, unitPrice: 2.14, lineTotal: 4.28, productId: 'p-other', addedAtVerify: true });
+  assert.ok(c.run('returnCardInReceipts(returns[0])').includes('נוסף באימות · לא היה בתעודה שנשלחה'));
+  c.run("openReturnVerify('ret-1', null)");
+  assert.deepEqual(json(c, 'returnVerify.items.map(rvRowState)'), ['full', 'full', 'full'], 'בפתיחה מחדש השורה היא שורה רגילה עם הכרעה');
+  assert.equal(json(c, 'returnVerify.items[2].addedAtVerify'), true);
+  c.click('rv-no', '2');
+  await c.run('saveReturnVerify({ skipGap: true })');
+  const d2 = writesFor(c).at(-1).data;
+  assert.equal(d2.items[2].addedAtVerify, true, 'הסימון נשאר גם אחרי אימות נוסף');
+  assert.equal(d2.items[2].noteQty, 0);
+});
+
+test('הוספת פריט החזרות כללי: בלי מוצר ובלי ברקוד, במחיר מהנייר; בלי מחיר לא נוסף', async () => {
+  const c = setup();
+  c.run("openReturnVerify('ret-1', null)");
+  c.run("$('rvAddGenPrice').value = ''");
+  c.click('rv-add-generic');
+  assert.equal(json(c, 'returnVerify.items.length'), 2);
+  assert.match(json(c, 'testToasts.at(-1)'), /הקלד את המחיר/);
+  c.run("$('rvAddGenPrice').value = '1.96'");
+  c.click('rv-add-generic');
+  c.click('rv-yes', '0'); c.click('rv-yes', '1');
+  const a = json(c, 'returnVerify.items[2]');
+  assert.equal(a.name, 'פריט החזרות'); assert.equal(a.productId, ''); assert.equal(a.barcode, ''); assert.equal(a.unitPrice, 1.96); assert.equal(a.qty, 1); assert.equal(a.added, true);
+  await c.run('saveReturnVerify()');
+  const d = writesFor(c).at(-1).data;
+  assert.deepEqual(d.items[2], { name: 'פריט החזרות', barcode: '', qty: 1, unitPrice: 1.96, lineTotal: 1.96, addedAtVerify: true });
+  assert.equal(d.totalExVat, 34.43);
 });
