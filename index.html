@@ -17203,7 +17203,11 @@ function supplierCreditClaimsVerifiedInRange(allReceipts, fromT, toT) {
   return (allReceipts || []).filter(r => {
     if (!supplierCreditClaimVerified(r)) return false;
     const c = r.supplierCreditClaim || {};
-    const ts = Number(c.verifiedAt || r.timestamp || 0);
+    // Payment offsets reduce the receipt period, even when recorded later.
+    // Actual supplier credit notes remain in the period they were verified.
+    const ts = c.status === 'payment_offset'
+      ? Number(r.timestamp || 0)
+      : Number(c.verifiedAt || r.timestamp || 0);
     return ts >= fromT && ts <= toT;
   });
 }
@@ -17304,7 +17308,7 @@ async function setReceiptSupplierCreditStatus(id, status, opts) {
     claim.receivedAmount = expected;
     claim.receivedAt = Date.now();
     claim.verifiedAt = Date.now();
-    claim.verifiedMonth = monthKeyFromTs(Date.now());
+    claim.verifiedMonth = monthKeyFromTs(rc.timestamp);
     claim.settlementMethod = 'payment_offset';
     claim.manualNote = note;
     claim.remainingAmount = 0;
@@ -17406,7 +17410,7 @@ function supplierCreditClaimCardHtml(rc) {
     return '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800"><div class="font-black"><i class="fa-solid fa-circle-check"></i> זיכוי ספק התקבל ואומת</div><div class="font-bold mt-1">צפוי: ₪' + amount + ' · התקבל: ₪' + fmtMoney(got) + (c.verifiedAt ? ' · ' + new Date(c.verifiedAt).toLocaleDateString('he-IL') : '') + '</div>' + (over > 0 ? '<div class="text-[11px] mt-1 font-black text-emerald-700">התקבל ₪' + fmtMoney(over) + ' יותר מהצפוי</div>' : '') + '<div class="text-[11px] mt-1">נסגר מול זיכוי — לא להוריד שוב במקום אחר.</div></div>';
   }
   if (c.status === 'payment_offset') {
-    return '<div class="mt-2 bg-purple-50 border border-purple-200 rounded-xl p-2.5 text-xs text-purple-800"><div class="font-black"><i class="fa-solid fa-money-bill-transfer"></i> קוזז בתשלום לספק</div><div class="font-bold mt-1">₪' + amount + (c.verifiedAt ? ' · ' + new Date(c.verifiedAt).toLocaleDateString('he-IL') : '') + '</div>' + noteHtml + '<div class="text-[11px] mt-1">סומן כקיזוז בתשלום, לא כתעודת זיכוי נפרדת — לא להוריד שוב.</div></div>';
+    return '<div class="mt-2 bg-purple-50 border border-purple-200 rounded-xl p-2.5 text-xs text-purple-800"><div class="font-black"><i class="fa-solid fa-money-bill-transfer"></i> קוזז בתשלום לספק</div><div class="font-bold mt-1">₪' + amount + (c.verifiedAt ? ' · ' + new Date(c.verifiedAt).toLocaleDateString('he-IL') : '') + '</div>' + noteHtml + '<div class="text-[11px] mt-1">הסכום מופחת אוטומטית בסיכום של חודש התעודה, גם אם הקיזוז סומן מאוחר יותר — לא להוריד שוב.</div></div>';
   }
   if (c.status === 'cancelled') {
     return '<div class="mt-2 bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-600"><div class="font-black"><i class="fa-solid fa-ban"></i> דרישת זיכוי בוטלה / לא מגיעה</div>' + noteHtml + '</div>';
@@ -19447,6 +19451,8 @@ function receiptRangeData(from, to) {
   const openSupplierCreditEx = r2(openSupplierCredits.reduce((a, r) => a + supplierCreditClaimAmountAny(r), 0));
   const deferredSupplierCreditEx = r2(deferredDueCredits.reduce((a, r) => a + supplierCreditClaimAmountAny(r), 0));
   const verifiedSupplierCreditEx = r2(verifiedSupplierCredits.reduce((a, r) => a + supplierCreditClaimSettledAmount(r), 0));
+  const paymentOffsetEx = r2(verifiedSupplierCredits.filter(r => r.supplierCreditClaim.status === 'payment_offset').reduce((a, r) => a + supplierCreditClaimSettledAmount(r), 0));
+  const verifiedStatementCreditEx = r2(verifiedSupplierCreditEx - paymentOffsetEx);
   const pendingSupplierCreditEx = r2(openSupplierCreditEx + deferredSupplierCreditEx);
   // החוסר כבר אינו כלול ב-receiptPayableBaseEx. העודף הוא הערה בלבד ואינו
   // מכסה חוסר אחר עד שהמשתמש מאשר קיזוז מפורש.
@@ -19470,7 +19476,7 @@ function receiptRangeData(from, to) {
   const netSafeEx = r2(netBeforeSupplierCredits - verifiedSupplierCreditEx);
   const netSafeVat = r2(netSafeEx * VAT);
   const netSafeInc = r2(netSafeEx + netSafeVat);
-  return { from, to, fromT, toT, recs, rets, recEx, recInc, retEx, retInc, meMap, meList: Object.values(meMap), meEx, openCnt, pendingOffsetSuggestions, shortOffsetByOverEx, openShortNetEx, openOverNetEx, openShortEx, openOverEx, openSupplierCredits, openSupplierCreditEx, deferredDueCredits, deferredSupplierCreditEx, pendingSupplierCreditEx, pendingSupplierCreditInc, verifiedSupplierCredits, verifiedSupplierCreditEx, verifiedSupplierCreditInc, netBeforeSupplierCredits, netSafeEx, netSafeVat, netSafeInc, netEx, vatAmount, netInc };
+  return { from, to, fromT, toT, recs, rets, recEx, recInc, retEx, retInc, meMap, meList: Object.values(meMap), meEx, openCnt, pendingOffsetSuggestions, shortOffsetByOverEx, openShortNetEx, openOverNetEx, openShortEx, openOverEx, openSupplierCredits, openSupplierCreditEx, deferredDueCredits, deferredSupplierCreditEx, pendingSupplierCreditEx, pendingSupplierCreditInc, verifiedSupplierCredits, verifiedSupplierCreditEx, verifiedSupplierCreditInc, paymentOffsetEx, verifiedStatementCreditEx, netBeforeSupplierCredits, netSafeEx, netSafeVat, netSafeInc, netEx, vatAmount, netInc };
 }
 function moneyRow(label, amount, cls, prefix) {
   prefix = prefix || '';
@@ -19516,7 +19522,8 @@ function supplierCalculationStepsHtml(d) {
       ? moneyRow('פחות הנחות מרכזת סוף חודש (צפי)', d.meEx, 'text-rose-700', '− ') +
         d.meList.map(s => '<div class="flex items-center justify-between text-[11px] text-rose-600/80 font-bold pr-3"><span>· ' + s.name + ' ' + s.pct + '%</span><span>− ₪' + fmtMoney(r2(s.ex)) + '</span></div>').join('')
       : '') +
-    (d.verifiedSupplierCreditEx > 0 ? moneyRow('פחות זיכויי מבצע שכבר אומתו', d.verifiedSupplierCreditEx, 'text-emerald-700', '− ') : '') +
+    (d.verifiedStatementCreditEx > 0 ? moneyRow('פחות זיכויי מבצע שהתקבלו מהספק', d.verifiedStatementCreditEx, 'text-emerald-700', '− ') : '') +
+    (d.paymentOffsetEx > 0 ? moneyRow('פחות קיזוזים בתשלום', d.paymentOffsetEx, 'text-purple-700', '− ') : '') +
     (d.pendingSupplierCreditEx > 0 ? moneyRow('פחות זיכויי מבצע פתוחים שמגיעים לכם', d.pendingSupplierCreditEx, 'text-orange-700', '− ') : '') +
     '<div class="border-t border-slate-200 mt-2 pt-2">' +
       (d.pendingOffsetSuggestions > 0 ? '<div class="text-[11px] font-black text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2 my-1"><i class="fa-solid fa-triangle-exclamation"></i> יש התאמות קיזוז שממתינות לאישור ב-' + d.pendingOffsetSuggestions + ' תעודות — פתח את התעודות ואשר לפני שסוגרים סכום</div>' : '') +
