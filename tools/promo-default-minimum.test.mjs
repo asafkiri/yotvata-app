@@ -90,7 +90,6 @@ test('final receiving uses the one-unit discount while preserving paper totals',
   const {c} = setup();
   c.run('logAction=()=>{};aiScanFromDraft=true;showConfirm=(title,text,label,fn)=>fn();finishReceipt();aiApplyInvoiceResult();saveReconciledReceipt({skipChecked:true})');
   assert.equal(c.run('pendingReceipt.ex'), 4);
-  c.run('flushReceiptDraftToCloud=async()=>{receiptSync.dirty=false;return true;}');
   await c.run('confirmReceipt()');
   const saved = c.writes.find(w => w.path?.includes('receipts'))?.data;
   assert.equal(saved.totalExVat, 4);

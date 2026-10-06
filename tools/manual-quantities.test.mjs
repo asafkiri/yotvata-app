@@ -144,11 +144,11 @@ test(supplier+': multiple papers aggregate quantities once and keep their origin
  assert.equal(r.run('receiptList.find(l=>l.productId==="coffee").qty'),12);
  assert.equal(r.run('pendingReceipt.noteParts.length'),2);assert.deepEqual(json(r,'aiScanResponse.scan'),paper);
 });
-if(supplier!=='berman')test(supplier+': unfinished differences follow the existing cloud draft to another device',async()=>{
+if(supplier!=='berman')test(supplier+': unfinished differences transfer with the handoff draft to another device',async()=>{
  const cloud=harness.fakeCloud(),data=plainData(),a=create({data,cloud});await cloud.tick();await a.scan();
  a.run('receiptList=[];startReceiptQuantityReview(false);receiptQuantityReview.rows[0].kind="shortage";receiptQuantityReview.rows[0].difference="2";saveReceiptDraft()');
- assert.equal(await a.run('flushReceiptDraftToCloud()'),true);await cloud.tick();
- const b=create({data,cloud});await cloud.tick();b.run('startReceiptQuantityReview(false)');
+ a.run('draftHandoffs.receiving.flush()');await cloud.tick();await cloud.tick();
+ const b=create({data,cloud});await cloud.tick();assert.equal((await b.run('draftHandoffs.receiving.take('+JSON.stringify(a.run('receiptDraftId'))+')')).ok,true);b.run('startReceiptQuantityReview(false)');
  assert.equal(b.run('receiptQuantityReview.rows[0].difference'),'2');assert.equal(b.run('commitReceiptQuantityReview()'),true);closeNormal(b);
  assert.equal(b.run('receiptList[0].qty'),8);assert.equal(b.requests.length,0);
 });
@@ -282,8 +282,8 @@ test(supplier+': switching back to scanning preserves the paper, entered differe
 });
 if(supplier!=='berman')test(supplier+': chosen manual screen follows the draft to another device before any count is entered',async()=>{
  const cloud=harness.fakeCloud(),data=plainData(),a=create({data,cloud});await cloud.tick();enterPhotoScreen(a);
- a.click(photoRole(true));await settleScan();assert.equal(await a.run('flushReceiptDraftToCloud()'),true);await cloud.tick();
- const b=create({data,cloud});await cloud.tick();b.run('renderReceiving()');assertManualScreen(b);
+ a.click(photoRole(true));await settleScan();a.run('draftHandoffs.receiving.flush()');await cloud.tick();await cloud.tick();
+ const b=create({data,cloud});await cloud.tick();assert.equal((await b.run('draftHandoffs.receiving.take('+JSON.stringify(a.run('receiptDraftId'))+')')).ok,true);b.run('renderReceiving()');assertManualScreen(b);
  assert.deepEqual(json(b,'receiptList'),[]);assert.equal(b.requests.length,0);
 });
 test(supplier+': cancelling the manual receipt resets the next receipt to the normal counting method',async()=>{

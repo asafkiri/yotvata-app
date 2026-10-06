@@ -107,7 +107,6 @@ test('a: a fresh receipt after a finished no-document receipt starts with a whol
   c.run(`receiptList = [{ productId: 'milk', name: 'חלב בדיקה', barcode: '7290000000008', qty: 9 }]; receiptDupConfirmed = true; saveReceiptDraft(); finishReceipt()`);
   const p = json(c, 'pendingReceipt');
   assert.ok(p); assert.equal(p.noDoc, true); assert.equal(p.status, 'open');
-  c.run('flushReceiptDraftToCloud = async () => { receiptSync.dirty = false; return true; }');
   await c.run('confirmReceipt()');
   const saved = c.writes.find(w => w.path?.includes('receipts'))?.data;
   assert.ok(saved); assert.equal(saved.noDoc, true); assert.equal(saved.status, 'open'); assert.equal(saved.totalExVat, 45);

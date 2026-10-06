@@ -4,7 +4,7 @@
 // are faked. No network, no paid calls.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { runtime, fixture, reply } from './receipt-scan-harness.mjs';
+import { runtime, fixture, reply, fakeCloud } from './receipt-scan-harness.mjs';
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const settle = async (n = 40) => { for (let i = 0; i < n; i++) await tick(); };
@@ -507,34 +507,13 @@ test('a 1:5 credit slip keeps ~715×3580 pixels; the same photo as an invoice pa
   assert.equal(c.run("'maxPixels' in aiScanDocuments[0].pages[0]"), false);
 });
 
-test('a cloud draft that arrives during a credit read is deferred; the paid result is kept', async () => {
-  const data = fixture('yotvata'); const c = runtime('yotvata', { data });
-  let release;
-  service(c, { version: 147, answer: () => new Promise(resolve => { release = () => resolve(reply(creditPaper(data))); }) });
-  c.run(`receiptOpened = true; receiptList = [{ productId: 'milk', name: 'חלב בדיקה', barcode: '7290000000008', qty: 3 }]; saveReceiptDraft();`);
-  addCredit(c);
-  c.context.otherDraft = { ...json(c, 'receiptDraftPayload(true)'), items: [{ productId: 'milk', qty: 7 }], deliveryCredits: [] };
-  c.context.remoteEnvelope = await c.run(`(async () => ({ revision: receiptSync.revision + 5, mutationId: 'other-device',
-    active: true, content: await packReceiptValue(otherDraft) }))()`);
-  const read = c.run("deliveryCreditRead('credit-1')");
-  await settle();
-  assert.equal(typeof release, 'function');
-  c.run('receiptSync.dirty = false; receiptSyncConflict = null');
-  await c.run('receiveReceiptCloudDraft(remoteEnvelope)');
-  assert.equal(c.run('receiptSyncConflict === remoteEnvelope'), true, 'deferred to the conflict notice');
-  c.run('receiptSyncConflict = null');
-  await c.run('applyReceiptCloudDraft(remoteEnvelope)');
-  assert.equal(c.run('receiptSyncConflict === remoteEnvelope'), true);
-  assert.equal(c.run('receiptList[0].qty'), 3);
-  assert.equal(c.run('receiptDeliveryCredits.length'), 1);
-  release();
-  assert.equal(await read, true);
-  assert.equal(c.run('receiptDeliveryCredits[0].status'), 'review');
-  // Control: with no read running, the same draft is applied.
-  c.run('receiptSyncConflict = null; receiptSync.dirty = false');
-  await c.run('receiveReceiptCloudDraft(remoteEnvelope)');
-  assert.equal(c.run('receiptList[0].qty'), 7);
-  assert.equal(c.run('receiptDeliveryCredits.length'), 0);
+test('handoff waits for a paid credit read and transfers the result without another upload', async () => {
+ const cloud=fakeCloud(),data=fixture('yotvata'),c=runtime('yotvata',{data,cloud}),other=runtime('yotvata',{data,cloud});let release;
+ service(c,{version:147,answer:()=>new Promise(resolve=>{release=()=>resolve(reply(creditPaper(data)));})});
+ c.run("receiptOpened=true;receiptList=[{productId:'milk',name:'בדיקה',qty:3}];saveReceiptDraft()");addCredit(c);const read=c.run("deliveryCreditRead('credit-1')");await settle();await cloud.tick();assert.equal(typeof release,'function');
+ const sid=c.run('receiptDraftId');assert.equal((await other.run('draftHandoffs.receiving.take('+JSON.stringify(sid)+')')).reason,'scan-running');assert.equal(c.run('receiptList[0].qty'),3);
+ release();assert.equal(await read,true);assert.equal(c.run('receiptDeliveryCredits[0].status'),'review');c.run('draftHandoffs.receiving.flush()');await cloud.tick();
+ assert.equal((await other.run('draftHandoffs.receiving.take('+JSON.stringify(sid)+')')).ok,true);assert.equal(other.run('receiptDeliveryCredits[0].status'),'review');assert.equal(other.run('receiptList[0].qty'),3);assert.equal(other.requests.length,0);
 });
 
 // Firebase 11: getIdToken() hands back the cached token until 30 s before it

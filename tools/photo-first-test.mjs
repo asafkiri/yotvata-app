@@ -13,7 +13,7 @@ function source(name) {
   assert.ok(end > firstEnd);
   return html.slice(match.index, end + 2);
 }
-const names = ['receiptReconcileSnapshot','receiptUsesManualQuantities','priceAuditNumber','priceAuditDate','priceAuditCapture','priceAuditSource','priceAuditIdentity','priceAuditDocumentComplete','receiptPriceAudit','dDisp','priceAuditDatesHtml','priceAuditChoiceHtml','receiptPriceAuditHtml','priceAuditLegacyVisible','refreshPriceScannerNotice','receiptRememberScanResults','receiptRebuildScanResponse','receiptScanChanged','receiptScanSnapshot','receiptStorageNotice','persistReceiptDraft','receiptDraftActive','scheduleReceiptDraftSync','refreshReceiptDraftNotice','yotvataPaperCheck', 'yotvataResetPhotoReceipt', 'yotvataCachedDoc', 'yotvataPhotoReady',
+const names = ['receiptReconcileSnapshot','receiptUsesManualQuantities','priceAuditNumber','priceAuditDate','priceAuditCapture','priceAuditSource','priceAuditIdentity','priceAuditDocumentComplete','receiptPriceAudit','dDisp','priceAuditDatesHtml','priceAuditChoiceHtml','receiptPriceAuditHtml','priceAuditLegacyVisible','refreshPriceScannerNotice','receiptRememberScanResults','receiptRebuildScanResponse','receiptScanChanged','receiptScanSnapshot','receiptStorageNotice','persistReceiptDraft','receiptDraftActive','refreshReceiptDraftNotice','yotvataPaperCheck', 'yotvataResetPhotoReceipt', 'yotvataCachedDoc', 'yotvataPhotoReady',
   'yotvataInvalidatePhotoDoc', 'yotvataAdoptPaperAnchors', 'yotvataStartPaperScan', 'yotvataScanMetadata', 'aiScanPageAudit',
   'yotvataStoreScanResults', 'yotvataReceiptScanAudit', 'receiptDraftPayload', 'saveReceiptDraft', 'deliveryCreditSnapshot',
   'restoreDraftScan', 'restoreReceiptDraft', 'normNote', 'noteSum', 'noteAnchorSum', 'recomputeNoteTotal',
@@ -26,9 +26,9 @@ const names = ['receiptReconcileSnapshot','receiptUsesManualQuantities','priceAu
 function context(extra = {}) {
   const storage = new Map();
   const c = vm.createContext({ console, setTimeout, clearTimeout, AbortController, Date, JSON, Math, Number,
-    Map, Set, Array, Object, String, Promise, Error, PRICE_AUDIT_SUPPLIER: 'yotvata', receiptPriceSaveFailed:false,
+    Map, Set, Array, Object, String, Promise, Error, PRICE_AUDIT_SUPPLIER: 'yotvata', canEditDraft:()=>true,handoffApplying:false,handoffChanged(){},renderDraftHandoffBanner(){}, receiptPriceSaveFailed:false,
     receiptReconcileDraft:null,receiptReconcileSession:null,promoArchive:[],db:null, receiptStorageWarning:'',receiptDraftId:null,makeOperationId:()=> 'test-' + Math.random(),receiptAnalysisCache:null,aiScanEditingImages:false,
-    receiptSync:{revision:0,dirty:false},receiptSyncSignature:null,receiptCloudReady:false,receiptSyncTimer:null,receiptSyncConflict:null,receiptSyncError:'',receiptFinalizing:false,
+    draftHandoffs:{},handoffFinalizing:{},receiptFinalizing:false,
     receiptCountingMode: 'scan', receiptQuantityReview: null, receiptManualInput: null, $: () => null, htmlEscape: String, fmtMoney: String,
     receiptEntryMode: 'photo', receiptAnchorSource: null, receiptPaperScanState: '', receiptPaperScanProblems: [],
     receiptPhotoCaptureOpen: false, receiptScanHistory: [], aiScanRunId: 0, receiptOpened: false,

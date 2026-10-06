@@ -212,7 +212,6 @@ test('photograph, confirm and save a credited shortage once without reducing sto
   assert.match(c.node('rsBody').innerHTML, /הזיכוי מהנהג מכסה את החוסר/);
   assert.equal(p.shortCreditNotes[0].number, 'TEST-CREDIT');
   assert.equal(p.shortCreditNotes[0].paper.subtotalExVat, -43.8);
-  c.run('flushReceiptDraftToCloud=async()=>{receiptSync.dirty=false;return true;}');
   await c.run('confirmReceipt()');
   const saved = c.writes.find(w => w.path?.includes('receipts'))?.data;
   assert.ok(saved); assert.equal(saved.shortCreditNotes.length, 1);
@@ -416,7 +415,6 @@ test('a credit with a separate document discount is never sent to a retake loop;
   assert.equal(c.run('receiptDeliveryCredits.length'), 0);
   const p = finish(c);
   assert.equal(p.status, 'open');
-  c.run('flushReceiptDraftToCloud=async()=>{receiptSync.dirty=false;return true;}');
   await c.run('confirmReceipt()');
   const saved = c.writes.find(w => w.path?.includes('receipts'))?.data;
   assert.ok(saved);
@@ -490,7 +488,7 @@ test('cancelling a credit photo cannot delete an invoice page or its verified sc
 test('a failed receipt save retains the confirmed credit for retry', async () => {
   const { c, data } = setup(); await readCredit(c, data); c.run("deliveryCreditConfirm('credit-1')");
   assert.ok(finish(c)); const before = json(c, 'deliveryCreditNotes()');
-  c.run('flushReceiptDraftToCloud=async()=>{receiptSync.dirty=false;return true;};runCloudTask=async()=>false');
+  c.run('globalThis.networkFailure=true');
   await c.run('confirmReceipt()');
   assert.deepEqual(json(c, 'deliveryCreditNotes()'), before);
   const reload = runtime('yotvata', { data, storage: c.storage });
@@ -506,27 +504,12 @@ test('credit approval changed after the summary requires a new summary before pe
   assert.match(c.toasts.at(-1), /מאז הסיכום/);
 });
 
-test('the shared draft carries credit approval to another device and final save consumes it atomically', async () => {
-  const { c, data } = setup(); const cloud = fakeCloud();
-  c.context.doc = (_db, ...path) => path.join('/');
-  c.context.runTransaction = (_db, fn) => cloud.transaction(fn, c.context);
-  c.context.onSnapshot = (ref, opts, listener) => cloud.subscribe(ref, listener, c.context);
-  c.run('startReceiptDraftListener()'); await cloud.tick();
-  await readCredit(c, data); c.run("deliveryCreditConfirm('credit-1')");
-  assert.equal(await c.run('flushReceiptDraftToCloud()'), true); await cloud.tick();
-  const other = runtime('yotvata', { data, cloud }); await cloud.tick();
-  assert.deepEqual(json(other, 'deliveryCreditNotes()'), json(c, 'deliveryCreditNotes()'));
-  assert.equal(other.run('deliveryCreditReady()'), true); assert.equal(uploads(other), 0);
-  c.run('runCloudTask=async(label,task)=>{testWrites.push(structuredClone(task));try{await executeCloudTask(task);return true}catch(e){testToasts.push(e.message);return false}}');
-  assert.ok(finish(c)); await c.run('confirmReceipt()');
-  assert.equal(c.writes.filter(w => w.path?.includes('receipts')).length, 1);
-  assert.equal(c.writes.find(w => w.path?.includes('receipts')).data.shortCreditNotes.length, 1);
-  assert.ok(c.writes.find(w => w.path?.includes('receipts')).receiptDraftGuard);
-  await cloud.tick();
-  assert.equal(other.run('receiptDeliveryCredits.length'), 0);
-  assert.equal([...cloud.documents.entries()].find(([k]) => k.endsWith('/drafts/receipt'))[1].active, false);
-  const saved = [...cloud.documents.entries()].filter(([k]) => k.includes('/receipts/'));
-  assert.equal(saved.length, 1); assert.equal(saved[0][1].shortCreditNotes.length, 1);
+test('handoff carries credit approval and final save commits it once without OCR', async () => {
+ const cloud=fakeCloud(),{c,data}=setup({cloud});await readCredit(c,data);c.run("deliveryCreditConfirm('credit-1');draftHandoffs.receiving.flush()");await cloud.tick();
+ const sid=c.run('receiptDraftId'),other=runtime('yotvata',{data,cloud});await cloud.tick();assert.equal((await other.run('draftHandoffs.receiving.take('+JSON.stringify(sid)+')')).ok,true);
+ assert.deepEqual(json(other,'deliveryCreditNotes()'),json(c,'deliveryCreditNotes()'));assert.equal(other.run('deliveryCreditReady()'),true);assert.equal(uploads(other),0);
+ assert.ok(finish(other));await other.run('confirmReceipt()');await cloud.tick();const records=cloud.paths('/receipts/');assert.equal(records.length,1);assert.equal(cloud.get(records[0]).shortCreditNotes.length,1);
+ assert.equal(c.run('draftHandoffs.receiving.state().away.away'),'saved');assert.equal(c.run('draftHandoffs.receiving.clear().ok'),true);assert.equal(c.run('receiptDeliveryCredits.length'),0);assert.equal(uploads(other),0);
 });
 
 test('credited products are excluded from future goods offsets while another shortage remains open', async () => {
