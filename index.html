@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v384 שמירת תיקוני ההשוואה</title>
+    <title>הזמנות יטבתה - v385 טיוטה בטלפון</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -123,8 +123,9 @@
     </header>
 
     <!-- תוכן ראשי -->
+    <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v384 שמירת תיקוני ההשוואה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v385 טיוטה בטלפון</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -499,13 +500,14 @@
       </div>
     </div>
 
-    <script type="module">
+    <script src="./draft-handoff.js"></script>
+<script type="module">
 // ===== Firebase (מפתח הענן של גלוברנס) =====
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import {
   initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager,
-  collection, onSnapshot, doc, getDoc, deleteDoc, addDoc, updateDoc, setDoc, writeBatch, query, orderBy, limit, getDocs, getDocsFromServer, where, runTransaction
+  collection, onSnapshot, doc, getDoc, deleteDoc, addDoc, updateDoc, setDoc, writeBatch, query, orderBy, limit, getDocs, getDocsFromServer, where, runTransaction, getDocFromServer
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -662,10 +664,10 @@ let aiScanEvaluation = null;
 let aiScanReused = false;        // v272: התוצאה שמוצגת נשענת על צילום קודם, בלי סריקה חדשה
 let receiptStorageWarning = '';
 let aiScanEditingImages = false;
-let receiptSync = { revision: 0, mutationId: null, dirty: false };
-let receiptSyncSignature = null, receiptSyncTimer = null, receiptSyncFlight = null;
-let receiptSyncConflict = null, receiptRemotePending = null, receiptSyncError = '';
-let receiptCloudReady = false, receiptDraftUnsubscribe = null, receiptFinalizing = false;
+const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
+let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
+let orderDraftId = null, orderDraftNote = '';
+const APP_VERSION = '385';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -886,25 +888,30 @@ function buzz(ms) { try { if (navigator.vibrate) navigator.vibrate(ms); } catch 
 
 // ===== טיוטת הזמנה =====
 function saveDraft() {
-  draftReady = true;
-  try { localStorage.setItem(ORDER_DRAFT_KEY, JSON.stringify(orderState)); } catch (e) {}
+  if (!handoffApplying && !canEditDraft('order',true)) return false;
+  if (!orderDraftId && Object.values(orderState).some(x=>x&&hasEnteredAmount(x.amount)))orderDraftId=makeOperationId('order');
+  draftReady=true;
+  try { localStorage.setItem(ORDER_DRAFT_KEY,JSON.stringify({schemaVersion:1,draftId:orderDraftId,items:orderState,note:orderDraftNote})); }
+  catch(e){showToast('ההזמנה לא נשמרה בטלפון — אין מקום. אל תסגור לפני גיבוי.');return false;}
+  handoffChanged('order');return true;
 }
 function saveDraftPassive() {
+  if(!canEditDraft('order',true))return;
   // סנכרון רקע לא מוחק כמות פעילה שנכתבה בטאב אחר של אותו מכשיר.
   try {
-    const disk = JSON.parse(localStorage.getItem(ORDER_DRAFT_KEY) || '{}') || {};
+    const raw = JSON.parse(localStorage.getItem(ORDER_DRAFT_KEY) || '{}') || {}; const disk=raw.schemaVersion===1?raw.items:raw;
     const merged = { ...orderState };
     Object.keys(disk).forEach(id => {
       if (hasEnteredAmount(disk[id] && disk[id].amount) && !hasEnteredAmount(merged[id] && merged[id].amount)) merged[id] = disk[id];
     });
     orderState = merged;
-    localStorage.setItem(ORDER_DRAFT_KEY, JSON.stringify(orderState));
+    saveDraft();
     draftReady = true;
   } catch (e) { saveDraft(); }
 }
 function restoreDraft() {
-  try { const s = localStorage.getItem(ORDER_DRAFT_KEY); if (s) { const o = JSON.parse(s); if (o && typeof o === 'object') orderState = { ...orderState, ...o }; } } catch (e) {}
-  draftReady = true;
+  try { const raw=JSON.parse(localStorage.getItem(ORDER_DRAFT_KEY)||'{}');orderState=raw.schemaVersion===1?raw.items||{}:raw;orderDraftId=raw.schemaVersion===1?raw.draftId||null:null;orderDraftNote=raw.schemaVersion===1?raw.note||'':''; } catch(e) {}
+  draftReady=true;
 }
 function saveReturnsDraft() {
   returnsDraftLocalTs = Date.now();
@@ -1249,6 +1256,7 @@ function yotvataPaperStatusHtml() {
   return '';
 }
 function yotvataAdoptPaperAnchors() {
+  if (!canEditDraft('receiving')) return;
   const returned = aiScanResponse && aiScanResponse.scan && aiScanResponse.scan.documents || [];
   const notes = [], problems = [];
   const seen = new Set();
@@ -1279,6 +1287,7 @@ async function yotvataEnsurePhotoService() {
   return status;
 }
 async function yotvataStartPaperScan(opts = {}) {
+  if (!canEditDraft('receiving')) return;
   if (!yotvataPhotoReady()) return;
   if (!auth || !auth.currentUser) { showToast('המתן לחיבור המאובטח ונסה שוב', null, null, 3000); return; }
   receiptCountingMode = opts.manualQuantities && !receiptAttachTarget ? 'manual' : 'scan';
@@ -1504,6 +1513,7 @@ function deliveryCreditReviewReasons(c) {
   return reasons;
 }
 function deliveryCreditConfirm(id) {
+  if (!canEditDraft('receiving')) return;
   const c = deliveryCreditFind(id);
   if (!c || !['review', 'confirmed'].includes(c.status) || !c.paper) return false;
   if (c.status === 'confirmed' && c.confirmedSignature === deliveryCreditSignature(c) && !deliveryCreditDuplicate(c)) return true;
@@ -1535,6 +1545,7 @@ function deliveryCreditOpenPage(id, pageIndex) {
 // v364: replace=true — "צלם את הזיכוי מחדש". הצילומים הקיימים מוחלפים רק אחרי
 // שהצילום החדש הוכן בהצלחה; כישלון בהכנה משאיר אותם כמו שהם.
 async function deliveryCreditAddFiles(id, files, replace = false) {
+  if (!canEditDraft('receiving')) return;
   const c = deliveryCreditFind(id);
   if (!c || !files || !files.length || deliveryCreditBusy(c) || receiptFinalizing) return false;
   const slots = replace ? 4 : 4 - c.pages.length;
@@ -1544,7 +1555,7 @@ async function deliveryCreditAddFiles(id, files, replace = false) {
     const pages = [];
     // v364: פתק זיכוי ארוך וצר מקבל תקציב שטח במקום תקרת צלע ארוכה (ראה AI_CREDIT_MAX_PIXELS).
     for (const file of Array.from(files).slice(0, slots)) pages.push(await aiCompressInvoiceImage(file, false, AI_CREDIT_MAX_PIXELS));
-    if (deliveryCreditFind(id) !== c) return false;
+    if (deliveryCreditFind(id) !== c || !canEditDraft('receiving',true)) return false;
     if (replace && aiOrientationSession && c.pages.includes(aiOrientationSession.page)) aiCloseOrientationReview();
     deliveryCreditInvalidate(c); if (replace) c.pages = []; c.pages.push(...pages); c.pageCount = c.pages.length;
     // v366: זיכוי מהנהג שייך לקליטה עם תעודה. מי שמצלם זיכוי במסך הצילום של קליטה שנפתחה
@@ -1615,13 +1626,14 @@ function deliveryCreditPaperError(message) {
 // הקריאה ששולמה נשמר בטיוטה המקומית (c.resume). נשלח רק גוף האיסוף, בלי צילומים,
 // באותו תור ואותו חימום; הצלחה ממשיכה לבדיקה הרגילה (בדיקת הנייר לא צריכה צילום).
 async function deliveryCreditRead(id, collect = false) {
+  if (!canEditDraft('receiving')) return;
   const c = deliveryCreditFind(id);
   if (!c || c.paper || deliveryCreditBusy(c) || receiptFinalizing) return false;
   if (collect ? !deliveryCreditCollectable(c) : (!c.pages.length || c.pages.some(p => !p.orientationConfirmed))) return false;
   if (!auth || !auth.currentUser) { showToast('המתן לחיבור המאובטח ונסה שוב', null, null, 3000); return false; }
   c.status = 'reading'; c.error = ''; c.errorKind = ''; c.errorDetail = ''; c.waiting = false; c.progress = '';
   saveReceiptDraft(); renderReceiving();
-  const current = () => deliveryCreditFind(id) === c;
+  const current = () => deliveryCreditFind(id) === c && canEditDraft('receiving',true);
   try {
     const token = await auth.currentUser.getIdToken();
     if (!current()) return false;
@@ -1722,6 +1734,7 @@ async function deliveryCreditRead(id, collect = false) {
 //   זה אוסף את הקריאה שכבר רצה, בלי לשלם שוב). "צלם את הזיכוי מחדש" מחליף את
 //   הצילומים רק אחרי שהחדש הוכן. הודעת הדפדפן (Load failed) — שורה טכנית קטנה.
 function deliveryCreditAutoRead(c) {
+  if (!canEditDraft('receiving')) return;
   if (!c || deliveryCreditFind(c.id) !== c || c.paper || deliveryCreditBusy(c) || receiptFinalizing
     || !c.pages.length || c.pages.some(p => !p.orientationConfirmed)) return false;
   deliveryCreditRead(c.id);
@@ -1793,6 +1806,7 @@ function deliveryCreditCaptureHtml(c) {
   return inputs + button('delivery-credit-read', 'קרא את הזיכוי', true) + more;
 }
 function deliveryCreditAction(role, id, page, row) {
+  if (!canEditDraft('receiving')) return;
   if (receiptFinalizing) return;
   if (role === 'delivery-credit-add') {
     if (receiptDeliveryCredits.length >= 4 || !deliveryCreditsAllowed()) return; // v366: הכפתור ממילא לא מוצג כשאסור — שמירה כפולה
@@ -2145,15 +2159,11 @@ function receiptDraftPayload(includeScan) {
     aiScan: includeScan ? scan : null };
 }
 function saveReceiptDraft() {
-  if ((receiptOpened || receiptList.length || receiptNotes.length || receiptDeliveryCredits.length || aiScanDocuments.some(d => d.pages.length || d.scanResult)) && !receiptDraftId) receiptDraftId = makeOperationId('receipt');
-  const payload = receiptDraftPayload(true), signature = JSON.stringify(payload);
-  if (signature !== receiptSyncSignature && (receiptSyncSignature !== null || receiptDraftActive(payload))) {
-    receiptSync.mutationId = makeOperationId('draft_change'); receiptSync.dirty = true;
-  }
-  receiptSyncSignature = signature;
-  const saved = persistReceiptDraft({ ...payload, sync: { ...receiptSync } });
-  scheduleReceiptDraftSync(); refreshReceiptDraftNotice();
+  if (!handoffApplying && !canEditDraft('receiving',true)) return false;
+  if ((receiptOpened || receiptList.length || receiptNotes.length || receiptManualInput || receiptDeliveryCredits.length || aiScanDocuments.some(d => d.pages.length || d.scanResult)) && !receiptDraftId) receiptDraftId = makeOperationId('receipt');
+  const saved = persistReceiptDraft(receiptDraftPayload(true));
   receiptPriceSaveFailed = !saved;
+  handoffChanged('receiving'); refreshReceiptDraftNotice();
   return saved;
 }
 // Each input owns its result. The combined response is only a derived view.
@@ -2225,20 +2235,14 @@ function receiptStorageNotice(message) {
   if (message && changed) showToast(message, null, null, 7000);
 }
 function persistReceiptDraft(payload) {
-  payload = deliveryCreditLocalDraft(payload); // v364: מפתחות איסוף של זיכויים — רק במכשיר
+  payload=deliveryCreditLocalDraft(payload);
   try {
     localStorage.setItem(RECEIPT_DRAFT_KEY, JSON.stringify(payload));
     receiptStorageNotice('');
     return true;
   } catch (error) {
-    const smaller = { ...payload, aiScan: null, analysisCache: null,
-      storageWarning: 'הכמויות נשמרו במכשיר, אבל אין מקום לפענוח. ' + (payload.sync && !payload.sync.dirty && payload.sync.revision > 0 ? 'הפענוח שמור בענן וייטען עם חיבור לאינטרנט.' : 'אל תסגור לפני שהטיוטה נשמרת בענן.') };
-    try {
-      localStorage.setItem(RECEIPT_DRAFT_KEY, JSON.stringify(smaller));
-      receiptStorageNotice(smaller.storageWarning);
-    } catch (fallbackError) {
-      receiptStorageNotice(payload.sync && !payload.sync.dirty && payload.sync.revision > 0 ? 'אין מקום לשמירה במכשיר. הטיוטה שמורה בענן; פתיחה מחדש מחייבת חיבור לאינטרנט.' : 'השינויים האחרונים לא נשמרו במכשיר. אל תסגור לפני השמירה בענן — רענון עלול להחזיר נתונים ישנים.');
-    }
+    // שומרים את העותק המלא האחרון; טיוטה חלקית לא תדרוס פענוח ששולם עליו.
+    receiptStorageNotice('השינויים האחרונים לא נשמרו במכשיר — אין מקום לפענוח. הטיוטה הקודמת נשמרה בשלמותה; אל תסגור לפני שהגיבוי לענן מאושר.');
     return false;
   }
 }
@@ -2326,9 +2330,6 @@ function restoreReceiptDraft(incoming) {
     }
     receiptStorageWarning = o.storageWarning || '';
     receiptAnalysisCache = o.analysisCache && typeof o.analysisCache.key === 'string' ? o.analysisCache : null;
-    receiptSync = o.sync && Number.isInteger(o.sync.revision) && o.sync.revision >= 0
-      ? { revision: o.sync.revision, mutationId: o.sync.mutationId || null, dirty: !!o.sync.dirty }
-      : { revision: 0, mutationId: makeOperationId('draft_change'), dirty: receiptDraftActive({ items: receiptList, notes: receiptNotes, opened: receiptOpened, photoInputs: o.photoInputs || [] }) };
     recomputeNoteTotal();
     // v272: אחרי recomputeNoteTotal — שחזור הקריאה נשען על העוגנים המחושבים.
     aiScanFromDraft = restoreDraftScan(o && (o.aiScan || (o.photoInputs && o.photoInputs.length ? { scan: { documents: [], warnings: [] }, docInputs: o.photoInputs } : null)));
@@ -2366,183 +2367,230 @@ async function unpackReceiptValue(value) {
   const bytes = Uint8Array.from(atob(value.data), c => c.charCodeAt(0));
   return JSON.parse(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text());
 }
-function scheduleReceiptDraftSync() {
-  clearTimeout(receiptSyncTimer);
-  if (receiptCloudReady && receiptSync.dirty && !receiptSyncConflict && !receiptFinalizing) {
-    receiptSyncTimer = setTimeout(() => { receiptSyncTimer = null; flushReceiptDraftToCloud(); }, 500);
+function receiptDraftNoticeHtml() { return receiptStorageWarning ? '<div class="text-amber-800 font-bold p-2">'+htmlEscape(receiptStorageWarning)+'</div>' : ''; }
+function refreshReceiptDraftNotice() { const n=$('rcDraftStatus'); if(n)n.innerHTML=receiptDraftNoticeHtml();renderDraftHandoffBanner(); }
+// טיוטות מקומיות; המודול המשותף בלבד כותב גיבויים ובעלות בענן.
+const HANDOFF_APP = 'yotvata', HANDOFF_PREFIX = 'yt';
+const handoffLabels = { receiving: 'קליטה', order: 'הזמנה' };
+function handoffSession(p) { return p.attach && p.attach.id ? p.attach.sessionId || ('edit_' + p.attach.id + '_legacy') : p.draftId; }
+function handoffKind() { return ['receiving','reconcile'].includes(currentView) ? 'receiving' : currentView === 'order' ? 'order' : null; }
+function handoffCanonical(v) { return JSON.stringify(v, (k, x) => x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map(k => [k,x[k]])) : x); }
+function handoffWithoutImages(v) {
+  // מסירים לפני הקידוד. גם מקור פענוח לא יכול להבריח צילום לענן.
+  if (Array.isArray(v)) return v.map(handoffWithoutImages);
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).filter(([k]) => !['pages','dataUrl','image','images','blob','file','resume','sync','pendingReceipt','photoCaptureOpen','quantityPickerOpen'].includes(k)).map(([k,x]) => [k,handoffWithoutImages(x)]));
+  return typeof v === 'string' && /^(data:image\/|blob:)/.test(v) ? null : v;
+}
+function handoffReceiptPayload() { return handoffWithoutImages(receiptDraftPayload(true)); }
+function handoffDraft(kind) {
+  if (kind === 'receiving') return {sessionId: handoffSession({draftId:receiptDraftId,attach:receiptAttachTarget}), recordId:receiptAttachTarget ? receiptAttachTarget.id : receiptDraftId,
+    empty: !receiptDraftId || !(receiptOpened || receiptList.length || receiptNotes.length || receiptManualInput || receiptDeliveryCredits.length || aiScanDocuments.length),
+    scanRunning: !!(aiScanBusy || aiAnalyzeBusy || receiptPaperScanState === 'running' || deliveryCreditReadActive() || receiptDeliveryCredits.some(deliveryCreditCollectable)), expected:receiptAttachTarget && receiptAttachTarget.expectedReceipt};
+  if (kind === 'order') return {sessionId:orderDraftId,recordId:orderDraftId,empty:!orderDraftId || !Object.values(orderState).some(x => x && hasEnteredAmount(x.amount))};
+  return {sessionId:null,recordId:null,empty:true};
+}
+function handoffPayload(kind) {
+  let p;
+  if (kind === 'receiving') p = handoffReceiptPayload();
+  else if (kind === 'order') p = {schemaVersion:1,draftId:orderDraftId,items:orderState,note:orderDraftNote};
+
+  const rows = kind === 'order' ? Object.values(p.items).filter(x=>x && hasEnteredAmount(x.amount)) : kind==='receiving'&&p.reconciliation?p.reconciliation.rows:p.items;
+  const papers = p.aiScan && p.aiScan.scan && p.aiScan.scan.documents || [];
+  return {payload:JSON.stringify(p),summary:{lines:rows.length,units:rows.reduce((a,x)=>a+(Number(x.received ?? x.qty ?? x.amount)||0),0),paperUnits:kind==='receiving'?receiptNoteUnits:null,
+    docs:papers.map(x=>x.invoiceNumber||x.docNumber).filter(Boolean).map(String)}};
+}
+function handoffFingerprint(kind) {
+  if(kind!=='receiving') {const p=JSON.parse(handoffPayload(kind).payload);delete p.draftId;return handoffCanonical(p);}
+  const p=handoffReceiptPayload();
+  // שדות שהמשתמש ערך + התשובה היקרה. בלי זמני סריקה, דגלי ריצה או מצב תצוגה.
+  const d=p.reconciliation;
+  return handoffCanonical({items:p.items,notes:p.notes,docDate:p.docDate,noDoc:p.noDoc,manualInput:p.manualInput,
+    countingMode:p.countingMode,quantityReview:p.quantityReview,rowDecisions:p.rowDecisions,aiScan:p.aiScan,deliveryCredits:p.deliveryCredits,dw:p.dw,uw:p.uw,
+    reconciliation:d?{rows:d.rows,state:d.state}:null,attach:p.attach});
+}
+function handoffChanged(kind, opts) {
+  if(handoffApplying) return;
+  const h=draftHandoffs[kind]; if(h) h.changed({user:!!handoffUserEdit,...opts});
+}
+function canEditDraft(kind, quiet=false) {
+  if(handoffApplying) return true;
+  const h=draftHandoffs[kind], st=h&&h.state();
+  if((kind==='receiving' && receiptFinalizing) || handoffFinalizing[kind] || (st&&st.readOnly)) {
+    if(!quiet) showToast(handoffBlockedText(kind,st),null,null,4000); return false;
   }
+  return true;
 }
-function receiptDraftNoticeHtml() {
-  let message = receiptStorageWarning || receiptSyncError;
-  if (receiptSyncConflict) {
-    return '<div class="rounded-xl bg-amber-50 border border-amber-400 p-3 mb-3 text-sm font-bold text-amber-900">הקליטה השתנתה גם במכשיר אחר. העבודה שלך נשמרה כאן ולא דרסה את הענן.' +
-      '<div class="mt-2">בחר איזו טיוטה להמשיך. עותק של הטיוטה האחרת יישמר בענן לפני ההחלפה.</div>' +
-      '<button data-role="rc-draft-cloud" class="btn-tap w-full mt-2 p-2 bg-white border rounded-xl">המשך עם הטיוטה מהענן</button>' +
-      '<button data-role="rc-draft-local" class="btn-tap w-full mt-2 p-2 bg-white border rounded-xl">המשך עם הטיוטה שבמכשיר הזה</button></div>';
-  }
-  if (message) return '<div class="rounded-xl bg-amber-50 border border-amber-300 p-3 mb-3 text-sm font-bold text-amber-900">' + htmlEscape(message) +
-    '<button data-role="rc-draft-retry" class="btn-tap w-full mt-2 p-2 bg-white border rounded-xl">נסה לשמור בענן</button></div>';
-  if (!receiptDraftActive(receiptDraftPayload(false))) return '';
-  return '<div class="text-xs font-bold text-slate-500 mb-2">' + (receiptSync.dirty
-    ? 'הטיוטה ממתינה לשמירה בענן — המשך במכשיר הזה עד שהשמירה תסתיים'
-    : 'הטיוטה נשמרה בענן — אפשר להמשיך במכשיר אחר') + '</div>';
+function handoffBlockedText(kind,st) {
+  const label=handoffLabels[kind]||'הטיוטה', a=st&&st.away;
+  if(a) return a.away==='moved' ? label+' ממשיכה בטלפון '+(a.by||'אחר')+' — ״החזר אותה לכאן״ למעלה.' : a.away==='saved'?label+' כבר נשמרה — כאן עותק ישן. ״נקה״ למעלה.':label+' בוטלה בטלפון אחר. ״נקה״ למעלה.';
+  return st&&st.checking==='take'?'בודק אם הטיוטה עברה לטלפון הזה…':'בודק אם התעודה נשמרה בענן…';
 }
-function refreshReceiptDraftNotice() {
-  const node = $('rcDraftStatus'); if (node) node.innerHTML = receiptDraftNoticeHtml();
-}
-function receiptPersistSyncState() {
-  persistReceiptDraft({ ...receiptDraftPayload(true), sync: { ...receiptSync } });
-  refreshReceiptDraftNotice();
-}
-async function flushReceiptDraftToCloud() {
-  clearTimeout(receiptSyncTimer); receiptSyncTimer = null;
-  if (receiptSyncFlight) { await receiptSyncFlight; return receiptSync.dirty && !receiptSyncConflict ? flushReceiptDraftToCloud() : !receiptSync.dirty; }
-  if (!receiptSync.dirty) return true;
-  if (!db || !auth || !auth.currentUser || !navigator.onLine || receiptSyncConflict) {
-    if (!receiptSyncConflict) receiptSyncError = 'הטיוטה טרם נשמרה בענן. המשך במכשיר הזה ונסה שוב כשיש חיבור.';
-    refreshReceiptDraftNotice(); return false;
-  }
-  const pending = { ...receiptSync }, payload = receiptDraftPayload(true);
-  const work = async () => {
-    try {
-      const content = await packReceiptValue(payload);
-      const ref = doc(db, ...dataPath('drafts', 'receipt'));
-      const envelope = await runTransaction(db, async transaction => {
-        const snap = await transaction.get(ref), remote = snap.exists() ? snap.data() : null;
-        if (remote && remote.mutationId === pending.mutationId) return remote; // Lost acknowledgement.
-        if ((Number(remote && remote.revision) || 0) !== pending.revision) {
-          const error = new Error('receipt-draft-conflict'); error.remote = remote; throw error;
-        }
-        const next = { schemaVersion: 1, revision: pending.revision + 1, mutationId: pending.mutationId,
-          draftId: payload.draftId, active: receiptDraftActive(payload), content, updatedAt: Date.now() };
-        transaction.set(ref, next); return next;
-      });
-      receiptSync.revision = envelope.revision;
-      if (receiptSync.mutationId === pending.mutationId) receiptSync.dirty = false;
-      receiptSyncError = ''; receiptPersistSyncState();
-      return true;
-    } catch (error) {
-      if (error.message === 'receipt-draft-conflict') receiptSyncConflict = error.remote || { revision: 0, mutationId: null, active: false, content: await packReceiptValue(receiptEmptyDraft()) };
-      receiptSyncError = error.message === 'receipt-draft-conflict' ? '' : 'הטיוטה לא נשמרה בענן. ' + (error.message || 'נסה שוב כשיש חיבור.');
-      refreshReceiptDraftNotice(); return false;
+function handoffApply(kind,text) {
+  const p=JSON.parse(text);
+  handoffApplying=true;
+  try {
+    if(kind==='receiving') {
+      // כשל אחסון עוצר לפני שינוי בזיכרון, גם כשהטלפון השני כבר אישר העברה.
+      localStorage.setItem(RECEIPT_DRAFT_KEY,JSON.stringify(p));
+      aiScanRunId++;aiScanBusy=false;aiAnalyzeBusy=false;aiScanProgressText='';pendingReceipt=null;
+      restoreReceiptDraft(p);saveReceiptDraft();hideReceiptSummary();setView('receiving');
+    } else if(kind==='order') {
+      localStorage.setItem(ORDER_DRAFT_KEY,JSON.stringify(p));orderState=p.items;orderDraftId=p.draftId;orderDraftNote=p.note||'';setView('order');
     }
-  };
-  receiptSyncFlight = work();
-  const success = await receiptSyncFlight; receiptSyncFlight = null;
-  const remote = receiptRemotePending; receiptRemotePending = null;
-  if (remote) await receiveReceiptCloudDraft(remote);
-  if (success && receiptSync.dirty && !receiptSyncConflict) return flushReceiptDraftToCloud();
-  return success && !receiptSync.dirty;
+  } finally {handoffApplying=false;renderDraftHandoffBanner();}
 }
-async function applyReceiptCloudDraft(envelope) {
-  const expectedMutation = receiptSync.mutationId;
-  const payload = await unpackReceiptValue(envelope.content);
-  // Decompression yields: typing or a newer snapshot may arrive meanwhile.
-  if (envelope.revision < receiptSync.revision) return;
-  // v364: גם קריאת זיכוי שרצה נדחית כמו סריקת חשבונית — אחרת טיוטה מהענן
-  // שמגיעה באמצע מוחקת את הזיכוי ואת הקריאה שכבר שולמה.
-  if (receiptSync.mutationId !== expectedMutation || aiScanBusy || deliveryCreditReadActive() || receiptFinalizing) {
-    receiptSyncConflict = envelope; refreshReceiptDraftNotice(); return;
+function handoffEmpty(kind) {
+  if(kind==='receiving') {handoffApply(kind,JSON.stringify(receiptEmptyDraft()));receiptFinalizing=false;}
+  else if(kind==='order') handoffApply(kind,JSON.stringify({schemaVersion:1,draftId:null,items:{},note:''}));
+}
+function handoffNotice(code) {
+  const msg={'take-done':'הטיוטה עברה לטלפון הזה ✓','take-failed':'הטיוטה לא הועברה. נסה שוב.','apply-failed':'הטיוטה לא הוחלפה — בדוק שיש מקום בטלפון ונסה שוב.',
+    'cancel-declined':'הטיוטה ממשיכה בטלפון אחר — שם היא לא בוטלה.','late-save':'התעודה נשמרה בלי השינויים האחרונים. השינויים נשמרו בצד למעלה.',
+    'finish-not-saved':'התעודה לא נשמרה — הטיוטה נשארה בטלפון. אפשר לשמור שוב.'}[code];if(msg)showToast(msg,null,null,5000);
+}
+function handoffResult(r) {
+  if(r.ok)return true;
+  const msg={offline:'אין חיבור — הטיוטה שמורה בטלפון. נסה שוב כשיש רשת.',moved:'הטיוטה ממשיכה בטלפון אחר — החזר אותה לכאן לפני השמירה.',saved:'התעודה כבר נשמרה.',canceled:'הטיוטה בוטלה בטלפון אחר.',exists:'התעודה כבר נשמרה — לא תישמר פעמיים.',changed:'התעודה או המחיר השתנו מאז תחילת העריכה — פתח שוב מההיסטוריה.',
+    'side-full':'יש בטלפון 3 טיוטות שמורות בצד — פתח וסיים אחת קודם.',storage:'אין מקום בטלפון לשמור את הטיוטה בצד — לא הוחלפה.',
+    'too-big-move':'הטיוטה גדולה מדי להעברה — סיים אותה שם.','scan-running':'קריאת הנייר רצה שם — עוד רגע אפשר להמשיך כאן.','scan-running-here':'קריאת הנייר רצה כאן — חכה שתסתיים.',
+    'saved-late':'התעודה כבר נשמרה בלי השינויים האחרונים. השינויים נשמרו בצד למעלה.',busy:'פעולה קודמת עדיין נבדקת — רגע.'};
+  showToast(r.unknown?'התשובה לא הגיעה — בודק מול הענן…':msg[r.reason]||'הפעולה לא אושרה. הטיוטה נשארה בטלפון.',null,null,5000);return false;
+}
+function startDraftHandoffs() {
+  if(!db||!globalThis.DraftHandoff||Object.keys(draftHandoffs).length)return;
+  let fsApi;try{fsApi={doc,collection,query,where,onSnapshot,runTransaction,getDocFromServer};}catch(e){return;}
+  // מזהה קבוע גם לטיוטות ישנות מאוד; נשמר לפני המאזינים, בלי לתבוע בעלות.
+  if(!receiptDraftId && receiptDraftActive(receiptDraftPayload(false))) {receiptDraftId=makeOperationId('receipt');saveReceiptDraft();}
+  if(Object.values(orderState).some(x=>x&&hasEnteredAmount(x.amount))&&!orderDraftId)orderDraftId=makeOperationId('order');
+  saveDraft();
+  for(const kind of Object.keys(handoffLabels)) {
+    const collectionName=kind==='receiving'?'receipts':kind==='order'?'history':'returns';
+    const h=DraftHandoff.create({app:HANDOFF_APP,kind,prefix:HANDOFF_PREFIX,db,fs:fsApi,rootPath:['artifacts',appId,'public','data'],recordCollection:collectionName,appVersion:APP_VERSION,
+      maxScanMs:Math.max(AI_SCAN_RESUME_TTL_MS,(AI_SCAN_NETWORK_RETRIES+1)*AI_SCAN_FETCH_TIMEOUT_MS+60000),
+      adapter:{getDraft:()=>handoffDraft(kind),getPayload:()=>handoffPayload(kind),fingerprint:()=>handoffFingerprint(kind),
+        validatePayload:(p,d)=>!!(p&&p.schemaVersion&&(kind==='receiving'?handoffSession(p):p.draftId)===d.sessionId&&(kind==='order'?p.items&&typeof p.items==='object':Array.isArray(p.items))),
+        applyPayload:text=>handoffApply(kind,text),emptyDraft:()=>handoffEmpty(kind),
+        reviveDraft:text=>{const p=JSON.parse(text),id=makeOperationId(kind);p.draftId=id;p.attach=null;if(p.reconciliation)p.reconciliation.draftId=id;handoffApply(kind,JSON.stringify(p));return id;},
+        deviceName:()=>actionDeviceLabel(),recordSaved:id=>(kind==='receiving'?receipts:kind==='order'?history:returns).some(x=>x.id===id),
+        onChange:st=>{if(st.away&&kind==='receiving'){if(aiScanBusy){aiScanRunId++;aiScanBusy=false;}aiCloseOrientationReview();aiCloseLiveCamera();}renderDraftHandoffBanner();},onNotice:handoffNotice,
+        // אין ביטבתה מסמכי נייר עצמאיים שנמחקים בביטול. תוצאת local של המודול זהה לביטול שאושר.
+        onClosed:()=>{},
+        log:(title,details,meta)=>logAction('draft-handoff',title,details,{...meta,kind}),
+        finishedLate:sid=>{if(handoffDraft(kind).sessionId===sid){handoffEmpty(kind);setView(kind==='order'?'history':'receiptsHistory');showToast('התעודה נשמרה ✓');}},
+        finishReads:async(tx,ctx)=>{
+          const plan=handoffFinishPlans[kind]||{prices:[],data:{}}, prices=[];
+          const logRef=doc(db,...dataPath('actionLog','handoff_'+kind+'_'+ctx.sessionId));await tx.get(logRef);
+          for(const change of plan.prices||[]) {
+            const ref=doc(db,...dataPath('products',change.id)),snap=await tx.get(ref),p=snap.exists()?snap.data():null;
+            prices.push({ref,data:p?{...p,price:change.price}:null,valid:!!p&&Number(p.price)===change.expected});
+          }
+          return {prices,logRef,log:{timestamp:Date.now(),type:kind,title:'שמירת '+handoffLabels[kind],details:'רשומה '+ctx.recordId,deviceName:actionDeviceLabel(),appVersion:APP_VERSION,meta:{recordId:ctx.recordId,sessionId:ctx.sessionId}}};
+        },
+        finishWrites:(tx,ctx)=>{for(const p of ctx.extra.prices){if(!p.valid){const e=Error('changed');e.code='changed';throw e;}tx.set(p.ref,p.data);}tx.set(ctx.extra.logRef,ctx.extra.log);}
+      }});
+    draftHandoffs[kind]=h;h.start();
   }
-  if (!payload || payload.schemaVersion !== 4 || !Array.isArray(payload.items) || !Array.isArray(payload.notes)) throw new Error('טיוטת הענן אינה תקינה');
-  aiScanRunId++; aiScanBusy = false; aiScanProgressText = ''; aiCloseOrientationReview();
-  reconcileData = null; pendingReceipt = null;
-  restoreReceiptDraft(payload);
-  receiptSync = { revision: envelope.revision, mutationId: envelope.mutationId, dirty: false };
-  receiptSyncSignature = JSON.stringify(receiptDraftPayload(true));
-  receiptSyncError = ''; receiptSyncConflict = null;
-  receiptPersistSyncState();
-  if (currentView === 'reconcile') setView('receiving');
-  else if (currentView === 'receiving') renderReceiving();
+  recoverLegacyDraftWrites();renderDraftHandoffBanner();
 }
-async function receiveReceiptCloudDraft(remote) {
-  receiptCloudReady = true;
-  if (!remote) {
-    if (receiptSync.revision > 0) {
-      receiptSyncConflict = { revision: 0, mutationId: null, active: false, content: await packReceiptValue(receiptEmptyDraft()) };
-      refreshReceiptDraftNotice();
-    } else scheduleReceiptDraftSync();
+function handoffHash(s){let n=2166136261;for(let i=0;i<s.length;i++)n=Math.imul(n^s.charCodeAt(i),16777619);return(n>>>0).toString(16);}
+async function finishDraft(kind,id,data,preparingReceipt=false) {
+  if(preparingReceipt ? handoffFinalizing[kind] || draftHandoffs[kind]?.state().readOnly : !canEditDraft(kind))return false;
+  const h=draftHandoffs[kind];if(!h){showToast('מנגנון השמירה טרם נטען — הטיוטה בטלפון. נסה שוב כשיש חיבור.');return false;}
+  handoffFinalizing[kind]=true;
+  try{return handoffResult(await h.finish(id,data));}
+  finally{handoffFinalizing[kind]=false;renderDraftHandoffBanner();}
+}
+function cancelLocalDraft(kind) {if(!canEditDraft(kind))return false;const h=draftHandoffs[kind];if(h)h.cancel({});return true;}
+function renderDraftHandoffBanner() {
+  const el=$('draftHandoffBanner');if(!el)return;
+  const kind=handoffKind(),h=kind&&draftHandoffs[kind];el.innerHTML=h?draftHandoffBannerHtml(kind,h.state()):'';
+}
+function draftHandoffBannerHtml(kind,st) {
+  const label=handoffLabels[kind],who=n=>n?'בטלפון ״'+htmlEscape(n)+'״':'בטלפון אחר';
+  const button=(act,txt,id='')=>'<button class="btn-tap block w-full border rounded-lg bg-white p-2 mt-2 font-bold" data-handoff="'+act+'" data-kind="'+kind+'" data-session="'+htmlEscape(id)+'">'+txt+'</button>';
+  const box=text=>'<div class="rounded-xl border border-amber-300 bg-amber-50 text-amber-900 p-3 mb-2 text-sm">'+text+'</div>';
+  const summary=s=>{s=s||{};return[(s.docs||[]).length?'תעודה '+s.docs.map(htmlEscape).join(', '):'',s.paperUnits!=null?s.paperUnits+' יח׳ בנייר':'',s.lines?'נספרו '+s.units+' יח׳ ב־'+s.lines+' שורות':''].filter(Boolean).join(' · ');};
+  const when=t=>t?new Date(t).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit'}):'';
+  if(st.checking)return box(handoffBlockedText(kind,st));
+  let out='',a=st.away;
+  if(a)out+=box(handoffBlockedText(kind,st)+(a.away==='moved'&&st.canTakeBack?button('take','החזר אותה לכאן',st.sessionId):st.scanThere?' קריאת הנייר רצה שם — עוד רגע אפשר להמשיך כאן.':button('clear','נקה אותה מהטלפון הזה')));
+  for(const o of st.offers||[])out+=box((o.mine?'יש '+label+' פתוחה שלך בענן':'יש '+label+' פתוחה '+who(o.deviceName))+' (מ־'+when(o.updatedAt)+' · '+summary(o.summary)+')'+(o.button?button('take','המשך אותה כאן',o.sessionId):o.scanRunning?' — קריאת הנייר רצה שם — עוד רגע אפשר להמשיך כאן.':' — גדולה מדי להעברה — סיים אותה שם.'));
+  for(const s of st.side||[])out+=box((s.reason==='late'?'שינויים אחרי השמירה נשמרו בצד ולא נכנסו לתעודה':label+' שנשמרה בצד')+' ('+when(s.savedAt)+' · '+summary(s.summary)+')'+(s.canOpen?button('side',s.sessionId===st.sessionId?'החלף לגרסה הזאת':'פתח אותה',s.sessionId):button('inspect','עיין בעותק',s.sessionId)));
+  if(!a&&!st.legacy){const text={saving:'מגבה לענן…',saved:label+' מגובה בענן — אפשר להמשיך אותה גם בטלפון אחר.',failed:'הגיבוי לענן מתעכב — הטיוטה שמורה בטלפון, וננסה שוב לבד.',blocked:'הגיבוי לענן לא אפשרי — הטיוטה שמורה בטלפון הזה.','too-big':'הטיוטה גדולה מדי לגיבוי — סיים אותה בטלפון הזה.'}[st.status];if(text)out+=box(text);}
+  return out;
+}
+async function draftHandoffAction(action,kind,id) {
+  const h=draftHandoffs[kind];if(!h)return;
+  const run=async()=>{const r=action==='take'?await h.take(id):action==='clear'?h.clear():h.openSide(id);handoffResult(r);renderDraftHandoffBanner();};run.allowReadOnly=true;
+  const st=h.state();
+  if(action==='inspect') {
+    let x;try{x=JSON.parse(localStorage.getItem(HANDOFF_PREFIX+'_handoff_'+kind+'_side')||'[]').find(x=>x.sessionId===id);}catch(e){}
+    if(x){const p=JSON.parse(x.payload),rows=p.reconciliation?p.reconciliation.rows:Array.isArray(p.items)?p.items:Object.entries(p.items||{}).map(([id,x])=>({...x,name:products.find(p=>p.id===id)?.name||id}));
+      $('draftHandoffBanner').innerHTML+='<div class="overflow-auto"><table class="w-full text-sm"><thead><tr><th>מוצר</th><th>כמות</th><th>בנייר</th><th>מחיר</th></tr></thead><tbody>'+rows.map(r=>'<tr><td>'+htmlEscape(r.name||'')+'</td><td>'+htmlEscape(r.received??r.qty??r.amount??'')+'</td><td>'+htmlEscape(r.noteQty??'')+'</td><td>'+htmlEscape(r.price??r.unitPrice??'')+'</td></tr>').join('')+'</tbody></table></div>';}
     return;
   }
-  if (!Number.isInteger(remote.revision) || !remote.content) return;
-  if (receiptSyncFlight || receiptFinalizing) { receiptRemotePending = remote; return; }
-  if (remote.mutationId === receiptSync.mutationId) {
-    // The local quota fallback intentionally omitted the paper; recover it even
-    // when the cloud acknowledges the same version, rather than a newer one.
-    if (receiptStorageWarning && !aiScanResponse && remote.active) {
-      try { await applyReceiptCloudDraft(remote); }
-      catch (error) { receiptSyncError = error.message; refreshReceiptDraftNotice(); }
-      return;
-    }
-    receiptSync.revision = remote.revision; receiptSync.dirty = false;
-    receiptSyncError = ''; receiptPersistSyncState(); return;
+  if(action==='clear')return showConfirm('לנקות את העותק הישן?','העותק יוסר מהמסך; עבודה שלא נשמרה נשמרת בצד.','נקה',run);
+  if(action==='take'&&st.sessionId&&st.sessionId!==id&&!st.away)return showConfirm('להחליף את הטיוטה שפתוחה כאן?','הטיוטה הנוכחית תישמר בצד בטלפון ואפשר לפתוח אותה אחר כך.','המשך אותה כאן',run);
+  return run();
+}
+function handoffEventKind(t) {
+  if(!t||!t.closest)return null;
+  if(t.closest('#draftHandoffBanner'))return null;
+  if(t.closest('#receiptSummaryModal,#receiptQuantityModal,#aiOrientationModal,#aiLiveCamModal'))return 'receiving';
+  if(t.closest('#sendModal'))return sendCtx&&sendCtx.type==='returns'?null:'order';
+  if(t.closest('#scanModal'))return scanPurpose==='receiving'?'receiving':null;
+  if(t.closest('#qtyModal'))return qtyTarget==='receipt'?'receiving':null;
+  return t.closest('#app,#confirmModal,#cartBtn')?handoffKind():null;
+}
+function guardDraftEvent(e) {
+  const t=e.target,kind=handoffEventKind(t);if(!kind)return;
+  const role=t.closest('[data-role]')?.dataset.role||'',id=t.closest('[id]')?.id||'';
+  if(['rc-history','rc-recon-cancel','ret-slot'].includes(role)||['scanClose','rs_cancel','qty_cancel','confirmCancel'].includes(id))return;
+  if(id==='confirmOk'&&confirmCb&&confirmCb.allowReadOnly)return;
+  if(!canEditDraft(kind)){e.preventDefault();e.stopImmediatePropagation();return;}
+  if(e.type==='input'&&id==='orderNote'){handoffUserEdit=true;if(kind==='order'){orderDraftNote=t.value;saveDraft();}queueMicrotask(()=>{handoffUserEdit=false;});}
+  if(['input','change','click'].includes(e.type)) {
+    // פתיחת השוואה וניווט אינם עריכה של טיוטה ישנה, גם אם נבנו שדות מחושבים.
+    const navigation=['rc-finish','rc-reconcile','rc-recon-cancel','rc-history','rc-scan','ret-send'];
+    if(!navigation.includes(role)){handoffUserEdit=true;queueMicrotask(()=>{handoffUserEdit=false;});}
   }
-  if (remote.revision <= receiptSync.revision) { scheduleReceiptDraftSync(); return; }
-  if (receiptSync.dirty || aiScanBusy || deliveryCreditReadActive()) { receiptSyncConflict = remote; refreshReceiptDraftNotice(); return; }
-  try { await applyReceiptCloudDraft(remote); }
-  catch (error) { receiptSyncError = error.message; refreshReceiptDraftNotice(); }
 }
-function startReceiptDraftListener() {
-  if (!db || receiptDraftUnsubscribe) return;
-  receiptDraftUnsubscribe = onSnapshot(doc(db, ...dataPath('drafts', 'receipt')), { includeMetadataChanges: true }, snap => {
-    if (snap.metadata.hasPendingWrites || snap.metadata.fromCache) return;
-    receiveReceiptCloudDraft(snap.exists() ? snap.data() : null);
-  }, error => { receiptSyncError = 'לא ניתן לסנכרן את טיוטת הקליטה. ' + (error.message || ''); refreshReceiptDraftNotice(); });
+// תור ישן מופרד לפני כל ניסיון שליחה. אף כתיבה ממנו לא נוגעת בטיוטה הישנה או דורסת רשומה.
+function legacyDraftTask(task){return !!(task&&(task.receiptDraftGuard||(task.path&&['receipts','history'].includes(task.path.at(-2))&&task.op==='set')||(task.path&&task.path.at(-2)==='drafts'&&['receipt'].includes(task.path.at(-1)))));}
+function quarantineLegacyDraftWrites() {
+  const key=HANDOFF_PREFIX+'_handoff_legacy_writes';
+  let saved=[];try{saved=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
+  const finalNames=['save receipt before clearing draft','save receipt','save order before send'];
+  const isOld=x=>legacyDraftTask(x.task)&&(finalNames.includes(x.actionName)||x.task.receiptDraftGuard||x.task.path.at(-2)==='drafts');
+  const old=cloudFailedWrites.filter(isOld);
+  if(!old.length)return;
+  try {localStorage.setItem(key,JSON.stringify([...saved,...old.filter(x=>!saved.some(y=>y.id===x.id))]));cloudFailedWrites=cloudFailedWrites.filter(x=>!isOld(x));saveCloudFailedWrites();}
+  catch(e){showToast('אין מקום לשמור בצד פעולות ישנות. הן נעצרו; הטיוטה נשארה בטלפון.');}
 }
-async function resolveReceiptDraftConflict(keepLocal) {
-  const remote = receiptSyncConflict; if (!remote || receiptSyncFlight || aiScanBusy || deliveryCreditReadActive()) return;
-  const local = receiptDraftPayload(true), expectedMutation = receiptSync.mutationId, mutationId = makeOperationId('draft_choice');
-  try {
-    const localContent = await packReceiptValue(local);
-    const ref = doc(db, ...dataPath('drafts', 'receipt'));
-    const selected = await runTransaction(db, async transaction => {
-      const snap = await transaction.get(ref), latest = snap.exists() ? snap.data() : remote;
-      if (receiptSync.mutationId !== expectedMutation) throw new Error('הטיוטה במכשיר השתנתה. בדוק ובחר שוב.');
-      if (latest.revision !== remote.revision) throw new Error('הטיוטה בענן השתנתה שוב. המתן לעדכון ובחר מחדש.');
-      // Preserve the losing version before replacing either side.
-      const backup = keepLocal ? latest : { revision: receiptSync.revision, draftId: local.draftId, content: localContent, active: receiptDraftActive(local) };
-      transaction.set(doc(db, ...dataPath('drafts', 'receipt_backup_' + mutationId)), { ...backup, savedAt: Date.now(), reason: 'concurrent_receiving_edit' });
-      if (!keepLocal) return latest;
-      const next = { schemaVersion: 1, revision: latest.revision + 1, mutationId, draftId: local.draftId,
-        active: receiptDraftActive(local), content: localContent, updatedAt: Date.now() };
-      transaction.set(ref, next); return next;
-    });
-    if (receiptSync.mutationId !== expectedMutation) {
-      // A local edit after the transaction started is still authoritative here.
-      // The committed selection becomes its base only if we chose this device.
-      if (keepLocal) { receiptSync.revision = selected.revision; receiptSyncConflict = null; receiptPersistSyncState(); scheduleReceiptDraftSync(); }
-      else { receiptSyncConflict = selected; refreshReceiptDraftNotice(); }
-      return;
-    }
-    await applyReceiptCloudDraft(selected);
-  } catch (error) { receiptSyncError = error.message; showToast(error.message, null, null, 5000); }
-}
-async function finalizeReceiptDraftTask(task) {
-  const guard = task.receiptDraftGuard;
-  const draftRef = doc(db, ...dataPath('drafts', 'receipt')), receiptRef = doc(db, ...task.path);
-  return runTransaction(db, async transaction => {
-    const [draftSnap, receiptSnap] = await Promise.all([transaction.get(draftRef), transaction.get(receiptRef)]);
-    const remote = draftSnap.data(), existing = receiptSnap.data();
-    if (existing && existing.receiptFinalizationId === guard.mutationId) return;
-    if (receiptSync.dirty || receiptSync.mutationId !== guard.mutationId) throw new Error('הטיוטה השתנתה מאז האישור. בדוק וסיים שוב.');
-    if (!remote || remote.revision !== guard.revision || remote.mutationId !== guard.mutationId) throw new Error('הקליטה השתנתה במכשיר אחר. הטיוטה לא נמחקה; בדוק לפני הסיום.');
-    transaction.set(receiptRef, { ...task.data, receiptFinalizationId: guard.mutationId });
-    transaction.set(draftRef, { schemaVersion: 1, revision: guard.revision + 1, mutationId: guard.closedId,
-      draftId: null, active: false, content: guard.closedContent, updatedAt: Date.now() });
-  });
-}
-function receiptEndFinalizing() {
-  receiptFinalizing = false;
-  const remote = receiptRemotePending; receiptRemotePending = null;
-  if (remote) receiveReceiptCloudDraft(remote);
-  else scheduleReceiptDraftSync();
-}
-function receiptSyncCompleted(guard) {
-  clearTimeout(receiptSyncTimer); receiptSyncTimer = null;
-  receiptSync = { revision: guard.revision + 1, mutationId: guard.closedId, dirty: false };
-  receiptSyncSignature = JSON.stringify(receiptDraftPayload(true));
-  receiptSyncError = ''; receiptSyncConflict = null;
-  receiptPersistSyncState(); receiptEndFinalizing();
+async function recoverLegacyDraftWrites() {
+  const key=HANDOFF_PREFIX+'_handoff_legacy_writes';let list;try{list=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){return;}
+  const keep=[];
+  for(const item of list) {
+    try {
+      const t=item.task;if(t.path.at(-2)==='drafts')continue; // הטיוטה המקומית שיקפה את המאזין הישן
+      const coll=t.path.at(-2),id=t.path.at(-1),kind=coll==='receipts'?'receiving':coll==='history'?'order':'returns_'+(t.data.returnKind==='daily'?'daily':'weekly');
+      if(handoffDraft(kind).recordId===id)continue;
+      if(!navigator.onLine){keep.push(item);continue;}
+      const snap=await getDocFromServer(doc(db,...t.path));if(snap.exists())continue;
+      let p;
+      if(kind==='receiving')p={...receiptEmptyDraft(),draftId:id,opened:true,items:(t.data.items||[]).map(l=>({...l,qty:l.qty})),notes:t.data.noteParts||[],docDate:t.data.docDate,noDoc:!!t.data.noDoc,entryMode:t.data.paperScan?'photo':'manual',aiScan:t.data.paperScan?await unpackReceiptValue(t.data.paperScan):null};
+      else if(kind==='order')p={schemaVersion:1,draftId:id,items:Object.fromEntries((t.data.items||[]).map(l=>[l.productId||l.id,{amount:l.amount,unit:l.unit}])),note:t.data.note||''};
+      else p={schemaVersion:1,draftId:id,items:t.data.items||[],date:t.data.docDate||'',slot:kind.slice(8),note:t.data.note||''};
+      if(kind==='receiving') {
+        p.reconciliation={version:1,draftId:id,source:p.items.map(l=>({productId:l.productId,qty:l.qty})),
+          rows:(t.data.items||[]).filter(l=>!l.isDeposit).map(l=>({...l,received:l.qty,noteQty:l.noteQty??l.qty,price:l.unitPrice,basePrice:l.basePrice??l.unitPrice,checked:false})),
+          state:{reconcilePaperEntered:!t.data.noDoc,reconcileSupplierDiscount:t.data.supplierDiscount||0,reconcileSupplierPromoItems:t.data.supplierPromoItems||[],reconcilePromoMismatchItems:t.data.promoMismatchItems||[],reconcileSupplierCreditClaim:t.data.supplierCreditClaim||null,reconcileAiAudit:t.data.aiAudit||null}};
+      }
+      const result=draftHandoffs[kind].importSide({sessionId:id,recordId:id,reason:'other',payload:JSON.stringify(p),savedAt:item.createdAt,summary:{lines:(t.data.items||[]).length}});
+      if(!result.ok)keep.push(item);
+    } catch(e){keep.push(item);}
+  }
+  try{localStorage.setItem(key,JSON.stringify(keep));}catch(e){}
 }
 
 // ===== התחברות =====
@@ -2552,9 +2600,7 @@ restoreAppOrders();
 restoreLastBarcode();
 restoreAskBarcode();
 restoreReceiptDraft();
-receiptSyncSignature = JSON.stringify(receiptDraftPayload(true));
-window.addEventListener('online', () => { receiptSyncError = ''; flushReceiptDraftToCloud(); });
-window.addEventListener('pagehide', () => { if (receiptSync.dirty) flushReceiptDraftToCloud(); });
+
 app.innerHTML = '<div class="text-center text-slate-500 font-bold py-20 animate-pulse">טוען נתונים...</div>';
 if (auth) {
   signInAnonymously(auth).catch(err => { console.error("Auth:", err); fallbackLocal(); });
@@ -2570,7 +2616,7 @@ function fallbackLocal() {
 // ===== מאזיני Firestore =====
 function startListeners() {
   if (!db) return;
-  startReceiptDraftListener();
+  startDraftHandoffs();
   const pRef = collection(db, 'artifacts', appId, 'public', 'data', 'products');
   onSnapshot(pRef, (snap) => {
     if (snap.empty && !seeded) {
@@ -2637,6 +2683,7 @@ function startListeners() {
   const hQ = query(hRef, orderBy('timestamp', 'desc'), limit(20));
   onSnapshot(hQ, (snap) => {
     history = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if(snap.metadata&&snap.metadata.fromCache===false)Object.values(draftHandoffs).forEach(h=>h.tidy());
     if (currentView === 'history') rerender();
   }, console.error);
 
@@ -2703,6 +2750,7 @@ function startListeners() {
   const rcQ = query(rcRef, orderBy('timestamp', 'desc'), limit(100));
   onSnapshot(rcQ, (snap) => {
     receipts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    if(snap.metadata&&snap.metadata.fromCache===false)Object.values(draftHandoffs).forEach(h=>h.tidy());
     promoHistoryLoaded.receipts = true;
     scheduleMonthEndSnapshots();
     appOrderCache = null; // v288: קליטה חדשה יכולה לסגור סימון "הוזמן באפליקציה"
@@ -2806,6 +2854,7 @@ function updateAppOrdersBadge() {
     (currentView === 'appOrders' ? 'bg-white/25 text-white' : 'bg-emerald-100 text-emerald-700');
 }
 function renderView() {
+  renderDraftHandoffBanner();
   const isOrder = currentView === 'order';
   const isReturns = currentView === 'returns';
   const isReceiving = currentView === 'receiving';
@@ -2905,6 +2954,7 @@ function appendGapReminder(msg) {
 
 // ===== מסך הזמנה =====
 function renderOrder() {
+  renderDraftHandoffBanner();
   const visible = products.filter(p => !p.hidden);
   if (!visible.length) {
     app.innerHTML = pendingReturnsBannerHtml() + '<div class="text-center p-10 text-slate-500">אין מוצרים להצגה. הוסף או הצג מוצרים בהגדרות.</div>';
@@ -3057,6 +3107,7 @@ function applySearch(q) {
 }
 
 function clearOrder() {
+  if(!cancelLocalDraft('order'))return;orderDraftId=null;
   const prev = {};
   products.forEach(p => { const st = orderState[p.id] || {}; prev[p.id] = { amount: st.amount || '', unit: normalizeOrderUnit(st.unit || p.defaultUnit) }; });
   orderState = {};
@@ -3451,7 +3502,7 @@ async function logAction(type, title, details, meta) {
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'actionLog', id), {
       timestamp: Date.now(), type: type || 'system', title: title || 'פעולה', details: details || '',
       deviceName: actionDeviceLabel(), uid: (auth && auth.currentUser && auth.currentUser.uid) || '',
-      appVersion: 'v384_reconcile_draft', meta: cloneSafe(meta || {})
+      appVersion: 'v385_local_first', meta: cloneSafe(meta || {})
     });
   } catch (e) { console.warn('action log failed', e); }
 }
@@ -3535,7 +3586,7 @@ async function exportFullBackup() {
       backupType: 'yotvata-firestore-full',
       backupVersion: 1,
       appId,
-      appVersion: 'v384_reconcile_draft',
+      appVersion: 'v385_local_first',
       exportedAt: Date.now(),
       exportedAtIso: new Date().toISOString(),
       collections: {},
@@ -6626,7 +6677,7 @@ function renderSendModal(items, titleNote, type) {
     marksHtml +
     gapReminderHtml +
     '<div class="bg-slate-50 rounded-xl p-3 max-h-40 overflow-y-auto border border-slate-100 mb-3">' + list + '</div>' +
-    '<div class="mb-3"><input id="orderNote" type="text" placeholder="הערה (לא חובה)..." class="w-full p-2.5 rounded-xl border border-slate-200 outline-none text-sm bg-white"></div>' +
+    '<div class="mb-3"><input id="orderNote" value="' + htmlEscape(type==='returns'?'':orderDraftNote) + '" type="text" placeholder="הערה (לא חובה)..." class="w-full p-2.5 rounded-xl border border-slate-200 outline-none text-sm bg-white"></div>' +
     '<div class="text-xs text-slate-400 mb-1 font-bold">בחר/י איש קשר לשליחה:</div>';
   renderContactPicker();
   const m = $('sendModal'); m.classList.remove('hidden'); m.classList.add('flex');
@@ -6690,16 +6741,17 @@ async function performSend(contact) {
     sendCtx = null; hideSend(); receiptsHistoryFilter = 'all'; setView('receiptsHistory'); window.location.href = url; // v378: התעודה שנשלחה עכשיו חייבת להיראות בראש המסך — בלי מסנן ישן
     return;
   }
-  const opId = sendCtx.operationId || (sendCtx.operationId = makeOperationId('order'));
+  saveDraft();
+  const opId=orderDraftId || sendCtx.operationId || (sendCtx.operationId=makeOperationId('order'));
   const data = { timestamp: Date.now(), sentTo: contact.name, items, operationId: opId };
-  const saved = await runCloudTask('save order before send', { op: 'set', path: dataPath('history', opId), data, operationId: opId });
+  const saved = await finishDraft('order',opId,data);
   if (!saved) return;
   const msg = appendGapReminder(buildMessage(items, note));
   const url = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg);
   if (resetCurrent) {
     orderState = {};
     products.forEach(p => orderState[p.id] = { amount: '', unit: normalizeOrderUnit(p.defaultUnit) });
-    try { localStorage.removeItem(ORDER_DRAFT_KEY); } catch (e) {}
+    orderDraftId=null;orderDraftNote='';saveDraft();
     // v300: השידור מפסיק את הסימון האדום (נגזר מההיסטוריה, בלי מחיקה),
     // אבל הסימונים עצמם נשמרים עד קליטת הסחורה — רק אז יודעים אם ההזמנה
     // משטראוס הגיעה, ומה שלא הגיע עובר לרשימת החוסרים.
@@ -6715,7 +6767,8 @@ async function performSend(contact) {
 let confirmCb = null;
 function showConfirm(title, msg, okText, cb) {
   $('confirmTitle').textContent = title; $('confirmMsg').textContent = msg; $('confirmOk').textContent = okText || 'מחק';
-  confirmCb = cb;
+  const kind=handoffKind();
+  confirmCb = !kind || cb.allowReadOnly ? cb : function(){if(canEditDraft(kind))return cb();};
   const m = $('confirmModal'); m.classList.remove('hidden'); m.classList.add('flex');
 }
 function hideConfirm() { const m = $('confirmModal'); m.classList.add('hidden'); m.classList.remove('flex'); confirmCb = null; }
@@ -7261,7 +7314,7 @@ function showCloudFailDetails() {
 async function executeCloudTask(task) {
   if (!db || !task) throw new Error('אין חיבור לענן');
   if (task.path && task.path.slice(-2).join('/') === 'drafts/appOrders') throw new Error('שמירת רשימה ישנה נחסמה כדי לא לדרוס סימונים ממכשיר אחר. יש לבדוק את רשימת ההזמנות המעודכנת.');
-  if (task.receiptDraftGuard) return finalizeReceiptDraftTask(task);
+  if(task.receiptDraftGuard || (task.path&&task.path.at(-2)==='drafts'&&task.path.at(-1)==='receipt'))throw Error('כתיבת קליטה ישנה נעצרה — הטיוטה נשמרה בטלפון');
   if (Array.isArray(task.tasks)) { for (const t of task.tasks) await executeCloudTask(t); return; }
   if (task.op === 'batch') {
     const batch = writeBatch(db);
@@ -7319,6 +7372,7 @@ function clearPendingUnitIntentForTask(actionName, task) {
   if (pendingUnitIntents[id] && pendingUnitIntents[id].updatedAt <= at) delete pendingUnitIntents[id];
 }
 async function retryCloudFailedWrites() {
+  quarantineLegacyDraftWrites();
   if (!cloudFailedWrites.length) return;
   if (!db) { showToast('אין חיבור לענן — נסה שוב כשהאפליקציה מחוברת', null, null, 3500); return; }
   if (cloudWriteInFlight) { showToast('פעולה קודמת עדיין נשמרת — המתן רגע', null, null, 2500); return; }
@@ -7328,6 +7382,7 @@ async function retryCloudFailedWrites() {
   try {
     const list = cloudFailedWrites.slice().reverse(); // הישן קודם
     for (const item of list) {
+      if(legacyDraftTask(item.task)&&['save receipt before clearing draft','save receipt','save order before send'].includes(item.actionName)){fail++;continue;}
       try {
         const retryTask = retryTaskWithoutStaleUnitWrites(item);
         if (!retryTask) { clearPendingUnitIntentForTask(item.actionName, item.task); removeCloudFailedWrite(item.id); ok++; continue; }
@@ -7419,6 +7474,7 @@ async function mustCloudWrite(actionName, fn, opts) {
   }
 }
 loadCloudFailedWrites();
+quarantineLegacyDraftWrites();
 restorePendingUnitIntentsFromFailedWrites();
 updateCloudFailButton();
 async function hardDeleteDocWithBackup(name, id, data, reason) {
@@ -7885,6 +7941,7 @@ function receivingDigitsPick(pid) {
   promptQty(p, 'receipt');
 }
 function addReceiptQtyToTop(p, qty) {
+  if (!canEditDraft('receiving')) return;
   const idx = receiptList.findIndex(it => it.productId === p.id);
   if (idx >= 0) {
     const ex = receiptList.splice(idx, 1)[0];
@@ -7895,6 +7952,7 @@ function addReceiptQtyToTop(p, qty) {
   }
 }
 function addScannedToReceipt(p) {
+  if (!canEditDraft('receiving')) return;
   addReceiptQtyToTop(p, 1);
   scanCount += 1;
   saveReceiptDraft();
@@ -8301,6 +8359,7 @@ function receiptQuantityCheckAudit() {
     ({ productId: row.productId, paperQty: row.paperQty, received: receiptQuantityActual(row) })) };
 }
 function commitReceiptQuantityReview() {
+  if (!canEditDraft('receiving')) return;
   const r = receiptQuantityReview, paperRows = receiptQuantityPaperRows();
   if (!r || !paperRows || r.key !== receiptQuantityPaperKey() || r.itemsKey !== JSON.stringify(receiptList)
     || r.paperRows !== receiptQuantityRowsSignature(paperRows)) {
@@ -8327,6 +8386,7 @@ function commitReceiptQuantityReview() {
 }
 
 function renderReceiving() {
+  renderDraftHandoffBanner();
   refreshPriceScannerNotice();
   const t = receiptTotals();
   // v366: "נפתחה" ו"מסך הצילום מוצג" עברו ל-receivingOpened / receivingPhotoGateShown —
@@ -8510,12 +8570,14 @@ function buildReceiptRow(it) {
   '</div>';
 }
 function changeReceiptQty(productId, delta) {
+  if (!canEditDraft('receiving')) return;
   const it = receiptList.find(x => x.productId === productId); if (!it) return;
   it.qty += delta;
   if (it.qty <= 0) { removeReceiptLine(productId); return; }
   saveReceiptDraft(); refreshReceipt(); updateCart();
 }
 function setReceiptQty(productId, val) {
+  if (!canEditDraft('receiving')) return;
   const it = receiptList.find(x => x.productId === productId); if (!it) return;
   let q = parseInt((val || '').toString().replace(/[^0-9]/g, ''), 10);
   if (!(q > 0)) { return; }
@@ -8526,6 +8588,7 @@ function setReceiptQty(productId, val) {
   if (lt && p) lt.textContent = '₪' + fmtMoney(effectiveLineTotal(p, q));
 }
 function removeReceiptLine(productId) {
+  if (!canEditDraft('receiving')) return;
   const idx = receiptList.findIndex(x => x.productId === productId); if (idx < 0) return;
   const removed = receiptList[idx];
   receiptList.splice(idx, 1);
@@ -8585,6 +8648,7 @@ async function saveNewProduct() {
 
 // --- סיכום ואישור תעודה ---
 function finishReceipt() {
+  if (!canEditDraft('receiving')) return;
   // v366: זיכוי בקליטה בלי תעודה — אין נייר, ולכן אין חוסר שהזיכוי יכסה. בלי הבדיקה הזאת הזיכוי
   // (מטיוטה ישנה: צולם במסך הצילום ואחריו "אין תעודה בכלל", לפני שהדגל ירד בצילום) היה מסיט את
   // הסיום למסך ההשוואה, שם הוא נפסל ומחזיר למסך הקליטה. הבדיקה קודמת ל-deliveryCreditReady
@@ -8776,6 +8840,7 @@ function restoreReceiptReconcile() {
   return true;
 }
 function openReconcile() {
+  if (!canEditDraft('receiving')) return;
   if (restoreReceiptReconcile()) return;
   receiptReconcileSession = receiptDraftId;
   reconcileData = receiptReconcileRows();
@@ -11718,6 +11783,7 @@ function aiCloseOrientationReview() {
   if (overlay) { overlay.classList.add('hidden'); overlay.classList.remove('flex'); }
 }
 async function aiRotateOrientationReview(deltaTurns) {
+  if(!canEditDraft('receiving'))return;
   const session = aiOrientationSession, location = session && aiOrientationLocation(session.page);
   if (!location || aiOrientationBusy || session.reviewOnly) return;
   aiSetOrientationBusy(true);
@@ -11745,6 +11811,7 @@ async function aiRotateOrientationReview(deltaTurns) {
 // לקרוא ופותח את המצלמה לחלק הבא. מהמאזין של "אשר" מגיע כאן אירוע הלחיצה,
 // שאין בו את השדה — ולכן אישור רגיל.
 async function aiConfirmOrientationReview(options) {
+  if(!canEditDraft('receiving'))return;
   const addPart = !!(options && options.creditAddPart === true);
   const location = aiOrientationSession && aiOrientationLocation(aiOrientationSession.page);
   if (!location || aiOrientationBusy) return;
@@ -11801,6 +11868,7 @@ async function aiConfirmOrientationReview(options) {
   setTimeout(aiOpenNextUnconfirmedOrientation, 0);
 }
 function aiCancelOrientationReview() {
+  if(!canEditDraft('receiving'))return;
   const location = aiOrientationSession && aiOrientationLocation(aiOrientationSession.page);
   if (!location || aiOrientationBusy) return;
   if (aiOrientationSession.reviewOnly) { aiCloseOrientationReview(); return; }
@@ -11817,6 +11885,7 @@ function aiAllPagesOrientationConfirmed(documents) {
   return list.length > 0 && list.every(doc => doc.pages.length > 0 && doc.pages.every(page => page.orientationConfirmed === true));
 }
 async function aiAddInvoiceFiles(docIndex, files) {
+  if(!canEditDraft('receiving'))return;
   const doc = aiScanDocuments[docIndex]; if (!doc || !files || !files.length || aiScanBusy) return;
   const slots = Math.max(0, 8 - aiScanDocuments.reduce((n, d) => n + (d === doc ? d.pages.length : d.pages.length || d.restoredPageCount || 0), 0));
   if (!slots) { showToast('ניתן לצרף עד 8 עמודים בסריקה אחת', null, null, 3000); return; }
@@ -11857,6 +11926,7 @@ function aiLiveCameraSupported() {
 }
 function aiLiveCamSetStatus(text) { const el = $('aiLiveCamStatus'); if (el) el.textContent = text; }
 async function aiOpenLiveCamera(docIndex) {
+  if(!canEditDraft('receiving'))return;
   if (!aiLiveCameraSupported() || aiScanBusy || aiLiveCamState) return;
   const modal = $('aiLiveCamModal'); if (!modal) return;
   modal.classList.remove('hidden'); modal.classList.add('flex');
@@ -12049,6 +12119,7 @@ function aiRotateBlobClockwise(bitmap) {
   });
 }
 async function aiLiveCamTakePhoto() {
+  if(!canEditDraft('receiving'))return;
   const state = aiLiveCamState; if (!state || state.shooting) return;
   state.shooting = true;
   aiLiveCamSetStatus('מצלם ברזולוציה מלאה…');
@@ -12094,11 +12165,13 @@ async function aiLiveCamTakePhoto() {
   if (shoot) shoot.addEventListener('click', aiLiveCamTakePhoto);
 })();
 function aiRemoveInvoicePage(docIndex, pageIndex) {
+  if(!canEditDraft('receiving'))return;
   const doc = aiScanDocuments[docIndex]; if (!doc || aiScanBusy) return;
   yotvataInvalidatePhotoDoc(doc);
   doc.pages.splice(pageIndex, 1); receiptScanChanged(); refreshScanHost();
 }
 async function aiRotateInvoicePage(docIndex, pageIndex) {
+  if(!canEditDraft('receiving'))return;
   const doc = aiScanDocuments[docIndex], page = doc && doc.pages[pageIndex];
   if (!page || aiScanBusy) return;
   aiScanBusy = true; aiScanProgressText = 'מסובב את עמוד ' + (pageIndex + 1) + '…'; aiScanError = ''; refreshScanHost();
@@ -15480,6 +15553,7 @@ async function aiScanSingleDocPipeline(token, docIndex, inputDoc = aiScanDocumen
   };
 }
 async function aiRunInvoiceScan({ background = false } = {}) {
+  if (!canEditDraft('receiving')) return;
   if (aiScanBusy) return;
   if (aiScanDocuments.length > 4 || aiScanDocuments.reduce((n, d) => n + (d.pages.length || d.restoredPageCount || 0), 0) > 8) { showToast('עד 4 תעודות ו-8 עמודים', null, null, 3000); return; }
   if (!yotvataPhotoReady()) { showToast('צלם את כל העמודים ואשר את הכיוון', null, null, 3000); aiOpenNextUnconfirmedOrientation(); return; }
@@ -15488,7 +15562,7 @@ async function aiRunInvoiceScan({ background = false } = {}) {
   aiScanEditingImages = false;
   const paperFirst = background || receiptEntryMode === 'photo';
   const runId = ++aiScanRunId, inputs = aiScanDocuments.slice(), results = [];
-  aiScanBusy = true; aiScanError = ''; aiScanErrorAnchor = false;
+  aiScanBusy = true; handoffChanged('receiving'); aiScanError = ''; aiScanErrorAnchor = false;
   aiScanEvaluation = null; aiScanReused = false; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0;
   refreshScanHost();
   try {
@@ -15536,7 +15610,7 @@ async function aiRunInvoiceScan({ background = false } = {}) {
     if (runId === aiScanRunId) { aiScanError = error.message || 'הסריקה נכשלה'; saveReceiptDraft(); }
   } finally {
     if (runId === aiScanRunId) {
-      aiScanBusy = false; aiScanProgressText = ''; refreshScanHost();
+      aiScanBusy = false; handoffChanged('receiving'); aiScanProgressText = ''; refreshScanHost();
       const ev = aiScanEvaluation;
       if (!background && ev && ev.findingsReady && ((ev.findings || []).some(aiIsActionableFinding)
         || (!(ev.closure && ev.closure.ok) && !ev.unitsAnchorless))) aiRunAnalyzer({ auto: true });
@@ -15716,12 +15790,13 @@ function aiAnalyzeClaimsPlainText() {
   return lines.join('\n');
 }
 async function aiRunAnalyzer(options) {
+  if (!canEditDraft('receiving')) return;
   const auto = !!(options && options.auto);
   if (aiAnalyzeBusy) return;
   const ev = aiScanEvaluation;
   if (!ev) { if (!auto) showToast('אין עדיין תוצאות סריקה לנתח', null, null, 2600); return; }
   if (!auth || !auth.currentUser) { if (!auto) showToast('עדיין אין חיבור מאובטח — המתן רגע ונסה שוב', null, null, 3000); return; }
-  aiAnalyzeBusy = true; aiAnalyzeError = ''; aiAnalyzeResult = null;
+  aiAnalyzeBusy = true; handoffChanged('receiving'); aiAnalyzeError = ''; aiAnalyzeResult = null;
   if (currentView === 'reconcile') renderReconcile();
   try {
     const body = JSON.stringify(aiAnalyzePayload(ev)), key = receiptDraftId + '\n' + body;
@@ -15773,6 +15848,7 @@ async function aiRunAnalyzer(options) {
     if (ev === aiScanEvaluation) aiAnalyzeError = (error && error.message) || 'הניתוח נכשל';
   } finally {
     if (ev === aiScanEvaluation) aiAnalyzeBusy = false;
+    handoffChanged('receiving');
     if (currentView === 'reconcile') renderReconcile();
   }
 }
@@ -16639,6 +16715,7 @@ function aiConfirmedMappingsAudit() {
   return output;
 }
 function aiApplyInvoiceResult() {
+  if (!canEditDraft('receiving')) return;
   const ev = aiScanEvaluation; if (!ev || !ev.valid || !reconcileData) return;
   // ההחלה היא עסקה מקומית: אם אפילו אגורה או יחידה אינן נסגרות, מחזירים את
   // המצב הקודם ולא משאירים חצי פענוח בתוך התעודה.
@@ -16717,6 +16794,7 @@ function reconcilePriceEditHtml(l) {
   return '<span class="text-[11px] text-slate-400">₪<input data-role="rc-recon-price" data-id="' + l.productId + '" type="text" inputmode="decimal" value="' + priceFieldVal(l.price) + '" class="w-14 text-center border border-slate-200 rounded px-1 py-0.5 outline-none focus:border-blue-500"> ליח׳</span>';
 }
 function renderReconcile() {
+  renderDraftHandoffBanner();
   saveReceiptDraft();
   if (!reconcileData) { setView('receiving'); return; }
   const note = receiptNoteTotal;
@@ -17626,6 +17704,7 @@ function refreshReconcileAddList(q) {
   box.innerHTML = list.map(p => addListRowHtml(p, 'rc-add-item', q)).join('') || '<div class="text-center text-slate-400 py-2 text-xs">לא נמצא</div>';
 }
 function reconcileAddItem(pid) {
+  if (!canEditDraft('receiving')) return;
   reconcilePaperEntered = true; // v178
   if (!reconcileData || reconcileData.find(l => l.productId === pid)) return;
   const p = products.find(x => x.id === pid); if (!p) return;
@@ -17633,28 +17712,34 @@ function reconcileAddItem(pid) {
   renderReconcile();
 }
 function reconcileSetNoteLive(productId, val) {
+  if (!canEditDraft('receiving')) return;
   const l = (reconcileData || []).find(x => x.productId === productId); if (!l) return;
   let q = parseInt((val || '').toString().replace(/[^0-9]/g, ''), 10); if (isNaN(q) || q < 0) q = 0;
   l.noteQty = q; reconcilePaperEntered = true; refreshReconcileHeader();
 }
 function reconcileStepNote(productId, delta) {
+  if (!canEditDraft('receiving')) return;
   const l = (reconcileData || []).find(x => x.productId === productId); if (!l) return;
   l.noteQty = Math.max(0, (Number(l.noteQty) || 0) + delta); refreshReconcile();
 }
 function reconcileStepRecv(productId, delta) {
+  if (!canEditDraft('receiving')) return;
   const l = (reconcileData || []).find(x => x.productId === productId); if (!l) return;
   l.received = Math.max(0, (Number(l.received) || 0) + delta); refreshReconcile();
 }
 function reconcileSetRecvLive(productId, val) {
+  if (!canEditDraft('receiving')) return;
   const l = (reconcileData || []).find(x => x.productId === productId); if (!l) return;
   let q = parseInt((val || '').toString().replace(/[^0-9]/g, ''), 10); if (isNaN(q) || q < 0) q = 0;
   l.received = q; refreshReconcileHeader();
 }
 function reconcileSetPriceLive(productId, val) {
+  if (!canEditDraft('receiving')) return;
   const l = (reconcileData || []).find(x => x.productId === productId); if (!l) return;
   const n = parseFloat((val || '').toString().replace(/[^0-9.]/g, '')); l.price = isFinite(n) ? n : 0; refreshReconcileHeader();
 }
 function saveReconciledReceipt(opts) {
+  if (!canEditDraft('receiving')) return;
   saveReceiptDraft();
   opts = opts || {};
   if (!reconcileData) return;
@@ -17673,14 +17758,6 @@ function saveReconciledReceipt(opts) {
       showConfirm('הפרש לא מוסבר', 'עדיין נשאר ' + parts.join(' וגם ') + ' שלא שובץ לפריטים. התעודה תישמר כפתוחה ולא תיצבע בירוק. לשמור בכל זאת?', 'שמור כפתוחה', function () { saveReconciledReceipt({ skipChecked: true, skipGap: true }); }); return;
     }
   }
-  reconcileData.forEach(l => {
-    // מחיר שנקרא מהנייר ב-AI שייך לתעודה הזאת בלבד. הוא אינו משנה בשקט
-    // את מחיר המוצר הקבוע במאגר.
-    if (l.aiPaperPriceOnly) return;
-    const p = products.find(x => x.id === l.productId);
-    const np = ((Number(l.promoPct) || 0) > 0 && l.promoOn) ? r2(Number(l.basePrice) || 0) : r2(Number(l.price) || 0);
-    if (p && np > 0 && r2(Number(p.price) || 0) !== np) { p.price = np; if (db) runCloudTaskSilent('save price from reconcile', { op: 'update', path: dataPath('products', l.productId), data: { price: np }, operationId: makeOperationId('reconcile_price') }); }
-  });
   const lines = reconcileData.filter(l => (Number(l.received) || 0) > 0 || (Number(l.noteQty) || 0) > 0).map(l => {
     const received = Number(l.received) || 0, noteQty = Number(l.noteQty) || 0, price = Number(l.price) || 0;
     const line = { productId: l.productId, name: l.name, barcode: l.barcode || '', qty: received, unitPrice: price, basePrice: r2(Number(l.basePrice) || price), lineTotal: lineTotalFromUnit(price, received), promoPct: (l.promoOn ? (Number(l.promoPct) || 0) : 0) };
@@ -18056,7 +18133,7 @@ function reopenReceiptForDoc(id) {
   if (!lines.length) { showToast('אין שורות בתעודה הזאת', null, null, 2600); return; }
   yotvataResetPhotoReceipt();
   receiptList = lines;
-  receiptAttachTarget = { id: rc.id, timestamp: Number(rc.timestamp) || Date.now(), date: rc.date || todayStr(), label: dDisp(rc.date || todayStr()) };
+  receiptAttachTarget = { id: rc.id, sessionId:makeOperationId('edit_'+rc.id), expectedReceipt:cloneSafe(rc), timestamp: Number(rc.timestamp) || Date.now(), date: rc.date || todayStr(), label: dDisp(rc.date || todayStr()) };
   receiptNotes = []; recomputeNoteTotal();
   receiptNoDoc = false; receiptOpened = false; editingNotes = false;
   anchorFixHint = ''; reconcileData = null;
@@ -18066,14 +18143,19 @@ function reopenReceiptForDoc(id) {
   setView('receiving');
 }
 function cancelReceiptAttach() {
+  if (!canEditDraft('receiving')) return;
   yotvataResetPhotoReceipt();
   receiptList = []; receiptQuantityReview = null; receiptCountingMode = 'scan'; receiptNotes = []; recomputeNoteTotal();
+  if(!cancelLocalDraft('receiving'))return;
   receiptAttachTarget = null; receiptNoDoc = false; receiptOpened = false; editingNotes = false;
   anchorFixHint = ''; reconcileData = null;
   receiptDupConfirmed = false; receiptDepositWaived = false; receiptUnitsWaived = false;
   resetAiInvoiceScan(true); aiScanDocuments = []; saveReceiptDraft();
   setView('receiptsHistory');
   showToast('הצירוף בוטל — התעודה נשארה ממתינה לנייר', null, null, 2800);
+}
+function receiptPriceChanges() {
+  return (reconcileData||[]).filter(l=>!l.aiPaperPriceOnly).flatMap(l=>{const p=products.find(x=>x.id===l.productId),price=l.promoOn&&Number(l.promoPct)>0?r2(Number(l.basePrice)||0):r2(Number(l.price)||0);return p&&price>0&&Number(p.price)!==price?[{id:l.productId,expected:Number(p.price)||0,price}]:[];});
 }
 async function confirmReceipt() {
   if (!pendingReceipt) { hideReceiptSummary(); return; }
@@ -18083,20 +18165,12 @@ async function confirmReceipt() {
     deliveryCreditOpenWork('פרטי הזיכוי השתנו מאז הסיכום. סיים שוב את הקליטה כדי לעדכן אותו.'); return;
   }
   if (receiptFinalizing) return;
-  saveReceiptDraft();
-  receiptFinalizing = true;
-  const intended = receiptSync.mutationId;
-  if (!await flushReceiptDraftToCloud() || receiptSync.mutationId !== intended || receiptSyncConflict) {
-    receiptEndFinalizing();
-    showToast('הטיוטה עדיין לא מסונכרנת או השתנתה. בדוק את הודעת השמירה לפני הסיום.', null, null, 5000); return;
-  }
-  let paperScan, receiptDraftGuard;
+  if (!canEditDraft('receiving'))return;
+  saveReceiptDraft();receiptFinalizing=true;
   try {
-    paperScan = receiptScanSnapshot() ? await packReceiptValue(receiptScanSnapshot()) : null;
-    receiptDraftGuard = { revision: receiptSync.revision, mutationId: intended,
-      closedId: makeOperationId('draft_closed'), closedContent: await packReceiptValue(receiptEmptyDraft()) };
-  } catch (error) { receiptEndFinalizing(); showToast(error.message, null, null, 5000); return; }
-  if (receiptSync.dirty || receiptSync.mutationId !== intended) { receiptEndFinalizing(); return; }
+  let paperScan;
+  try {paperScan=receiptScanSnapshot()?await packReceiptValue(receiptScanSnapshot()):null;}
+  catch(e){showToast(e.message);return;}
   const { lines, ex, calculatedEx, roundingAdjustment, grossEx, supplierDiscount, supplierPromoItems, supplierPromoMismatchItems, supplierCreditClaim, aiAudit, noteTotal, status, noDoc, noteParts, unresolvedAmountGap, unresolvedUnitsGap, shortCreditNotes } = pendingReceipt;
   // v306: צירוף נייר דורס את אותה תעודה עצמה (אותו מזהה) ואינו יוצר שנייה.
   // תאריך הקליטה המקורי נשמר — התעודה יושבת בהיסטוריה ביום שבו הסחורה
@@ -18106,18 +18180,14 @@ async function confirmReceipt() {
   const creditClaim = supplierCreditClaim ? { ...cloneSafe(supplierCreditClaim), createdAt: supplierCreditClaim.createdAt || Date.now() } : null;
   const data = { shortCreditNotes: cloneSafe(shortCreditNotes || []), quantityCheck: receiptQuantityCheckAudit(), priceAudit: receiptPriceAudit(), paperScan, scanAudit: cloneSafe(yotvataReceiptScanAudit()), timestamp: (attach && Number(attach.timestamp)) || Date.now(), date: (attach && attach.date) || todayStr(), noDoc: !!(noDoc || attach), items: lines, count: lines.length, totalExVat: ex, totalIncVat: ex, calculatedExVat: (calculatedEx != null ? calculatedEx : ex), roundingAdjustment: r2(Number(roundingAdjustment) || 0), grossExVat: (grossEx != null ? grossEx : (calculatedEx != null ? calculatedEx : ex)), supplierDiscount: r2(Number(supplierDiscount) || 0), supplierPromoItems: (Array.isArray(supplierPromoItems) ? supplierPromoItems : []), supplierPromoMismatchItems: (Array.isArray(supplierPromoMismatchItems) ? supplierPromoMismatchItems : []), supplierCreditClaim: creditClaim, aiAudit: aiAudit ? cloneSafe(aiAudit) : null, noteTotalInc: (noteTotal != null ? noteTotal : null), noteParts: (Array.isArray(noteParts) ? noteParts : []), unresolvedAmountGap: r2(Number(unresolvedAmountGap) || 0), unresolvedUnitsGap: Number(unresolvedUnitsGap) || 0, status: status || 'ok', operationId: opId };
   data.monthEndPromoSnapshots = receiptMonthEndSnapshots({ ...(receipts.find(r => r.id === opId) || {}), ...data });
-  const saved = await runCloudTask('save receipt before clearing draft', { op: 'set', path: dataPath('receipts', opId), data, operationId: opId, receiptDraftGuard });
-  if (!saved) { receiptEndFinalizing(); return; }
-  if (receiptSync.mutationId !== intended) {
-    receiptEndFinalizing();
-    showToast('התעודה נשמרה, אך הטיוטה השתנתה בזמן השמירה. השינויים נשמרו כאן לבדיקה.', null, null, 6000);
-    return;
-  }
+  handoffFinishPlans.receiving={prices:receiptPriceChanges(),data};
+  const saved=await finishDraft('receiving',opId,data,true);if(!saved)return;
+  receiptFinalizing=false;
   hideReceiptSummary();
   aiCloseOrientationReview();
   yotvataResetPhotoReceipt();
   receiptDraftId = null; receiptList = []; receiptQuantityReview = null; receiptCountingMode = 'scan'; pendingReceipt = null; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; reconcileData = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; reconcileAiAudit = null; aiScanDocuments = []; aiScanBusy = false; aiScanProgressText = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanReused = false; aiScanFromDraft = false; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; receiptDupConfirmed = false; receiptDepositWaived = false; receiptUnitsWaived = false; receiptNoDoc = false; receiptAttachTarget = null; saveReceiptDraft();
-  receiptSyncCompleted(receiptDraftGuard);
+  handoffFinishPlans.receiving=null;
   setView('receiptsHistory');
   const autoApplied = await autoApplyExactOffsets(); // v249: זוג מדויק מתקזז לבד
   const newOpen = receipts.filter(r => receiptDiscrepancyInfo(r).open).find(r => findOffsetMatch(r));
@@ -18126,6 +18196,7 @@ async function confirmReceipt() {
   else if (noDoc && !attach) showToast('נקלט לפי ספירה — התעודה פתוחה עד שיגיע הנייר', null, null, 3600);
   else if (attach) showToast('התעודה צורפה ונבדקה ✓', null, null, 2600);
   else showToast('התעודה נקלטה ✓', null, null, 2200);
+  }finally{receiptFinalizing=false;}
 }
 async function delReceipt(id) {
   const rc = receipts.find(x => x.id === id);
@@ -24062,8 +24133,7 @@ app.addEventListener('click', (e) => {
   if (role === 'an-rank') { anRank = t.dataset.rank || 'returns'; const box = $('anRankBox'); if (box) box.outerHTML = anRankingsHtml(); else renderAnalysis(); return; }
   if (role === 'an-share') { anShareText(t.dataset.what === 'product' ? anProductText(anSelectedKey) : anSummaryText()); return; }
   if (role === 'an-copy') { anCopyText(t.dataset.what === 'product' ? anProductText(anSelectedKey) : anSummaryText()); return; }
-  if (role === 'rc-draft-retry') { flushReceiptDraftToCloud(); return; }
-  if (role === 'rc-draft-cloud' || role === 'rc-draft-local') { resolveReceiptDraftConflict(role === 'rc-draft-local'); return; }
+
   if (role.startsWith('rc-photo-')) {
     if (aiScanBusy) return;
     const docIndex = Number(t.dataset.doc) || 0;
@@ -24231,7 +24301,7 @@ app.addEventListener('click', (e) => {
   // v272: ביטול תעודה חייב למחוק גם את הצילומים ואת קריאת הנייר. כל עוד כל
   // כניסה למסך ההשוואה איפסה אותם ממילא, הדילוג כאן לא הזיק; מרגע שהם שורדים
   // בין המסכים, תעודה שבוטלה הייתה יכולה להוריש את הנייר שלה לתעודה הבאה.
-  else if (role === 'rc-cancel') { showConfirm('ביטול תעודה', 'לבטל את התעודה הנוכחית? כל הפריטים שנסרקו יימחקו.', 'בטל תעודה', () => { yotvataResetPhotoReceipt(); receiptDraftId = null; receiptList = []; receiptQuantityReview = null; receiptCountingMode = 'scan'; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; anchorFixHint = ''; reconcileData = null; receiptDupConfirmed = false; receiptDepositWaived = false; receiptUnitsWaived = false; receiptNoDoc = false; receiptAttachTarget = null; resetAiInvoiceScan(true); aiScanDocuments = []; saveReceiptDraft(); setView('receiving'); }); }
+  else if (role === 'rc-cancel') { showConfirm('ביטול תעודה', 'לבטל את התעודה הנוכחית? כל הפריטים שנסרקו יימחקו.', 'בטל תעודה', () => { if(!cancelLocalDraft('receiving'))return; yotvataResetPhotoReceipt(); receiptDraftId = null; receiptList = []; receiptQuantityReview = null; receiptCountingMode = 'scan'; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; anchorFixHint = ''; reconcileData = null; receiptDupConfirmed = false; receiptDepositWaived = false; receiptUnitsWaived = false; receiptNoDoc = false; receiptAttachTarget = null; resetAiInvoiceScan(true); aiScanDocuments = []; saveReceiptDraft(); setView('receiving'); }); }
   else if (role === 'rc-note-add') {
     // v274: הפעולה עוטפת את עצמה, כדי שאישור ההצהרה על חוסר סך יחידות
     // יוסיף את התעודה במקום להשאיר את העובד מול שדות מלאים שלא נקלטו.
@@ -24655,6 +24725,10 @@ acquireScreenWakeLock();
 
 // ===== Service Worker =====
 if ('serviceWorker' in navigator) { window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); }); }
+
+for(const event of ['click','input','change','beforeinput','keydown'])document.addEventListener(event,guardDraftEvent,true);
+$('draftHandoffBanner').addEventListener('click',e=>{const b=e.target.closest('[data-handoff]');if(b)draftHandoffAction(b.dataset.handoff,b.dataset.kind,b.dataset.session);});
+window.addEventListener('online',recoverLegacyDraftWrites);
 </script>
 </body>
 </html>

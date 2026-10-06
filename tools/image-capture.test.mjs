@@ -39,7 +39,7 @@ function context() {
       getContext: () => ({ clearRect() {}, fillRect() {}, strokeRect() {} }) };
     nodes.set(id, n); return n;
   }
-  const c = vm.createContext({ console, Number, Math, Array, Object, String, Promise,
+  const c = vm.createContext({ console, canEditDraft:()=>true, Number, Math, Array, Object, String, Promise,
     aiScanEditingImages:false,receiptScanChanged(){},aiOrientationSession: null, aiOrientationBusy: false, aiCropState: null, aiScanBusy: false,
     aiScanDocuments: [], receiptDeliveryCredits: [], aiScanResponse: null, aiScanEvaluation: null, aiScanError: '',
     aiScanAutoRotationNote: '', aiScanAttemptCount: 0,

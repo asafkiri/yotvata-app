@@ -178,7 +178,6 @@ test('final receipt retains the exact payable, source and automatic price eviden
   const mappings = json(c, 'aiAutomaticNamePriceMappingsAudit()');
   assert.equal(mappings[0].confirmationSource, 'verified_price_name');
   assert.equal(mappings[0].priceVerification.unitPrice, 5.24);
-  c.run('flushReceiptDraftToCloud=async()=>{receiptSync.dirty=false;return true;}');
   await c.run('confirmReceipt()');
   const saved = c.writes.find(w => w.path?.includes('receipts'))?.data;
   assert.equal(saved.totalExVat, 31.44);

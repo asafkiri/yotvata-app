@@ -164,7 +164,6 @@ test('acknowledged price discrepancy reaches the final saved audit without chang
   await confirm(c);
   c.run('aiScanFromDraft=true;showConfirm=(title,text,label,fn)=>fn();finishReceipt();aiApplyInvoiceResult();saveReconciledReceipt({skipChecked:true})');
   assert.equal(c.run('pendingReceipt.ex'), 54);
-  c.run('flushReceiptDraftToCloud=async()=>{receiptSync.dirty=false;return true;}');
   await c.run('confirmReceipt()');
   const saved = c.writes.find(w => w.path?.includes('receipts'))?.data;
   assert.ok(saved);

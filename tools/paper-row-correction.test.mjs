@@ -60,8 +60,7 @@ test('corrected paper values drive price review and final payment while the orig
   const p = finish(c); assert.ok(p); assert.equal(p.ex, 88.8);
   assert.equal(p.lines.find(r => r.productId === 'milk').unitPrice, 5);
   assert.equal(p.lines.find(r => r.productId === 'milk').noteQty, 10);
-  assert.equal(p.lines.find(r => r.productId === 'coffee').unitPrice, 7.3);
-  c.run('flushReceiptDraftToCloud=async()=>{receiptSync.dirty=false;return true;}'); await c.run('confirmReceipt()');
+  assert.equal(p.lines.find(r => r.productId === 'coffee').unitPrice, 7.3); await c.run('confirmReceipt()');
   const saved = c.writes.find(w => w.path?.includes('receipts'))?.data;
   assert.ok(saved); assert.equal(saved.totalExVat, 88.8);
   assert.equal(saved.priceAudit.rows[0].paperCorrection.values.unitPriceExVat, 5);

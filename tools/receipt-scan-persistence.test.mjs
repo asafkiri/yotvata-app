@@ -59,7 +59,7 @@ for(const s of suppliers) {
     const b=reload(s,a);assert.equal(b.run('receiptPaperScanState'),'interrupted');assert.equal(scanCount(b),0);
   });
   test(s+': HEALTHY failed final write keeps draft and parsed result',async()=>{
-    const cloud=fakeCloud(),a=runtime(s,{cloud});await cloud.tick();await a.scan();a.run('finishReceipt();aiApplyInvoiceResult();saveReconciledReceipt();runCloudTask=async()=>false');
+    const cloud=fakeCloud(),a=runtime(s,{cloud});await cloud.tick();await a.scan();a.run('finishReceipt();aiApplyInvoiceResult();saveReconciledReceipt();globalThis.networkFailure=true');
     assert.equal(a.run('!!pendingReceipt'),true);await a.run('confirmReceipt()');
     assert.equal(raw(a),1);assert.equal(raw(reload(s,a)),1);
   });
@@ -99,9 +99,8 @@ for(const s of suppliers) {
   test(s+': storage fallback warns immediately and preserves counted quantities',async()=>{
     const a=runtime(s);await a.scan();a.context.persist=(k,v)=>a.storage.set(k,v);a.toasts.length=0;
     a.run(`localStorage.setItem=(k,v)=>{if(JSON.parse(v).aiScan)throw Error('QuotaExceededError');persist(k,v)};saveReceiptDraft()`);
-    assert.equal(a.toasts.length,1);assert.match(a.toasts[0],/אין מקום לפענוח/);const b=reload(s,a);assert.equal(raw(b),null);
-    assert.equal(b.run('receiptList.length'),1);assert.equal(b.run('receiptPaperScanState'),'failed');
-    b.run('finishReceipt()');assert.match(b.toasts.at(-1),/השלם צילום/);
+    assert.equal(a.toasts.length,1);assert.match(a.toasts[0],/השינויים האחרונים לא נשמרו/);const b=reload(s,a);assert.equal(raw(b),1);
+    assert.equal(b.run('receiptList.length'),1);assert.equal(b.run('receiptPaperScanState'),'ok');assert.equal(scanCount(b),0);
   });
   test(s+': complete storage failure warns without claiming that recent changes are saved',async()=>{
     const a=runtime(s);await a.scan();a.toasts.length=0;
@@ -129,8 +128,8 @@ for(const s of suppliers) {
   });
   test(s+': active scan and count resume on another device without another OCR request',async()=>{
     const cloud=fakeCloud(),a=runtime(s,{cloud});await cloud.tick();await a.scan();
-    assert.equal(await a.run('flushReceiptDraftToCloud()'),true);
-    const otherDevice=runtime(s,{cloud});await cloud.tick();assert.equal(raw(otherDevice),1);
+    a.run('draftHandoffs.receiving.flush()');await cloud.tick();
+    const otherDevice=runtime(s,{cloud});await cloud.tick();assert.equal((await otherDevice.run('draftHandoffs.receiving.take('+JSON.stringify(a.run('receiptDraftId'))+')')).ok,true);assert.equal(raw(otherDevice),1);
     assert.equal(otherDevice.run('receiptList[0].qty'),9);otherDevice.run('finishReceipt()');
     assert.equal(otherDevice.run('aiScanEvaluation.findings.some(f=>f.type==="shortage"&&f.qty===1)'),true);assert.equal(scanCount(otherDevice),0);
   });

@@ -110,7 +110,6 @@ test('a verified credit (two agreed rows, resolved products, a number, negative 
   c.context.pendingFixture = p;
   const di = json(c, 'receiptDiscrepancyInfo({...pendingFixture,items:pendingFixture.lines})');
   assert.equal(di.shortValRaw, 48.8); assert.equal(di.shortVal, 0); assert.equal(di.shortFullyCredited, true);
-  c.run('flushReceiptDraftToCloud=async()=>{receiptSync.dirty=false;return true;}');
   await c.run('confirmReceipt()');
   const saved = c.writes.find(w => w.path?.includes('receipts'))?.data;
   assert.ok(saved); assert.equal(saved.shortCreditNotes.length, 1); assert.equal(saved.shortCreditNotes[0].autoConfirmed, true);
