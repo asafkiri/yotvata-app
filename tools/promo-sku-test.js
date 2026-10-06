@@ -1,6 +1,6 @@
 // בודק את הלוגיקה שנוספה, מתוך הקוד האמיתי ולא מהעתק
 const fs = require('fs');
-const src = fs.readFileSync('/home/user/yotvata-app/index.html', 'utf8');
+const src = fs.readFileSync(require('path').join(__dirname, '..', 'index.html'), 'utf8');
 function grab(a, b) {
   const i = src.indexOf(a); if (i < 0) throw new Error('לא נמצא: ' + a);
   const j = src.indexOf(b, i); if (j < 0) throw new Error('לא נמצא סוף: ' + b);

@@ -14,7 +14,7 @@ function setup(minimum = {minQty: 1, minUnit: 'carton', cartonSize: 0}) {
   doc.__pricePaper = structuredClone(doc); doc.__priceSourceId = 'default-minimum-fixture';
   const c = runtime('yotvata', {data});
   c.context.savedMinimumScan = {...data.paper, docInputs: [{amount: 4, units: 1, pageCount: 1}]};
-  c.run("receiptOpened=true;receiptDupConfirmed=true;restoreDraftScan(savedMinimumScan);receiptPaperScanState='ok';receiptDocDate='2026-09-20';receiptNotes=[{amount:4,units:1}];recomputeNoteTotal();receiptList=structuredClone(testData.items);saveReceiptDraft();renderReceiving()");
+  c.run("receiptOpened=true;receiptDupConfirmed=true;restoreDraftScan(savedMinimumScan);receiptPaperScanState='ok';priceAuditSetDate(0,'2026-09-20');receiptDocDate='2026-09-20';receiptNotes=[{amount:4,units:1}];recomputeNoteTotal();receiptList=structuredClone(testData.items);saveReceiptDraft();renderReceiving()");
   return {c, data};
 }
 

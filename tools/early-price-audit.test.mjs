@@ -278,6 +278,7 @@ if(supplier==='yotvata'){
    barcodeRetryConflictInitialCandidate:'7290000000022',barcodeRetryConflictRetryCandidate:'7290000000039'}),8);
   const data=fixture({rows:[row],extraProducts:[PROMO_ITEM,PLAIN_ITEM],promo:{productIds:['promoitem'],pct:20,start:'2026-09-01',end:'2026-09-30'}});
   const c=create(data);
+  c.run("todayStr=()=> '2026-09-20'");
   await scan(c,data,{completeDate:false});
   const decision=()=>{const r=JSON.parse(c.run("JSON.stringify(aiResolveInvoiceBarcode(aiScanResponse.scan.documents[0].rows[0]),(k,v)=>k==='product'?v.id:v)"));return r.method?r.method+':'+r.product:'undecided';};
   // Default day is the receiving day, inside the promotion — both candidates can
@@ -298,6 +299,7 @@ if(supplier==='yotvata'){
   // ensureReconcileLine stamps promoOn/promoPct/basePrice onto a fabricated
   // line, and those stamps later decide whether the catalog price is rewritten.
   const data=fixture({unit:5,promo:{start:'2026-09-01',end:'2026-09-30',pct:20}}),c=create(data);
+  c.run("todayStr=()=> '2026-09-20'");
   await scan(c,data,{completeDate:false});
   c.run("receiptList=[{productId:'milk',name:'מוצר בדיקה',barcode:'7290000000008',qty:10}];reconcileData=[]");
   // Default is the receiving day, which is inside the promotion window.
