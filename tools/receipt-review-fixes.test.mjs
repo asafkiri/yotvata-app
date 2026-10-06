@@ -21,7 +21,7 @@ function setup({ gap = false, consensus = false, issues = [], carton = false, ba
   d.__pricePaper = structuredClone(d); d.__priceSourceId = 'review-fixture';
   const saved = { ...data.paper, docInputs: [{ amount: d.subtotalExVat, units: 10, pageCount: 1 }] };
   const c = runtime('yotvata', { data }); c.context.savedReview = saved;
-  c.run("receiptOpened=true;receiptDupConfirmed=true;restoreDraftScan(savedReview);receiptPaperScanState='ok';receiptDocDate='2026-09-20';receiptNotes=[{amount:aiScanResponse.scan.documents[0].subtotalExVat,units:10}];recomputeNoteTotal();receiptList=structuredClone(testData.items);saveReceiptDraft();renderReceiving()");
+  c.run("receiptOpened=true;receiptDupConfirmed=true;restoreDraftScan(savedReview);receiptPaperScanState='ok';priceAuditSetDate(0,'2026-09-20');receiptDocDate='2026-09-20';receiptNotes=[{amount:aiScanResponse.scan.documents[0].subtotalExVat,units:10}];recomputeNoteTotal();receiptList=structuredClone(testData.items);saveReceiptDraft();renderReceiving()");
   return { c, data };
 }
 function confirm(c) {

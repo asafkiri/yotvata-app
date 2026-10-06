@@ -58,7 +58,7 @@ test(s+': final receipt and empty draft commit together, with full source; secon
  a.context.task=a.writes[0];await a.run('executeCloudTask(task)');assert.equal([...cloud.documents.keys()].filter(k=>k.includes('/receipts/')).length,1);
 });
 test(s+': stale completion cannot discard changes from the other device',async()=>{
- const {cloud,a,b}=await shared();a.run('finishReceipt();aiApplyInvoiceResult();saveReconciledReceipt()');
+ const {cloud,a,b}=await shared();a.run('finishReceipt();aiApplyInvoiceResult();saveReconciledReceipt()');await a.run('flushReceiptDraftToCloud()');await cloud.tick();
  b.run('receiptList[0].qty=11;saveReceiptDraft()');await b.run('flushReceiptDraftToCloud()');await cloud.tick();actualFinal(a);await a.run('confirmReceipt()');
  assert.equal([...cloud.documents.keys()].filter(k=>k.includes('/receipts/')).length,0);assert.equal(a.run('receiptList[0].qty'),11);assert.equal(draft(cloud).active,true);
 });
