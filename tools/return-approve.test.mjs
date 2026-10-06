@@ -1,3 +1,4 @@
+import {attachReturns,settle} from './returns-events-harness.mjs';
 // v371: אישור תעודת זיכוי בלחיצה אחת — כמו בברמן (v80 שם).
 // המצב הרגיל הוא שהספק זיכה בדיוק את מה שהוחזר. עד כה זה חייב הקלדה של מספר
 // שהאפליקציה כבר יודעת ומציגה בראש הכרטיס; עכשיו "אישור" ליד "בדוק" רושם את
@@ -243,7 +244,8 @@ test('פער שהועבר לרשימת החזרות ואז התעודה נפתח
   // אסור שתיתבע שוב בתעודת החזרות הבאה.
   const items = [Object.assign({}, LINES[0], { noteQty: 3 }), LINES[1]];
   const c = setup({ items, credited: true, creditedAt: Date.now(), creditNoteTotal: 31.46, creditStatus: 'open' });
-  c.run('returnsList = []; saveReturnsDraft = () => {}; refreshReturnsList = () => {}; updateCart = () => {};');
+  c.run('returnsList = []; refreshReturnsList = () => {}; updateCart = () => {};');
+  const engine=await attachReturns(c);
   c.click('ret-carry', 'ret-1');
   await c.run('testConfirms.at(-1).cb()');
   assert.equal(json(c, 'returnsList.filter(it => it.carriedFrom === "ret-1").length'), 1, 'הפער נכנס לרשימה');
@@ -253,13 +255,13 @@ test('פער שהועבר לרשימת החזרות ואז התעודה נפתח
 
   c.click('rv-approve', 'ret-1');
   c.run('testConfirms.at(-1).cb()');
-  await new Promise(resolve => setImmediate(resolve)); // השמירה וביטול ההעברה אסינכרוניים
+  await settle(); // השמירה וביטול ההעברה אסינכרוניים
   const r = json(c, 'returns[0]');
   assert.equal(r.credited, true); assert.equal(r.creditStatus, 'ok'); assert.equal(r.creditNoteTotal, SENT_EX);
   assert.equal(json(c, 'returnsList.filter(it => it.carriedFrom === "ret-1").length'), 0, 'הפער ירד מרשימת החזרות');
   assert.deepEqual(r.carriedNotes, [], 'והתעודה כבר לא מסמנת פער שהועבר');
   assert.ok(json(c, 'testWrites.some(w => w.data && Array.isArray(w.data.carriedNotes) && w.data.carriedNotes.length === 0)'), 'גם בענן');
-  assert.match(json(c, 'testToasts.at(-1)'), /הפער ירד גם מרשימת החזרות/);
+  assert.match(json(c, 'testToasts.at(-1)'), /הפער ירד גם מרשימת החזרות/);engine.stop();
 });
 
 // ===== חורים שבדיקת המוטציות מצאה =====

@@ -1,3 +1,4 @@
+import {attachReturns} from './returns-events-harness.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runtime, fakeCloud } from './receipt-scan-harness.mjs';
@@ -127,9 +128,10 @@ test('sending returns flushes pending order marks before leaving for WhatsApp', 
   const cloud = fakeCloud(), c = device(cloud); edit(c, 'milk', 2);
   c.context.window.location = { href: '' };
   c.run(`returnsList=[{productId:'coffee',name:'קפה בדיקה',qty:1}];
-    runCloudTaskSilent=async()=>true;openReturnsSend()`);
+    runCloudTaskSilent=async()=>true;`);
+  const engine=await attachReturns(c);c.run('openReturnsSend()');
   await c.run("performSend({name:'בדיקה מקומית',phone:''})");
   assert.deepEqual(keys(cloud), ['milk']);
-  assert.equal(c.run('appOrders.length'), 1); assert.equal(c.run('returnsList.length'), 0);
+  assert.equal(c.run('appOrders.length'), 1); assert.equal(c.run('returnsList.length'), 0);engine.stop();
   assert.equal(c.run('appOrdersChanges.length'), 0);
 });
