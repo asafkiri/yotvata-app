@@ -17,7 +17,7 @@ function boundary(){
   const [host,port]=emulator.split(':');sdk.connectFirestoreEmulator(db,host,Number(port));
   const p=phone(createCloud(),{start:false,timeouts:{backup:3000,finish:3000,take:3000,close:3000,read:3000}});
   const doc=(_db,...parts)=>sdk.doc(db,'runs',run,...parts),collection=(_db,...parts)=>sdk.collection(db,'runs',run,...parts);
-  Object.assign(p.context,{doc,collection,query:sdk.query,where:sdk.where,onSnapshot:sdk.onSnapshot,getDocFromServer:sdk.getDocFromServer,getDocsFromServer:sdk.getDocsFromServer,
+  Object.assign(p.context,{doc,collection,query:sdk.query,where:sdk.where,onSnapshot:sdk.onSnapshot,getDocFromServer:sdk.getDocFromServer,getDocsFromServer:sdk.getDocsFromServer,setDoc:(ref,value)=>sdk.setDoc(ref,structuredClone(value)),
    runTransaction:(_db,fn,opts)=>sdk.runTransaction(db,t=>fn({get:r=>t.get(r),set:(r,d)=>t.set(r,structuredClone(d))}),opts)});
   p.run('startDraftHandoffs()');clients.push({p,app,db});
   p.read=async key=>{const s=await sdk.getDocFromServer(doc(null,...(root+key).split('/')));return s.exists()?s.data():null;};
@@ -33,7 +33,7 @@ test('real SDK: two phones transfer the paid result and corrections, then save o
   const b=c.make();await wait(()=>b.state().offers.length);assert.equal((await b.take(sid)).ok,true);b.run('openReconcile()');assert.equal(b.run('reconcileData[0].received'),4);assert.equal(b.run('reconcileData[0].noteQty'),12);assert.equal(b.requests.length,0);
   // Direct confirmation uses the same final transaction as the summary button.
   assert.equal(await b.run("(async()=>finishDraft('receiving',receiptDraftId,{items:reconcileData.map(l=>({productId:l.productId,qty:l.received,noteQty:l.noteQty,unitPrice:l.price})),paperScan:await packReceiptValue(receiptScanSnapshot())}))()"),true);
-  const records=await b.list('receipts');assert.equal(records.length,1);b.context.savedPaper=records[0].paperScan;assert.equal((await b.run('unpackReceiptValue(savedPaper)')).scan.documents.length,2);assert.equal((await b.read('drafts/handoff_yotvata_receiving_'+sid)).state,'saved');assert.equal((await b.list('actionLog')).length,1);
+  const records=await b.list('receipts');assert.equal(records.length,1);b.context.savedPaper=records[0].paperScan;assert.equal((await b.run('unpackReceiptValue(savedPaper)')).scan.documents.length,2);assert.equal((await b.read('drafts/handoff_yotvata_receiving_'+sid)).state,'saved');assert.equal((await b.list('actionLog')).filter(x=>x.type==='receiving').length,1);assert.equal((await b.list('actionLog')).filter(x=>x.type==='draft-handoff').length,1);
   await wait(()=>a.state().away?.away==='saved');assert.equal(a.run('draftHandoffs.receiving.clear().ok'),true);assert.equal((await b.list('receipts')).length,1);
  }finally{await c.close();}
 });

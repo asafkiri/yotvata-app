@@ -119,3 +119,5 @@ test('the former owner cannot add photos or trigger the old live camera, includi
  await a.run("aiAddInvoiceFiles(0,[{}]);aiOpenLiveCamera(0);aiLiveCamTakePhoto();aiRemoveInvoicePage(0,0);aiConfirmOrientationReview();aiCancelOrientationReview()");assert.equal(prepared,0);assert.deepEqual(json(a,'aiScanDocuments'),before);assert.equal(a.requests.length,0);
  let blocked=false;a.context.cameraEvent={type:'click',target:{closest:selector=>selector.includes('#aiLiveCamModal')?{}:null},preventDefault:()=>blocked=true,stopImmediatePropagation(){}};a.run('guardDraftEvent(cameraEvent)');assert.equal(blocked,true);
 });
+
+test('taking a draft records the successful session and generation in the action log',async()=>{const c=createCloud(),a=await begin(c),b=make(c),entries=[];b.context.logAction=(...entry)=>entries.push(entry);await settle();const sid=id(a);assert.equal((await b.take(sid)).ok,true);assert.equal(entries.length,1);assert.equal(entries[0][0],'draft-handoff');assert.equal(entries[0][3].sessionId,sid);assert.equal(entries[0][3].gen,2);});

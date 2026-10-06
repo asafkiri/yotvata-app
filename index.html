@@ -2475,6 +2475,7 @@ function startDraftHandoffs() {
         onChange:st=>{if(st.away&&kind==='receiving'){if(aiScanBusy){aiScanRunId++;aiScanBusy=false;}aiCloseOrientationReview();aiCloseLiveCamera();}renderDraftHandoffBanner();},onNotice:handoffNotice,
         // אין ביטבתה מסמכי נייר עצמאיים שנמחקים בביטול. תוצאת local של המודול זהה לביטול שאושר.
         onClosed:()=>{},
+        log:(title,details,meta)=>logAction('draft-handoff',title,details,{...meta,kind}),
         finishedLate:sid=>{if(handoffDraft(kind).sessionId===sid){handoffEmpty(kind);setView(kind==='order'?'history':'receiptsHistory');showToast('התעודה נשמרה ✓');}},
         finishReads:async(tx,ctx)=>{
           const plan=handoffFinishPlans[kind]||{prices:[],data:{}}, prices=[];
