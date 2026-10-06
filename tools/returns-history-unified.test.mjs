@@ -11,6 +11,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { runtime } from './receipt-scan-harness.mjs';
+import {attachReturns} from './returns-events-harness.mjs';
 
 const SUPPLIER = 'yotvata';
 const json = (c, expression) => JSON.parse(c.run('JSON.stringify(' + expression + ')'));
@@ -143,12 +144,13 @@ test('שליחה בוואטסאפ נוחתת על כל התעודות — מסנ
   // המסך הישן הראה אחרי השליחה את כל החזרות; במסך המאוחד "הושלמו" היה מסתיר את התעודה שזה עתה נשלחה
   const c = setup({ returns: [] });
   c.run("receiptsHistoryFilter = 'done'; window.location = { href: '' }; currentView = 'returns'; mainMode = 'returns';");
-  c.run("returnsList = [{ productId: 'p-milk', name: 'חלב בדיקה', barcode: '7290000000008', qty: 2 }]; openReturnsSend();");
+  c.run("returnsList = [{ productId: 'p-milk', name: 'חלב בדיקה', barcode: '7290000000008', qty: 2 }];");
+  const engine=await attachReturns(c);c.run('openReturnsSend()');
   assert.equal(c.run('sendCtx.type'), 'returns');
   await c.run("performSend({ name: 'גיל', phone: '050-1234567' })");
   assert.equal(view(c), 'receiptsHistory', 'נוחתים במסך המאוחד');
   assert.equal(c.run('receiptsHistoryFilter'), 'all', 'עם המסנן "הכל" — התעודה שנשלחה תיראה בראש');
-  assert.match(c.run('window.location.href'), /^https:\/\/wa\.me\//, 'והקישור לוואטסאפ נפתח');
+  assert.match(c.run('window.location.href'), /^https:\/\/wa\.me\//, 'והקישור לוואטסאפ נפתח');engine.stop();
 });
 
 test('הכפתור בלשונית החזרות אומר שהוא מוביל לכל התעודות; הבאנר האדום נשאר כשיש מה לאמת', () => {

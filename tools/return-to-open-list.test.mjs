@@ -3,10 +3,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runtime } from './receipt-scan-harness.mjs';
+import {attachReturns} from './returns-events-harness.mjs';
+const engines=[];test.afterEach(()=>engines.splice(0).forEach(e=>e.stop()));
 
 const json = (c, expression) => JSON.parse(c.run('JSON.stringify(' + expression + ')'));
 
-function setup(items, opts) {
+async function setup(items, opts) {
   opts = opts || {};
   const c = runtime('yotvata');
   c.context.testDeleted = [];
@@ -21,13 +23,13 @@ function setup(items, opts) {
     hardDeleteDocWithBackup = async (name, id, backup) => { testDeleted.push({ name, id, backup }); return true; };
     renderReceiptsHistory = () => {}; refreshReturnsList = () => {}; updateCart = () => {}; logAction = async () => {};
   `);
-  return c;
+  engines.push(await attachReturns(c));return c;
 }
 const lines = c => json(c, "returns[0].items.filter(l => !l.isDeposit && (Number(l.qty) || 0) > 0)");
 const apply = (c, takes) => c.run('retReturnApply("ret-1", returns[0].items.filter(l => !l.isDeposit && (Number(l.qty) || 0) > 0), ' + JSON.stringify(takes) + ', null)');
 
 test('חלק מהכמות חוזר — התעודה יורדת, הפיקדון הצמוד יורד, והפריט נכנס לרשימה הפתוחה', async () => {
-  const c = setup([
+  const c = await setup([
     { name: 'חלב בדיקה', barcode: '7290000000008', qty: 6, unitPrice: 5, lineTotal: 30 },
     { name: 'בקבוק בדיקה', barcode: '7290000000015', qty: 4, unitPrice: 4, lineTotal: 16 },
     { name: 'פיקדון · בקבוק בדיקה', barcode: '', qty: 4, unitPrice: 1.2, lineTotal: 4.8, isDeposit: true }
@@ -47,14 +49,14 @@ test('חלק מהכמות חוזר — התעודה יורדת, הפיקדון �
   assert.deepEqual(json(c, 'returns[0].items.map(l => l.qty)'), [4, 1, 1], 'הרשומה בזיכרון עודכנה יחד עם הענן');
 
   const open = json(c, 'returnsList');
-  assert.deepEqual(open.map(it => [it.productId, it.qty, !!it.manual]), [['p-milk', 2, false], ['p-bottle', 3, false]],
+  assert.deepEqual(open.map(it => [it.productId, it.qty, !!it.manual]).sort(), [['p-bottle', 3, false], ['p-milk', 2, false]],
     'הפריטים חוזרים כשורות מוצר רגילות לפי ברקוד — הפיקדון יתווסף שוב בשליחה');
   assert.equal(json(c, 'testDeleted.length'), 0);
   assert.match(json(c, 'testToasts.at(-1)'), /5 יח׳ חזרו לרשימה הפתוחה/);
 });
 
 test('פריט שכבר ברשימה הפתוחה מקבל תוספת כמות במקום שורה כפולה', async () => {
-  const c = setup(
+  const c = await setup(
     [{ name: 'חלב בדיקה', barcode: '7290000000008', qty: 6, unitPrice: 5, lineTotal: 30 }],
     { openList: [{ productId: 'p-milk', name: 'חלב בדיקה', barcode: '7290000000008', qty: 1 }] }
   );
@@ -63,23 +65,23 @@ test('פריט שכבר ברשימה הפתוחה מקבל תוספת כמות �
 });
 
 test('החזרת הכל — התעודה נמחקת לסל המחזור עם גיבוי, בלי כתיבת עדכון', async () => {
-  const c = setup([
+  const c = await setup([
     { name: 'חלב בדיקה', barcode: '7290000000008', qty: 2, unitPrice: 5, lineTotal: 10 },
     { name: 'בקבוק בדיקה', barcode: '7290000000015', qty: 1, unitPrice: 4, lineTotal: 4 },
     { name: 'פיקדון · בקבוק בדיקה', barcode: '', qty: 1, unitPrice: 1.2, lineTotal: 1.2, isDeposit: true }
   ]);
   await apply(c, [2, 1]);
   assert.equal(json(c, 'testWrites.filter(w => w.op === "update" && w.data && w.data.items).length'), 0);
-  const del = json(c, 'testDeleted');
+  const del = c.returnCloud.paths('/trash/').map(path=>{const item=c.returnCloud.get(path);return {name:item.collectionName,id:item.originalId,backup:item.data};});
   assert.equal(del.length, 1);
   assert.equal(del[0].name, 'returns');
   assert.equal(del[0].id, 'ret-1');
   assert.equal(del[0].backup.items.length, 3, 'הגיבוי שומר את התעודה המקורית כולל הפיקדון');
-  assert.deepEqual(json(c, 'returnsList.map(it => [it.productId, it.qty])'), [['p-milk', 2], ['p-bottle', 1]]);
+  assert.deepEqual(json(c, 'returnsList.map(it => [it.productId, it.qty]).sort()'), [['p-bottle', 1], ['p-milk', 2]]);
 });
 
 test('שורה ללא מוצר במערכת ותביעת זיכוי שהועברה חוזרות כשורות ידניות עם מחיר הזיכוי', async () => {
-  const c = setup([
+  const c = await setup([
     { name: 'מוצר לא מוכר', barcode: '5740900403239', qty: 3, unitPrice: 7.5, lineTotal: 22.5 },
     { name: 'חלב בדיקה', barcode: '7290000000008', qty: 2, unitPrice: 4.1, lineTotal: 8.2, carriedClaim: true }
   ]);
@@ -87,6 +89,7 @@ test('שורה ללא מוצר במערכת ותביעת זיכוי שהועבר
   const open = json(c, 'returnsList');
   assert.equal(open.length, 2);
   assert.equal(open[0].manual, true);
+  open.sort((a,b)=>Number(!!a.carried)-Number(!!b.carried));
   assert.equal(open[0].name, 'מוצר לא מוכר');
   assert.equal(open[0].unitPrice, 7.5);
   assert.equal(open[0].qty, 1);
@@ -98,15 +101,15 @@ test('שורה ללא מוצר במערכת ותביעת זיכוי שהועבר
 });
 
 test('כשהענן נכשל — התעודה והרשימה הפתוחה לא זזות', async () => {
-  const c = setup([{ name: 'חלב בדיקה', barcode: '7290000000008', qty: 6, unitPrice: 5, lineTotal: 30 }]);
-  c.run('runCloudTask = async () => false;');
+  const c = await setup([{ name: 'חלב בדיקה', barcode: '7290000000008', qty: 6, unitPrice: 5, lineTotal: 30 }]);
+  c.returnCloud.reject='permission-denied';
   await apply(c, [2]);
   assert.equal(json(c, 'returns[0].items[0].qty'), 6);
   assert.deepEqual(json(c, 'returnsList'), []);
 });
 
 test('תעודה מאומתת — אין החזרה, גם אם קוראים ישירות', async () => {
-  const c = setup([{ name: 'חלב בדיקה', barcode: '7290000000008', qty: 6, unitPrice: 5, lineTotal: 30 }], { credited: true });
+  const c = await setup([{ name: 'חלב בדיקה', barcode: '7290000000008', qty: 6, unitPrice: 5, lineTotal: 30 }], { credited: true });
   c.run('openRetReturnPicker("ret-1")');
   assert.match(json(c, 'testToasts.at(-1)'), /תעודה מאומתת/);
   await apply(c, [2]);
@@ -115,8 +118,8 @@ test('תעודה מאומתת — אין החזרה, גם אם קוראים יש
   assert.equal(json(c, 'testWrites.filter(w => w.op === "update").length'), 0);
 });
 
-test('הכפתור מופיע רק בתעודה שטרם אומתה, בכרטיס שבמסך התעודות המאוחד', () => {
-  const c = setup([{ name: 'חלב בדיקה', barcode: '7290000000008', qty: 6, unitPrice: 5, lineTotal: 30 }]);
+test('הכפתור מופיע רק בתעודה שטרם אומתה, בכרטיס שבמסך התעודות המאוחד', async () => {
+  const c = await setup([{ name: 'חלב בדיקה', barcode: '7290000000008', qty: 6, unitPrice: 5, lineTotal: 30 }]);
   const openHtml = c.run('returnCardInReceipts(returns[0])');
   assert.match(openHtml, /data-role="ret-return-open" data-id="ret-1"/);
   c.run('returns[0].credited = true; returns[0].creditNoteTotal = 30;');

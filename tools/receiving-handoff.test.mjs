@@ -1,3 +1,4 @@
+import {attachReturns} from './returns-events-harness.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {phone,createCloud,root,path,settle,json} from './handoff-harness.mjs';
@@ -87,7 +88,7 @@ test('edit sessions carry expected record, transfer and stop stale overwrites',a
  const sid=a.run("handoffDraft('receiving').sessionId");assert.match(sid,/^edit_/);a.change("setReceiptQty('milk','4')");await a.sync();const b=make(c);await settle();assert.equal((await b.take(sid)).ok,true);assert.equal(b.run('receiptAttachTarget.expectedReceipt.items[0].qty'),9);
  c.put(root+'receipts/'+record.id,{...record,newer:true});assert.equal(await b.run("finishDraft('receiving','saved-test',{items:[]})"),false);assert.equal(c.get(root+'receipts/'+record.id).newer,true);
 });
-test('receiving and order are isolated; shared returns and app orders stay live',async()=>{const c=createCloud(),a=await begin(c);a.change("returnsList=[{productId:'milk',qty:3}];saveReturnsDraft();orderState={milk:{amount:'5',unit:'unit'}};saveDraft()");await a.sync('order');assert.equal(c.paths('handoff_yotvata_').length,2);assert.deepEqual(json(a,'Object.keys(draftHandoffs)').sort(),['order','receiving']);assert.equal(JSON.parse(a.storage.get('yt_returns_draft'))[0].qty,3);});
+test('receiving and order are isolated; shared returns and app orders stay live',async()=>{const c=createCloud(),a=await begin(c);const engine=await attachReturns(a);a.change("returnsList=[{productId:'milk',qty:3}];saveReturnsDraft();orderState={milk:{amount:'5',unit:'unit'}};saveDraft()");await a.sync('order');assert.equal(c.paths('handoff_yotvata_').length,2);assert.deepEqual(json(a,'Object.keys(draftHandoffs)').sort(),['order','receiving']);assert.equal(JSON.parse(a.storage.get('yt_returns_draft'))[0].qty,3);engine.stop();});
 test('late commit after restart keeps the later correction visible in a side copy',async()=>{
  const c=createCloud(),a=await begin(c),sid=id(a);c.commitDelayMs=1100;
  assert.equal(await a.run("finishDraft('receiving',receiptDraftId,{items:receiptList})"),false);c.commitDelayMs=0;
