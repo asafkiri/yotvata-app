@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v381 פריט החזרות כללי והוספת מוצר באימות הזיכוי</title>
+    <title>הזמנות יטבתה - v383 שמירת מבצעים וסיכומים היסטוריים</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -124,7 +124,7 @@
 
     <!-- תוכן ראשי -->
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v381 פריט החזרות כללי והוספת מוצר באימות הזיכוי</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v383 שמירת מבצעים וסיכומים היסטוריים</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -505,7 +505,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebas
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 import {
   initializeFirestore, getFirestore, persistentLocalCache, persistentMultipleTabManager,
-  collection, onSnapshot, doc, getDoc, deleteDoc, addDoc, updateDoc, setDoc, writeBatch, query, orderBy, limit, getDocs, where, runTransaction
+  collection, onSnapshot, doc, getDoc, deleteDoc, addDoc, updateDoc, setDoc, writeBatch, query, orderBy, limit, getDocs, getDocsFromServer, where, runTransaction
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -720,6 +720,7 @@ const BACKUP_COLLECTIONS = [
   { name: 'returns', label: 'היסטוריית חזרות' },
   { name: 'receipts', label: 'תעודות קליטה' },
   { name: 'promos', label: 'מבצעים' },
+  { name: 'promoArchive', label: 'ארכיון מבצעים (שנתיים)' },
   { name: 'notes', label: 'הערות' },
   { name: 'settings', label: 'הגדרות מחירים' },
   { name: 'config', label: 'הגדרות מערכת' },
@@ -744,6 +745,10 @@ let productCreateId = null, prodAfterSaveTarget = null, productEditorScanReturn 
 let aiUnknownProductCreateContext = null; // שורת AI בטוחה שממתינה ליצירת מוצר, ללא קריאה נוספת
 let promoUnitMode = 'unit'; // יחידת סף המבצע: 'unit' | 'carton'
 let promos = [], promoEdit = null, promoSearch = ''; // מבצעי סל
+let promoArchive = [], promoHistoryReady = false, promoHistoryError = '';
+let promoMaintenancePromise = null, promoMaintenanceDay = '', promoHistoryImporting = false;
+const promoHistoryLoaded = { promos: false, archive: false, receipts: false };
+const promoSnapshotPending = new Set();
 let promoType = 'receipt'; // סוג מבצע בעורך: 'receipt' (בתעודה) | 'monthEnd' (מרכזת)
 const priceTimers = {};
 const posPriceTimers = {}; // v241: דיליי שמירה למחיר קופה, נפרד ממחיר הקנייה
@@ -2693,6 +2698,8 @@ function startListeners() {
   const rcQ = query(rcRef, orderBy('timestamp', 'desc'), limit(100));
   onSnapshot(rcQ, (snap) => {
     receipts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    promoHistoryLoaded.receipts = true;
+    scheduleMonthEndSnapshots();
     appOrderCache = null; // v288: קליטה חדשה יכולה לסגור סימון "הוזמן באפליקציה"
     // v285: גם מסך ההיסטוריה תלוי בתעודות — הריבוע "לא הגיע" נגזר מהן.
     if (currentView === 'receiptsHistory' || currentView === 'receiving' || currentView === 'health' || currentView === 'history' || currentView === 'order') rerender();
@@ -2705,13 +2712,24 @@ function startListeners() {
   const prmRef = collection(db, 'artifacts', appId, 'public', 'data', 'promos');
   onSnapshot(prmRef, (snap) => {
     promos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    promoHistoryLoaded.promos = true;
+    scheduleMonthEndSnapshots();
+    setTimeout(() => promoAutoCleanup(), 0);
     rerender();
   }, console.error);
+  onSnapshot(collection(db, ...dataPath('promoArchive').slice(0, -1)), snap => {
+    promoArchive = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    promoHistoryLoaded.archive = true;
+    scheduleMonthEndSnapshots();
+    if (currentView === 'promos') rerender();
+    refreshPromoHistorySummary();
+  }, error => { promoHistoryError = error.message; refreshPromoHistorySummary(); });
 
   const trashRef = collection(db, 'artifacts', appId, 'public', 'data', 'trash');
   const trashQ = query(trashRef, orderBy('deletedAt', 'desc'), limit(100));
   onSnapshot(trashQ, (snap) => {
     trash = snap.docs.map(d => ({ trashId: d.id, ...d.data() }));
+    if (trash.some(isAutoCleanedPromo)) setTimeout(() => promoAutoCleanup(true), 0);
     if (currentView === 'trash' || currentView === 'settings') rerender();
   }, console.error);
 
@@ -3169,7 +3187,7 @@ function htmlEscape(v) {
 function trashLabel(name) {
   const map = {
     products: 'מוצרים', contacts: 'אנשי קשר', history: 'היסטוריית הזמנות', returns: 'היסטוריית חזרות',
-    receipts: 'תעודות קליטה', promos: 'מבצעים', notes: 'הערות', settings: 'הגדרות מחירים', config: 'הגדרות מערכת', drafts: 'טיוטות', actionLog: 'יומן פעולות'
+    receipts: 'תעודות קליטה', promos: 'מבצעים', promoArchive: 'ארכיון מבצעים', notes: 'הערות', settings: 'הגדרות מחירים', config: 'הגדרות מערכת', drafts: 'טיוטות', actionLog: 'יומן פעולות'
   };
   return map[name] || name || 'לא ידוע';
 }
@@ -3261,11 +3279,15 @@ async function restoreTrashItem(trashId) {
   if (ok) showToast('שוחזר בהצלחה ✓', null, null, 2500);
 }
 async function deleteTrashItem(trashId) {
+  if (isAutoCleanedPromo(trash.find(x => x.trashId === trashId)) && !await promoAutoCleanup(true)) {
+    showToast('לא נמחק: צריך להשלים את שמירת המבצע בארכיון', null, null, 3500); return;
+  }
   const ok = await runCloudTask('delete trash item', { op: 'delete', path: dataPath('trash', trashId), operationId: makeOperationId('trash_delete') });
   if (ok) showToast('נמחק לצמיתות מסל המחזור', null, null, 2500);
 }
 async function clearTrash() {
   if (!db) return;
+  if (!await promoAutoCleanup(true)) { showToast('לא רוקנתי: שמירת היסטוריית המבצעים טרם הושלמה', null, null, 4000); return; }
   try {
     const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'trash'));
     if (snap.empty) { showToast('סל המחזור כבר ריק', null, null, 2200); return; }
@@ -3273,7 +3295,7 @@ async function clearTrash() {
     showCloudBusy('מרוקן סל מחזור...');
     for (let i = 0; i < snap.docs.length; i += 450) {
       const batch = writeBatch(db);
-      snap.docs.slice(i, i + 450).forEach(dd => { batch.delete(dd.ref); deleted++; });
+      snap.docs.slice(i, i + 450).filter(dd => !isAutoCleanedPromo(dd.data())).forEach(dd => { batch.delete(dd.ref); deleted++; });
       await batch.commit();
     }
     showToast('נמחקו לצמיתות ' + deleted + ' רשומות מסל המחזור', null, null, 3500);
@@ -3424,7 +3446,7 @@ async function logAction(type, title, details, meta) {
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'actionLog', id), {
       timestamp: Date.now(), type: type || 'system', title: title || 'פעולה', details: details || '',
       deviceName: actionDeviceLabel(), uid: (auth && auth.currentUser && auth.currentUser.uid) || '',
-      appVersion: 'v241_pos_prices', meta: cloneSafe(meta || {})
+      appVersion: 'v383_promo_history', meta: cloneSafe(meta || {})
     });
   } catch (e) { console.warn('action log failed', e); }
 }
@@ -3508,7 +3530,7 @@ async function exportFullBackup() {
       backupType: 'yotvata-firestore-full',
       backupVersion: 1,
       appId,
-      appVersion: 'v241_pos_prices',
+      appVersion: 'v383_promo_history',
       exportedAt: Date.now(),
       exportedAtIso: new Date().toISOString(),
       collections: {},
@@ -3586,10 +3608,13 @@ async function commitBackupOpQueue(ops, busyText) {
 }
 async function applyBackupToCloud(payload) {
   if (!db || !validBackupPayload(payload)) throw new Error('גיבוי לא תקין');
+  if (promoMaintenancePromise) await promoMaintenancePromise;
+  promoHistoryImporting = true;
   showCloudBusy('משחזר נתונים מגיבוי...');
   let restored = 0;
   try {
     for (const c of BACKUP_COLLECTIONS) {
+      if (c.name === 'promoArchive' && !Object.prototype.hasOwnProperty.call(payload.collections || {}, c.name)) continue;
       const ref = collection(db, 'artifacts', appId, 'public', 'data', c.name);
       const existing = await getDocs(ref);
       const ops = [];
@@ -3602,7 +3627,10 @@ async function applyBackupToCloud(payload) {
     logAction('import', 'ייבוא גיבוי מלא', 'שוחזרו/נמחקו ' + restored + ' פעולות כתיבה מהגיבוי', { restoredOps: restored });
     pendingBackupImport = null; pendingBackupFileName = '';
     setView('health');
-  } finally { hideCloudBusy(); }
+  } finally {
+    hideCloudBusy(); promoHistoryImporting = false; promoMaintenanceDay = ''; promoHistoryReady = false;
+    setTimeout(() => promoAutoCleanup(true), 0);
+  }
   return restored;
 }
 function confirmRestoreBackup() {
@@ -6410,7 +6438,7 @@ async function pruneTrash(days) {
   try {
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
     const snap = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'trash'), where('deletedAt', '<', cutoff)));
-    const docs = snap.docs;
+    const docs = snap.docs.filter(dd => !isAutoCleanedPromo(dd.data()));
     if (!docs.length) return;
     for (let i = 0; i < docs.length; i += 400) {
       const batch = writeBatch(db);
@@ -7392,6 +7420,8 @@ async function hardDeleteDocWithBackup(name, id, data, reason) {
   if (!db || !id) return false;
   showCloudBusy();
   try {
+    // A manual deletion removes future eligibility, but keeps earned credits on every existing receipt.
+    if (name === 'promos') await preserveAllMonthEndSnapshots();
     const backup = cloneSafe({ id, ...(data || {}) });
     const batch = writeBatch(db);
     batch.set(doc(db, 'artifacts', appId, 'public', 'data', 'trash', trashDocId(name, id)), {
@@ -7402,6 +7432,7 @@ async function hardDeleteDocWithBackup(name, id, data, reason) {
       data: backup
     });
     batch.delete(doc(db, 'artifacts', appId, 'public', 'data', name, id));
+    if (name === 'promos') batch.delete(promoArchiveRef('promoArchive', id));
     await batch.commit();
     logAction('delete', 'מחיקה לסל מחזור', trashLabel(name) + ' · ' + (backup.name || backup.title || backup.originalId || id), { collectionName: name, originalId: id, reason: reason || 'delete' });
     return true;
@@ -7667,10 +7698,43 @@ function aiPriceFindingPromoMatch(f, dateStr) {
   return pr;
 }
 // ===== מבצעי מרכזת (סוף חודש) — לא בתעודה, מחושב בדוח החודשי =====
-function monthEndPromoForProduct(pid, dateStr) {
+function monthEndPromoForProduct(pid, dateStr, receipt = null) {
   if (!pid) return null;
-  return promos.find(pr => pr.type === 'monthEnd' && promoActive(pr, dateStr) && Array.isArray(pr.productIds) && pr.productIds.indexOf(pid) !== -1) || null;
+  return monthEndHistoryCandidates(receipt).find(pr => pr.type === 'monthEnd' && promoActive(pr, dateStr) && Array.isArray(pr.productIds) && pr.productIds.includes(pid)) || null;
 }
+// Live definitions win over archived/saved copies, including explicit date/product edits.
+// Missing definitions fall back to the receipt: deleting a promotion cannot erase its credit.
+function monthEndHistoryCandidates(receipt, catalog = promos.concat(promoArchive)) {
+  const seen = new Set();
+  return catalog.concat((receipt && receipt.monthEndPromoSnapshots) || []).filter(pr => {
+    if (!pr || !pr.id || seen.has(pr.id)) return false;
+    seen.add(pr.id); return true;
+  });
+}
+function receiptMonthEndSnapshots(receipt, catalog = promos.concat(promoArchive)) {
+  const candidates = monthEndHistoryCandidates(receipt, catalog);
+  const snapshots = new Map();
+  (receipt.items || []).forEach(line => {
+    const pr = candidates.find(p => p.type === 'monthEnd' && promoActive(p, receipt.date) && Array.isArray(p.productIds) && p.productIds.includes(line.productId));
+    if (!pr || !(Number(pr.pct) > 0)) return;
+    if (!snapshots.has(pr.id)) snapshots.set(pr.id, { id: pr.id, type: 'monthEnd', name: pr.name || '',
+      pct: Number(pr.pct), start: pr.start || '', end: pr.end || '', productIds: pr.productIds.slice(), creditEx: 0 });
+    const saved = snapshots.get(pr.id);
+    saved.creditEx = r2(saved.creditEx + r2((Number(line.lineTotal) || 0) * saved.pct / 100));
+  });
+  const previousIds = new Set((receipt.monthEndPromoSnapshots || []).map(pr => pr.id));
+  candidates.forEach(pr => {
+    if (previousIds.has(pr.id) && pr.type === 'monthEnd' && !snapshots.has(pr.id)) snapshots.set(pr.id, {
+      id: pr.id, type: 'monthEnd', name: pr.name || '', pct: Number(pr.pct), start: pr.start || '', end: pr.end || '',
+      productIds: (pr.productIds || []).slice(), creditEx: 0
+    });
+  });
+  return Array.from(snapshots.values());
+}
+function sameMonthEndSnapshots(receipt, snapshots) {
+  return JSON.stringify(receipt.monthEndPromoSnapshots || []) === JSON.stringify(snapshots);
+}
+
 // סטטוס הנחות מרכזת בתעודה הנוכחית (לתצוגה בלבד — לא משפיע על סכום התעודה)
 function receiptMonthEndStatuses() {
   const day = activeReceiptDate(); const seen = {}; const out = [];
@@ -17884,6 +17948,7 @@ async function saveReceiptFix() {
   const open = di.open || !!(aiAudit && aiAudit.hasDiscrepancy);
   const id = receiptFix.id;
   const updateData = { items, count: items.length, totalExVat: ex, totalIncVat: ex, grossExVat: grossEx, calculatedExVat: calculatedEx, roundingAdjustment, aiAudit, unresolvedAmountGap: r2(Number(di.unresolvedAmountGap) || 0), unresolvedUnitsGap: Number(di.unresolvedUnitsGap) || 0, status: open ? 'open' : 'ok' };
+  updateData.monthEndPromoSnapshots = receiptMonthEndSnapshots({ ...originalReceipt, ...updateData });
   const opId = makeOperationId('receipt_fix');
   const saved = await runCloudTask('save receipt fix', { op: 'update', path: dataPath('receipts', id), data: updateData, operationId: opId });
   if (!saved) return;
@@ -17969,6 +18034,7 @@ async function confirmReceipt() {
   const opId = (attach && attach.id) || receiptDraftId || pendingReceipt.operationId || (pendingReceipt.operationId = makeOperationId('receipt'));
   const creditClaim = supplierCreditClaim ? { ...cloneSafe(supplierCreditClaim), createdAt: supplierCreditClaim.createdAt || Date.now() } : null;
   const data = { shortCreditNotes: cloneSafe(shortCreditNotes || []), quantityCheck: receiptQuantityCheckAudit(), priceAudit: receiptPriceAudit(), paperScan, scanAudit: cloneSafe(yotvataReceiptScanAudit()), timestamp: (attach && Number(attach.timestamp)) || Date.now(), date: (attach && attach.date) || todayStr(), noDoc: !!(noDoc || attach), items: lines, count: lines.length, totalExVat: ex, totalIncVat: ex, calculatedExVat: (calculatedEx != null ? calculatedEx : ex), roundingAdjustment: r2(Number(roundingAdjustment) || 0), grossExVat: (grossEx != null ? grossEx : (calculatedEx != null ? calculatedEx : ex)), supplierDiscount: r2(Number(supplierDiscount) || 0), supplierPromoItems: (Array.isArray(supplierPromoItems) ? supplierPromoItems : []), supplierPromoMismatchItems: (Array.isArray(supplierPromoMismatchItems) ? supplierPromoMismatchItems : []), supplierCreditClaim: creditClaim, aiAudit: aiAudit ? cloneSafe(aiAudit) : null, noteTotalInc: (noteTotal != null ? noteTotal : null), noteParts: (Array.isArray(noteParts) ? noteParts : []), unresolvedAmountGap: r2(Number(unresolvedAmountGap) || 0), unresolvedUnitsGap: Number(unresolvedUnitsGap) || 0, status: status || 'ok', operationId: opId };
+  data.monthEndPromoSnapshots = receiptMonthEndSnapshots({ ...(receipts.find(r => r.id === opId) || {}), ...data });
   const saved = await runCloudTask('save receipt before clearing draft', { op: 'set', path: dataPath('receipts', opId), data, operationId: opId, receiptDraftGuard });
   if (!saved) { receiptEndFinalizing(); return; }
   if (receiptSync.mutationId !== intended) {
@@ -19187,6 +19253,7 @@ async function saveDocDate(kind, id) {
     dateChangedAt: Date.now(),
     originalTimestamp: (r.originalTimestamp != null ? Number(r.originalTimestamp) : (Number(r.timestamp) || next.getTime()))
   };
+  if (!isReturn) data.monthEndPromoSnapshots = receiptMonthEndSnapshots({ ...r, ...data });
   const actionName = isReturn ? 'change return date' : 'change receipt date';
   const saved = await runCloudTask(actionName, { op: 'update', path: dataPath(isReturn ? 'returns' : 'receipts', id), data, operationId: makeOperationId(isReturn ? 'ret_date' : 'rc_date') });
   if (!saved) return;
@@ -19206,6 +19273,9 @@ function returnsBalanceBannerHtml() {
   return '<div class="bg-emerald-500 text-white rounded-2xl p-4 mb-3 shadow-md"><div class="font-black text-lg flex items-center gap-2"><i class="fa-solid fa-scale-balanced"></i> מאזן הזיכויים מול הספק מאוזן ✓</div><div class="text-xs text-white/90 mt-1">כל הפערים מתקזזים — אין חוב זיכוי פתוח</div></div>';
 }
 function renderReceiptsHistory() {
+  // Background archival/stamping must not reset a month the user is checking.
+  const rangeState = $('rcFrom') && $('rcTo') ? { from: $('rcFrom').value, to: $('rcTo').value,
+    shown: $('rcRangeResult') && !$('rcRangeResult').classList.contains('hidden') } : null;
   // v378: מסך אחד לכל התעודות — קליטות וחזרות יחד. הכותרת, שורות המצב של החזרות,
   // "ניהול תעודות" (מחיקה) ומאזן הזיכויים הגיעו ממסך היסטוריית החזרות שאוחד לכאן.
   const head = '<div class="flex items-center justify-between px-1 py-1 mb-2"><div><h2 class="font-black text-2xl text-slate-800">היסטוריית תעודות</h2><div class="text-xs text-slate-500 font-bold">קליטות וחזרות יחד · פתח קודם את מה שדורש טיפול</div></div></div>';
@@ -19402,6 +19472,7 @@ function renderReceiptsHistory() {
   }
   const supplierCreditBanner = supplierCreditWarningHtml(receipts, true);
   app.innerHTML = head + manageHtml + filterChips + returnsStatus + supplierCreditBanner + recBalBanner + returnsBalanceBannerHtml() + receiptsRangeHtml() + '<div class="space-y-2.5 pb-6">' + items + '</div>';
+  if (rangeState) { $('rcFrom').value = rangeState.from; $('rcTo').value = rangeState.to; if (rangeState.shown) calcReceiptRange(false); }
 }
 // כלל התשלום הלא-סימטרי: מתחילים מסכום הנייר ומפחיתים סחורה שלא הגיעה.
 // עודף שלא חויב אינו מתווסף לתשלום. קיזוז שאושר מקטין את החוסר הפתוח ולכן
@@ -19432,7 +19503,7 @@ function receiptRangeData(from, to) {
   const meMap = {}; let meEx = 0;
   recs.forEach(r => {
     (r.items || []).forEach(l => {
-      const pr = monthEndPromoForProduct(l.productId, r.date);
+      const pr = monthEndPromoForProduct(l.productId, r.date, r);
       if (pr) {
         const reb = r2((Number(l.lineTotal) || 0) * (Number(pr.pct) || 0) / 100);
         meEx += reb;
@@ -19487,9 +19558,10 @@ function supplierPaymentModeCardsHtml(d) {
   const diffInc = r2((Number(d.netSafeInc) || 0) - (Number(d.netInc) || 0));
   const diffEx = r2((Number(d.netSafeEx) || 0) - (Number(d.netEx) || 0));
   if (!hasPending) {
-    return '<div class="bg-emerald-50 border-2 border-emerald-200 rounded-2xl p-4 mb-3 text-emerald-900">' +
-      '<div class="font-black text-base flex items-center gap-2"><i class="fa-solid fa-circle-check"></i> אין זיכויי מבצע פתוחים</div>' +
-      '<div class="text-xs font-bold mt-1">אין כרגע סכום שמורד מהתשלום לפני אימות ספק. לכן סכום הבדיקה וסכום התשלום זהים.</div>' +
+    const monthEnd = Number(d.meEx) > 0;
+    return '<div class="' + (monthEnd ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-emerald-50 border-emerald-200 text-emerald-900') + ' border-2 rounded-2xl p-4 mb-3">' +
+      '<div class="font-black text-base flex items-center gap-2"><i class="fa-solid fa-file-invoice"></i> ' + (monthEnd ? 'כולל זיכוי צפוי במרכזת' : 'אין זיכויי מבצע פתוחים') + '</div>' +
+      '<div class="text-xs font-bold mt-1">' + (monthEnd ? 'הופחתו ₪' + fmtMoney(d.meEx) + ' לפני מע״מ עבור מבצעי מרכזת. יש לוודא שהספק נתן את הזיכוי בחשבון החודשי.' : 'אין כרגע סכום שמורד מהתשלום לפני אימות ספק. לכן סכום הבדיקה וסכום התשלום זהים.') + '</div>' +
       '<div class="font-black text-3xl mt-2">₪' + fmtMoney(d.netInc) + '</div>' +
       '<div class="text-xs font-bold">לתשלום כולל מע״מ לפי המערכת</div>' +
     '</div>';
@@ -19657,10 +19729,18 @@ function receiptRangeDocsListHtml(d) {
     '</div>' +
   '</details>';
 }
-function calcReceiptRange() {
+function calcReceiptRange(retryHistory = true) {
   const fromEl = $('rcFrom'), toEl = $('rcTo'), out = $('rcRangeResult');
   if (!out) return;
   const from = fromEl ? fromEl.value : '', to = toEl ? toEl.value : '';
+  if (!promoHistoryReady || !promoHistoryLoaded.archive || promoHistoryError) {
+    out.innerHTML = '<div class="font-bold text-amber-800">' + (promoHistoryError
+      ? 'היסטוריית המבצעים טרם נטענה. בדוק חיבור ולחץ שוב על חשב סכום.'
+      : 'טוען את היסטוריית המבצעים לפני חישוב הסכום…') + '</div>';
+    out.classList.remove('hidden');
+    if (promoHistoryError && retryHistory) setTimeout(() => promoAutoCleanup(true), 0);
+    return;
+  }
   const d = receiptRangeData(from, to);
   const supplierCreditHtml = d.openSupplierCredits.length ? supplierCreditWarningHtml(d.openSupplierCredits, false) : '';
   const deferredHtml = d.deferredDueCredits.length ? '<div class="bg-blue-600 text-white rounded-2xl p-4 mb-3 shadow-lg border-2 border-blue-300"><div class="font-black text-lg flex items-center gap-2"><i class="fa-solid fa-calendar-days fa-beat"></i> זיכויים מחודש קודם שממתינים לאימות</div><div class="font-black text-2xl mt-1">₪' + fmtMoney(d.deferredSupplierCreditEx) + '</div><div class="text-xs text-white/95 mt-1 font-bold">הספק התחייב להוציא אותם בחודש הזה. ודא מול המרכזת לפני סגירת חשבון.</div>' + supplierCreditMiniList(d.deferredDueCredits) + '</div>' : '';
@@ -21240,10 +21320,7 @@ function launchImportHtml() {
     '<button data-role="launch-import-close" class="btn-tap w-full bg-white border border-slate-300 text-slate-600 rounded-xl py-2 font-black text-xs mt-2">' + (started || allDone ? 'סגור' : 'בטל') + '</button></div>';
 }
 
-// v197: ניקוי אוטומטי — מבצע שהסתיים לפני תחילת החודש הקודם עובר לסל
-// המחזור (לא נמחק לצמיתות). פעילים, עתידיים, החודש הנוכחי והקודם — לעולם
-// לא נגועים; מבצעי מרכזת של החודש שעבר נשארים זמינים לדוח סוף החודש.
-let promoCleanupRan = false;
+// v383: archive for two years; earned month-end credits survive with each receipt.
 // v202: מסקנת הבדיקה נחתמת פנימה לתוך התעודה, פעם אחת, כדי שתשרוד את
 // מחיקת המבצע. הטקסט המקורי של הממצא לא נגוע — רק נוסף לו שדה promoResolved.
 let aiPriceStampRan = false;
@@ -21267,24 +21344,130 @@ function stampResolvedAiPriceFindings() {
     runCloudTaskSilent('stamp resolved price finding', { op: 'update', path: dataPath('receipts', rc.id), data: { aiAudit: cloneSafe(rc.aiAudit) }, operationId: makeOperationId('ai_price_resolved') });
   });
 }
-async function promoAutoCleanup() {
-  if (promoCleanupRan) return; // פעם אחת בכל טעינת אפליקציה
-  promoCleanupRan = true;
-  stampResolvedAiPriceFindings(); // תמיד לפני מחיקה — אחרת הראיה נעלמת עם המבצע
-  const now = new Date();
-  const prevMonthFirst = new Date(now.getFullYear(), now.getMonth() - 1, 1).toLocaleDateString('en-CA');
-  const stale = promos.filter(pr => pr && pr.end && pr.end < prevMonthFirst);
-  if (!stale.length) return;
-  let cleaned = 0;
-  for (const pr of stale) {
-    const backup = { ...pr };
-    const ok = await hardDeleteDocWithBackup('promos', pr.id, backup, 'promo-auto-cleanup');
-    if (ok) cleaned++;
+function isAutoCleanedPromo(entry) {
+  return !!(entry && entry.collectionName === 'promos' && entry.reason === 'promo-auto-cleanup' && entry.originalId && entry.data);
+}
+function promoArchiveExpiry(pr) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(pr && pr.end || '');
+  if (!m || Number(m[2]) < 1 || Number(m[2]) > 12 || Number(m[3]) < 1 || Number(m[3]) > new Date(Number(m[1]), Number(m[2]), 0).getDate()) return '';
+  const year = Number(m[1]) + 2, month = Number(m[2]);
+  const day = Math.min(Number(m[3]), new Date(year, month, 0).getDate());
+  return String(year) + '-' + m[2] + '-' + String(day).padStart(2, '0');
+}
+function promoArchiveRef(name, id) { return doc(db, ...dataPath(name, id)); }
+async function promoHistoryDocs(name) {
+  // Retention/deletion must be based on a complete server read, never the UI's 100-receipt window or offline cache.
+  return (await getDocsFromServer(collection(db, ...dataPath(name).slice(0, -1)))).docs;
+}
+async function recoverAutoCleanedPromo(trashId) {
+  await runTransaction(db, async tx => {
+    const source = promoArchiveRef('trash', trashId), snap = await tx.get(source);
+    if (!snap.exists() || !isAutoCleanedPromo(snap.data())) return;
+    const entry = snap.data(), id = entry.originalId;
+    const live = await tx.get(promoArchiveRef('promos', id));
+    const archivedRef = promoArchiveRef('promoArchive', id), archived = await tx.get(archivedRef);
+    if (!live.exists() && !archived.exists()) tx.set(archivedRef, {
+      ...entry.data, id, archivedAt: Number(entry.deletedAt) || Date.now(), archiveReason: 'recovered-auto-cleanup'
+    });
+    tx.delete(source); // Atomic with preservation; retries cannot duplicate the promotion.
+  });
+}
+async function archiveExpiredPromo(id, before) {
+  await runTransaction(db, async tx => {
+    const source = promoArchiveRef('promos', id), snap = await tx.get(source);
+    if (!snap.exists()) return;
+    const pr = snap.data();
+    if (!pr.end || pr.end >= before) return; // Re-check a concurrent date extension.
+    tx.set(promoArchiveRef('promoArchive', id), { ...pr, id, archivedAt: Date.now(), archiveReason: 'expired' });
+    tx.delete(source);
+  });
+}
+async function stampReceiptMonthEndPromos(id, catalog) {
+  await runTransaction(db, async tx => {
+    const ref = promoArchiveRef('receipts', id), snap = await tx.get(ref);
+    if (!snap.exists()) return;
+    const receipt = snap.data();
+    const candidates = monthEndHistoryCandidates(receipt, catalog);
+    const relevant = candidates.filter(pr => pr.type === 'monthEnd' || (receipt.monthEndPromoSnapshots || []).some(p => p.id === pr.id));
+    const current = [];
+    for (const pr of relevant) {
+      const live = await tx.get(promoArchiveRef('promos', pr.id));
+      const archived = await tx.get(promoArchiveRef('promoArchive', pr.id));
+      // Retain the known historical definition if another client just removed it.
+      current.push(live.exists() ? { ...live.data(), id: pr.id } : archived.exists() ? { ...archived.data(), id: pr.id } : pr);
+    }
+    const snapshots = receiptMonthEndSnapshots(receipt, current);
+    if (!sameMonthEndSnapshots(receipt, snapshots)) tx.update(ref, { monthEndPromoSnapshots: snapshots });
+  });
+}
+async function preserveAllMonthEndSnapshots() {
+  const [live, archived, allReceipts] = await Promise.all([promoHistoryDocs('promos'), promoHistoryDocs('promoArchive'), promoHistoryDocs('receipts')]);
+  const catalog = live.concat(archived).map(dd => ({ ...dd.data(), id: dd.id }));
+  for (const dd of allReceipts) {
+    if (!sameMonthEndSnapshots(dd.data(), receiptMonthEndSnapshots(dd.data(), catalog))) await stampReceiptMonthEndPromos(dd.id, catalog);
   }
-  if (cleaned) {
-    showToast('נוקו ' + cleaned + ' מבצעים ישנים — שמורים בסל המחזור', null, null, 3200);
-    if (currentView === 'promos') renderPromos();
-  }
+  return archived;
+}
+function scheduleMonthEndSnapshots() {
+  if (!db || promoHistoryImporting || !promoHistoryReady || !Object.values(promoHistoryLoaded).every(Boolean)) return;
+  const catalog = promos.concat(promoArchive);
+  receipts.forEach(rc => {
+    if (promoSnapshotPending.has(rc.id) || sameMonthEndSnapshots(rc, receiptMonthEndSnapshots(rc, catalog))) return;
+    promoSnapshotPending.add(rc.id);
+    stampReceiptMonthEndPromos(rc.id, catalog).catch(error => {
+      console.error('preserve month-end credit', error);
+    }).finally(() => promoSnapshotPending.delete(rc.id));
+  });
+}
+function refreshPromoHistorySummary() {
+  const out = $('rcRangeResult');
+  if (currentView === 'receiptsHistory' && out && !out.classList.contains('hidden')) calcReceiptRange(false);
+}
+async function promoAutoCleanup(force = false) {
+  if (!db || promoHistoryImporting) return false;
+  if (promoMaintenancePromise) return promoMaintenancePromise;
+  const day = todayStr();
+  if (!force && promoMaintenanceDay === day) return true;
+  promoMaintenancePromise = (async () => {
+    try {
+      const now = new Date(day + 'T12:00:00');
+      const before = new Date(now.getFullYear(), now.getMonth() - 1, 1).toLocaleDateString('en-CA');
+      const [live, deleted] = await Promise.all([promoHistoryDocs('promos'), promoHistoryDocs('trash')]);
+      // Recover the whole collection, even if the relevant entry is outside the trash UI limit.
+      for (const dd of deleted) if (isAutoCleanedPromo(dd.data())) await recoverAutoCleanedPromo(dd.id);
+      stampResolvedAiPriceFindings();
+      for (const dd of live) if (dd.data().end && dd.data().end < before) await archiveExpiredPromo(dd.id, before);
+      // No archived promotion is purged until ALL affected receipts are durably preserved.
+      const archived = await preserveAllMonthEndSnapshots();
+      for (const dd of archived) {
+        const expiry = promoArchiveExpiry(dd.data());
+        if (!expiry || expiry >= day) continue;
+        await runTransaction(db, async tx => {
+          const ref = promoArchiveRef('promoArchive', dd.id), fresh = await tx.get(ref);
+          if (fresh.exists() && JSON.stringify(fresh.data()) === JSON.stringify(dd.data())) tx.delete(ref);
+        });
+      }
+      promoMaintenanceDay = day; promoHistoryReady = true; promoHistoryError = '';
+      scheduleMonthEndSnapshots();
+      return true;
+    } catch (error) {
+      promoHistoryError = error.message || String(error);
+      console.error('promo history maintenance', error);
+      return false; // Retry on the next open/calculate; never delete on a failed read/write.
+    } finally {
+      promoMaintenancePromise = null;
+      refreshPromoHistorySummary();
+    }
+  })();
+  return promoMaintenancePromise;
+}
+function promoArchiveHtml() {
+  if (!promoArchive.length) return '';
+  const rows = promoArchive.slice().sort((a, b) => (b.end || '').localeCompare(a.end || '')).map(pr =>
+    '<div class="border-b border-slate-100 py-2"><div class="font-black text-sm">' + htmlEscape(pr.name || 'מבצע') + ' · ' + htmlEscape(pr.pct) + '%</div>' +
+    '<div class="text-xs text-slate-500">' + (pr.type === 'monthEnd' ? 'זיכוי במרכזת' : 'הנחה בתעודה') + ' · ' + htmlEscape(pr.start) + ' — ' + htmlEscape(pr.end) + '</div></div>').join('');
+  return '<details class="bg-white rounded-xl border border-slate-200 mb-3"><summary class="cursor-pointer p-3 font-black text-slate-600">ארכיון מבצעים · ' + promoArchive.length + '</summary>' +
+    '<div class="px-3 pb-3"><div class="text-xs text-slate-500 mb-2">נשמרים שנתיים מתאריך הסיום. הזיכויים בתעודות נשמרים גם לאחר מכן.</div>' + rows + '</div></details>';
 }
 function renderPromos() {
   const day = todayStr();
@@ -21297,7 +21480,7 @@ function renderPromos() {
     '<button data-role="promo-import" class="btn-tap w-full bg-white border-2 border-violet-300 text-violet-700 rounded-2xl py-3 font-black text-sm flex items-center justify-center gap-2 mb-2"><i class="fa-solid fa-file-import"></i> ייבוא מבצעים מדף הפעילות</button>' +
     (promos.length ? '<button data-role="sign-start" class="btn-tap w-full bg-white border-2 border-rose-200 text-rose-700 rounded-2xl py-3 font-black text-sm flex items-center justify-center gap-2 mb-2"><i class="fa-solid fa-print"></i> הכן שלט למבצעים</button>' : '') +
     '<button data-role="sign-start-internal" class="btn-tap w-full bg-white border-2 border-amber-300 text-amber-700 rounded-2xl py-3 font-black text-sm flex items-center justify-center gap-2 mb-3"><i class="fa-solid fa-tag"></i> שלט למבצע פנימי של החנות</button>' +
-    promoImportHtml();
+    promoImportHtml() + promoArchiveHtml();
   if (!promos.length) { app.innerHTML = head + '<div class="text-center text-slate-400 py-10"><i class="fa-solid fa-percent text-4xl mb-2 opacity-30"></i><div class="font-bold">אין מבצעים עדיין</div></div>'; return; }
   const withState = promos.slice().map(pr => {
     let state;
