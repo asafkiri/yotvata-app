@@ -25,6 +25,22 @@ test('oversized Hebrew payload stays local and offers no take button',async()=>{
  const c=createCloud(),a=make(c);a.receipt();a.change("receiptList[0].name='א'.repeat(500000);saveReceiptDraft()");await a.sync();assert.equal(c.get(path('receiving',id(a))).tooBig,true);
  const b=make(c);await settle();assert.equal(b.state().offers[0].button,false);assert.equal(a.run('receiptList[0].name.length'),500000);
 });
+test('more scans after comparison survive transfer without losing manual corrections',async()=>{
+ const c=createCloud(),a=await begin(c);
+ a.change("openReconcile();reconcileSetRecvLive('milk','4');reconcileSetNoteLive('milk','12');reconcileSetPriceLive('milk','6.321');setView('receiving');addReceiptQtyToTop(products.find(p=>p.id==='coffee'),3);saveReceiptDraft()");
+ await a.sync();
+ const p=JSON.parse(c.get(path('receiving',id(a))).payload);
+ assert.equal(p.items.length,2);assert.equal(p.reconciliation.source.length,1);
+ const b=make(c);await settle();assert.equal((await b.take(id(a))).ok,true);
+ b.run('openReconcile()');
+ assert.equal(b.run("reconcileData.find(l=>l.productId==='milk').received"),4);
+ assert.equal(b.run("reconcileData.find(l=>l.productId==='milk').noteQty"),12);
+ assert.equal(b.run("reconcileData.find(l=>l.productId==='milk').price"),6.321);
+ assert.equal(b.run("reconcileData.find(l=>l.productId==='coffee').received"),3);
+ assert.equal(b.requests.length,0);
+ await b.sync();
+ assert.equal(JSON.parse(c.get(path('receiving',id(a))).payload).reconciliation.rows.length,2);
+});
 test('take uses the latest transaction payload; offline take leaves the phone untouched',async()=>{
  const c=createCloud(),a=await begin(c),b=make(c);await settle();a.change("setReceiptQty('milk','4')");await a.sync();
  b.online(false);assert.equal((await b.take(id(a))).reason,'offline');assert.equal(id(b),null);b.online(true);await settle();assert.equal((await b.take(id(a))).ok,true);assert.equal(b.run('receiptList[0].qty'),4);assert.equal(b.requests.length,0);
@@ -122,3 +138,4 @@ test('the former owner cannot add photos or trigger the old live camera, includi
 });
 
 test('taking a draft records the successful session and generation in the action log',async()=>{const c=createCloud(),a=await begin(c),b=make(c),entries=[];b.context.logAction=(...entry)=>entries.push(entry);await settle();const sid=id(a);assert.equal((await b.take(sid)).ok,true);assert.equal(entries.length,1);assert.equal(entries[0][0],'draft-handoff');assert.equal(entries[0][3].sessionId,sid);assert.equal(entries[0][3].gen,2);});
+
