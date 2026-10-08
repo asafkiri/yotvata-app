@@ -507,13 +507,14 @@ test('a 1:5 credit slip keeps ~715×3580 pixels; the same photo as an invoice pa
   assert.equal(c.run("'maxPixels' in aiScanDocuments[0].pages[0]"), false);
 });
 
-test('handoff waits for a paid credit read and transfers the result without another upload', async () => {
+test('paid credit read stays on this phone and reload uses its result without another upload', async () => {
  const cloud=fakeCloud(),data=fixture('yotvata'),c=runtime('yotvata',{data,cloud}),other=runtime('yotvata',{data,cloud});let release;
  service(c,{version:147,answer:()=>new Promise(resolve=>{release=()=>resolve(reply(creditPaper(data)));})});
  c.run("receiptOpened=true;receiptList=[{productId:'milk',name:'בדיקה',qty:3}];saveReceiptDraft()");addCredit(c);const read=c.run("deliveryCreditRead('credit-1')");await settle();await cloud.tick();assert.equal(typeof release,'function');
- const sid=c.run('receiptDraftId');assert.equal((await other.run('draftHandoffs.receiving.take('+JSON.stringify(sid)+')')).reason,'scan-running');assert.equal(c.run('receiptList[0].qty'),3);
- release();assert.equal(await read,true);assert.equal(c.run('receiptDeliveryCredits[0].status'),'review');c.run('draftHandoffs.receiving.flush()');await cloud.tick();
- assert.equal((await other.run('draftHandoffs.receiving.take('+JSON.stringify(sid)+')')).ok,true);assert.equal(other.run('receiptDeliveryCredits[0].status'),'review');assert.equal(other.run('receiptList[0].qty'),3);assert.equal(other.requests.length,0);
+ assert.equal(other.run('receiptDeliveryCredits.length'),0);assert.equal(c.run('receiptList[0].qty'),3);
+ release();assert.equal(await read,true);assert.equal(c.run('receiptDeliveryCredits[0].status'),'review');
+ const reloaded=runtime('yotvata',{data,cloud,storage:new Map(c.storage)});
+ assert.equal(reloaded.run('receiptDeliveryCredits[0].status'),'review');assert.equal(reloaded.run('receiptList[0].qty'),3);assert.equal(reloaded.requests.length,0);assert.equal(other.requests.length,0);
 });
 
 // Firebase 11: getIdToken() hands back the cached token until 30 s before it

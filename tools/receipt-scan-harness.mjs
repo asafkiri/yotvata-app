@@ -48,6 +48,7 @@ export function runtime(supplier, { storage = new Map(), data = fixture(supplier
       return reply(data.paper);
     }
   });
+  vm.runInContext(fs.readFileSync(new URL('../local-receiving.js', import.meta.url), 'utf8'), context);
   vm.runInContext(moduleSource, context, { filename: 'index.html', timeout: 5000 });
   context.testData = structuredClone(data); context.testWrites = writes; context.testToasts = toasts;
   const run = script => vm.runInContext(script, context, { timeout: 5000 });

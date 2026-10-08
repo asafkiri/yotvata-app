@@ -1,0 +1,16 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {runtime,fakeCloud,supplier} from './receipt-scan-harness.mjs';
+const root='artifacts/'+supplier+'-app-classic/public/data/';
+function setup(storage=new Map(),cloud=fakeCloud()){
+ const p=runtime(supplier,{cloud,storage});
+ // Only browser/Firebase boundaries are faked; actual confirmReceipt and local finalizer run.
+ p.run(`receiptOpened=true;receiptNoDoc=true;receiptDraftId='receipt-red';receiptList=structuredClone(testData.items);saveReceiptDraft();
+   pendingReceipt={operationId:'receipt-red',lines:[{productId:'milk',name:'milk',qty:9,unitPrice:5,lineTotal:45}],ex:45,grossEx:45,calculatedEx:45,noDoc:true,status:'ok',noteParts:[],shortCreditNotes:[]};`);
+ return {...p,cloud};
+}
+test('actual confirmReceipt finalizes and clears only acknowledged local draft',async()=>{const p=setup();await p.run('confirmReceipt()');assert.equal(p.cloud.get(root+'receipts/receipt-red').items[0].qty,9);assert.equal(p.run('receiptList.length'),0);assert.equal(p.run('localReceiptPending()'),false);});
+test('actual unresolved finish survives reload and blocks edits/cancel until explicit retry',async()=>{const p=setup();p.cloud.reject='unavailable';await p.run('confirmReceipt()');assert.equal(p.run('receiptList[0].qty'),9);assert.equal(p.run("canEditDraft('receiving',true)"),false);const b=runtime(supplier,{cloud:p.cloud,storage:p.storage});assert.equal(b.run("canEditDraft('receiving',true)"),false);assert.equal(b.run('receiptList[0].qty'),9);p.cloud.reject=null;assert.equal(await b.run('retryLocalReceiptFinal()'),true);assert.equal(p.cloud.get(root+'receipts/receipt-red').items[0].qty,9);assert.equal(b.run('receiptList.length'),0);assert.equal(p.cloud.paths('/receipts/').length,1);});
+test('failed empty-draft persistence after acknowledged commit preserves retry journal across reload',async()=>{const p=setup();const write=p.context.localStorage.setItem;p.context.localStorage.setItem=(key,value)=>{if(key.endsWith('_receipt_draft')&&!JSON.parse(value).draftId)throw Error('storage-full-after-success');return write(key,value);};await p.run('confirmReceipt()');assert.equal(p.cloud.get(root+'receipts/receipt-red').items[0].qty,9);const b=runtime(supplier,{cloud:p.cloud,storage:p.storage});assert.equal(b.run('receiptList[0].qty'),9);assert.equal(b.run('localReceiptPending()'),true);assert.equal(await b.run('retryLocalReceiptFinal()'),true);assert.equal(b.run('receiptList.length'),0);assert.equal(p.cloud.paths('/receipts/').length,1);});
+test('actual definitive permission rejection keeps editable draft and no receipt',async()=>{const p=setup();p.cloud.reject='permission-denied';await p.run('confirmReceipt()');assert.equal(p.cloud.get(root+'receipts/receipt-red'),null);assert.equal(p.run('receiptList[0].qty'),9);assert.equal(p.run("canEditDraft('receiving',true)"),true);});
+test('concurrent final save completion cannot clear programmatically newer counts',async()=>{const p=setup();let release;p.cloud.commitGate=new Promise(r=>release=r);const promise=p.run('confirmReceipt()');await new Promise(r=>setTimeout(r,5));p.run('receiptList[0].qty=17');release();await promise;assert.equal(p.cloud.get(root+'receipts/receipt-red').items[0].qty,9);assert.equal(p.run('receiptList[0].qty'),17);});

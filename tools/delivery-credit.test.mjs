@@ -504,12 +504,13 @@ test('credit approval changed after the summary requires a new summary before pe
   assert.match(c.toasts.at(-1), /מאז הסיכום/);
 });
 
-test('handoff carries credit approval and final save commits it once without OCR', async () => {
- const cloud=fakeCloud(),{c,data}=setup({cloud});await readCredit(c,data);c.run("deliveryCreditConfirm('credit-1');draftHandoffs.receiving.flush()");await cloud.tick();
- const sid=c.run('receiptDraftId'),other=runtime('yotvata',{data,cloud});await cloud.tick();assert.equal((await other.run('draftHandoffs.receiving.take('+JSON.stringify(sid)+')')).ok,true);
- assert.deepEqual(json(other,'deliveryCreditNotes()'),json(c,'deliveryCreditNotes()'));assert.equal(other.run('deliveryCreditReady()'),true);assert.equal(uploads(other),0);
- assert.ok(finish(other));await other.run('confirmReceipt()');await cloud.tick();const records=cloud.paths('/receipts/');assert.equal(records.length,1);assert.equal(cloud.get(records[0]).shortCreditNotes.length,1);
- assert.equal(c.run('draftHandoffs.receiving.state().away.away'),'saved');assert.equal(c.run('draftHandoffs.receiving.clear().ok'),true);assert.equal(c.run('receiptDeliveryCredits.length'),0);assert.equal(uploads(other),0);
+test('local reload preserves credit approval and final save commits it once without OCR', async () => {
+ const cloud=fakeCloud(),{c,data}=setup({cloud});await readCredit(c,data);c.run("deliveryCreditConfirm('credit-1');saveReceiptDraft()");await cloud.tick();
+ const other=runtime('yotvata',{data,cloud});assert.equal(other.run('receiptDeliveryCredits.length'),0);
+ const reloaded=runtime('yotvata',{data,cloud,storage:new Map(c.storage)});
+ assert.deepEqual(json(reloaded,'deliveryCreditNotes()'),json(c,'deliveryCreditNotes()'));assert.equal(reloaded.run('deliveryCreditReady()'),true);assert.equal(uploads(reloaded),0);
+ assert.ok(finish(reloaded));await reloaded.run('confirmReceipt()');await cloud.tick();const records=cloud.paths('/receipts/');assert.equal(records.length,1);assert.equal(cloud.get(records[0]).shortCreditNotes.length,1);
+ assert.equal(reloaded.run('receiptDeliveryCredits.length'),0);assert.equal(uploads(reloaded),0);assert.equal(cloud.paths('/drafts/handoff_yotvata_receiving_').length,0);
 });
 
 test('credited products are excluded from future goods offsets while another shortage remains open', async () => {

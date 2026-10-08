@@ -126,12 +126,15 @@ for(const s of suppliers) {
     assert.equal((await a.run('unpackReceiptValue(packed)')).scan.documents[0].rows[0].quantity,10);
     assert.equal(typeof d.aiAudit.documents[0].rows,'number');assert.equal(raw(reload(s,a)),null);
   });
-  test(s+': active scan and count resume on another device without another OCR request',async()=>{
+  test(s+': active scan stays local and reload reuses OCR without offering it on another phone',async()=>{
     const cloud=fakeCloud(),a=runtime(s,{cloud});await cloud.tick();await a.scan();
-    a.run('draftHandoffs.receiving.flush()');await cloud.tick();
-    const otherDevice=runtime(s,{cloud});await cloud.tick();assert.equal((await otherDevice.run('draftHandoffs.receiving.take('+JSON.stringify(a.run('receiptDraftId'))+')')).ok,true);assert.equal(raw(otherDevice),1);
-    assert.equal(otherDevice.run('receiptList[0].qty'),9);otherDevice.run('finishReceipt()');
-    assert.equal(otherDevice.run('aiScanEvaluation.findings.some(f=>f.type==="shortage"&&f.qty===1)'),true);assert.equal(scanCount(otherDevice),0);
+    const otherDevice=runtime(s,{cloud});await cloud.tick();
+    assert.equal(otherDevice.run('receiptList.length'),0);assert.equal(otherDevice.run('draftHandoffs.receiving'),undefined);
+    const sameDevice=runtime(s,{cloud,storage:new Map(a.storage)});sameDevice.run('finishReceipt()');
+    assert.equal(sameDevice.run('receiptList[0].qty'),9);
+    assert.equal(sameDevice.run('aiScanEvaluation.findings.some(f=>f.type==="shortage"&&f.qty===1)'),true);
+    assert.equal(scanCount(sameDevice),0);assert.equal(scanCount(otherDevice),0);
+    assert.equal([...cloud.documents.keys()].filter(k=>k.includes('handoff_yotvata_receiving')).length,0);
   });
   test(s+': unchanged discrepancies reuse text analysis without resending photos',async()=>{
     const a=runtime(s);await a.scan();a.run('aiRunAnalyzer=auditOriginalAnalyzer;finishReceipt()');await pause();

@@ -1,141 +1,110 @@
-import {attachReturns} from './returns-events-harness.mjs';
+// Receiving is local until the explicit final save; order handoff remains supported.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {phone,createCloud,root,path,settle,json} from './handoff-harness.mjs';
 const alive=[];const make=(c,o)=>{const p=phone(c,o);alive.push(p);return p;};
 test.afterEach(()=>{while(alive.length)alive.pop().stop();});
 const id=p=>p.run('receiptDraftId');
-async function begin(c=createCloud()){const a=make(c);a.receipt();await a.sync();return a;}
-async function pair(){const cloud=createCloud(),a=await begin(cloud),b=make(cloud);await settle();assert.equal((await b.take(id(a))).ok,true);return {cloud,a,b};}
+const saved=p=>p.run('finishDraft("receiving",receiptDraftId,{items:receiptList})');
 
-test('local edits never wait for a stuck cloud; one backup in flight, with no old draft writes',async()=>{
- const c=createCloud(),a=make(c);a.receipt();c.hangCommits=true;const waiting=a.sync();await settle();
- a.change("setReceiptQty('milk','4')");assert.equal(JSON.parse(a.storage.get('yt_receipt_draft')).items[0].qty,4);
- a.run("draftHandoffs.receiving.flush();draftHandoffs.receiving.flush()");await settle();assert.equal(c.transactions,1);
- await waiting;await new Promise(r=>setTimeout(r,300));assert.equal(a.state().readOnly,false);assert.equal(a.state().status,'failed');assert.deepEqual(c.paths('drafts/receipt'),[]);
+test('counting, editing, backgrounding, and network reconnect never create receiving cloud drafts',async()=>{
+ const c=createCloud(),a=make(c);a.receipt();a.change("setReceiptQty('milk','4');openReconcile();reconcileSetPriceLive('milk','6');saveReceiptDraft()");
+ a.fire('visibilitychange');a.fire('pagehide');a.online(false);a.online(true);await settle();
+ assert.deepEqual(json(a,'Object.keys(draftHandoffs)'),['order']);assert.equal(c.transactions,0);assert.deepEqual(c.paths('drafts/'),[]);
+ assert.match(a.node('draftHandoffBanner').innerHTML,/בטלפון הזה בלבד/);assert.doesNotMatch(a.node('draftHandoffBanner').innerHTML,/מגובה בענן|המשך אותה כאן/);
 });
-test('backup includes stable identity, paper source and corrections, never images; unchanged content is not rewritten',async()=>{
- const c=createCloud(),a=make(c);await a.scan();a.change("openReconcile();reconcileSetRecvLive('milk','4');reconcileSetPriceLive('milk','6');reconcileSetNoteLive('milk','12')");await a.sync();
- const d=c.get(path('receiving',id(a))),p=JSON.parse(d.payload);assert.equal(d.gen,1);assert.equal(d.recordId,id(a));assert.equal(d.summary.lines,1);assert.equal(d.summary.units,4);
- assert.equal(p.reconciliation.rows[0].received,4);assert.equal(p.reconciliation.rows[0].price,6);assert.equal(p.reconciliation.rows[0].noteQty,12);assert.ok(p.aiScan);
- assert.doesNotMatch(d.payload,/data:image|blob:|"pages"/);const before=c.server.get(path('receiving',id(a))).version;await a.sync();assert.equal(c.server.get(path('receiving',id(a))).version,before);
- const b=make(c);await settle();assert.equal((await b.take(id(a))).ok,true);b.run('openReconcile()');assert.equal(b.run('reconcileData[0].received'),4);assert.equal(b.run('reconcileData[0].price'),6);assert.equal(b.requests.length,0);
+test('two phones retain different local counts and do not offer a receiving transfer',async()=>{
+ const c=createCloud(),a=make(c),b=make(c);a.receipt(9);b.receipt(17);await settle();
+ assert.notEqual(id(a),id(b));assert.equal(a.run('receiptList[0].qty'),9);assert.equal(b.run('receiptList[0].qty'),17);assert.deepEqual(c.paths('drafts/'),[]);
 });
-test('oversized Hebrew payload stays local and offers no take button',async()=>{
- const c=createCloud(),a=make(c);a.receipt();a.change("receiptList[0].name='א'.repeat(500000);saveReceiptDraft()");await a.sync();assert.equal(c.get(path('receiving',id(a))).tooBig,true);
- const b=make(c);await settle();assert.equal(b.state().offers[0].button,false);assert.equal(a.run('receiptList[0].name.length'),500000);
+test('reload keeps counts, corrections and parsed paper without another OCR',async()=>{
+ const c=createCloud(),a=make(c);await a.scan();a.change("openReconcile();reconcileSetRecvLive('milk','4');reconcileSetNoteLive('milk','12');reconcileSetPriceLive('milk','6.321');addReceiptQtyToTop(products[1],3);saveReceiptDraft()");
+ const b=make(c,{storage:new Map(a.storage)});b.run('openReconcile()');
+ assert.equal(b.run("reconcileData.find(l=>l.productId==='milk').received"),4);assert.equal(b.run("reconcileData.find(l=>l.productId==='milk').noteQty"),12);
+ assert.equal(b.run("reconcileData.find(l=>l.productId==='milk').price"),6.321);assert.equal(b.run("reconcileData.find(l=>l.productId==='coffee').received"),3);
+ assert.equal(b.requests.length,0);assert.equal(b.run('aiScanResponse.scan.documents.length'),1);
 });
-test('more scans after comparison survive transfer without losing manual corrections',async()=>{
- const c=createCloud(),a=await begin(c);
- a.change("openReconcile();reconcileSetRecvLive('milk','4');reconcileSetNoteLive('milk','12');reconcileSetPriceLive('milk','6.321');setView('receiving');addReceiptQtyToTop(products.find(p=>p.id==='coffee'),3);saveReceiptDraft()");
- await a.sync();
- const p=JSON.parse(c.get(path('receiving',id(a))).payload);
- assert.equal(p.items.length,2);assert.equal(p.reconciliation.source.length,1);
- const b=make(c);await settle();assert.equal((await b.take(id(a))).ok,true);
- b.run('openReconcile()');
- assert.equal(b.run("reconcileData.find(l=>l.productId==='milk').received"),4);
- assert.equal(b.run("reconcileData.find(l=>l.productId==='milk').noteQty"),12);
- assert.equal(b.run("reconcileData.find(l=>l.productId==='milk').price"),6.321);
- assert.equal(b.run("reconcileData.find(l=>l.productId==='coffee').received"),3);
- assert.equal(b.requests.length,0);
- await b.sync();
- assert.equal(JSON.parse(c.get(path('receiving',id(a))).payload).reconciliation.rows.length,2);
+test('explicit final save writes one receipt and action log without creating or mutating a handoff',async()=>{
+ const c=createCloud(),a=make(c);a.receipt();const sid=id(a);assert.equal(await saved(a),true);assert.equal(await a.run("retryLocalReceiptFinal()"),true);
+ assert.equal(c.paths('/receipts/').length,1);assert.equal(c.paths('/actionLog/').length,1);assert.equal(c.get(root+'receipts/'+sid).items[0].qty,9);assert.deepEqual(c.paths('/drafts/'),[]);
 });
-test('take uses the latest transaction payload; offline take leaves the phone untouched',async()=>{
- const c=createCloud(),a=await begin(c),b=make(c);await settle();a.change("setReceiptQty('milk','4')");await a.sync();
- b.online(false);assert.equal((await b.take(id(a))).reason,'offline');assert.equal(id(b),null);b.online(true);await settle();assert.equal((await b.take(id(a))).ok,true);assert.equal(b.run('receiptList[0].qty'),4);assert.equal(b.requests.length,0);
+test('offline final keeps local counts and retry after reconnect succeeds',async()=>{
+ const c=createCloud(),a=make(c);a.receipt(17);const raw=a.storage.get('yt_receipt_draft');a.online(false);
+ assert.equal(await saved(a),false);assert.equal(a.storage.get('yt_receipt_draft'),raw);assert.equal(c.paths('/receipts/').length,0);
+ a.online(true);assert.equal(await saved(a),true);assert.equal(c.get(root+'receipts/'+id(a)).items[0].qty,17);
 });
-test('former owner cannot edit, scan, cancel or finalize; take-back preserves the local version',async()=>{
- const {cloud,a,b}=await pair();assert.equal(a.state().away.away,'moved');const before=json(a,'receiptList');
- a.run("setReceiptQty('milk','2');reconcileSetRecvLive('milk','1');cancelReceiptAttach();yotvataStartPaperScan();aiRunAnalyzer();finishReceipt()");assert.deepEqual(json(a,'receiptList'),before);assert.equal(a.requests.length,0);
- assert.equal(await a.run("finishDraft('receiving',receiptDraftId,{test:true})"),false);assert.equal(a.run("cancelLocalDraft('receiving')"),false);
- a.online(false); // emulate an edit made before the handoff notice reached this phone, never by bypassing the UI in real use
- a.run('receiptList[0].qty=8');b.change("setReceiptQty('milk','4')");await b.sync();a.online(true);await settle();assert.equal((await a.take(id(a))).ok,true);assert.equal(a.run('receiptList[0].qty'),4);
- assert.equal(a.state().side.length,1);assert.equal(JSON.parse(a.storage.get('yt_handoff_receiving_side'))[0].reason,'same');assert.equal(cloud.get(path('receiving',id(a))).gen,3);
+test('a lost reply resolves only the exact final receipt and does not duplicate it',async()=>{
+ const c=createCloud(),a=make(c);a.receipt();c.loseReplyAfterCommit=true;assert.equal(await saved(a),true);assert.equal(await a.run("retryLocalReceiptFinal()"),true);
+ assert.equal(c.paths('/receipts/').length,1);assert.equal(c.paths('/actionLog/').length,1);
 });
-test('finish writes exactly one receipt and closes handoff; other phone clears only its copy',async()=>{
- const {cloud,a,b}=await pair();const sid=id(b);b.run('openReconcile();saveReconciledReceipt({skipChecked:true,skipGap:true})');await b.run('confirmReceipt()');await settle();
- assert.equal(cloud.paths('/receipts/').length,1);assert.equal(cloud.get(path('receiving',sid)).state,'saved');assert.equal(cloud.paths('/actionLog/').length,1);
- assert.equal(id(b),null);assert.equal(a.state().away.away,'saved');assert.equal(a.run('draftHandoffs.receiving.clear().ok'),true);assert.equal(id(a),null);assert.equal(cloud.paths('/receipts/').length,1);
+test('a saved copy on another phone never replaces or clears this phone unique counts',async()=>{
+ const c=createCloud(),a=make(c);a.receipt(17);const sid=id(a);c.put(root+'receipts/'+sid,{items:[{productId:'milk',qty:9}]});await settle();
+ assert.equal(a.run('receiptList[0].qty'),17);assert.equal(await saved(a),false);assert.equal(a.run('receiptList[0].qty'),17);assert.equal(c.get(root+'receipts/'+sid).items[0].qty,9);
 });
-test('two takers and finish versus take are atomic',async()=>{
- const c=createCloud(),a=await begin(c),b=make(c),d=make(c);await settle();const sid=id(a);let release;c.commitGate=new Promise(r=>release=r);
- const r1=b.take(sid),r2=d.take(sid);await settle();release();const results=await Promise.all([r1,r2]);assert.equal(results.filter(r=>r.ok).length,1);c.commitGate=null;
- const owner=results[0].ok?b:d,other=owner===b?d:b;let release2;c.commitGate=new Promise(r=>release2=r);
- const finish=owner.run("finishDraft('receiving',receiptDraftId,{items:[]})"),take=other.take(sid);await settle();release2();const [saved,taken]=await Promise.all([finish,take]);assert.equal(Number(saved)+Number(taken.ok),1);
+test('changed attachment record and changed product price reject the whole atomic save',async()=>{
+ const c=createCloud(),a=make(c);a.receipt();const record={id:'old',timestamp:1,noDoc:true,items:[{productId:'milk',qty:9,unitPrice:5}]};
+ c.put(root+'receipts/old',{...record,newer:true});a.context.record=record;a.run('receiptAttachTarget={id:"old",sessionId:"edit_old",expectedReceipt:record}');
+ assert.equal(await a.run('finishDraft("receiving","old",{items:receiptList})'),false);assert.equal(c.get(root+'receipts/old').newer,true);
+ a.run('receiptAttachTarget=null;handoffFinishPlans.receiving={prices:[{id:"milk",expected:5,price:6}]}');c.put(root+'products/milk',{id:'milk',price:7});
+ assert.equal(await saved(a),false);assert.equal(c.paths('/receipts/').length,1);assert.equal(c.get(root+'products/milk').price,7);assert.equal(c.paths('/actionLog/').length,0);
 });
-test('lost finish reply resolves from server without a duplicate receipt',async()=>{
- const c=createCloud(),a=await begin(c),sid=id(a);c.loseReplyAfterCommit=true;
- await a.run("finishDraft('receiving',receiptDraftId,{items:receiptList})");await settle();assert.equal(c.paths('/receipts/').length,1);assert.equal(c.get(path('receiving',sid)).state,'saved');assert.equal(id(a),null);
+test('old moved/canceled ownership cannot be revived; the local copy remains available',async()=>{
+ for(const state of ['open','canceled']){const c=createCloud(),a=make(c);a.receipt(17);const sid=id(a);c.put(path('receiving',sid),{state,deviceId:'other',gen:2});
+ assert.equal(await saved(a),false);assert.equal(a.run('receiptList[0].qty'),17);assert.equal(c.paths('/receipts/').length,0);assert.equal(c.get(path('receiving',sid)).state,state);}
 });
-test('offline finish cannot overwrite a receipt after another phone takes and saves',async()=>{
- const c=createCloud(),a=await begin(c),sid=id(a);a.online(false);assert.equal(await a.run("finishDraft('receiving',receiptDraftId,{items:receiptList})"),false);
- const b=make(c);await settle();await b.take(sid);b.change("setReceiptQty('milk','4')");assert.equal(await b.run("finishDraft('receiving',receiptDraftId,{items:receiptList})"),true);
- a.online(true);await settle();await a.sync();assert.equal(c.get(root+'receipts/'+sid).items[0].qty,4);assert.equal(a.state().away.away,'saved');
+test('legacy sides and queued final writes remain available even if same receipt ID is already saved',async()=>{
+ const c=createCloud(),a=make(c);a.receipt(17);const payload=a.storage.get('yt_receipt_draft'),sid=id(a);
+ a.storage.set('yt_handoff_receiving_side',JSON.stringify([{sessionId:sid,payload,savedAt:1}]));
+ a.context.oldTasks=[{id:'old-task',actionName:'save receipt before clearing draft',task:{op:'set',path:(root+'receipts/'+sid).split('/'),data:{items:[{productId:'milk',qty:4,noteQty:12,unitPrice:6}],noDoc:true}}}];
+ c.put(root+'receipts/'+sid,{items:[{productId:'milk',qty:9}]});a.run('cloudFailedWrites=oldTasks;quarantineLegacyDraftWrites()');await a.run('recoverLegacyDraftWrites()');
+ assert.equal(a.run('localReceiptCopies().length'),2);assert.equal(JSON.parse(a.storage.get('yt_handoff_legacy_writes')).length,1);
+ assert.equal(await a.run('openLocalReceiptCopy("legacy:0")'),false);assert.equal(a.run('receiptList[0].qty'),17);assert.match(a.node('draftHandoffBanner').innerHTML,/לעיון בלבד/);
+ const full=await a.run('localReceiptCopyPayload(localReceiptCopies().find(x=>x.key==="legacy:0"))');assert.equal(full.legacyFinalReceipt.items[0].noteQty,12);assert.equal(JSON.parse(a.storage.get('yt_handoff_receiving_side')).length,1);
+ assert.equal(c.get(root+'receipts/'+sid).items[0].qty,9);assert.equal(a.requests.length,0);
 });
-test('cached ownership cannot undo a server transfer after restart',async()=>{
- const c=createCloud(),a=await begin(c),sid=id(a),storage=new Map(a.storage),cache=new Map(a.client.cache);a.stop();const b=make(c);await settle();await b.take(sid);
- const restarted=make(c,{storage,cache,online:false});await settle();assert.equal(c.get(path('receiving',sid)).gen,2);restarted.online(true);await settle();assert.equal(restarted.state().away.away,'moved');assert.equal(restarted.run("canEditDraft('receiving',true)"),false);
+test('quota failure cannot replace the active draft or submit final save',async()=>{
+ const c=createCloud(),a=make(c);a.receipt(17);const payload=a.storage.get('yt_receipt_draft');a.storage.set('yt_handoff_receiving_side',JSON.stringify([{payload:payload.replace('"qty":17','"qty":4')}]))
+ a.context.localStorage.setItem=()=>{throw Error('quota')};assert.equal(await a.run('openLocalReceiptCopy("yt_handoff_receiving_side:0")'),false);
+ assert.equal(a.run('receiptList[0].qty'),17);assert.equal(await saved(a),false);assert.equal(c.transactions,0);
 });
-test('offline cancel retries; a moved copy cannot cancel the current owner',async()=>{
- const {cloud,a,b}=await pair(),sid=id(b);b.online(false);assert.equal(b.run("cancelLocalDraft('receiving')"),true);b.run("handoffEmpty('receiving')");assert.equal(cloud.get(path('receiving',sid)).state,'open');
- b.online(true);await b.sync();await settle();assert.equal(cloud.get(path('receiving',sid)).state,'canceled');assert.equal(a.state().away.away,'canceled');
+test('cancel closes stale quantity window and scan callbacks without writing a receiving tombstone',async()=>{
+ const c=createCloud(),a=make(c);a.receipt();a.run("promptQty(products[0],'receipt');cancelLocalDraft('receiving');yotvataResetPhotoReceipt();receiptList=[];receiptDraftId=null;commitQty(false);handleReceivingScan(products[0].barcode)");
+ assert.equal(a.run('receiptList.length'),0);assert.equal(a.run('qtyProduct'),null);assert.deepEqual(c.paths('drafts/'),[]);
 });
-test('scan start immediately hides the take button and restore never uploads again',async()=>{
- const c=createCloud(),a=await begin(c),b=make(c);await settle();assert.equal(b.state().offers[0].button,true);
- a.run("aiScanBusy=true;handoffChanged('receiving')");await settle();assert.equal(c.get(path('receiving',id(a))).scanRunning,true);assert.equal(b.state().offers[0].button,false);assert.equal((await b.take(id(a))).reason,'scan-running');
- a.run("aiScanBusy=false;handoffChanged('receiving')");await settle();await a.sync();assert.equal((await b.take(id(a))).ok,true);assert.equal(b.requests.length,0);
+test('order synchronization remains enabled alongside local receiving',async()=>{
+ const c=createCloud(),a=make(c);a.receipt();a.change("orderState={milk:{amount:'5',unit:'unit'}};saveDraft()");await a.sync('order');
+ assert.equal(c.paths('handoff_yotvata_order_').length,1);assert.equal(c.paths('handoff_yotvata_receiving_').length,0);
 });
-test('another local draft is kept and reopened; full storage stops replacement',async()=>{
- const c=createCloud(),a=await begin(c),b=make(c);b.receipt(2);const local=id(b);await settle();assert.equal((await b.take(id(a))).ok,true);assert.equal(JSON.parse(b.storage.get('yt_handoff_receiving_side'))[0].sessionId,local);
- b.run("draftHandoffs.receiving.openSide("+JSON.stringify(local)+")");assert.equal(b.run('receiptList[0].qty'),2);
- b.context.localStorage.setItem=()=>{throw Error('quota')};assert.equal((await b.take(id(a))).reason,'storage');assert.equal(id(b),local);
+test('unknown final result locks edits and explicit retry after reload saves the original snapshot',async()=>{
+ const c=createCloud(),a=make(c);a.receipt(17);const sid=id(a);c.reject='unavailable';assert.equal(await saved(a),false);
+ assert.equal(a.run('localReceiptPending()'),true);a.run("setReceiptQty('milk','4')");assert.equal(a.run('receiptList[0].qty'),17);
+ const b=make(c,{storage:new Map(a.storage)});assert.equal(b.run('localReceiptPending()'),true);c.reject=null;
+ assert.equal(await b.run('retryLocalReceiptFinal()'),true,b.toasts.join('\n'));assert.equal(b.run('receiptList.length'),0);
+ assert.equal(c.get(root+'receipts/'+sid).items[0].qty,17);assert.equal(c.paths('/receipts/').length,1);
 });
-test('legacy copies do not claim on start, render or automatic saves; first user edit owns',async()=>{
- const seed=make(createCloud(),{start:false});seed.receipt();const storage=new Map(seed.storage);const c=createCloud(),a=make(c,{storage:new Map(storage)}),b=make(c,{storage:new Map(storage)});await settle();await a.sync();await b.sync();assert.equal(c.paths('handoff_').length,0);
- a.run('saveReceiptDraft();renderReceiving()');await a.sync();assert.equal(c.paths('handoff_').length,0);a.change("setReceiptQty('milk','4')");await a.sync();assert.equal(b.state().away.away,'moved');assert.equal((await b.take(id(a))).ok,true);assert.equal(b.state().side.length,1);assert.deepEqual(c.paths('drafts/receipt'),[]);
+test('pending archive preserves both full draft and immutable submission and quota failure cannot clear it',async()=>{
+ const c=createCloud(),a=make(c);a.receipt(17);c.reject='unavailable';await saved(a);const sid=id(a),journal=a.storage.get('yt_receiving_final_v1');
+ a.run('showConfirm=(title,text,label,fn)=>fn();archivePendingLocalReceipt()');assert.equal(id(a),null);
+ assert.equal(a.storage.get('yt_receiving_final_v1'),journal);assert.equal(JSON.parse(JSON.parse(a.storage.get('yt_local_receiving_archive'))[0].payload).items[0].qty,17);
+ assert.equal(await a.run('openLocalReceiptCopy("yt_local_receiving_archive:0")'),true);assert.equal(id(a),sid);assert.equal(a.run('localReceiptPending()'),true);
+ a.context.localStorage.setItem=()=>{throw Error('quota')};a.run('archivePendingLocalReceipt()');assert.equal(id(a),sid);assert.equal(a.run('receiptList[0].qty'),17);
 });
-test('legacy cancel is local and creates no tombstone',async()=>{
- const seed=make(createCloud(),{start:false});seed.receipt();const c=createCloud(),a=make(c,{storage:new Map(seed.storage)});a.run("cancelLocalDraft('receiving');handoffEmpty('receiving')");await a.sync();assert.equal(c.paths('handoff_').length,0);
+test('old native barcode result is ignored after a different receiving scanner starts',async()=>{
+ const c=createCloud(),a=make(c);a.receipt();let release;a.context.barcodeWait=new Promise(r=>release=r);a.node('scanVideo').readyState=2;
+ a.run('scanStream={};barcodeDetector={detect:()=>barcodeWait};scanPurpose="receiving";scanReceiptEpoch=receiptLocalEpoch;scanTick();closeReceivingEditors();receiptDraftId="next";scanStream={};scanPurpose="receiving";scanReceiptEpoch=receiptLocalEpoch');
+ release([{rawValue:a.run('products[1].barcode')}]);await settle();assert.equal(a.run('qtyProduct'),null);assert.equal(id(a),'next');
 });
-test('edit sessions carry expected record, transfer and stop stale overwrites',async()=>{
- const c=createCloud(),a=make(c),record={id:'saved-test',timestamp:1,date:'2026-10-06',docDate:'2026-10-06',noDoc:true,items:[{productId:'milk',name:'בדיקה',qty:9,unitPrice:5}],totalExVat:45};c.put(root+'receipts/'+record.id,record);a.context.fixtureRecord=record;
- a.run('receipts=[fixtureRecord];reopenReceiptForDoc(fixtureRecord.id)');
- const sid=a.run("handoffDraft('receiving').sessionId");assert.match(sid,/^edit_/);a.change("setReceiptQty('milk','4')");await a.sync();const b=make(c);await settle();assert.equal((await b.take(sid)).ok,true);assert.equal(b.run('receiptAttachTarget.expectedReceipt.items[0].qty'),9);
- c.put(root+'receipts/'+record.id,{...record,newer:true});assert.equal(await b.run("finishDraft('receiving','saved-test',{items:[]})"),false);assert.equal(c.get(root+'receipts/'+record.id).newer,true);
+test('old cancellation dialog cannot discard an explicitly opened side draft',async()=>{
+ const c=createCloud(),a=make(c);a.receipt(17);const payload=JSON.parse(a.storage.get('yt_receipt_draft'));payload.draftId='side';payload.items[0].qty=23;
+ a.storage.set('yt_handoff_receiving_side',JSON.stringify([{payload:JSON.stringify(payload)}]));await a.click('rc-cancel');
+ assert.equal(a.run('typeof confirmCb'),'function');assert.equal(await a.run('openLocalReceiptCopy("yt_handoff_receiving_side:0")'),true);
+ a.events.get('confirmOk:click')();assert.equal(a.run('receiptList[0].qty'),23);assert.equal(id(a),'side');
 });
-test('receiving and order are isolated; shared returns and app orders stay live',async()=>{const c=createCloud(),a=await begin(c);const engine=await attachReturns(a);a.change("returnsList=[{productId:'milk',qty:3}];saveReturnsDraft();orderState={milk:{amount:'5',unit:'unit'}};saveDraft()");await a.sync('order');assert.equal(c.paths('handoff_yotvata_').length,2);assert.deepEqual(json(a,'Object.keys(draftHandoffs)').sort(),['order','receiving']);assert.equal(JSON.parse(a.storage.get('yt_returns_draft'))[0].qty,3);engine.stop();});
-test('late commit after restart keeps the later correction visible in a side copy',async()=>{
- const c=createCloud(),a=await begin(c),sid=id(a);c.commitDelayMs=1100;
- assert.equal(await a.run("finishDraft('receiving',receiptDraftId,{items:receiptList})"),false);c.commitDelayMs=0;
- await new Promise(r=>setTimeout(r,550));assert.equal(a.state().readOnly,false);a.online(false);a.change("setReceiptQty('milk','4')");const storage=new Map(a.storage),cache=new Map(a.client.cache);a.stop();
- const b=make(c,{storage,cache,online:false});await new Promise(r=>setTimeout(r,400));b.online(true);await settle();
- assert.equal(b.state().away.away,'saved');assert.equal(c.get(root+'receipts/'+sid).items[0].qty,9);
- const side=JSON.parse(b.storage.get('yt_handoff_receiving_side'));assert.equal(side[0].reason,'late');assert.equal(JSON.parse(side[0].payload).items[0].qty,4);
- b.run('draftHandoffs.receiving.clear()');assert.equal(b.state().side.length,1);assert.equal(b.requests.length,0);
+test('quota failure quarantining legacy receiving writes still blocks every retry including nested batches',async()=>{
+ const c=createCloud(),a=make(c);a.receipt();a.context.oldTasks=[
+  {id:'draft',actionName:'old autosave',task:{op:'set',path:(root+'drafts/receipt').split('/'),data:{items:[]}}},
+  {id:'batch',actionName:'old batch',task:{op:'batch',writes:[{op:'set',path:(root+'receipts/legacy').split('/'),data:{items:[]}}]}}
+ ];let writes=0;a.context.executeCloudTask=async()=>{writes++};a.context.localStorage.setItem=()=>{throw Error('quota')};
+ a.run('cloudFailedWrites=oldTasks');await a.run('retryCloudFailedWrites()');assert.equal(writes,0);assert.equal(a.run('cloudFailedWrites.length'),2);
+ assert.equal(a.run('legacyReceivingWrite({actionName:"restore from trash",task:oldTasks[1].task})'),false);
 });
-test('two consecutive edits use different sessions and both save on the original phone',async()=>{
- const c=createCloud(),a=await begin(c),sid=id(a);assert.equal(await a.run("finishDraft('receiving',handoffDraft('receiving').recordId,{timestamp:1,noDoc:true,items:receiptList})"),true);a.run("handoffEmpty('receiving')");
- let previous='';for(const qty of [4,2]){
-  a.context.savedRecord={id:sid,...c.get(root+'receipts/'+sid)};a.run('receipts=[savedRecord];reopenReceiptForDoc(savedRecord.id)');const edit=a.run("handoffDraft('receiving').sessionId");assert.notEqual(edit,previous);previous=edit;
-  a.change("setReceiptQty('milk','"+qty+"')");await a.sync();assert.equal(await a.run("finishDraft('receiving',handoffDraft('receiving').recordId,{timestamp:1,noDoc:true,items:receiptList})"),true);a.run("handoffEmpty('receiving')");assert.equal(c.get(root+'receipts/'+sid).items[0].qty,qty);
- }
- assert.equal(c.paths('/receipts/').length,1);assert.equal(c.paths('/actionLog/').length,3);
-});
-test('old blind queued saves are quarantined, restored with corrections, and never overwrite newer records',async()=>{
- const c=createCloud(),a=make(c);a.context.oldTasks=['missing','already'].map(id=>({id:'q_'+id,actionName:'save receipt before clearing draft',createdAt:1,task:{op:'set',path:(root+'receipts/'+id).split('/'),data:{items:[{productId:'milk',name:'בדיקה',qty:4,noteQty:12,unitPrice:6}],noDoc:true,noteParts:[]}}}));
- c.put(root+'receipts/already',{newer:true});a.run('cloudFailedWrites=oldTasks;quarantineLegacyDraftWrites()');assert.equal(a.run('cloudFailedWrites.length'),0);await a.run('recoverLegacyDraftWrites()');assert.equal(c.get(root+'receipts/already').newer,true);assert.equal(c.get(root+'receipts/missing'),null);
- assert.equal(a.state().side.length,1);assert.equal(a.run("draftHandoffs.receiving.openSide('missing').ok"),true);a.run('openReconcile()');assert.equal(a.run('reconcileData[0].received'),4);assert.equal(a.run('reconcileData[0].noteQty'),12);assert.equal(a.run('reconcileData[0].price'),6);assert.equal(a.requests.length,0);
-});
-test('offline cancellation cannot close the draft subsequently taken by another phone',async()=>{
- const c=createCloud(),a=await begin(c),sid=id(a);a.online(false);a.run("cancelLocalDraft('receiving');handoffEmpty('receiving')");const b=make(c);await settle();assert.equal((await b.take(sid)).ok,true);a.online(true);await a.sync();assert.equal(c.get(path('receiving',sid)).state,'open');assert.equal(c.get(path('receiving',sid)).deviceId,b.storage.get('yt_device_id'));
-});
-
-test('the former owner cannot add photos or trigger the old live camera, including an already open modal',async()=>{
- const {a}=await pair();const before=json(a,'aiScanDocuments');let prepared=0;a.context.aiCompressInvoiceImage=async()=>{prepared++;return {dataUrl:'synthetic'};};
- await a.run("aiAddInvoiceFiles(0,[{}]);aiOpenLiveCamera(0);aiLiveCamTakePhoto();aiRemoveInvoicePage(0,0);aiConfirmOrientationReview();aiCancelOrientationReview()");assert.equal(prepared,0);assert.deepEqual(json(a,'aiScanDocuments'),before);assert.equal(a.requests.length,0);
- let blocked=false;a.context.cameraEvent={type:'click',target:{closest:selector=>selector.includes('#aiLiveCamModal')?{}:null},preventDefault:()=>blocked=true,stopImmediatePropagation(){}};a.run('guardDraftEvent(cameraEvent)');assert.equal(blocked,true);
-});
-
-test('taking a draft records the successful session and generation in the action log',async()=>{const c=createCloud(),a=await begin(c),b=make(c),entries=[];b.context.logAction=(...entry)=>entries.push(entry);await settle();const sid=id(a);assert.equal((await b.take(sid)).ok,true);assert.equal(entries.length,1);assert.equal(entries[0][0],'draft-handoff');assert.equal(entries[0][3].sessionId,sid);assert.equal(entries[0][3].gen,2);});
-
