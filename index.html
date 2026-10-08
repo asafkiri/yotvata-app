@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v386 החזרות בטוחות</title>
+    <title>הזמנות יטבתה - v387 תיקון חוסרי שווא</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -125,7 +125,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v386 החזרות בטוחות</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v387 תיקון חוסרי שווא</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -645,7 +645,7 @@ let receiptOpened = false;       // האם נפתחה תעודה (שער לפנ�
 let receiptNoDoc = false;        // הקליטה הנוכחית נפתחה בלי תעודה
 let receiptAttachTarget = null;  // צירוף נייר לקליטה שכבר נשמרה בלי תעודה
 let receiptDepositWaived = false; // v232: התעודה לא חייבה פיקדון — שורות הפיקדון הנגזרות הוסרו לתעודה זו
-let receiptReconcileDraft = null, receiptReconcileSession = null;
+let receiptReconcileDraft = null, receiptReconcileSession = null, receiptReconcileSource = null;
 let reconcileData = null;        // נתוני מסך השוואת תעודה
 // v178: האם באמת הוזנו נתוני נייר (הקלדה ידנית / החלת סריקת AI) על noteQty.
 // עד שזה קורה, noteQty הוא עותק של מה שנסרק — והכותרת חייבת לומר את זה.
@@ -667,7 +667,7 @@ let aiScanEditingImages = false;
 const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '386';
+const APP_VERSION = '387';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -2310,7 +2310,7 @@ function restoreReceiptDraft(incoming) {
     const o = incoming || JSON.parse(s);
     receiptReconcileDraft = o && o.reconciliation && o.reconciliation.version === 1
       && o.reconciliation.draftId === o.draftId && Array.isArray(o.reconciliation.rows) ? o.reconciliation : null;
-    receiptReconcileSession = null; reconcileData = null;
+    receiptReconcileSession = null; receiptReconcileSource = null; reconcileData = null;
     receiptDeliveryCredits = (Array.isArray(o && o.deliveryCredits) ? o.deliveryCredits : []).filter(c => c && typeof c.id === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(c.id)).slice(0, 4)
       // v365: זיכוי שאושר (גם לבד — autoConfirmed) חוזר מאושר כמו שנשמר; השחזור לעולם לא מאשר ולא קורא.
       .map(({ waiting, waitingFor, progress, resume, editBarcode, ...c }) => ({ ...c, pages: [], status: deliveryCreditBusy(c) ? 'interrupted' : c.status,
@@ -3503,7 +3503,7 @@ async function logAction(type, title, details, meta) {
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'actionLog', id), {
       timestamp: Date.now(), type: type || 'system', title: title || 'פעולה', details: details || '',
       deviceName: actionDeviceLabel(), uid: (auth && auth.currentUser && auth.currentUser.uid) || '',
-      appVersion: 'v386_return_events', meta: cloneSafe(meta || {})
+      appVersion: 'v387_reconcile_counts', meta: cloneSafe(meta || {})
     });
   } catch (e) { console.warn('action log failed', e); }
 }
@@ -3587,7 +3587,7 @@ async function exportFullBackup() {
       backupType: 'yotvata-firestore-full',
       backupVersion: 1,
       appId,
-      appVersion: 'v386_return_events',
+      appVersion: 'v387_reconcile_counts',
       exportedAt: Date.now(),
       exportedAtIso: new Date().toISOString(),
       collections: {},
@@ -8836,10 +8836,12 @@ function receiptReconcileRows() {
 }
 // תיקוני ההשוואה הם חלק מהטיוטה, גם כשהמסך נסגר. בלי תמונות ובלי סיכום לתשלום.
 function receiptReconcileSnapshot() {
-  if (!receiptDraftId) { receiptReconcileDraft = null; receiptReconcileSession = null; return null; }
+  if (!receiptDraftId) { receiptReconcileDraft = null; receiptReconcileSession = null; receiptReconcileSource = null; return null; }
   if (reconcileData && receiptReconcileSession === receiptDraftId) {
     receiptReconcileDraft = { version: 1, draftId: receiptDraftId, rows: reconcileData,
-      source: receiptList.map(l => ({ productId: l.productId, qty: l.qty })),
+      // The baseline belongs to these comparison rows, not to later scans.
+      // Advancing it during autosave made new/changed counts look already applied.
+      source: receiptReconcileSource || [],
       state: { reconcilePaperEntered, reconcileAiAudit, reconcileSupplierDiscount, reconcileSupplierPromoItems, reconcilePromoMismatchItems, reconcileSupplierCreditClaim, noteCheckRows, noteCheckQtyMode, reconcileCheckMode, noteCheckForceQty, manualAssigned, manualPromoMarks, detectiveQuestionState } };
   }
   return receiptReconcileDraft && receiptReconcileDraft.draftId === receiptDraftId ? receiptReconcileDraft : null;
@@ -8864,10 +8866,14 @@ function restoreReceiptReconcile() {
   if (Object.prototype.hasOwnProperty.call(state, 'manualPromoMarks')) manualPromoMarks = state.manualPromoMarks;
   if (Object.prototype.hasOwnProperty.call(state, 'detectiveQuestionState')) detectiveQuestionState = state.detectiveQuestionState;
   const oldCounts = new Map((d.source || []).map(l => [String(l.productId), Number(l.qty) || 0]));
+  let countsChanged = false;
   for (const item of receiptList) {
     const id = String(item.productId), qty = Number(item.qty) || 0;
-    if (oldCounts.has(id) && oldCounts.get(id) === qty) continue;
     const line = reconcileData.find(l => String(l.productId) === id);
+    // Repair v384-v386 drafts too: a matching source is not proof that the row
+    // exists. Existing unchanged rows keep manual quantities (including zero).
+    if (line && oldCounts.has(id) && oldCounts.get(id) === qty) continue;
+    countsChanged = true;
     if (line) { line.received = qty; }
     else {
       const p = products.find(p => String(p.id) === id), base = r2(Number(p && p.price) || 0);
@@ -8879,8 +8885,11 @@ function restoreReceiptReconcile() {
     }
   }
   for (const [id] of oldCounts) if (!receiptList.some(l => String(l.productId) === id)) {
+    countsChanged = true;
     const line = reconcileData.find(l => String(l.productId) === id); if (line) line.received = 0;
   }
+  // Advance the baseline only after all physical count changes were applied.
+  receiptReconcileSource = receiptList.map(l => ({ productId: l.productId, qty: l.qty }));
   receiptReconcileSession = receiptDraftId;
   pendingReceipt = null; // סיכום תמיד נבנה מחדש מהתיקונים, בלי קריאת AI נוספת.
   rcStep = null;
@@ -8890,7 +8899,6 @@ function restoreReceiptReconcile() {
     try { aiScanEvaluation = aiEvaluateInvoiceScan(aiScanResponse); aiScanReused = true; aiScanError = ''; }
     catch (e) { aiScanEvaluation = null; aiScanError = 'לא הצלחתי להשוות כרגע. הפענוח נשמר; חזור לספירה ונסה שוב.'; }
   }
-  const countsChanged = JSON.stringify(d.source || []) !== JSON.stringify(receiptList.map(l => ({productId:l.productId,qty:l.qty})));
   if (countsChanged) { reconcileAiAudit = null; }
   setView('reconcile');
   return true;
@@ -8900,6 +8908,7 @@ function openReconcile() {
   if (restoreReceiptReconcile()) return;
   receiptReconcileSession = receiptDraftId;
   reconcileData = receiptReconcileRows();
+  receiptReconcileSource = receiptList.map(l => ({ productId: l.productId, qty: l.qty }));
   detectiveOpen = false; noteCheckOpen = false; noteCheckAuto = false; noteCheckRows = []; noteCheckRes = null; reconcileCheckMode = false; noteCheckQtyMode = false; rcStep = null; noteCheckForceQty = false; ncPromoResult = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; manualSearchTerm = ''; manualAssigned = []; manualSearchOpen = false; manualPromoMarks = {}; reconcilePaperEntered = false;
   resetAiInvoiceScan();
   resetDetectiveQuestions();
@@ -24767,3 +24776,4 @@ window.addEventListener('online',recoverLegacyDraftWrites);
 </script>
 </body>
 </html>
+
