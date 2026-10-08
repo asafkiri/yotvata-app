@@ -55,6 +55,6 @@ for(const noDoc of [false,true]) test(s+': '+(noDoc?'no-document':'manual')+' re
  const cloud=fakeCloud(),a=runtime(s,{cloud});await cloud.tick();
  a.run(`receiptEntryMode='manual';receiptAnchorSource='manual';receiptOpened=true;receiptNoDoc=${noDoc};receiptDupConfirmed=true;
  receiptList=[{productId:'milk',name:'חלב בדיקה',qty:10}];receiptNotes=${noDoc?'[]':'[{amount:50,units:10,lines:1}]'};recomputeNoteTotal();saveReceiptDraft();finishReceipt()`);
- assert.ok(a.run('pendingReceipt'));await a.run('confirmReceipt()');assert.equal(a.run('receiptList.length'),0,a.toasts.join('\n'));assert.equal(paperRequests(a),0);assert.equal(cloud.find('/drafts/handoff_yotvata_receiving_'+a.writes[0].data.savedBy.sessionId).state,'saved');
+ assert.ok(a.run('pendingReceipt'));await a.run('confirmReceipt()');assert.equal(a.run('receiptList.length'),0,a.toasts.join('\n'));assert.equal(paperRequests(a),0);assert.ok(a.writes[0].data.localFinal.sessionId);assert.equal([...cloud.documents.keys()].some(k=>k.includes('handoff_yotvata_receiving')),false);
  const saved=[...cloud.documents.entries()].find(([k])=>k.includes('/receipts/'))[1];assert.equal(saved.paperScan,null);assert.equal(saved.noDoc,noDoc);
 });

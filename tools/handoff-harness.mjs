@@ -23,7 +23,7 @@ export function phone(cloud=createCloud(),{storage=new Map(),cache=new Map(),nam
   p.run('actionDeviceLabel=()=>__name;navigator.onLine='+online);
   if(start)p.run('startDraftHandoffs()');
   p.change=code=>p.run('handoffUserEdit=true;try{'+code+'}finally{handoffUserEdit=false;}');
-  p.sync=async(kind='receiving')=>{p.run("draftHandoffs['"+kind+"'].flush()");await settle();for(let i=0;i<80&&p.state(kind).status==='saving';i++)await new Promise(r=>setTimeout(r,5));await settle();};
+  p.sync=async(kind='receiving')=>{if(kind==='receiving'){await settle();return;}p.run("draftHandoffs['"+kind+"'].flush()");await settle();for(let i=0;i<80&&p.state(kind).status==='saving';i++)await new Promise(r=>setTimeout(r,5));await settle();};
   p.take=async(id,kind='receiving')=>{const r=await p.run("draftHandoffs['"+kind+"'].take("+JSON.stringify(id)+")");await settle();return r;};
   p.state=(kind='receiving')=>json(p,"draftHandoffs['"+kind+"'].state()");
   p.online=v=>{client.setOnline(v);p.run('navigator.onLine='+v);if(v)p.fire('online');};

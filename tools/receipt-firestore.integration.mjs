@@ -27,14 +27,13 @@ function boundary(){
  }
  return {make,close:async()=>{for(const {p,app,db} of clients){p.stop();await sdk.terminate(db);await deleteApp(app);}}};
 }
-test('real SDK: two phones transfer the paid result and corrections, then save one record atomically',async()=>{
+test('real SDK: two phones keep separate drafts; explicit final save commits one receipt and no draft',async()=>{
  const c=boundary();try{
-  const a=c.make();await a.scan(2);a.change("openReconcile();reconcileSetRecvLive('milk','4');reconcileSetNoteLive('milk','12')");await a.sync();const sid=a.run('receiptDraftId');await wait(async()=>!!await a.read('drafts/handoff_yotvata_receiving_'+sid));
-  const b=c.make();await wait(()=>b.state().offers.length);assert.equal((await b.take(sid)).ok,true);b.run('openReconcile()');assert.equal(b.run('reconcileData[0].received'),4);assert.equal(b.run('reconcileData[0].noteQty'),12);assert.equal(b.requests.length,0);
-  // Direct confirmation uses the same final transaction as the summary button.
-  assert.equal(await b.run("(async()=>finishDraft('receiving',receiptDraftId,{items:reconcileData.map(l=>({productId:l.productId,qty:l.received,noteQty:l.noteQty,unitPrice:l.price})),paperScan:await packReceiptValue(receiptScanSnapshot())}))()"),true);
-  const records=await b.list('receipts');assert.equal(records.length,1);b.context.savedPaper=records[0].paperScan;assert.equal((await b.run('unpackReceiptValue(savedPaper)')).scan.documents.length,2);assert.equal((await b.read('drafts/handoff_yotvata_receiving_'+sid)).state,'saved');assert.equal((await b.list('actionLog')).filter(x=>x.type==='receiving').length,1);assert.equal((await b.list('actionLog')).filter(x=>x.type==='draft-handoff').length,1);
-  await wait(()=>a.state().away?.away==='saved');assert.equal(a.run('draftHandoffs.receiving.clear().ok'),true);assert.equal((await b.list('receipts')).length,1);
+  const a=c.make();await a.scan(2);a.change("openReconcile();reconcileSetRecvLive('milk','4');reconcileSetNoteLive('milk','12')");const sid=a.run('receiptDraftId');
+  const b=c.make();assert.equal(b.run('receiptList.length'),0);assert.equal((await a.list('drafts')).length,0);
+  assert.equal(await a.run("(async()=>finishDraft('receiving',receiptDraftId,{items:reconcileData.map(l=>({productId:l.productId,qty:l.received,noteQty:l.noteQty,unitPrice:l.price})),paperScan:await packReceiptValue(receiptScanSnapshot())}))()"),true);
+  const records=await b.list('receipts');assert.equal(records.length,1);b.context.savedPaper=records[0].paperScan;assert.equal((await b.run('unpackReceiptValue(savedPaper)')).scan.documents.length,2);assert.equal((await b.list('drafts')).length,0);assert.equal((await b.list('actionLog')).filter(x=>x.type==='receiving').length,1);
+  assert.equal(await a.run('retryLocalReceiptFinal()'),true);assert.equal((await b.list('receipts')).length,1);
  }finally{await c.close();}
 });
 test('real SDK: product price, log and final receipt commit together; stale product stops every write',async()=>{
