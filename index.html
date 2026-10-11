@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v389 תזכורת חוסרים בהחזרות</title>
+    <title>הזמנות יטבתה - v390 בדיקת שורות בתעודה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -125,7 +125,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v389 תזכורת חוסרים בהחזרות</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v390 בדיקת שורות בתעודה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -669,7 +669,7 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '389';
+const APP_VERSION = '390';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -3717,7 +3717,7 @@ async function logAction(type, title, details, meta) {
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'actionLog', id), {
       timestamp: Date.now(), type: type || 'system', title: title || 'פעולה', details: details || '',
       deviceName: actionDeviceLabel(), uid: (auth && auth.currentUser && auth.currentUser.uid) || '',
-      appVersion: 'v389_returns_shortage_reminder', meta: cloneSafe(meta || {})
+      appVersion: 'v390_document_warning_scope', meta: cloneSafe(meta || {})
     });
   } catch (e) { console.warn('action log failed', e); }
 }
@@ -3801,7 +3801,7 @@ async function exportFullBackup() {
       backupType: 'yotvata-firestore-full',
       backupVersion: 1,
       appId,
-      appVersion: 'v389_returns_shortage_reminder',
+      appVersion: 'v390_document_warning_scope',
       exportedAt: Date.now(),
       exportedAtIso: new Date().toISOString(),
       collections: {},
@@ -13148,10 +13148,27 @@ function aiOpenSourceRowPage(documentIndex, rowIndex) {
   aiPaintOrientationReview();
   return true;
 }
+// v390: אזהרה על תיאור/ברקוד בשורה אינה ראיה שחסר עמוד. למשל
+// "line 17 description is partially unclear" חסמה בעבר את כל התעודה.
+// שומרים חסימה לאזהרת מסמך חלקי ולחוסר עמוד אמיתי, לצד בדיקות הסכום,
+// הכמות ומספר העמודים. אזהרות המקור נשארות שמורות ללא שינוי.
+function priceAuditIncompleteDocumentWarning(value) {
+  return String(value || '').split(/[.;!?\n]+/).some(part => {
+    const text = part.trim();
+    if (/\bmissing\b[^;.!?\n]*\b(?:pages?|documents?|invoices?|receipts?)\b|\b(?:pages?|documents?|invoices?|receipts?)\b[^;.!?\n]*\bmissing\b/i.test(text)) return true;
+    if (/חסר(?:ה|ים|ות)?\s+(?:(?:את|עוד|ה|אחד|אחת|מספר|צילום)\s+)*(?:עמוד|דף|מסמך|תעודה)|(?:עמוד|דף|מסמך|תעודה)(?:\s+[^\s]+){0,3}\s+חסר(?:ה|ים|ות)?/.test(text)) return true;
+    if (/(?:פענוח|סריקה|צילום|מסמך|תעודה|עמוד|דף)\s+(?:הוא\s+|היא\s+)?(?:חלקי|חלקית|אינו מלא|אינה מלאה)/.test(text)) return true;
+    if (!/\b(?:partial(?:ly)?|incomplete)\b/i.test(text)) return false;
+    // אזהרה כללית "partial scan" נשארת חסימה. כשמוזכרת שורת מוצר,
+    // נדרשת אמירה מפורשת שהמסמך עצמו חלקי כדי לחסום את יתר השורות.
+    if (!/\b(?:rows?|lines?|items?|products?|descriptions?|barcodes?|names?)\b/i.test(text)) return true;
+    return /\b(?:partial|incomplete)\s+(?:documents?|invoices?|receipts?|pages?|scans?|ocr|extraction|reading)\b|\b(?:documents?|invoices?|receipts?|pages?|scans?|ocr|extraction|reading)\s+(?:(?:is|are|was|were|appears?|remains?|seems?|only)\s+)*(?:partial(?:ly)?|incomplete)\b/i.test(text);
+  });
+}
 function priceAuditDocumentComplete(doc, raw, input) {
   const rows = raw && raw.rows || [], pages = input && ((input.pages || []).length || input.restoredPageCount || input.savedPageCount);
   if (!raw || !rows.length || !pages || raw.pageCount !== pages || rows.some(r => !Number.isInteger(r.sourcePage) || r.sourcePage < 1 || r.sourcePage > pages || !(priceAuditNumber(r.quantity) > 0))) return false;
-  if (raw.partial || raw.incomplete || (raw.warnings || []).some(w => /חסר.*(עמוד|דף)|missing.*page|partial|incomplete/i.test(w))) return false;
+  if (raw.partial || raw.incomplete || (raw.warnings || []).some(priceAuditIncompleteDocumentWarning)) return false;
   if (PRICE_AUDIT_SUPPLIER === 'tnuva') return tnuvaPaperCheck(raw, pages).receivable;
   if (PRICE_AUDIT_SUPPLIER === 'yotvata') return yotvataPaperCheck(raw, pages).ok;
   // Berman's money anchor uses catalog-derived amounts, so it is NOT evidence
@@ -13200,7 +13217,7 @@ function receiptPriceAudit() {
   if (aiScanBusy || receiptPaperScanState === 'running') { out.state = 'running'; return out; }
   if (receiptPriceSaveFailed || (typeof receiptStorageWarning !== 'undefined' && receiptStorageWarning)) { out.state = 'unsaved'; return out; }
   const sources = docs.map(priceAuditSource);
-  const hasMissingWarning = (aiScanResponse.scan.warnings || []).some(w => /חסר.*(עמוד|דף)|missing.*page|partial|incomplete/i.test(String(w)));
+  const hasMissingWarning = (aiScanResponse.scan.warnings || []).some(priceAuditIncompleteDocumentWarning);
   const allComplete = !hasMissingWarning && docs.length === aiScanDocuments.length && docs.every((d, i) => priceAuditDocumentComplete(d, sources[i], aiScanDocuments[d.noteIndex]));
   out.state = 'ready'; out.complete = allComplete;
   docs.forEach((doc, di) => {
