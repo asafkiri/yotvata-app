@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v390 בדיקת שורות בתעודה</title>
+    <title>הזמנות יטבתה - v391 מסך הזמנה פשוט</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -125,7 +125,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v390 בדיקת שורות בתעודה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v391 מסך הזמנה פשוט</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -669,7 +669,7 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '390';
+const APP_VERSION = '391';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -3717,7 +3717,7 @@ async function logAction(type, title, details, meta) {
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'actionLog', id), {
       timestamp: Date.now(), type: type || 'system', title: title || 'פעולה', details: details || '',
       deviceName: actionDeviceLabel(), uid: (auth && auth.currentUser && auth.currentUser.uid) || '',
-      appVersion: 'v390_document_warning_scope', meta: cloneSafe(meta || {})
+      appVersion: 'v391_simple_app_orders', meta: cloneSafe(meta || {})
     });
   } catch (e) { console.warn('action log failed', e); }
 }
@@ -3801,7 +3801,7 @@ async function exportFullBackup() {
       backupType: 'yotvata-firestore-full',
       backupVersion: 1,
       appId,
-      appVersion: 'v390_document_warning_scope',
+      appVersion: 'v391_simple_app_orders',
       exportedAt: Date.now(),
       exportedAtIso: new Date().toISOString(),
       collections: {},
@@ -4723,18 +4723,24 @@ function appSearchMatches(q) {
     .slice(0, 8)
     .map(x => x.p);
 }
+// v391: במסך ההזמנה באפליקציה מזהי המוצר הם טקסט, בלי פעולת העתקה.
+function appOrderCodesHtml(barcode, sku) {
+  const parts = [];
+  if (barcode) parts.push('ברקוד <span dir="ltr">' + htmlEscape(barcode) + '</span>');
+  if (sku) parts.push('מק״ט <span dir="ltr">' + htmlEscape(sku) + '</span>');
+  return parts.length ? '<span class="block text-[10px] text-slate-400 mt-0.5">' + parts.join(' · ') + '</span>' : '';
+}
 function appSearchResultsHtml() {
   const q = (appSearch || '').trim();
   if (!q) return '';
   const matches = appSearchMatches(q);
   if (!matches.length) return '<div class="p-3 text-sm text-slate-400 text-center font-bold">לא נמצא מוצר</div>';
   const idx = appOrderIndex();
-  // v292: השורה אינה כפתור אחד — הברקוד הוא כפתור העתקה בפני עצמו
   return matches.map(p => {
     const on = (idx[p.id] || []).length > 0;
     return '<div class="p-2.5 border-b border-slate-100 last:border-0 flex items-start justify-between gap-2 ' + (on ? 'opacity-60' : '') + '">' +
       '<span class="min-w-0 flex-1"><span class="block font-bold text-slate-800 text-sm truncate">' + htmlEscape(p.name) + '</span>' +
-        barcodeChipHtml(p.barcode) + skuChipHtml(p.sku) + '</span>' +
+        appOrderCodesHtml(p.barcode, p.sku) + '</span>' +
       (on
         ? '<span class="text-[10px] font-black text-emerald-600 shrink-0 whitespace-nowrap mt-1"><i class="fa-solid fa-check"></i> כבר מסומן</span>'
         : '<button data-role="app-add" data-id="' + htmlEscape(p.id) + '" class="btn-tap text-[10px] font-black text-white bg-blue-600 rounded-lg px-2.5 py-1.5 shrink-0 whitespace-nowrap mt-0.5"><i class="fa-solid fa-plus"></i> סמן</button>') +
@@ -4748,17 +4754,17 @@ function appPanelHtml(orderId) {
     ? marked.map(m => '<div class="flex items-start gap-2 py-1.5 border-b border-slate-100 last:border-0">' +
         '<button data-role="app-mark" data-id="' + htmlEscape(m.key) + '" class="btn-tap shrink-0 w-6 h-6 rounded-md bg-emerald-500 text-white flex items-center justify-center"><i class="fa-solid fa-check text-[11px]"></i></button>' +
         '<span class="min-w-0 flex-1"><span class="block text-sm font-bold text-slate-700 truncate">' + htmlEscape(m.name) + '</span>' +
-          barcodeChipHtml(m.barcode) + skuChipHtml(m.sku) + '</span>' +
+          appOrderCodesHtml(m.barcode, m.sku) + '</span>' +
         '<span class="shrink-0 flex items-center gap-1">' +
           '<button data-role="app-minus" data-id="' + htmlEscape(m.key) + '" class="btn-tap w-7 h-7 rounded-lg bg-white border border-emerald-200 text-emerald-700 flex items-center justify-center"><i class="fa-solid fa-minus text-[10px]"></i></button>' +
           '<span class="text-[11px] font-black text-emerald-700 whitespace-nowrap px-1">' + m.qty + ' ' + (m.qty === 1 ? 'ארגז' : 'ארגזים') + '</span>' +
           '<button data-role="app-plus" data-id="' + htmlEscape(m.key) + '" class="btn-tap w-7 h-7 rounded-lg bg-white border border-emerald-200 text-emerald-700 flex items-center justify-center"><i class="fa-solid fa-plus text-[10px]"></i></button>' +
         '</span>' +
       '</div>').join('')
-    : '<div class="text-[11px] font-bold text-slate-400 text-center py-2">עוד לא סומן כלום. חפש מוצר למעלה, או סמן מרשימת החוסרים.</div>';
+    : '<div class="text-[11px] font-bold text-slate-400 text-center py-2">עדיין אין מוצרים. הדבק הזמנה או חפש מוצר להוספה ידנית.</div>';
   return '<div data-approot="' + htmlEscape(orderId || '') + '" class="bg-white border border-slate-200 rounded-xl p-3 mb-3">' +
     '<div class="flex items-center justify-between gap-2 mb-2">' +
-      '<div class="font-black text-sm text-slate-700"><i class="fa-solid fa-mobile-screen text-blue-600"></i> הוזמן באפליקציה של יטבתה</div>' +
+      '<div class="font-black text-sm text-slate-700"><i class="fa-solid fa-plus text-blue-600"></i> הוספת מוצרים ידנית</div>' +
       (marked.length ? '<span class="text-[11px] font-black bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full shrink-0">' + marked.length + '</span>' : '') +
     '</div>' +
     '<div class="relative mb-2">' +
@@ -5260,7 +5266,7 @@ function pasteAttachResultsHtml() {
   return matches.slice(0, 8).map(p =>
     '<div class="p-2.5 border-b border-slate-100 last:border-0 flex items-start justify-between gap-2">' +
       '<span class="min-w-0 flex-1"><span class="block font-bold text-slate-800 text-sm truncate">' + htmlEscape(p.name) + '</span>' +
-        barcodeChipHtml(p.barcode) + skuChipHtml(p.sku) + '</span>' +
+        appOrderCodesHtml(p.barcode, p.sku) + '</span>' +
       '<button data-role="paste-attach-pick" data-id="' + htmlEscape(p.id) + '" class="btn-tap text-[10px] font-black text-white bg-blue-600 rounded-lg px-2.5 py-1.5 shrink-0 whitespace-nowrap mt-0.5">זה המוצר</button>' +
     '</div>').join('');
 }
@@ -5391,53 +5397,17 @@ function orderPasteHtml() {
   '</div>';
 }
 
-// ===== v318: מסך "הוזמן באפליקציה של יטבתה" =====
-// עד כה הפאנל ישב בתוך כרטיס ההזמנה האחרונה בהיסטוריה — שלוש פעולות
-// להגיע אליו, ודחוס בין רשימת הפריטים של ההזמנה ל"הוזמן ולא הגיע".
-// המיקום גם הניח שסימון הוא תת-משימה של סקירת ההזמנה, והוא לא: מזמינים
-// בשטראוס ביום אחד ומהנהג ביום אחר.
-// המסך הזה הוא בדיוק אותה זרימה, פרוסה על מסך שלם: אותה הזמנה אחרונה,
-// אותן פונקציות ואותם כפתורים — appPanelHtml, appMissingRowHtml
-// ו-appNotArrivedRowHtml כפי שהם, עם אותו orderId. לא נוספה שום לוגיקה,
-// ולכן ההתנהגות (צביעה באדום בהזמנה לנהג, הורדה מהכמות, סגירה בשידור או
-// בקליטה) זהה לחלוטין למה שהיה.
+// ===== v391: הדבקה והוספה ידנית במסך ההזמנה באפליקציה =====
+// המסך אינו תלוי בהזמנה קודמת לנהג. רשימות החוסרים וההיסטוריה אינן
+// חלק מהמסך הזה; המוצרים הפעילים ופעולות הכמות נשארים באותו מנגנון.
 function renderAppOrders() {
-  const last = history && history.length ? history[0] : null;
-  if (!last) {
-    // ההדבקה (v321) אינה תלויה בהזמנה לנהג — היא באה מהספק — ולכן היא
-    // זמינה גם כאן, בעוד שאר המסך נשען על ההזמנה האחרונה
-    app.innerHTML = orderPasteHtml() +
-      '<div class="text-center py-16 text-slate-400">' +
-      '<i class="fa-solid fa-mobile-screen text-5xl mb-4"></i>' +
-      '<h3 class="font-black text-xl text-slate-600">אין עדיין הזמנה</h3>' +
-      '<div class="text-sm font-bold mt-2">רשימת החוסרים נשענת על ההזמנה האחרונה לנהג.<br>שדרו הזמנה אחת וחזרו לכאן.</div></div>';
-    return;
-  }
-  const d = new Date(last.timestamp);
-  const dateStr = d.toLocaleDateString('he-IL', { weekday: 'short', day: 'numeric', month: 'numeric' });
-  const timeStr = d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
-
-  const missing = orderMissingItems(0);
-  const appMiss = appNotArrivedList();
-  const missingBlock = ((missing && missing.length) || appMiss.length)
-    ? '<div class="bg-rose-50 border border-rose-200 rounded-xl p-3">' +
-        '<div class="text-xs font-black text-rose-700 mb-2"><i class="fa-solid fa-triangle-exclamation"></i> הוזמן ולא הגיע</div>' +
-        '<div class="space-y-1.5">' + (missing || []).map(it => appMissingRowHtml(it, last.id)).join('') + '</div>' +
-        '<div data-appmiss="1" class="space-y-1.5' + ((missing && missing.length) ? ' mt-1.5 pt-1.5 border-t border-rose-200' : '') + '">' + appMiss.map(appNotArrivedRowHtml).join('') + '</div>' +
-        '<div class="text-[10px] font-bold text-rose-500 mt-2">לפי תעודות הקליטה שנקלטו אחרי ההזמנה. כמות חלקית נחשבת "הגיע".</div>' +
-      '</div>'
-    : '';
-
   app.innerHTML =
     '<div class="px-1 pt-1 pb-3">' +
       '<h2 class="font-black text-2xl text-slate-800 leading-tight"><i class="fa-solid fa-mobile-screen text-blue-600"></i> הוזמן באפליקציה</h2>' +
-      '<div class="text-[12px] font-bold text-slate-400 mt-1">מה שהזמנתם ישירות אצל הספק. הסימון צובע את המוצר באדום בהזמנה לנהג ויורד מהכמות, עד השידור הבא או קליטת סחורה.</div>' +
-      '<div class="text-[11px] font-bold text-slate-500 mt-2"><i class="fa-solid fa-clock-rotate-left text-slate-300"></i> ההזמנה האחרונה לנהג · ' + dateStr + ' · ' + timeStr + '</div>' +
+      '<div class="text-[12px] font-bold text-slate-400 mt-1">הדביקו הזמנה מהספק או הוסיפו מוצרים ידנית. אפשר לעדכן כמויות ולהסיר מוצרים מהרשימה.</div>' +
     '</div>' +
     orderPasteHtml() +
-    appPanelHtml(last.id) +
-    appPastChipsHtml() +
-    missingBlock;
+    appPanelHtml('');
 }
 // ===== הערות ותזכורות =====
 function updateNotesBadge() {
