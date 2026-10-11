@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v388 קליטה מקומית</title>
+    <title>הזמנות יטבתה - v389 תזכורת חוסרים בהחזרות</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -125,7 +125,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v388 קליטה מקומית</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v389 תזכורת חוסרים בהחזרות</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -669,7 +669,7 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '388';
+const APP_VERSION = '389';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -3098,15 +3098,69 @@ function supplierGapBannerHtml() {
     ? '<div class="text-[11px] text-white/85 font-bold mt-2"><i class="fa-solid fa-clipboard-question"></i> ' + g.openRecs + ' תעודות קליטה עם הפרש פתוח</div>' : '';
   return '<div class="' + (anyOwed ? 'bg-rose-600' : 'bg-blue-600') + ' text-white rounded-2xl p-3.5 mb-3 shadow-md">' + rows + sub + '</div>';
 }
-// תזכורת לספק בהודעת הוואטסאפ — רק פערים שבהם הספק חייב לנו
+// v389: פירוט חוסרים פתוחים, אחרי השלמות וקיזוזים שאושרו וזיכויים לפי מוצר.
+// זיכוי כללי אינו משויך לכמות שרירותית; מציגים אותו בנפרד מהשורות.
+function receiptGapWhatsappDetails(rc, di) {
+  const split = receiptShortAfterCredits(di);
+  const generalCredit = r2((di.shortCreditNotes || []).filter(n => n.source !== 'delivery_credit_scan')
+    .reduce((sum, n) => sum + (Number(n.amount) || 0), 0));
+  const day = rc.date || rc.docDate;
+  const date = day ? new Date(day + 'T12:00:00') : new Date(Number(rc.timestamp) || NaN);
+  const dateText = Number.isFinite(date.getTime()) ? date.toLocaleDateString('he-IL') : 'תאריך לא שמור';
+  const numbers = [...new Set((rc.priceAudit && Array.isArray(rc.priceAudit.documents) ? rc.priceAudit.documents : [])
+    .map(d => String(d.number || '').trim()).filter(Boolean))];
+  const lines = ['*קליטה מ־' + dateText + (numbers.length ? ' · ' + (numbers.length === 1 ? 'תעודה ' : 'תעודות ') + numbers.join(', ') : '') + '*'];
+  if (generalCredit > 0) lines.push('פירוט החוסר לפני הזיכוי הכספי הכללי:');
+  // מוצר יכול להופיע בכמה שורות במחירים שונים. הזיכוי קשור למוצר,
+  // לכן הכמות והשווי שנותרו נלקחים יחד מסיכום הכיסוי ולא ממחיר שורה אקראית.
+  const openByProduct = new Map();
+  split.open.forEach((it, index) => {
+    const key = it.productId ? 'product:' + it.productId : 'row:' + index;
+    const row = openByProduct.get(key) || { ...it, n: 0, value: 0 };
+    row.n += Number(it.n) || 0;
+    row.value = r2(row.value + (it.value != null ? Number(it.value) : lineTotalFromUnit(it.price, it.n)));
+    openByProduct.set(key, row);
+  });
+  openByProduct.forEach(it => {
+    const matches = (rc.items || []).filter(l => it.productId ? l.productId === it.productId : l.name === it.name);
+    const barcodes = [...new Set(matches.map(l => String(l.barcode || '').trim()).filter(Boolean))];
+    const product = it.productId ? products.find(p => p.id === it.productId) : null;
+    const barcode = barcodes.length === 1 ? barcodes[0] : (!barcodes.length && product ? String(product.barcode || '') : '');
+    const creditRemainder = it.productId ? split.byProduct.get(it.productId) : null;
+    const value = creditRemainder ? r2(creditRemainder.cents / 100) : it.value;
+    const qty = Math.round(Number(it.n) * 1000000) / 1000000;
+    const valueOffsetRemainder = !Number.isInteger(qty) && (di.externalOffsets || [])
+      .some(x => x.source === 'manual-value' && x.dir === 'short' && x.productId === it.productId);
+    const detail = valueOffsetRemainder ? 'יתרה כספית לאחר קיזוז · ₪' + fmtMoney(value)
+      : 'חסר *' + qty + '* יח׳' + (value > 0 ? ' · ₪' + fmtMoney(value) : '');
+    lines.push('• ' + (it.name || (product && product.name) || 'מוצר ללא שם') + ' — ' + detail);
+    if (barcode) lines.push('  ברקוד: ' + barcode);
+  });
+  // יתרה כוללת מהמפצל כבר הופחתה בזיכוי הכללי; מציגים כאן את הבסיס
+  // לפני אותה הפחתה כדי ששורות הפירוט והזיכוי יסתכמו ליתרת התעודה.
+  split.remainder.forEach(it => lines.push('• יתרה כספית ללא זיכוי' + (it.name ? ': ' + it.name : '') + ' · ₪' + fmtMoney(it.cents / 100 + (it.total ? generalCredit : 0))));
+  if (di.amountGapOpen && di.unresolvedAmountGap > 0) lines.push('• פער כספי ללא שיוך למוצר · ₪' + fmtMoney(di.unresolvedAmountGap));
+  if (generalCredit > 0) lines.push('זיכוי כספי כללי שכבר התקבל: ₪' + fmtMoney(generalCredit));
+  lines.push('*יתרה לתעודה: ₪' + fmtMoney(di.shortVal) + '*');
+  return lines.join('\n');
+}
+// התזכורת מצורפת להחזרות בלבד. עודף שלא אושר לקיזוז אינו מסתיר חוסר.
 function supplierGapWhatsappNote() {
-  const rec = receiptsBalance(), ret = returnsBalance();
   const parts = [];
-  if (rec.bal > 0.5) parts.push('חסרה לנו סחורה בשווי ₪' + fmtMoney(rec.bal) + ' מתעודות קודמות');
+  const shortages = receipts.map(rc => ({ rc, di: receiptDiscrepancyInfo(rc) }))
+    .filter(({ di }) => di.open && !di.awaitingDoc && !di.shortFullyCredited && (di.shortItems.length || di.shortVal > 0.01));
+  if (shortages.length) {
+    const total = r2(shortages.reduce((sum, x) => sum + x.di.shortVal, 0));
+    parts.push('*חוסרים מקבלות סחורה קודמות*\nהסכומים ללא מע״מ.\n\n' +
+      shortages.map(({ rc, di }) => receiptGapWhatsappDetails(rc, di)).join('\n\n') +
+      '\n\n*סה״כ יתרת החוסרים: ₪' + fmtMoney(total) + '*');
+  }
+  const ret = returnsBalance();
   if (ret.bal > 0.5) parts.push('חסר לנו זיכוי של ₪' + fmtMoney(ret.bal) + ' על חזרות');
-  return parts.length ? '⚠️ *תזכורת:* ' + parts.join(', וגם ') : '';
+  return parts.length ? '⚠️ *תזכורת:*\n' + parts.join('\n\n') : '';
 }
 function appendGapReminder(msg) {
+  if (!sendCtx || sendCtx.type !== 'returns') return msg;
   const gr = $('gapReminder');
   if (gr && gr.checked) { const gn = supplierGapWhatsappNote(); if (gn) return msg + '\n\n' + gn; }
   return msg;
@@ -3663,7 +3717,7 @@ async function logAction(type, title, details, meta) {
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'actionLog', id), {
       timestamp: Date.now(), type: type || 'system', title: title || 'פעולה', details: details || '',
       deviceName: actionDeviceLabel(), uid: (auth && auth.currentUser && auth.currentUser.uid) || '',
-      appVersion: 'v388_local_receiving', meta: cloneSafe(meta || {})
+      appVersion: 'v389_returns_shortage_reminder', meta: cloneSafe(meta || {})
     });
   } catch (e) { console.warn('action log failed', e); }
 }
@@ -3747,7 +3801,7 @@ async function exportFullBackup() {
       backupType: 'yotvata-firestore-full',
       backupVersion: 1,
       appId,
-      appVersion: 'v388_local_receiving',
+      appVersion: 'v389_returns_shortage_reminder',
       exportedAt: Date.now(),
       exportedAtIso: new Date().toISOString(),
       collections: {},
@@ -6867,12 +6921,13 @@ function renderSendModal(items, titleNote, type) {
         '<i class="fa-solid fa-mobile-screen text-blue-600"></i> ' + marksCount + ' מוצרים מסומנים "הוזמן באפליקציה" — אחרי השליחה הם יפסיקו להיות אדומים. מה שלא יגיע במשלוח יופיע ברשימת החוסרים' +
       '</div>'
     : '';
-  const gapNote = supplierGapWhatsappNote();
+  const gapNote = type === 'returns' ? supplierGapWhatsappNote() : '';
   const gapReminderHtml = gapNote
     ? '<label class="flex items-start gap-2.5 bg-rose-600 text-white rounded-xl p-3 mb-3 cursor-pointer shadow-md">' +
         '<input id="gapReminder" type="checkbox" checked class="mt-1 w-5 h-5 accent-white shrink-0">' +
         '<span class="min-w-0"><span class="block font-black text-sm"><i class="fa-solid fa-triangle-exclamation"></i> הספק חייב לך — אל תשכח להזכיר!</span>' +
-        '<span class="block text-[11px] font-bold text-white/90 mt-0.5">מסומן = התזכורת תצורף להודעה: "' + htmlEscape(gapNote.replace(/\*/g, '')) + '"</span></span>' +
+        '<span class="block text-[11px] font-bold text-white/90 mt-0.5">צרף את פירוט החוסרים להודעת ההחזרות</span>' +
+        '<span class="block text-[11px] text-white/90 mt-2 whitespace-pre-line max-h-52 overflow-y-auto">' + htmlEscape(gapNote.replace(/\*/g, '')) + '</span></span>' +
       '</label>'
     : '';
   $('sendSummary').innerHTML =
@@ -6948,7 +7003,7 @@ async function performSend(contact) {
   const data = { timestamp: Date.now(), sentTo: contact.name, items, operationId: opId };
   const saved = await finishDraft('order',opId,data);
   if (!saved) return;
-  const msg = appendGapReminder(buildMessage(items, note));
+  const msg = buildMessage(items, note);
   const url = 'https://wa.me/' + phone + '?text=' + encodeURIComponent(msg);
   if (resetCurrent) {
     orderState = {};
