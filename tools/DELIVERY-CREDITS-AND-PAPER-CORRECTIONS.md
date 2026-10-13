@@ -350,7 +350,9 @@ cannot be reopened, and `deliveryCreditRead` refuses a busy credit.
   read a document with a credit signal — a negative subtotal, a negative read
   (`modelVerification.readings`, works on v150), a read typed `'credit'`, a
   credit title (`/זיכוי|ביטול\s*מכירה|credit/i`) or gallery pages that split by
-  sign — is **held**: out of the money view (`receiptRebuildScanResponse`), its
+  sign with evidence of a second paper (the positive pages' rows alone close
+  the summary, or a read says credit; a 2-page invoice whose return line is
+  alone on its last page stays one invoice, as in v393) — is **held**: out of the money view (`receiptRebuildScanResponse`), its
   read cached and kept in the draft, adoption fails with "תעודה N נראית כמו
   תעודת זיכוי — ההחלטה בכרטיס שמתחת." and every save waits ("לפני הסיום צריך
   להחליט על תעודה N…") — the finish, "קלוט תעודה" in the comparison and the
@@ -374,10 +376,11 @@ cannot be reopened, and `deliveryCreditRead` refuses a busy credit.
   pages are explained and never adopted.
 - A moved credit says "צולם כ"תעודה N" וזוהה כתעודת זיכוי («…»)." and offers
   "זו לא תעודת זיכוי? החזר לתעודות" in every state but a document discount
-  and a credit whose own credit-mode read found a valid credit paper (its
-  original read is the one that dropped the minus; it stays a credit, like a
-  green-button one): the original read comes back (no call), marked as the
-  worker's "delivery".
+  and a credit whose own credit-mode read found a valid credit paper, or saw
+  the minus and failed another check (its original read is the one that
+  dropped the minus; it stays a credit, like a green-button one): the original
+  read comes back (no call), marked as the worker's "delivery", together with
+  the typed line the move removed from a typed-anchor receipt.
   A credit-mode read that finds a positive paper offers "זו תעודה רגילה — החזר
   לתעודות" as its main action. Saved notes of moved credits carry `paperMode`
   and `origin`; green-button notes are unchanged.
