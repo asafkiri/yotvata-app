@@ -980,3 +980,48 @@ test('manual quantities: an invoice read that waited behind a credit never rebui
     assert.match(c.node('app').innerHTML, /data-manual-receiving/, role);
   }
 });
+
+// v394: a credit that came from the documents (tools/credit-as-document.test.mjs) is read by a tap on
+// its card — and that read goes through the same one-paid-upload queue as everything else.
+test('v394: a credit moved from the documents, read by a tap while an invoice is read, waits behind it and never overlaps', async () => {
+  const { c, data } = setup({ paperFirst: true });
+  const SLIP = 'data:image/jpeg;base64,' + btoa('slip.jpg'), NEW = 'data:image/jpeg;base64,' + btoa('invoice-2.jpg');
+  // The slip read as an invoice: all negative (moved by itself), but VAT and total do not add up — the
+  // invoice read cannot be the credit paper, and the card offers one read of the same photo as a credit.
+  const slipAsInvoice = () => { const p = creditPaper(data); p.scan.documents[0].totalInclVat = -50; return p; };
+  let releaseInvoice = null;
+  const s = service(c, { answer: req => {
+    if (req.credit) return reply(creditPaper(data));
+    const page = req.body.documents[0].pages[0];
+    if (page === SLIP) return reply(slipAsInvoice());
+    if (page === NEW) return new Promise(resolve => { releaseInvoice = () => resolve(reply(data.paper)); });
+    return reply(data.paper);
+  } });
+  c.run(`aiScanDocuments.push({ noteIndex: 1, amount: null, units: null, pages: [{ dataUrl: '${SLIP}', orientationConfirmed: true }] })`);
+  c.run('yotvataStartPaperScan()'); await flush(c);
+  assert.deepEqual(s.kinds(), ['health', 'full', 'full']);
+  assert.deepEqual(json(c, 'receiptDeliveryCredits.map(x => [x.origin.docNumber, x.status, x.errorKind, x.readAs])'), [[2, 'error', 'paper', 'invoice']]);
+  assert.match(card(c), /data-role="delivery-credit-read"[^>]*>קרא את הצילום כזיכוי</);
+  // A new photo of the delivery note is read in the background…
+  c.run(`aiScanDocuments[0].pages = [{ dataUrl: '${NEW}', orientationConfirmed: true }]; yotvataInvalidatePhotoDoc(aiScanDocuments[0]); receiptScanChanged();`);
+  const invoice = c.run('yotvataStartPaperScan()');
+  await flush(c, 10);
+  assert.equal(c.run('aiScanBusy'), true);
+  assert.equal(typeof releaseInvoice, 'function');
+  // …and the worker taps "קרא את הצילום כזיכוי" meanwhile.
+  const read = c.click('delivery-credit-read', c.run('receiptDeliveryCredits[0].id'));
+  await flush(c, 10);
+  assert.equal(creditStatus(c), 'reading');
+  assert.equal(c.run('receiptDeliveryCredits[0].waiting'), true);
+  assert.equal(c.run('receiptDeliveryCredits[0].waitingFor'), 'invoice');
+  assert.match(card(c), /ממתין לסיום קריאת החשבונית — הזיכוי ייקרא מיד אחריה\./);
+  assert.deepEqual(s.kinds(), ['health', 'full', 'full', 'health', 'full'], 'nothing of the credit while the invoice upload is open');
+  releaseInvoice();
+  await invoice; await flush(c);
+  assert.equal(await read, true);
+  assert.deepEqual(s.kinds(), ['health', 'full', 'full', 'health', 'full', 'health', 'full:credit']);
+  assert.equal(s.stats.maxActive, 1, 'never two paid uploads at once');
+  assert.equal(creditStatus(c), 'review', c.run('receiptDeliveryCredits[0].error'));
+  assert.equal(c.run('receiptDeliveryCredits[0].paperMode'), 'credit');
+  assert.equal(c.run('receiptPaperScanState'), 'ok');
+});

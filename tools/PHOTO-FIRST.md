@@ -130,6 +130,23 @@ receipt refuses while a credit with a photo or an invoice page is on the gate
 צירוף תעודה") instead of wiping them and aborting a paid read. See
 `tools/CREDIT-AUTO-READ-V364.md` (v366); tests: `tools/credit-on-gate.test.mjs`.
 
+### v394 — a credit among the documents
+
+Every invoice body carries `detectDocumentType: true` (service v151 answers the
+document type and printed title; older services ignore the key). A document
+whose read looks like a credit (negative amounts in any read, a `'credit'`
+type or title, or gallery pages that split by sign) is held out of
+`aiScanResponse` (the money view), its read is cached and saved, and the paper
+adoption waits for a decision. A slip that is negative in every read and that
+no read typed `'delivery'` moves to the driver credits by itself at the end of
+the read run, with its invoice read as the credit paper; everything else is
+one tap in the card under the paper status (or in the gate's document card).
+The gate hint now reads "תעודת זיכוי מהנהג מצלמים בכפתור הירוק — היא נקראת
+מיד. צילמת זיכוי כתעודה רגילה? נזהה אותו בקריאה ונעביר אותו לזיכויים." See
+`tools/CREDIT-AS-DOCUMENT-V394.md`; tests: `tools/credit-as-document.test.mjs`.
+`tools/photo-first-test.mjs` lists the new helpers and no longer fails on the
+stale `closeReceivingEditors` / `priceAuditIncompleteDocumentWarning` references.
+
 ## Validation
 
 `node --test tools/photo-first-test.mjs`

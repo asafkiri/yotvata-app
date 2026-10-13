@@ -34,6 +34,11 @@ when its OCR price was wrong.
 - Number and barcode can be corrected. Credit pages require negative printed
   amounts, internally consistent rows and summary, and exact catalog barcodes.
   A positive invoice is never silently converted into a credit.
+- Since v394 a credit can also enter from the documents: a slip photographed
+  with the regular document buttons is recognised after its invoice read and
+  moved into the credits (by itself only when the read is negative throughout,
+  otherwise with one tap). A positive invoice is still never converted
+  silently — see the v394 section below.
 - Confirmed values and source evidence survive local/cloud draft restoration.
   Image bytes remain transient, consistently with invoice images. Interrupted
   reads request recapture and do not automatically run paid OCR again.
@@ -330,6 +335,52 @@ cannot be reopened, and `deliveryCreditRead` refuses a busy credit.
   with two difference rows keep today's row. No violet box (v370 stays).
 - Display only. Tests: `tools/quantity-finding-row.test.mjs`,
   `tools/receipt-quantity-detail.test.mjs`, `tools/receipt-history-credit.test.mjs`.
+
+### v394: a credit photographed as a regular document moves to the credits
+
+- Field report: the driver's slip ("ביטול מכירה חלקי ת.משלוח", 24 yogurt,
+  −83.52) was photographed with "צלם את התעודה" / "+ תעודה נוספת מהנהג /
+  הספק" instead of the green button. Read as an invoice it failed the paper
+  check with "הסכום ללא מע״מ לא נקרא…", dropped the real delivery note's
+  anchors with it and was paid for again on every retry; a read that dropped
+  the minus signs billed it as a second delivery note (+24, a phantom 48-unit
+  shortage).
+- Every invoice body now asks the service for the document type
+  (`detectDocumentType: true`, service v151; v150 ignores it). After each paid
+  read a document with a credit signal — a negative subtotal, a negative read
+  (`modelVerification.readings`, works on v150), a read typed `'credit'`, a
+  credit title (`/זיכוי|ביטול\s*מכירה|credit/i`) or gallery pages that split by
+  sign — is **held**: out of the money view (`receiptRebuildScanResponse`), its
+  read cached and kept in the draft, adoption fails with "תעודה N נראית כמו
+  תעודת זיכוי — ההחלטה בכרטיס שמתחת." and the finish waits ("לפני הסיום צריך
+  להחליט על תעודה N…").
+- Only a read that is negative throughout, in every read, with no read typed
+  `'delivery'` and no decision of the worker moves by itself, once, at the end
+  of the read run (`yotvataRouteCreditDocuments` — never on render, restore or
+  sync, and it never bumps `aiScanRunId`). The paid invoice read is the credit
+  paper (`paperMode: 'invoice'`, 0 more calls); `deliveryCreditApplyPaper` (the
+  former body of `deliveryCreditRead`, behaviour-identical) applies
+  `deliveryCreditPaperCheck` and the v365 rules, plus one: it attaches by
+  itself only when two reads typed it `'credit'` and another read saw the same
+  number (`documentType.invoiceNumberSupport`); otherwise "הזיכוי צולם כתעודה
+  רגילה — בדוק את מספר הזיכוי, המוצרים והכמויות מול הנייר" and one tap.
+- Every other case is one tap in the decision card: "כן, זו תעודת זיכוי —
+  העבר לזיכויים" (0 calls), "…העבר וקרא כזיכוי" (one credit-mode read of the
+  same photos, re-encoded at `AI_CREDIT_MAX_PIXELS`), "העבר את עמוד K
+  לזיכויים וקרא מחדש" (gallery pages), "הסר את תעודה N וצלם אותה כזיכוי" (after
+  a reload), "לא, זו תעודת משלוח רגילה" (only a valid positive invoice; 0
+  calls), "הסר את תעודה N מהקליטה". Attach mode, 4 credits and more than 4
+  pages are explained and never adopted.
+- A moved credit says "צולם כ"תעודה N" וזוהה כתעודת זיכוי («…»)." and offers
+  "זו לא תעודת זיכוי? החזר לתעודות" in every state but a document discount:
+  the original read comes back (no call), marked as the worker's "delivery".
+  A credit-mode read that finds a positive paper offers "זו תעודה רגילה — החזר
+  לתעודות" as its main action. Saved notes of moved credits carry `paperMode`
+  and `origin`; green-button notes are unchanged.
+- Coverage, payable and the finish checks are unchanged. Typed anchors refuse
+  a minus ("סכום עם מינוס הוא זיכוי…") instead of turning −83.52 into +83.52.
+  Details, contract, paid calls and edge cases: `tools/CREDIT-AS-DOCUMENT-V394.md`;
+  tests: `tools/credit-as-document.test.mjs`, `tools/credit-service-contract.test.mjs`.
 
 ## Correcting an OCR row
 

@@ -193,3 +193,102 @@ test('against the real service: when only one read parsed (the other cheap read 
   assert.equal(json(c, 'receiptDeliveryCredits[0]').status, 'confirmed');
   assert.equal(json(c, 'receiptDeliveryCredits[0]').autoConfirmed, false);
 });
+
+// ---- v394: a credit photographed as a REGULAR document, read through the app's own invoice body ----
+// The app sends every invoice body with detectDocumentType:true. Service v151 answers with documentType,
+// printedTitle and modelVerification.documentType; v150 ignores the key. The fake model adds the two
+// typed fields only when the request's schema asks for them — so the same test proves both releases:
+// against v151 (YOTVATA_AI_SCAN=<the v151 checkout>) the slip moves and attaches by itself with its own
+// invoice read; against v150 it moves on its signs alone and waits for one tap. Synthetic papers only.
+const YOGURT = { id: 'yogurt', name: 'יוגורט בדיקה', barcode: '7290000000022', price: 3.48 };
+const MILK = { id: 'milk', name: 'חלב בדיקה', barcode: '7290000000008', price: 5 };
+const SLIP_TITLE = 'ביטול מכירה חלקי ת.משלוח';
+const paperLine = (p, quantity, total) => ({ sourcePage: 1, lineNumber: null, supplierItemCode: null, rowRegion: null, barcode: p.barcode, barcodeReadType: 'full',
+  catalogHintId: null, catalogCandidateHintIds: [], description: p.name, quantity, unitPriceExVat: p.price, grossLineTotalExVat: total,
+  lineDiscountExVat: null, lineTotalExVat: total, promotionText: null, confidence: 0.93 });
+const PAPERS = {
+  'delivery.jpg': { doc: () => ({ noteIndex: 0, invoiceNumber: '9073800001', pageCount: 1, subtotalExVat: 217.04, vatAmount: 39.07, totalInclVat: 256.11, printedUnits: 58,
+    printedLines: 2, documentDiscountExVat: null, confidence: 0.92, warnings: [], rows: [paperLine(YOGURT, 48, 167.04), paperLine(MILK, 10, 50)] }), type: 'delivery', title: 'תעודת משלוח' },
+  // Variant A: the slip read in invoice mode — quantity as printed, money negative, no unit total.
+  'slip.jpg': { doc: () => ({ noteIndex: 0, invoiceNumber: '22230011', pageCount: 1, subtotalExVat: -83.52, vatAmount: -15.03, totalInclVat: -98.55, printedUnits: null,
+    printedLines: 1, documentDiscountExVat: null, confidence: 0.9, warnings: [], rows: [paperLine(YOGURT, 24, -83.52)] }), type: 'credit', title: SLIP_TITLE }
+};
+// The app's fetch, answered by the real createServer in-process (GET /health and POST /scan).
+function appBridge() {
+  const calls = [];
+  const server = createServer({ env: { OPENAI_API_KEY: 'fixture-only', OPENAI_MODEL: 'fixture-read', OPENAI_RETRY_MODEL: 'fixture-verifier', OPENAI_RETRY_SERVICE_TIER: 'priority' },
+    logger: { info: () => {}, error: error => { throw error; } },
+    fetchImpl: async (url, options) => {
+      if (String(url).includes('googleapis.com')) return Response.json({ keys: [jwk] });
+      const call = JSON.parse(options.body);
+      const user = call.input.find(m => m.role === 'user').content;
+      const name = Buffer.from(user.find(p => p.type === 'input_image').image_url.split(',')[1], 'base64').toString();
+      const schema = call.text.format.schema, item = schema.properties.documents.items;
+      const typed = !!item.properties.documentType;
+      calls.push({ name, typed, model: call.model, credit: user.some(p => p.type === 'input_text' && /^הנחיה לסוג המסמך: הצילום צולם כתעודת זיכוי/.test(p.text)) });
+      const paper = PAPERS[name];
+      assert.ok(paper, 'no paper for ' + name);
+      const doc = { ...paper.doc(), ...(typed ? { documentType: paper.type, printedTitle: paper.title } : {}) };
+      return Response.json({ output_text: JSON.stringify({ documents: [doc], warnings: [] }), model: call.model, id: 'test-' + calls.length, usage: { input_tokens: 10, output_tokens: 20 } });
+    } });
+  const request = (method, url, body) => new Promise(resolve => {
+    const req = Readable.from(body ? [Buffer.from(body)] : []);
+    req.method = method; req.url = url; req.socket = { remoteAddress: '127.0.0.1' };
+    req.headers = { origin: 'https://asafkiri.github.io', authorization: 'Bearer ' + token };
+    let status = 200;
+    server.emit('request', req, { headersSent: false, writeHead(s) { status = s; this.headersSent = true; }, write() {}, end(text) { resolve({ status, text: text || '' }); } });
+  });
+  const bodies = [];
+  const fetch = async (url, options = {}) => {
+    const path = new URL(String(url)).pathname;
+    if (options.body) bodies.push(JSON.parse(options.body));
+    const r = await request(options.method || 'GET', path, options.body);
+    return { ok: r.status >= 200 && r.status < 300, status: r.status, json: async () => JSON.parse(r.text), text: async () => r.text };
+  };
+  return { fetch, calls, bodies, close: () => server.close() };
+}
+
+test('v394 against the real service: the slip photographed as "תעודה 2" — the app\'s typed invoice body; v151 moves and attaches it with its own read, v150 moves it on its signs and waits for one tap', { skip }, async () => {
+  const data = { products: [structuredClone(YOGURT), structuredClone(MILK)], promos: [], items: [], paper: null };
+  const c = runtime('yotvata', { data });
+  const bridge = appBridge();
+  c.context.fetch = bridge.fetch;
+  const page = name => `{ dataUrl: 'data:image/jpeg;base64,${Buffer.from(name).toString('base64')}', orientationConfirmed: true }`;
+  c.run(`receiptOpened = false; receiptList = []; receiptDupConfirmed = true;
+    aiScanDocuments = [{ noteIndex: 0, amount: null, units: null, pages: [${page('delivery.jpg')}] }, { noteIndex: 1, amount: null, units: null, pages: [${page('slip.jpg')}] }];`);
+  await c.run('yotvataStartPaperScan()');
+  for (let i = 0; i < 20; i++) await new Promise(resolve => setImmediate(resolve));
+  bridge.close();
+  const version = Number(c.run('aiScanServiceStatus.serviceVersion'));
+  const typed = version >= 151;
+  const scans = bridge.bodies.filter(b => !b.resume && b.documents);
+  assert.equal(scans.length, 2, 'one paid request per document');
+  assert.ok(scans.every(b => b.detectDocumentType === true && !('documentKind' in b)), 'the app\'s invoice bodies ask for the type');
+  assert.equal(bridge.calls.length, 4, 'two cheap reads per document, no verifier, no credit-mode read');
+  assert.ok(bridge.calls.every(call => call.typed === typed), 'the service asks the model for the type exactly when it is v151');
+  assert.ok(bridge.calls.every(call => !call.credit), 'no credit prompt in an invoice read');
+  assert.equal(c.run('aiScanDocuments.length'), 1, 'the slip left the documents');
+  assert.equal(c.run('receiptPaperScanState'), 'ok');
+  assert.deepEqual(JSON.parse(c.run('JSON.stringify(receiptNotes)')), [{ amount: 217.04, units: 58 }]);
+  const credit = JSON.parse(c.run('JSON.stringify(receiptDeliveryCredits[0])'));
+  assert.deepEqual([credit.origin.docNumber, credit.origin.auto, credit.origin.verdict, credit.paperMode], [2, true, 'move', 'invoice']);
+  assert.equal(credit.number, '22230011');
+  assert.deepEqual(JSON.parse(c.run('JSON.stringify(deliveryCreditRows(receiptDeliveryCredits[0]).map(r => [r.productId, r.qty, r.amount]))')), [['yogurt', 24, 83.52]]);
+  if (typed) {
+    // The contract the app's gate relies on, from the real service: types, title and the number's support.
+    const block = credit.paper.modelVerification.documentType;
+    assert.equal(credit.paper.documentType, 'credit');
+    assert.equal(credit.paper.printedTitle, SLIP_TITLE);
+    assert.deepEqual([block.value, block.support, block.invoiceNumberSupport], ['credit', [1], [1]]);
+    assert.deepEqual(block.readings.map(r => [r.read, r.documentType, r.creditSigns, r.subtotalExVat]), [[0, 'credit', 'negative', -83.52], [1, 'credit', 'negative', -83.52]]);
+    assert.equal(credit.status, 'confirmed');
+    assert.equal(credit.autoConfirmed, true);
+    assert.equal(credit.origin.title, SLIP_TITLE);
+  } else {
+    assert.equal(credit.paper.documentType, undefined, 'v150 never answers the type');
+    assert.equal(credit.status, 'review');
+    assert.deepEqual(JSON.parse(c.run('JSON.stringify(deliveryCreditReviewReasons(receiptDeliveryCredits[0]).map(r => r.code))')), ['document']);
+    assert.equal(c.run("deliveryCreditConfirm(receiptDeliveryCredits[0].id)"), true, 'one tap');
+    assert.equal(c.run('receiptDeliveryCredits[0].status'), 'confirmed');
+  }
+});

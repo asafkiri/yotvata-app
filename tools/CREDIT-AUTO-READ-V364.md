@@ -868,6 +868,11 @@ stale gate came from the same receipt returning to its photo step.
   per-product shortage, so the comparison still ends with "הזיכוי אינו תואם
   לחוסר שנספר…" unless the counted lines explain it — unchanged since v364,
   not part of this change.
+- v394: a credit photographed with the regular document buttons instead of
+  the green one is now recognised after its invoice read and moved into the
+  credits (`tools/CREDIT-AS-DOCUMENT-V394.md`). Still open: attach mode has no
+  credits at all, and a v150 slip whose minus signs were dropped is not
+  detected.
 
 # A quantity the arithmetic proves needs no confirmation — v367
 
