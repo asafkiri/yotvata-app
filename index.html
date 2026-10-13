@@ -9805,7 +9805,8 @@ function reconcileUntouchedCopy(rows, oldCounts) {
     for (const [id, qty] of oldCounts) if (!receiptList.some(l => String(l.productId) === id)) receiptList.push({ productId: id, qty });
     expected = new Map(receiptReconcileRows().map(l => [String(l.productId), l]));
   } finally { receiptList = current; }
-  const same = (a, b) => Math.abs((Number(a) || 0) - (Number(b) || 0)) < 0.0005;
+  // שווה לגמרי (אותו חישוב כמו בפתיחה): גם מחיר שהוקלד ושונה באלפית אגורה הוא הכרעה.
+  const same = (a, b) => Math.abs((Number(a) || 0) - (Number(b) || 0)) < 1e-9;
   return rows.every(l => {
     const e = expected.get(String(l.productId));
     return e && same(l.received, e.received) && same(l.noteQty, e.noteQty) && same(l.price, e.price) && same(l.basePrice, e.basePrice)
