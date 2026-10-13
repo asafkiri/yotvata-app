@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v392 הדבקת הזמנה פתוחה</title>
+    <title>הזמנות יטבתה - v393 זיכוי שסוגר הכל</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -125,7 +125,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v392 הדבקת הזמנה פתוחה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v393 זיכוי שסוגר הכל</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -669,7 +669,7 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '392';
+const APP_VERSION = '393';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -2024,8 +2024,13 @@ function deliveryCreditLiveStatus(receiving = false, evaluation = aiScanEvaluati
   const rawUnits = shortages.reduce((sum, s) => sum + s.n, 0);
   const remainingUnits = [...coverage.remaining.values()].reduce((sum, s) => sum + s.qty, 0);
   const units = rawUnits - remainingUnits;
+  // v393: לפני שהוזן נייר, החוסרים כאן נמדדים מקריאת הנייר מול מה שהתקבל — לא
+  // מ-noteQty, שהוא רק עותק של הספירה. גם הפער הכספי נמדד מאותו מקום, בדיוק כמו
+  // בכרטיס ("צפוי לאחר זיכוי" מול "סכום הפריטים שהתקבלו"). כשהעותק תואם לספירה
+  // זה אותו מספר; עותק ישן בטיוטה (36 במקום 12) הציג "נותר לטיפול" על זיכוי שסגר הכל.
   const rawGap = receiving ? r2((receiptNoteTotal || 0) - receiptTotals().ex)
-    : r2(reconcileGap() + (paperEntered ? reconcileAssigned().sh - reconcileAssigned().ov : 0));
+    : paperEntered ? r2(reconcileGap() + reconcileAssigned().sh - reconcileAssigned().ov)
+    : r2((receiptNoteTotal || 0) + (Number(reconcileSupplierDiscount) || 0) - reconcileReceivedInc());
   const unitGap = receiptNoteUnits == null ? null : Number(receiptNoteUnits) - [...received.values()].reduce((sum, n) => sum + n, 0);
   const status = { ...coverage, units, verified, pending: confirmed.length !== receiptDeliveryCredits.length,
     amountGap: r2(rawGap - coverage.amount), unitsGap: unitGap == null ? null : unitGap - units,
@@ -3717,7 +3722,7 @@ async function logAction(type, title, details, meta) {
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'actionLog', id), {
       timestamp: Date.now(), type: type || 'system', title: title || 'פעולה', details: details || '',
       deviceName: actionDeviceLabel(), uid: (auth && auth.currentUser && auth.currentUser.uid) || '',
-      appVersion: 'v392_open_order_paste', meta: cloneSafe(meta || {})
+      appVersion: 'v393_reconcile_credit_baseline', meta: cloneSafe(meta || {})
     });
   } catch (e) { console.warn('action log failed', e); }
 }
@@ -3801,7 +3806,7 @@ async function exportFullBackup() {
       backupType: 'yotvata-firestore-full',
       backupVersion: 1,
       appId,
-      appVersion: 'v392_open_order_paste',
+      appVersion: 'v393_reconcile_credit_baseline',
       exportedAt: Date.now(),
       exportedAtIso: new Date().toISOString(),
       collections: {},
@@ -9043,6 +9048,30 @@ function receiptReconcileSnapshot() {
   }
   return receiptReconcileDraft && receiptReconcileDraft.draftId === receiptDraftId ? receiptReconcileDraft : null;
 }
+// v393: true רק כשההשוואה השמורה זהה למה שפתיחה חדשה הייתה בונה מהספירה הישנה
+// (אותן שורות, אותם מחירים, "בנייר" = "התקבל" = הספירה), שום הכרעה לא נרשמה בה
+// (נייר, בלש, שיוך, מבצע/הנחה, ברקודים, AI), והיא לא הייתה מאוזנת מול סכום
+// ויחידות התעודה. השוואה מאוזנת היא כבר אישור של הנייר, גם בלי הקלדה.
+function reconcileUntouchedCopy(rows, oldCounts) {
+  if (reconcilePaperEntered || reconcileAiAudit || (Number(reconcileSupplierDiscount) || 0) !== 0
+    || (reconcileSupplierPromoItems || []).length || (reconcilePromoMismatchItems || []).length || reconcileSupplierCreditClaim
+    || (noteCheckRows || []).length || noteCheckQtyMode || reconcileCheckMode || noteCheckForceQty
+    || (manualAssigned || []).length || Object.keys(manualPromoMarks || {}).length
+    || (detectiveQuestionState && (detectiveQuestionState.asked || (detectiveQuestionState.constraints || []).length))) return false;
+  const current = receiptList;
+  let expected;
+  try {
+    receiptList = (Array.isArray(current) ? current : []).filter(l => oldCounts.has(String(l.productId))).map(l => ({ ...l, qty: oldCounts.get(String(l.productId)) }));
+    for (const [id, qty] of oldCounts) if (!receiptList.some(l => String(l.productId) === id)) receiptList.push({ productId: id, qty });
+    expected = new Map(receiptReconcileRows().map(l => [String(l.productId), l]));
+  } finally { receiptList = current; }
+  const same = (a, b) => Math.abs((Number(a) || 0) - (Number(b) || 0)) < 0.0005;
+  return rows.every(l => {
+    const e = expected.get(String(l.productId));
+    return e && same(l.received, e.received) && same(l.noteQty, e.noteQty) && same(l.price, e.price) && same(l.basePrice, e.basePrice)
+      && same(l.promoPct, e.promoPct) && !!l.promoOn === !!e.promoOn && !!l.isDeposit === !!e.isDeposit && !!l.checked === !!e.checked && !l.aiPaperPriceOnly;
+  }) && !reconcileIsBalanced();
+}
 function restoreReceiptReconcile() {
   const d = receiptReconcileDraft;
   if (!d || d.draftId !== receiptDraftId || !Array.isArray(d.rows)) return false;
@@ -9063,6 +9092,11 @@ function restoreReceiptReconcile() {
   if (Object.prototype.hasOwnProperty.call(state, 'manualPromoMarks')) manualPromoMarks = state.manualPromoMarks;
   if (Object.prototype.hasOwnProperty.call(state, 'detectiveQuestionState')) detectiveQuestionState = state.detectiveQuestionState;
   const oldCounts = new Map((d.source || []).map(l => [String(l.productId), Number(l.qty) || 0]));
+  // v393: השוואה שאיש לא נגע בה נבנית מחדש מהספירה הנוכחית, כאילו נפתחה עכשיו.
+  // בלי זה עמודת "בנייר" (שלפני הזנת נייר היא רק עותק של הספירה, v178) נשארה עם
+  // הספירה הישנה: 36 שתוקנו ל-12 השאירו 24 יחידות רפאים ו"נותר לטיפול" על זיכוי
+  // שסגר הכל. כל השאר — וגם השוואה שהייתה מאוזנת מול הנייר — נשמר כמו קודם.
+  if (reconcileUntouchedCopy(d.rows, oldCounts)) reconcileData = receiptReconcileRows();
   let countsChanged = false;
   for (const item of receiptList) {
     const id = String(item.productId), qty = Number(item.qty) || 0;
