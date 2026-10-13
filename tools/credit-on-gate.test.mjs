@@ -26,7 +26,9 @@ const app = c => c.node('app').innerHTML;
 const creditStatus = c => c.run('receiptDeliveryCredits[0].status');
 const CREDIT_BUTTON = /<button data-role="delivery-credit-add"[^>]*>[^<]*<i[^>]*><\/i> הנהג הביא זיכוי על חוסר\? צלם כאן<\/button>/;
 const GATE = /שלב 1 · צילום תעודה/;
-const GATE_HINT = /תעודת זיכוי מהנהג מצלמים בכפתור הירוק — היא נקראת לבד\./;
+// v394: the hint also says that a credit photographed with the document buttons is recognised and moved
+// (tools/credit-as-document.test.mjs); the green button and its immediate read are unchanged.
+const GATE_HINT = /תעודת זיכוי מהנהג מצלמים בכפתור הירוק — היא נקראת מיד\. צילמת זיכוי כתעודה רגילה\? נזהה אותו בקריאה ונעביר אותו לזיכויים\./;
 const DROP_TOAST = 'זיכוי מהנהג מצורף רק לקליטה עם תעודה.';
 const AUTO_TOAST = 'הזיכוי צורף למשלוח. בסיום הספירה נבדוק איזה חוסר הוא מכסה.';
 const CONFIRMED_CARD = /<details data-delivery-credit="[^"]+"[^>]*><summary[^>]*>זיכוי שאושר · ₪48\.80 לפני מע״מ · פרטים/;

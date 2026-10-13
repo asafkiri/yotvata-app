@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v393 זיכוי שסוגר הכל</title>
+    <title>הזמנות יטבתה - v394 זיכוי שצולם כתעודה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -125,7 +125,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v393 זיכוי שסוגר הכל</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v394 זיכוי שצולם כתעודה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -669,7 +669,7 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '393';
+const APP_VERSION = '394';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -1179,6 +1179,129 @@ function yotvataPaperCheck(doc, pageCount) {
     amount: subtotal == null ? null : subtotal / 100, units: printedUnits,
     rowAmount: effectiveCents / 100, rowUnits: units, discountSeparate };
 }
+// ===== v394: זיכוי שצולם כתעודה רגילה =====
+// דיווח מהשטח: פתק הזיכוי של הנהג ("ביטול מכירה חלקי ת.משלוח", 24 יוגורט, -83.52) צולם
+// בכפתורי התעודה הרגילים ("צלם את התעודה" / "+ תעודה נוספת"), לא בכפתור הירוק. הוא נקרא
+// כחשבונית, נכשל בבדיקת הנייר ("הסכום ללא מע״מ לא נקרא") והפיל איתו גם את התעודה האמיתית;
+// כשהמינוס נשמט בקריאה הוא אף נקלט כחשבונית שנייה (+24 יוגורט וחוסר רפאים של 48).
+// הכלל מעכשיו, לכל תעודה אחרי הקריאה ששולמה עליה:
+// • תעודה עם סימן של זיכוי (סכום שלילי, קריאה שלילית, סוג 'credit' או כותרת של זיכוי
+//   משרת v151, או עמודים שהסימן שלהם מתחלק) "מוחזקת": היא לא נכנסת לתצוגת הכסף (עוגנים,
+//   השוואה, מחירים, מנתח), הקריאה שלה נשמרת ולא נשלחת שוב, והסיום חסום עד החלטה.
+// • רק קריאה שלילית לגמרי, שכל הקריאות שלה שליליות ואף קריאה לא סימנה "תעודת משלוח",
+//   עוברת לזיכויים לבד בסוף הקריאה — והקריאה ששולמה היא נייר הזיכוי (0 קריאות נוספות).
+// • בכל מקרה אחר — שאלה אחת בכרטיס, לחיצה אחת. קריאה חיובית לעולם לא עוברת בלי העובד.
+// כללי הזיכוי עצמם (deliveryCreditPaperCheck, הכיסוי מול החוסר, התשלום) לא השתנו.
+// סימן הזיכוי של מסמך: 'negative' — הסכום לפני מע״מ וכל נטו שאינו 0 שליליים; 'as_printed' —
+// אף אחד אינו שלילי; 'mixed' — גם וגם. keep identical with the scan service
+// (creditPaperSigns ב-scan-consensus.js).
+function paperCreditSigns(doc) {
+  let negative = 0, positive = 0;
+  const count = value => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value === 0) return;
+    if (value < 0) negative += 1; else positive += 1;
+  };
+  count(doc && doc.subtotalExVat);
+  for (const row of (doc && Array.isArray(doc.rows) ? doc.rows : [])) count(row && row.lineTotalExVat);
+  return negative === 0 ? 'as_printed' : positive === 0 ? 'negative' : 'mixed';
+}
+// v394: מה הקריאה ששולמה אומרת על סוג המסמך. סוגים וכותרות רק משרת v151 (detectDocumentType);
+// הסכומים של כל קריאה (modelVerification.readings, שרת 149 ומעלה) עובדים גם מול v150.
+// signal — יש סיבה לחשוב שזה זיכוי (כל אחד מאלה מספיק): סכום שלילי, קריאה שלילית, סוג 'credit',
+// כותרת של זיכוי, או עמודים שהסימן שלהם מתחלק (pageSplit). שורת החזרה שלילית בתוך חשבונית
+// חיובית, הנחה שלילית, 'unclear' ואזהרות בטקסט חופשי אינם סימן.
+function yotvataPaperCreditSignals(doc, pageCount) {
+  const known = ['delivery', 'credit', 'unclear'];
+  const finite = v => typeof v === 'number' && Number.isFinite(v) ? v : null;
+  const proof = doc && doc.modelVerification && typeof doc.modelVerification === 'object' ? doc.modelVerification : null;
+  const typeBlock = proof && proof.documentType && typeof proof.documentType === 'object' ? proof.documentType : null;
+  const typeReadings = typeBlock && Array.isArray(typeBlock.readings) ? typeBlock.readings.filter(r => r && typeof r === 'object') : null;
+  const types = typeReadings ? typeReadings.map(r => r.documentType).filter(t => known.includes(t))
+    : doc && known.includes(doc.documentType) ? [doc.documentType] : [];
+  const titles = (typeReadings ? typeReadings.map(r => r.printedTitle) : [doc && doc.printedTitle]).filter(t => typeof t === 'string' && t.trim());
+  const titleCredit = [doc && doc.printedTitle, ...titles].some(t => typeof t === 'string' && /זיכוי|ביטול\s*מכירה|credit/i.test(t));
+  const subtotal = finite(doc && doc.subtotalExVat);
+  const readings = proof && Array.isArray(proof.readings) && proof.readings.length
+    ? proof.readings.map(r => finite(r && r.values && r.values.subtotalExVat)) : [subtotal];
+  const readingNegative = readings.some(v => v != null && v < 0);
+  const allReadingsNegative = readings.length > 0 && readings.every(v => v != null && v < 0);
+  const anyCredit = types.includes('credit') || (!!doc && doc.documentType === 'credit');
+  const anyDelivery = types.includes('delivery');
+  // v394: עמודים של שני מסמכים שנבחרו יחד מהגלריה: כל שורה משויכת לעמוד, בכל עמוד יש שורה,
+  // בכל עמוד סימן אחד, יש שני הסימנים, ועמודי הזיכוי 1–4.
+  const pageSplit = (() => {
+    const rows = doc && Array.isArray(doc.rows) ? doc.rows : [];
+    const pages = Number.isInteger(pageCount) && pageCount > 0 ? pageCount : Number(doc && doc.pageCount) || 0;
+    if (pages < 2 || !rows.length) return null;
+    const signs = new Map();
+    for (const row of rows) {
+      const net = finite(row && row.lineTotalExVat);
+      if (!net || !Number.isInteger(row.sourcePage) || row.sourcePage < 1 || row.sourcePage > pages) return null;
+      const sign = net < 0 ? -1 : 1;
+      if (signs.has(row.sourcePage) && signs.get(row.sourcePage) !== sign) return null;
+      signs.set(row.sourcePage, sign);
+    }
+    if (signs.size !== pages) return null;
+    const creditPages = [], deliveryPages = [];
+    for (let p = 1; p <= pages; p++) (signs.get(p) < 0 ? creditPages : deliveryPages).push(p);
+    return creditPages.length >= 1 && creditPages.length <= 4 && deliveryPages.length ? { creditPages, deliveryPages } : null;
+  })();
+  const negativeSubtotal = subtotal != null && subtotal < 0;
+  return { signs: paperCreditSigns(doc), negativeSubtotal, readingNegative, allReadingsNegative, types, anyCredit, anyDelivery,
+    allCredit: types.length >= 2 && types.every(t => t === 'credit'), titles, titleCredit,
+    numberSupport: typeBlock && Array.isArray(typeBlock.invoiceNumberSupport) ? typeBlock.invoiceNumberSupport : [],
+    pageSplit, typed: !!doc && typeof doc.documentType === 'string',
+    signal: negativeSubtotal || readingNegative || anyCredit || titleCredit || !!pageSplit };
+}
+// v394: "לא, זו תעודת משלוח רגילה" נשמרת רק על קריאה שהיא חשבונית חיובית תקינה. החלטה על
+// קריאה שלילית (או כזו שבדיקת הנייר שלה נכשלת) אינה הופכת זיכוי לחשבונית.
+function yotvataKeptAsDelivery(input) {
+  const doc = input && input.scanResult && input.scanResult.ok ? input.scanResult.doc : null;
+  return !!doc && !!input.kindDecision && input.kindDecision.kind === 'delivery'
+    && typeof doc.subtotalExVat === 'number' && doc.subtotalExVat > 0 && paperCreditSigns(doc) !== 'negative'
+    && yotvataPaperCheck(doc, input.pages.length || input.restoredPageCount || 0).ok;
+}
+// v394: תעודה מוחזקת — פוענחה, יש לה סימן של זיכוי, והעובד לא קבע (בתוקף) שהיא תעודת משלוח.
+// פונקציה טהורה של הקריאה השמורה וההחלטה; נבדקת בכל בנייה של תצוגת הכסף.
+function yotvataDocumentHeld(input) {
+  if (!(input && input.scanResult && input.scanResult.ok && input.scanResult.doc)) return false;
+  return yotvataPaperCreditSignals(input.scanResult.doc, input.pages.length || input.restoredPageCount || 0).signal && !yotvataKeptAsDelivery(input);
+}
+function yotvataHeldDocuments() {
+  return aiScanDocuments.map((input, index) => ({ input, index })).filter(x => yotvataDocumentHeld(x.input));
+}
+// v394: מה עושים בתעודה מוחזקת. הסדר קובע (הראשון שמתאים):
+// blocked-attach — צירוף נייר לקליטה שנשמרה (אין שם זיכויים); blocked-full — כבר 4 זיכויים;
+// ask-split — עמודים של שני מסמכים; blocked-pages — יותר מ-4 עמודים; move — קריאה שלילית
+// לגמרי, כל הקריאות שליליות, אף קריאה לא אמרה "משלוח" ואין החלטה של העובד (עוברת לבד בסוף
+// הקריאה); ask-move — שלילית, אבל קריאה אמרה "משלוח", הקריאות נחלקו בסימן, או שהעובד בחר
+// "משלוח" (לחיצה אחת, 0 קריאות); ask-read — כל השאר: הקריאה שנבחרה חיובית או מעורבת
+// (מינוס שנשמט, קריאה חיובית שנבחרה מול שלילית) — "העבר וקרא כזיכוי" (קריאת זיכוי אחת).
+function yotvataDocumentKindVerdict(input) {
+  const doc = input && input.scanResult && input.scanResult.doc;
+  const pageCount = input ? input.pages.length || input.restoredPageCount || 0 : 0;
+  const s = yotvataPaperCreditSignals(doc, pageCount);
+  if (receiptAttachTarget) return 'blocked-attach';
+  if (receiptDeliveryCredits.length >= 4) return 'blocked-full';
+  if (s.pageSplit) return 'ask-split';
+  if (pageCount > 4) return 'blocked-pages';
+  if (s.signs === 'negative') return s.allReadingsNegative && !s.anyDelivery && !input.kindDecision ? 'move' : 'ask-move';
+  return 'ask-read';
+}
+// v394: הבעיות של בדיקת הנייר כפי שהעובד קורא אותן. yotvataPaperCheck עצמה זהה לשרת; כאן רק
+// "חסרים כמות, סכום נטו או שיוך לעמוד" מוחלף בהסבר אמיתי כשכל שורה נקראה במלואה ורק סכום
+// או כמות שליליים הפילו אותה (שורת החזרה בתוך חשבונית).
+function yotvataPaperProblemTexts(doc, check, pageCount = doc && doc.pageCount) {
+  const problems = check && Array.isArray(check.problems) ? check.problems : [];
+  const rows = doc && Array.isArray(doc.rows) ? doc.rows : [];
+  const pages = Number(pageCount) || 0;
+  const read = rows.length > 0 && rows.every(row => row && Number.isInteger(row.quantity) && typeof row.lineTotalExVat === 'number' && Number.isFinite(row.lineTotalExVat)
+    && Number.isInteger(row.sourcePage) && row.sourcePage >= 1 && row.sourcePage <= pages);
+  const index = read ? rows.findIndex(row => row.quantity < 0 || row.lineTotalExVat < 0) : -1;
+  if (index === -1) return problems;
+  const text = 'בשורה ' + (index + 1) + ' נקרא סכום שלילי (' + fmtMoney(rows[index].lineTotalExVat) + ') — אם זו שורת החזרה בתוך התעודה, הקלד את הסכום והיחידות ידנית.';
+  return problems.map(p => p === 'חסרים כמות, סכום נטו או שיוך לעמוד באחת השורות' ? text : p);
+}
 
 // v325: capture now, count independently, reconcile the saved paper at the end.
 function yotvataResetPhotoReceipt() {
@@ -1231,6 +1354,8 @@ function yotvataInvalidatePhotoDoc(input) {
   if (!input) return;
   receiptRememberScanResults();
   input.scanResult = null; input.cachedResult = null; input.cachedPages = null; input.restoredPageCount = 0;
+  // v394: "לא, זו תעודת משלוח רגילה" נאמר על הצילומים הקודמים — צילום חדש מבקש החלטה חדשה.
+  if (input.kindDecision) delete input.kindDecision;
 }
 function yotvataPhotoGateHtml() {
   yotvataSeedPhotoDocuments();
@@ -1242,7 +1367,11 @@ function yotvataPhotoGateHtml() {
       '<div class="text-xs font-bold text-center">עמוד ' + (j + 1) + (p.orientationConfirmed ? ' ✓' : ' · אשר כיוון') + '</div></div>').join('');
     return '<div class="border-2 border-slate-200 rounded-2xl p-3 mt-3"><div class="flex justify-between gap-2 items-center"><b>תעודה ' + (i + 1) + '</b>' +
       (aiScanDocuments.length > 1 ? '<button data-role="rc-photo-remove-doc" data-doc="' + i + '" class="text-xs font-bold text-rose-600">הסר תעודה</button>' : '') + '</div>' +
-      (cached ? '<div class="text-sm font-bold text-emerald-700 mt-2">הפענוח שמור — אין צורך בסריקה נוספת</div>' : '') +
+      // v394: תעודה שנראית כמו זיכוי מציגה כאן את כרטיס ההחלטה במקום "הפענוח שמור"; תעודה שהעובד
+      // קבע שהיא תעודת משלוח אומרת זאת, עם דרך לבטל את ההחלטה.
+      (yotvataDocumentHeld(doc) ? yotvataCreditDocumentCardHtml(i, { gate: true })
+        : (cached ? '<div class="text-sm font-bold text-emerald-700 mt-2">הפענוח שמור — אין צורך בסריקה נוספת</div>' : '') +
+          (doc.kindDecision ? '<div data-credit-doc-kept class="text-sm text-slate-600 mt-1">סומנה כתעודת משלוח רגילה לפי ההחלטה שלך. <button data-role="rc-credit-doc-unkeep" data-scan="' + htmlEscape(doc.scanId || '') + '" class="btn-tap text-blue-700 font-bold">בטל — זו כן תעודת זיכוי</button></div>' : '')) +
       (pages ? '<div class="flex gap-2 overflow-x-auto py-3">' + pages + '</div>' : '') +
       '<input id="aiDocCam_' + i + '" data-role="ai-file" data-doc="' + i + '" type="file" accept="image/*" capture="environment" class="hidden">' +
       '<input id="aiDocFile_' + i + '" data-role="ai-file" data-doc="' + i + '" type="file" accept="image/*" multiple class="hidden">' +
@@ -1256,7 +1385,8 @@ function yotvataPhotoGateHtml() {
     '<p class="text-xs font-bold text-slate-500 mt-2">עמודים של אותה תעודה נשארים יחד. תעודה נוספת מהנהג מוסיפים בנפרד.</p>' +
     // v366: הזיכוי מצולם כאן, יחד עם התעודות — לא רק אחרי "התחל קליטת מוצרים".
     // בצירוף נייר לקליטה שנשמרה אין כפתור זיכוי במסך הצילום — ולכן גם לא ההסבר עליו.
-    (deliveryCreditsAllowed(true) ? '<p class="text-xs font-bold text-slate-500 mt-1">תעודת זיכוי מהנהג מצלמים בכפתור הירוק — היא נקראת לבד.</p>' : '') +
+    // v394: זיכוי שצולם בכפתורי התעודה מזוהה בקריאה ועובר לזיכויים — ההסבר אומר זאת.
+    (deliveryCreditsAllowed(true) ? '<p class="text-xs font-bold text-slate-500 mt-1">תעודת זיכוי מהנהג מצלמים בכפתור הירוק — היא נקראת מיד. צילמת זיכוי כתעודה רגילה? נזהה אותו בקריאה ונעביר אותו לזיכויים.</p>' : '') +
     (aiScanError ? '<div class="bg-amber-50 text-amber-800 rounded-xl p-3 mt-2 text-sm">' + htmlEscape(aiScanError) + '</div>' : '') +
     (aiScanBusy ? '<div class="p-4 font-black text-blue-700">מכין את הצילום…</div>' : cards) +
     (!aiScanBusy && aiScanDocuments.length < 4 ? '<button data-role="rc-photo-add-doc" class="btn-tap w-full py-3 mt-2 border border-slate-300 rounded-xl text-slate-700 font-bold">+ תעודה נוספת מהנהג / הספק</button>' : '') +
@@ -1268,14 +1398,17 @@ function yotvataPhotoGateHtml() {
 }
 function yotvataPaperStatusHtml() {
   if (receiptStorageWarning) return '<div class="rounded-xl bg-amber-50 border border-amber-300 p-3 mb-3 font-bold text-amber-900">' + htmlEscape(receiptStorageWarning) + '</div>';
-  if (receiptEntryMode !== 'photo') return '';
-  if (receiptPaperScanState === 'running') return '<div class="rounded-xl bg-blue-50 border border-blue-200 p-3 mb-3 text-sm font-bold text-blue-800"><i class="fa-solid fa-circle-notch fa-spin"></i> ' + htmlEscape(aiScanProgressText || 'קורא את התעודה ברקע…') + '<div class="mt-1">אפשר לסרוק מוצרים כרגיל.</div></div>';
-  if (receiptPaperScanState === 'ok') return '<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-2 mb-2 text-[11px] font-black text-emerald-800"><i class="fa-solid fa-file-circle-check"></i> התעודה נקראה ואומתה · השוואת הכמויות בסיום הקליטה</div>';
+  // v394: כרטיס ההחלטה של תעודה שנראית כמו זיכוי — גם בקליטה עם סכום ויחידות שהוקלדו (התעודה
+  // עדיין מוחזקת מחוץ לכסף, והסיום מחכה להחלטה), וגם מתחת לקופסה של קריאה שלא הושלמה.
+  const heldHtml = yotvataHeldDocuments().map(x => yotvataCreditDocumentCardHtml(x.index)).join('');
+  if (receiptEntryMode !== 'photo') return heldHtml;
+  if (receiptPaperScanState === 'running') return '<div class="rounded-xl bg-blue-50 border border-blue-200 p-3 mb-3 text-sm font-bold text-blue-800"><i class="fa-solid fa-circle-notch fa-spin"></i> ' + htmlEscape(aiScanProgressText || 'קורא את התעודה ברקע…') + '<div class="mt-1">אפשר לסרוק מוצרים כרגיל.</div></div>' + heldHtml;
+  if (receiptPaperScanState === 'ok') return '<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-2 mb-2 text-[11px] font-black text-emerald-800"><i class="fa-solid fa-file-circle-check"></i> התעודה נקראה ואומתה · השוואת הכמויות בסיום הקליטה</div>' + heldHtml;
   if (receiptPaperScanState === 'failed' || receiptPaperScanState === 'interrupted') return '<div class="rounded-xl bg-amber-50 border border-amber-300 p-3 mb-3 text-sm font-bold text-amber-900">אפשר להמשיך בספירה. לפני הסיום צריך להשלים את נתוני התעודה.' +
     '<div class="mt-1 text-xs">' + receiptPaperScanProblems.map(htmlEscape).join('<br>') + '</div>' +
     '<button data-role="rc-photo-repair" class="btn-tap w-full bg-white border border-amber-300 rounded-xl py-2 mt-2">בדוק צילומים / הוסף עמוד חסר</button>' +
-    '<button data-role="rc-photo-manual" class="btn-tap w-full py-2 text-xs underline">או הקלד סכום ויחידות</button></div>';
-  return '';
+    '<button data-role="rc-photo-manual" class="btn-tap w-full py-2 text-xs underline">או הקלד סכום ויחידות</button></div>' + heldHtml;
+  return heldHtml;
 }
 function yotvataAdoptPaperAnchors() {
   if (!canEditDraft('receiving')) return;
@@ -1286,13 +1419,21 @@ function yotvataAdoptPaperAnchors() {
     if (seen.has(doc.noteIndex)) problems.push('התקבלה תעודה כפולה');
     seen.add(doc.noteIndex);
   });
-  aiScanDocuments.forEach((input, index) => {
+  // v394: הכל נבנה על התעודות שצולמו (aiScanDocuments). תעודה מוחזקת (נראית כמו זיכוי) אינה
+  // בתצוגת הכסף, ולכן היא לא "לא פוענחה" — היא מחכה להחלטה, והנייר לא מאומץ עד שתוכרע.
+  // כשלא מוחזקת אף תעודה הפלט זהה לגרסה 393.
+  // זיכוי שעבר מהתעודה היחידה משאיר תעודה ריקה: קליטה בלי אף תעודת משלוח לא נסגרת כ"נקראה".
+  const creditOnly = !aiScanDocuments.some(d => d.pages.length || d.restoredPageCount || d.scanResult) && receiptDeliveryCredits.some(c => c.origin);
+  if (creditOnly) problems.push('צולמה רק תעודת זיכוי. צלם גם את תעודת המשלוח (בדוק צילומים) או הקלד את הסכום והיחידות שלה.');
+  else aiScanDocuments.forEach((input, index) => {
+    if (yotvataDocumentHeld(input)) { problems.push('תעודה ' + (index + 1) + ' נראית כמו תעודת זיכוי — ההחלטה בכרטיס שמתחת.'); notes.push(null); return; }
     const doc = returned.find(d => d.noteIndex === index);
-    const check = yotvataPaperCheck(doc, input.pages.length || input.restoredPageCount || 0);
-    if (!check.ok) check.problems.forEach(p => problems.push('תעודה ' + (index + 1) + ': ' + p));
+    const pageCount = input.pages.length || input.restoredPageCount || 0;
+    const check = yotvataPaperCheck(doc, pageCount);
+    if (!check.ok) yotvataPaperProblemTexts(doc, check, pageCount).forEach(p => problems.push('תעודה ' + (index + 1) + ': ' + p));
     notes.push({ amount: check.amount, units: check.units });
   });
-  if (returned.length !== aiScanDocuments.length) problems.push('לא כל התעודות פוענחו');
+  if (!creditOnly && returned.length !== aiScanDocuments.filter(input => !yotvataDocumentHeld(input)).length) problems.push('לא כל התעודות פוענחו');
   receiptPaperScanProblems = [...new Set((aiScanError ? [aiScanError] : []).concat(problems))].slice(0, 8);
   if (problems.length) { receiptPaperScanState = 'failed'; saveReceiptDraft(); refreshScanHost(); return false; }
   receiptManualInput = null; // Verified paper replaces any unfinished manual entry.
@@ -1324,7 +1465,241 @@ async function yotvataStartPaperScan(opts = {}) {
   if (!receiptAttachTarget && !opts.manualQuantities) openReceivingScanner();
   await run;
   if (runId !== aiScanRunId || receiptEntryMode !== 'photo') return;
+  // v394: פעם אחת בסוף כל ריצת קריאה (לא ברינדור, בשחזור או בסנכרון): זיכוי ודאי עובר לזיכויים
+  // לפני אימוץ העוגנים, ותעודה מוחזקת מחכה להחלטה.
+  const routed = yotvataRouteCreditDocuments(runId);
   yotvataAdoptPaperAnchors();
+  yotvataAnnounceRouting(routed);
+}
+// v394: העברה אוטומטית — רק בסוף ריצת קריאה שלא בוטלה (runId), ורק לתעודה שהכרעתה 'move'.
+// מהאחרונה לראשונה, כדי שהמספר שהעובד ראה ("תעודה 2") יישאר נכון בכל העברה. אין כאן רשת,
+// רינדור או receiptScanChanged: הגדלת aiScanRunId כאן הייתה משאירה את aiRunInvoiceScan
+// (שמשחרר את aiScanBusy רק כש-runId עדיין שלו) עסוק לתמיד.
+function yotvataRouteCreditDocuments(runId) {
+  const routed = { moved: [], held: [] };
+  if (runId !== aiScanRunId || !canEditDraft('receiving', true) || receiptFinalizing) return routed;
+  for (let index = aiScanDocuments.length - 1; index >= 0; index--) {
+    const input = aiScanDocuments[index];
+    if (!yotvataDocumentHeld(input) || yotvataDocumentKindVerdict(input) !== 'move') continue;
+    const moved = yotvataMoveDocumentToCredit(input, { auto: true, runId, verdict: 'move' });
+    if (moved.ok) routed.moved.unshift(moved);
+  }
+  routed.held = yotvataHeldDocuments();
+  if (routed.moved.length || routed.held.length) saveReceiptDraft();
+  return routed;
+}
+// v394: מעביר תעודה (או עמודים ממנה) לזיכויים, בבלוק סינכרוני אחד. אותם אובייקטי עמוד (האישור
+// שלהם נשמר) עוברים לזיכוי. תעודה שלמה בלי read: הקריאה ששולמה היא נייר הזיכוי (paperMode
+// 'invoice') — 0 קריאות נוספות, וכללי v365 של deliveryCreditApplyPaper קובעים אם הוא מצורף.
+// origin שומר מאיפה הזיכוי הגיע ואת הקריאה המקורית, כדי ש"החזר לתעודות" לא יקרא שוב.
+// לא שומר, לא מרנדר ולא מתחיל קריאה — מי שקורא לכאן עושה זאת.
+function yotvataMoveDocumentToCredit(input, { auto = false, read = false, pages = null, runId = null, verdict = '' } = {}) {
+  const refused = reason => ({ ok: false, reason, credit: null, number: 0 });
+  if (!canEditDraft('receiving', true) || receiptFinalizing) return refused('הקליטה נשמרת עכשיו — נסה שוב בעוד רגע.');
+  if (runId != null ? runId !== aiScanRunId : aiScanBusy) return refused('ממתין לסיום קריאת התעודות…');
+  if (!aiScanDocuments.includes(input)) return refused('התעודה כבר לא ברשימת התעודות.');
+  const result = input.scanResult, doc = result && result.ok ? result.doc : null;
+  const pageCount = input.pages.length || input.restoredPageCount || 0;
+  if (pages ? !(pages.length >= 1 && pages.length <= 4 && pages.every(p => input.pages.includes(p))) : !(doc && pageCount <= 4)) return refused('לתעודת זיכוי אפשר עד 4 עמודים.');
+  if (!deliveryCreditsAllowed()) return refused('בצירוף תעודה לקליטה שנשמרה אין זיכויים');
+  if (receiptDeliveryCredits.length >= 4) return refused('יש כבר 4 זיכויים בקליטה — הסר זיכוי אחד קודם.');
+  receiptRememberScanResults();
+  const index = aiScanDocuments.indexOf(input), number = index + 1;
+  const s = yotvataPaperCreditSignals(doc, pageCount);
+  const moved = pages ? pages.slice() : input.pages.slice();
+  if (aiOrientationSession && moved.includes(aiOrientationSession.page)) aiCloseOrientationReview();
+  const c = { id: makeOperationId('delivery_credit'), pages: moved, status: 'capture', pageCount: moved.length || input.restoredPageCount || 0,
+    origin: { kind: pages ? 'page' : 'document', docNumber: number, pages: pages ? pages.map(p => input.pages.indexOf(p) + 1) : null,
+      scanId: input.scanId || null, pageCount, at: Date.now(), auto: !!auto, verdict: verdict || '',
+      title: s.titles.find(t => /זיכוי|ביטול\s*מכירה|credit/i.test(t)) || (doc && typeof doc.printedTitle === 'string' && doc.printedTitle) || null, types: s.types,
+      read: pages ? null : { doc: cloneSafe(doc), serviceVersion: result.serviceVersion || null, model: result.model || null,
+        requestId: result.requestId || null, scanAudit: result.scanAudit || null, verification: result.verification || null } } };
+  if (!pages) {
+    // בזיכרון בלבד (תמונות): "החזר לתעודות" מחזיר את התעודה בדיוק כפי שהייתה, עם הקריאה השמורה.
+    c.originCache = { pages: input.pages, scanResult: input.scanResult, cachedResult: input.cachedResult, cachedPages: input.cachedPages };
+    aiScanDocuments.splice(index, 1);
+    if (!aiScanDocuments.length) yotvataSeedPhotoDocuments();
+  } else {
+    input.pages = input.pages.filter(p => !pages.includes(p));
+    yotvataInvalidatePhotoDoc(input);
+  }
+  receiptDeliveryCredits.push(c); receiptNoDoc = false; pendingReceipt = null;
+  receiptScanHistory.forEach(entry => { if (entry && input.scanId && entry.scanId === input.scanId) entry.movedToCredit = c.id; });
+  // המספור מתעדכן (תעודה 2 שנשארה לבד היא עכשיו תעודה 1), וגם השגיאות של תעודות שנכשלו.
+  receiptRebuildScanResponse(); aiScanEvaluation = null;
+  aiScanError = aiScanDocuments.map((d, i) => d.scanResult && !d.scanResult.ok ? 'תעודה ' + (i + 1) + ': ' + (d.scanResult.errorMessage || 'הסריקה נכשלה') : '').filter(Boolean).join(' · ');
+  if (!read && !pages) deliveryCreditApplyPaper(c, cloneSafe(doc.__pricePaper || doc), { requestId: result.requestId, model: result.model, scanAudit: result.scanAudit }, 'invoice', { toast: false });
+  return { ok: true, reason: '', credit: c, number };
+}
+// v394: "2", "2 ו-3", "1, 2 ו-3".
+function yotvataNumberList(numbers) {
+  const list = (numbers || []).map(String);
+  return list.length > 1 ? list.slice(0, -1).join(', ') + ' ו-' + list[list.length - 1] : (list[0] || '');
+}
+// v394: מה קרה לתעודות שעברו. המספר הוא זה שהעובד ראה בזמן הצילום (origin.docNumber).
+function yotvataMovedText(moved) {
+  if (moved.length > 1) return 'תעודות ' + yotvataNumberList(moved.map(m => m.number)) + ' הן תעודות זיכוי — הועברו לזיכויים. בדוק אותן בכרטיסי הזיכוי.';
+  const credit = moved[0].credit, n = credit.origin ? credit.origin.docNumber : moved[0].number, title = credit.origin && credit.origin.title;
+  if (credit.status === 'confirmed') return 'תעודה ' + n + ' היא תעודת זיכוי' + (title ? ' («' + title + '»)' : '') + ' — הועברה לזיכויים וצורפה למשלוח. בסיום הספירה נבדוק איזה חוסר היא מכסה.';
+  if (credit.status === 'error') return 'תעודה ' + n + ' היא תעודת זיכוי — הועברה לזיכויים, אבל הקריאה שלה לא נסגרה. פרטים בכרטיס הזיכוי.';
+  return 'תעודה ' + n + ' היא תעודת זיכוי — הועברה לזיכויים. בדוק אותה מול הנייר ואשר בכרטיס הזיכוי.';
+}
+// v394: אחרי הניתוב — מרעננים רק את כרטיסי הזיכוי, הסה"כים וההודעה בסורק (לא את כל המסך: הסורק
+// ושדה הכמות הפעיל נשארים), והודעה אחת מעל חלון הסורק.
+function yotvataAnnounceRouting({ moved = [], held = [] } = {}) {
+  deliveryCreditRefreshCards();
+  if (currentView === 'receiving' && !receiptUsesManualQuantities()) refreshReceiptTotals();
+  refreshPriceScannerNotice();
+  const text = moved.length ? yotvataMovedText(moved)
+    : held.length === 1 ? 'תעודה ' + (held[0].index + 1) + ' נראית כמו תעודת זיכוי — צריך החלטה שלך לפני הסיום.'
+    : held.length ? 'תעודות ' + yotvataNumberList(held.map(x => x.index + 1)) + ' נראות כמו תעודות זיכוי — צריך החלטה שלך לפני הסיום.' : '';
+  if (text) showToast(text, null, null, 6000);
+}
+function yotvataCreditDocumentBlockedText(verdict, n, pageCount) {
+  if (verdict === 'blocked-attach') return 'תעודה ' + n + ' היא תעודת זיכוי. בצירוף תעודה לקליטה שנשמרה אין זיכויים: הסר אותה, ואחרי השמירה רשום את הזיכוי בכרטיס התעודה ("התקבל זיכוי מהספק").';
+  if (verdict === 'blocked-full') return 'תעודה ' + n + ' היא תעודת זיכוי, אבל כבר יש 4 זיכויים בקליטה. הסר זיכוי שאינו של המשלוח הזה ואז "העבר לזיכויים".';
+  return 'לתעודת זיכוי אפשר עד 4 עמודים; בתעודה ' + n + ' יש ' + pageCount + '. מחק את העמודים שאינם של הזיכוי (בדוק צילומים).';
+}
+// v394: כרטיס ההחלטה של תעודה מוחזקת: למה היא נראית כמו זיכוי (שורה לכל סיבה), פעולה ראשית לפי
+// ההכרעה, "לא, זו תעודת משלוח רגילה" רק לחשבונית חיובית תקינה, ותמיד "הסר את תעודה N".
+// gate — במסך הצילום (שם תעודה שנשארה תיקרא שוב רק ב"התחל").
+function yotvataCreditDocumentCardHtml(index, { gate = false } = {}) {
+  const input = aiScanDocuments[index];
+  if (!yotvataDocumentHeld(input)) return '';
+  const doc = input.scanResult.doc, n = index + 1, pageCount = input.pages.length || input.restoredPageCount || 0;
+  const s = yotvataPaperCreditSignals(doc, pageCount), verdict = yotvataDocumentKindVerdict(input);
+  const scan = htmlEscape(input.scanId || ''), photos = input.pages.length > 0, busy = aiScanBusy;
+  const button = (role, text, main) => '<button data-role="' + role + '" data-scan="' + scan + '"' + (busy ? ' disabled' : '') + ' class="btn-tap w-full ' +
+    (main ? 'bg-amber-600 text-white rounded-xl py-3 mt-2 font-black' : 'bg-white border border-amber-300 text-amber-900 rounded-xl py-2 mt-2 font-bold') + '">' + text + '</button>';
+  const line = text => '<p class="mt-1 text-sm text-amber-900">' + text + '</p>';
+  const grey = text => '<p class="mt-1 text-xs text-slate-500">' + text + '</p>';
+  const subtotal = typeof doc.subtotalExVat === 'number' && Number.isFinite(doc.subtotalExVat) ? doc.subtotalExVat : null;
+  const reads = (doc.modelVerification && Array.isArray(doc.modelVerification.readings) ? doc.modelVerification.readings : [])
+    .map(r => r && r.values && r.values.subtotalExVat).filter(v => typeof v === 'number' && Number.isFinite(v));
+  const negativeRead = reads.find(v => v < 0), positiveRead = reads.find(v => v > 0);
+  const title = s.titles.find(t => /זיכוי|ביטול\s*מכירה|credit/i.test(t)) || s.titles[0] || null;
+  const reasons = [];
+  if (title) reasons.push('הכותרת שנקראה: «' + htmlEscape(title) + '»');
+  if (s.signs === 'as_printed' && subtotal > 0 && (s.anyCredit || s.titleCredit)) reasons.push('אבל הסכומים נקראו בלי סימן מינוס.');
+  if (negativeRead != null && positiveRead != null) reasons.push('קריאה אחת קראה סכום שלילי (' + fmtMoney(negativeRead) + ') והשנייה חיובי (' + fmtMoney(positiveRead) + ').');
+  if (s.anyCredit && s.anyDelivery) reasons.push('קריאה אחת סימנה אותה כזיכוי והשנייה כתעודת משלוח.');
+  else if (s.signs === 'negative' && s.anyDelivery) reasons.push('הסכומים בה שליליים, אבל היא סומנה כתעודת משלוח.');
+  if (input.kindDecision && s.signs === 'negative') reasons.push('סימנת אותה כתעודת משלוח, אבל הסכומים בה שליליים.');
+  if (!s.types.length && subtotal != null && subtotal < 0) reasons.push('הסכומים בה שליליים (₪-' + fmtMoney(Math.abs(subtotal)) + ' לפני מע״מ).');
+  const keep = yotvataPaperCheck(doc, pageCount).ok && subtotal > 0 && s.signs !== 'negative' ? button('rc-credit-doc-keep', 'לא, זו תעודת משלוח רגילה', false) : '';
+  let head = 'תעודה ' + n + ' נראית כמו תעודת זיכוי', body;
+  if (verdict === 'ask-split') {
+    const k = s.pageSplit.creditPages, several = k.length > 1, named = several ? 'עמודים ' + yotvataNumberList(k) : 'עמוד ' + k[0];
+    head = 'בתעודה ' + n + ' צולמו יחד שני מסמכים: ' + named + (several ? ' נראים' : ' נראה') + ' כמו תעודת זיכוי.';
+    body = !photos ? line('הצילומים לא נשמרו אחרי רענון. הסר את תעודה ' + n + ', צלם את תעודת המשלוח כתעודה ואת הזיכוי בכפתור הירוק.')
+      : button('rc-credit-doc-split', 'העבר את ' + named + ' לזיכויים וקרא מחדש', true) +
+        grey(gate ? 'הזיכוי ייקרא עכשיו; תעודה ' + n + ' תיקרא שוב כשתלחץ "התחל קליטת מוצרים".'
+          : 'הזיכוי ייקרא כזיכוי, ותעודה ' + n + ' תיקרא שוב בלי ' + (several ? 'העמודים האלה' : 'העמוד הזה') + ' — שתי קריאות.');
+  } else if (verdict.startsWith('blocked-')) body = line(yotvataCreditDocumentBlockedText(verdict, n, pageCount));
+  else if (verdict === 'ask-read' && !photos) body = button('rc-credit-doc-recapture', 'הסר את תעודה ' + n + ' וצלם אותה כזיכוי', true);
+  else if (verdict === 'ask-read') body = button('rc-credit-doc-move', 'כן, זו תעודת זיכוי — העבר וקרא כזיכוי', true) + grey('הצילום ייקרא שוב כזיכוי — קריאה אחת נוספת.');
+  else body = button('rc-credit-doc-move', 'כן, זו תעודת זיכוי — העבר לזיכויים', true);
+  return '<div data-credit-document="' + scan + '" class="rounded-xl border-2 border-amber-300 bg-amber-50 p-3 mt-2"><div class="font-black text-amber-900">' + head + '</div>' +
+    reasons.map(line).join('') + body + keep +
+    (busy ? '<p class="mt-2 text-sm font-bold text-blue-700">ממתין לסיום קריאת התעודות…</p>' : '') +
+    '<button data-role="rc-credit-doc-remove" data-scan="' + scan + '"' + (busy ? ' disabled' : '') + ' class="btn-tap w-full py-2 mt-1 text-xs font-bold text-rose-700 underline">הסר את תעודה ' + n + ' מהקליטה</button></div>';
+}
+// v394: הלחיצות בכרטיס ההחלטה. אף אחת מהן אינה קריאה בתשלום, חוץ מ"העבר וקרא כזיכוי" ו"העבר
+// את עמוד K… וקרא מחדש", שהכפתור שלהן אומר זאת. לא בזמן קריאה (aiScanBusy) ולא בזמן שמירה.
+function yotvataCreditDocumentAction(role, scanId) {
+  if (!canEditDraft('receiving') || aiScanBusy || receiptFinalizing) return false;
+  const input = scanId ? aiScanDocuments.find(d => d.scanId === scanId) : null;
+  if (!input) return false;
+  const index = aiScanDocuments.indexOf(input), n = index + 1, pageCount = input.pages.length || input.restoredPageCount || 0;
+  // אחרי כל החלטה: אם הנייר לא אומץ (או שתעודה מוחזקת עכשיו) — מנסים לאמץ שוב מהקריאות השמורות.
+  const settle = () => {
+    if (receiptEntryMode === 'photo' && (receiptPaperScanState !== 'ok' || yotvataHeldDocuments().length)) yotvataAdoptPaperAnchors();
+    saveReceiptDraft(); renderReceiving();
+  };
+  const drop = () => {
+    receiptRememberScanResults();
+    if (aiOrientationSession && input.pages.includes(aiOrientationSession.page)) aiCloseOrientationReview();
+    aiScanDocuments.splice(aiScanDocuments.indexOf(input), 1);
+    if (!aiScanDocuments.length) yotvataSeedPhotoDocuments();
+    receiptScanChanged();
+  };
+  if (role === 'rc-credit-doc-recapture') {
+    // הצילומים אבדו (רענון): התעודה יוצאת, וכרטיס זיכוי ריק פותח את המצלמה הירוקה — בתוך הלחיצה (iOS).
+    if (!deliveryCreditsAllowed() || receiptDeliveryCredits.length >= 4) { showToast(yotvataCreditDocumentBlockedText(receiptAttachTarget ? 'blocked-attach' : 'blocked-full', n, pageCount), null, null, 6000); return false; }
+    drop();
+    const c = { id: makeOperationId('delivery_credit'), pages: [], status: 'capture', pageCount: 0,
+      origin: { kind: 'document', docNumber: n, scanId: input.scanId || null, at: Date.now(), recapture: true, read: null } };
+    receiptDeliveryCredits.push(c); pendingReceipt = null;
+    saveReceiptDraft(); renderReceiving();
+    deliveryCreditClickInput('creditCam_' + c.id);
+    return true;
+  }
+  if (role === 'rc-credit-doc-remove') {
+    showConfirm('להסיר את תעודה ' + n + '?', 'הצילום והקריאה שלה יוסרו מהקליטה. אם זו תעודת זיכוי, אפשר לצלם אותה שוב בכפתור הירוק.', 'הסר', () => {
+      if (!aiScanDocuments.includes(input) || aiScanBusy || receiptFinalizing) return;
+      drop(); settle();
+      showToast('תעודה ' + n + ' הוסרה מהקליטה.', null, null, 4000);
+    });
+    return true;
+  }
+  if (role === 'rc-credit-doc-unkeep') {
+    if (!input.kindDecision) return false;
+    delete input.kindDecision;
+    // התעודה חוזרת להיות מוחזקת: העוגנים שאומצו איתה כבר לא נכונים (receiptScanChanged מנקה אותם
+    // ומאמץ מחדש מהקריאות השמורות — אין קריאה באוויר, aiScanBusy נבדק למעלה).
+    receiptScanChanged(); settle();
+    showToast('ההחלטה בוטלה — תעודה ' + n + ' שוב ממתינה להחלטה.', null, null, 4000);
+    return true;
+  }
+  if (!yotvataDocumentHeld(input)) return false;
+  const verdict = yotvataDocumentKindVerdict(input);
+  if (role === 'rc-credit-doc-keep') {
+    input.kindDecision = { kind: 'delivery', at: Date.now(), source: 'card' };
+    if (!yotvataKeptAsDelivery(input)) { delete input.kindDecision; return false; }
+    receiptScanChanged(); settle(); // התעודה נכנסת לתצוגת הכסף ונאמצת עם השאר
+    showToast('תעודה ' + n + ' נקלטת כתעודת משלוח, לפי ההחלטה שלך.', null, null, 4000);
+    return true;
+  }
+  if (role !== 'rc-credit-doc-move' && role !== 'rc-credit-doc-split') return false;
+  if (verdict.startsWith('blocked-')) { showToast(yotvataCreditDocumentBlockedText(verdict, n, pageCount), null, null, 6000); return false; }
+  if (role === 'rc-credit-doc-split') {
+    const split = yotvataPaperCreditSignals(input.scanResult.doc, pageCount).pageSplit;
+    if (verdict !== 'ask-split' || !split || !input.pages.length) return false;
+    const onGate = receivingPhotoGateShown(), k = split.creditPages;
+    const r = yotvataMoveDocumentToCredit(input, { pages: k.map(p => input.pages[p - 1]), verdict });
+    if (!r.ok) { showToast(r.reason, null, null, 4500); return false; }
+    receiptScanChanged(); settle();
+    deliveryCreditAutoRead(r.credit);
+    // קריאת החשבונית של העמודים שנשארו ממתינה בתור לקריאת הזיכוי; במסך הצילום — רק ב"התחל".
+    if (receiptOpened && !receiptPhotoCaptureOpen) yotvataRereadDocuments();
+    showToast((k.length > 1 ? 'עמודים ' + yotvataNumberList(k) + ' הועברו' : 'עמוד ' + k[0] + ' הועבר') + ' לזיכויים. הזיכוי נקרא כזיכוי, ותעודה ' + n +
+      (onGate ? ' תיקרא שוב כשתלחץ "התחל קליטת מוצרים".' : ' נקראת שוב.'), null, null, 6000);
+    return true;
+  }
+  if (verdict === 'ask-split') return false;
+  if (verdict === 'ask-read' && !input.pages.length) return yotvataCreditDocumentAction('rc-credit-doc-recapture', scanId);
+  const read = verdict === 'ask-read';
+  const r = yotvataMoveDocumentToCredit(input, { read, verdict });
+  if (!r.ok) { showToast(r.reason, null, null, 4500); return false; }
+  receiptScanChanged(); // אין קריאה באוויר (aiScanBusy נבדק למעלה), ולכן מותר להגדיל כאן את aiScanRunId
+  settle();
+  showToast(read ? 'תעודה ' + n + ' הועברה לזיכויים ונקראת עכשיו כזיכוי.' : yotvataMovedText([r]), null, null, 6000);
+  if (read) deliveryCreditAutoRead(r.credit);
+  return true;
+}
+// v394: אחרי פיצול עמודים — קריאה חוזרת של התעודות שנשארו, בלי לפתוח את הסורק. תעודות שכבר
+// נקראו (שמורות) לא עולות שוב; התעודה שהשתנתה ממתינה בתור לקריאת הזיכוי.
+async function yotvataRereadDocuments() {
+  if (!canEditDraft('receiving') || aiScanBusy || !yotvataPhotoReady()) return false;
+  receiptPaperScanState = 'running'; receiptPaperScanProblems = []; saveReceiptDraft(); refreshScanHost();
+  const run = aiRunInvoiceScan({ background: true });
+  const runId = aiScanRunId;
+  await run;
+  if (runId !== aiScanRunId || receiptEntryMode !== 'photo') return false;
+  const routed = yotvataRouteCreditDocuments(runId);
+  yotvataAdoptPaperAnchors();
+  yotvataAnnounceRouting(routed);
+  return true;
 }
 function yotvataScanMetadata(result) {
   return { docIndex: result.docIndex, ok: !!result.ok, attempts: result.attempts || 1,
@@ -1351,7 +1726,8 @@ function deliveryCreditSnapshot() {
   // v364: waiting/waitingFor/progress הם מצב תצוגה רגעי של קריאה שרצה — לא נשמרים בטיוטה.
   // resume (מפתח האיסוף) נשמר רק בטיוטה המקומית — ראה deliveryCreditLocalDraft.
   // v365: editBarcode ("תקן ברקוד" שנפתח בשורה מזוהה) הוא מצב תצוגה בלבד — לא נשמר.
-  return receiptDeliveryCredits.map(({ pages, waiting, waitingFor, progress, resume, editBarcode, ...c }) => ({ ...c, pageCount: pages.length || c.pageCount || 0 }));
+  // v394: originPages / originCache (זיכוי שעבר מהתעודות) מחזיקים צילומים (Blob) — בזיכרון בלבד, לעולם לא בטיוטה.
+  return receiptDeliveryCredits.map(({ pages, waiting, waitingFor, progress, resume, editBarcode, originPages, originCache, ...c }) => ({ ...c, pageCount: pages.length || c.pageCount || 0 }));
 }
 // v364: מפתח הקריאה של זיכוי (c.resume = { scanKey, at }) נכנס לטיוטה שבמכשיר בלבד,
 // לא לענן: הוא שייך לחיבור של המכשיר הזה, ובלעדיו טיוטת הענן והחתימה שלה לא משתנות.
@@ -1511,7 +1887,12 @@ function deliveryCreditNumberUnsupported(c) {
   const key = v => String(v == null ? '' : v).replace(/\s/g, '');
   const read = key(c.paper && c.paper.invoiceNumber);
   if (!read || key(c.number) !== read) return '';
-  const proof = c.paper.modelVerification, support = proof && proof.support && typeof proof.support === 'object' ? proof.support.invoiceNumber : undefined;
+  const proof = c.paper.modelVerification;
+  let support = proof && proof.support && typeof proof.support === 'object' ? proof.support.invoiceNumber : undefined;
+  // v394: זיכוי שצולם כתעודה רגילה נקרא כחשבונית, ושם השרת לא מצביע על מספר הזיכוי
+  // (support.invoiceNumber קיים רק בקריאת זיכוי). שרת v151 מוסיף לכל חשבונית
+  // documentType.invoiceNumberSupport — אילו קריאות אחרות ראו את אותו מספר.
+  if (!Array.isArray(support) && c.paperMode === 'invoice') support = proof && proof.documentType && proof.documentType.invoiceNumberSupport;
   if (!Array.isArray(support)) return 'מספר הזיכוי לא אומת בשרת — בדוק אותו מול הנייר';
   return support.length || (Array.isArray(proof.issues) && proof.issues.includes('invoiceNumber')) ? '' : 'הקריאות לא הסכימו על מספר הזיכוי — בדוק מול הנייר';
 }
@@ -1521,6 +1902,12 @@ function deliveryCreditReviewReasons(c) {
   const reasons = [];
   if (!c || !c.paper) return reasons;
   const rows = deliveryCreditRows(c), missing = rows.filter(r => !r.productId).length;
+  // v394: נייר זיכוי שהוא קריאת חשבונית (צולם כתעודה רגילה) מצורף לבד רק כשלפחות שתי קריאות
+  // אמרו "זיכוי" (שרת v151) ולפחות קריאה אחת נוספת ראתה את אותו מספר — מעבר לכל כללי v365.
+  // אחרת לחיצה אחת. קריאת חשבונית משווה סימנים בקפדנות, ולכן זה לפחות מחמיר כמו הכפתור הירוק.
+  const signals = c.paperMode === 'invoice' ? yotvataPaperCreditSignals(c.paper, c.pageCount) : null;
+  const photographedAsDocument = !!signals && !(signals.allCredit && signals.numberSupport.length);
+  if (photographedAsDocument) reasons.push({ code: 'document', text: 'הזיכוי צולם כתעודה רגילה — בדוק את מספר הזיכוי, המוצרים והכמויות מול הנייר' });
   const consensus = deliveryCreditConsensus(c, rows);
   if (consensus.unverified) reasons.push({ code: 'unverified', text: 'הקריאה לא אומתה בשרת — בדוק את המוצרים, הכמויות והסכומים מול הנייר' });
   // שורה בלי מוצר שלא אומתה נספרת רק ב-'product' למטה (consensus.verified כבר false בגללה).
@@ -1530,7 +1917,8 @@ function deliveryCreditReviewReasons(c) {
   if (!String(c.number || '').trim()) reasons.push({ code: 'number', text: 'מספר הזיכוי לא נקרא — הקלד אותו מהנייר' });
   // v365: מספר שנקרא אבל אף קריאה אחרת לא תמכה בו (או שאין על זה עדות) — לא מצרפים לבד.
   // כשהקריאה כולה לא אומתה ('unverified') הסיבה ההיא כבר אומרת לבדוק הכול.
-  else if (!consensus.unverified) { const unsupported = deliveryCreditNumberUnsupported(c); if (unsupported) reasons.push({ code: 'number', text: unsupported }); }
+  // v394: כשכבר נאמר "הזיכוי צולם כתעודה רגילה — בדוק את מספר הזיכוי…" אין צורך לומר זאת פעמיים.
+  else if (!consensus.unverified && !photographedAsDocument) { const unsupported = deliveryCreditNumberUnsupported(c); if (unsupported) reasons.push({ code: 'number', text: unsupported }); }
   if (deliveryCreditDuplicate(c)) reasons.push({ code: 'duplicate', text: 'מספר הזיכוי כבר צורף' });
   return reasons;
 }
@@ -1553,6 +1941,7 @@ function deliveryCreditInvalidate(c) {
   c.barcodes = []; pendingReceipt = null;
   c.autoConfirmed = false; c.editBarcode = []; // v365
   c.resume = null; // v364: צילום חדש (או חלק נוסף) — הקריאה הקודמת כבר לא שלו
+  delete c.paperMode; delete c.readAs; delete c.notCredit; // v394: איך נקרא הנייר הקודם — כבר לא רלוונטי
 }
 function deliveryCreditOpenPage(id, pageIndex) {
   const c = deliveryCreditFind(id), page = c && c.pages[pageIndex];
@@ -1644,6 +2033,61 @@ function deliveryCreditRefreshCards() {
 function deliveryCreditPaperError(message) {
   const error = new Error(message); error.creditPaper = true; return error;
 }
+// v394: הנייר של זיכוי — מקריאת זיכוי (readAs 'credit', הכפתור הירוק או "העבר וקרא כזיכוי") או
+// מקריאת החשבונית ששולמה על תעודה שהתבררה כזיכוי (readAs 'invoice', 0 קריאות נוספות). אותם כללים
+// בדיוק כמו עד היום ב-deliveryCreditRead: deliveryCreditPaperCheck, ואז צירוף לבד רק כש-
+// deliveryCreditReviewReasons ריק (v365). נייר שנדחה — כמו שגיאת נייר בקריאה ('paper' / 'discount').
+// notCredit — קריאת זיכוי של תעודה שעברה מהתעודות מצאה נייר חיובי כמודפס: כנראה תעודת משלוח
+// רגילה, והפעולה הראשית בכרטיס היא "זו תעודה רגילה — החזר לתעודות" (בלי קריאה).
+// מחזיר את הסטטוס החדש ('error' / 'review' / 'confirmed'). לא שומר ולא מרנדר.
+function deliveryCreditApplyPaper(c, paper, meta, readAs, { toast = true } = {}) {
+  c.readAs = readAs;
+  const problem = deliveryCreditPaperCheck(paper, c.pageCount);
+  if (problem) {
+    c.paper = null; c.status = 'error'; c.waiting = false; c.progress = '';
+    c.errorKind = problem === DELIVERY_CREDIT_DOC_DISCOUNT_PROBLEM ? 'discount' : 'paper'; c.error = problem; c.errorDetail = ''; c.resume = null;
+    c.notCredit = readAs === 'credit' && !!c.origin && !!paper && paper.subtotalExVat > 0 && paperCreditSigns(paper) === 'as_printed';
+    return 'error';
+  }
+  c.paper = paper; c.paperMode = readAs; c.notCredit = false;
+  c.number = String(c.paper.invoiceNumber || '').trim(); c.barcodes = []; c.status = 'review';
+  // readAs נשמר בביקורת רק לנייר שנקרא כחשבונית — זיכוי של הכפתור הירוק נשמר בדיוק כמו עד היום.
+  c.scanAudit = { requestId: (meta && meta.requestId) || null, model: (meta && meta.model) || null, scanAudit: (meta && meta.scanAudit) || null, ...(readAs !== 'credit' ? { readAs } : {}) };
+  // v365: זיכוי מאומת מצורף לבד — כאן בלבד, בסוף הקריאה (גם באיסוף אחרי רענון, ומאז v394 גם בסוף
+  // הקריאה של תעודה שעברה לזיכויים), ולעולם לא בשחזור טיוטה או בסנכרון ענן.
+  c.autoConfirmed = false; c.editBarcode = [];
+  if (!deliveryCreditReviewReasons(c).length) {
+    c.status = 'confirmed'; c.confirmedAt = Date.now(); c.confirmedSignature = deliveryCreditSignature(c); c.autoConfirmed = true;
+    pendingReceipt = null;
+    if (toast) showToast('הזיכוי צורף למשלוח. בסיום הספירה נבדוק איזה חוסר הוא מכסה.', null, null, 3200);
+  }
+  return c.status;
+}
+// v394: עמוד שצולם בכפתורי התעודה הוכן בתקרת החשבונית (1850px בצלע הארוכה). לפני קריאת זיכוי
+// הוא מוכן מחדש מהצילום המקורי בתקציב הזיכוי (AI_CREDIT_MAX_PIXELS) — אותם שלבים כמו חיתוך
+// (aiApplyCropIfMoved): אותו אזור, אותו סיבוב, אישור הכיוון נשמר. עמוד שנכשל נשאר כפי שהיה.
+// העמודים המקוריים נשמרים בזיכרון (originPages) ל"החזר לתעודות".
+async function deliveryCreditUpgradePages(c) {
+  const next = [];
+  let changed = false;
+  for (const page of c.pages) {
+    const r = page && page.sourceRegion;
+    if (!page || page.maxPixels || !page.sourceBlob || !r || !page.processScale) { next.push(page); continue; }
+    try {
+      const out = await aiReprocessFromSource({ ...page, maxPixels: AI_CREDIT_MAX_PIXELS }, { x: r.x, y: r.y, w: r.width, h: r.height });
+      const turns = aiNormalizeQuarterTurns((Number(page.rotation) || 0) / 90);
+      const rendered = await aiRenderInvoiceRotation(out.encoded.dataUrl, turns);
+      next.push({ ...page, baseDataUrl: out.encoded.dataUrl, dataUrl: rendered.dataUrl, bytes: rendered.bytes, rotation: turns * 90,
+        sourceRegion: out.region, processScale: out.scale, maxPixels: AI_CREDIT_MAX_PIXELS,
+        originalImage: page.cropped ? null : { dataUrl: out.encoded.dataUrl, region: { ...out.region }, scale: out.scale, rotationOffset: 0 },
+        orientationConfirmed: true });
+      changed = true;
+    } catch (error) { next.push(page); }
+  }
+  if (deliveryCreditFind(c.id) !== c) return false;
+  if (changed) { c.originPages = c.originPages || c.pages.slice(); c.pages = next; }
+  return changed;
+}
 // v364: collect=true — "אסוף את הקריאה": זיכוי שהצילומים שלו אבדו ברענון, אבל מפתח
 // הקריאה ששולמה נשמר בטיוטה המקומית (c.resume). נשלח רק גוף האיסוף, בלי צילומים,
 // באותו תור ואותו חימום; הצלחה ממשיכה לבדיקה הרגילה (בדיקת הנייר לא צריכה צילום).
@@ -1657,6 +2101,8 @@ async function deliveryCreditRead(id, collect = false) {
   saveReceiptDraft(); renderReceiving();
   const current = () => deliveryCreditFind(id) === c && canEditDraft('receiving',true);
   try {
+    // v394: זיכוי שעבר מהתעודות נקרא בתקציב הפיקסלים של זיכוי (פתק תרמי ארוך וצר).
+    if (c.origin && !collect) { await deliveryCreditUpgradePages(c); if (!current()) return false; }
     const token = await auth.currentUser.getIdToken();
     if (!current()) return false;
     // The existing OCR endpoint preserves signed paper values. Keep this result
@@ -1686,18 +2132,10 @@ async function deliveryCreditRead(id, collect = false) {
     const docs = result.scan && result.scan.documents || [];
     if (docs.length !== 1) throw deliveryCreditPaperError('לא התקבלה תעודת זיכוי יחידה. צלם כל תעודת זיכוי בנפרד.');
     // v364: באיסוף אחרי רענון אין צילומים — מספר העמודים הוא זה שנשמר בטיוטה.
-    c.pageCount = collect ? Number(c.pageCount) || 0 : c.pages.length; c.paper = cloneSafe(docs[0].__pricePaper || docs[0]);
-    const problem = deliveryCreditPaperCheck(c.paper, c.pageCount);
-    if (problem) { c.paper = null; throw deliveryCreditPaperError(problem); }
-    c.number = String(c.paper.invoiceNumber || '').trim(); c.barcodes = []; c.status = 'review';
-    c.scanAudit = { requestId: result.requestId || null, model: result.model || null, scanAudit: result.scanAudit || null };
-    // v365: זיכוי מאומת מצורף לבד — כאן בלבד, בסוף הקריאה (גם באיסוף אחרי רענון), ולעולם
-    // לא בשחזור טיוטה או בסנכרון ענן. הסיבות שמשאירות זיכוי לבדיקה — deliveryCreditReviewReasons.
-    c.autoConfirmed = false; c.editBarcode = [];
-    if (!deliveryCreditReviewReasons(c).length) {
-      c.status = 'confirmed'; c.confirmedAt = Date.now(); c.confirmedSignature = deliveryCreditSignature(c); c.autoConfirmed = true;
-      pendingReceipt = null;
-      showToast('הזיכוי צורף למשלוח. בסיום הספירה נבדוק איזה חוסר הוא מכסה.', null, null, 3200);
+    c.pageCount = collect ? Number(c.pageCount) || 0 : c.pages.length;
+    // v394: בדיקת הנייר והצירוף לבד עברו ל-deliveryCreditApplyPaper (אותם כללים, גם לתעודה שעברה).
+    if (deliveryCreditApplyPaper(c, cloneSafe(docs[0].__pricePaper || docs[0]), result, 'credit') === 'error') {
+      saveReceiptDraft(); deliveryCreditRefreshCards(); return false;
     }
     // v364: הקריאה מסתיימת ברקע, בזמן שהעובד אולי מקליד כמות — רק כרטיסי הזיכוי
     // מתעדכנים, בלי לבנות מחדש את כל מסך הקליטה (שדה הכמות הפעיל נשאר).
@@ -1793,7 +2231,12 @@ function deliveryCreditNoticeHtml(c) {
   if (deliveryCreditPhotosLost(c)) return '<p class="mt-2 text-amber-800 font-bold">' +
     htmlEscape(c.status === 'error' && c.errorKind === 'paper' && c.error ? c.error : 'פענוח הזיכוי לא הושלם והצילום לא נשמר. צלם אותו שוב כדי להמשיך.') + '</p>';
   if (!c.error) return '';
+  // v394: זיכוי שעבר מהתעודות — מה אפשר לעשות עם אותו צילום.
+  const origin = c.origin && c.status === 'error' && c.errorKind === 'paper' && c.pages.length
+    ? (c.notCredit ? 'הקריאה כזיכוי מצאה סכומים חיוביים — נראה שזו תעודת משלוח רגילה. אם כך, החזר אותה לתעודות.'
+      : c.readAs === 'invoice' ? 'אפשר לקרוא את אותו צילום שוב כזיכוי (קריאה אחת נוספת), או לצלם אותו מחדש.' : '') : '';
   return '<p class="mt-2 text-amber-800 font-bold">' + htmlEscape(c.error) + '</p>' +
+    (origin ? '<p data-credit-origin-hint class="mt-1 text-sm text-slate-700">' + origin + '</p>' : '') +
     (c.errorDetail ? '<p class="mt-1 text-[11px] text-slate-400" dir="ltr">' + htmlEscape(c.errorDetail) + '</p>' : '');
 }
 // הכפתורים של זיכוי שעוד לא נקרא: פעולה ראשית אחת לכל מצב.
@@ -1816,6 +2259,12 @@ function deliveryCreditCaptureHtml(c) {
     : button('delivery-credit-camera', 'צלם את תעודת הזיכוי', true) + button('delivery-credit-gallery', 'בחר צילום מהגלריה', false));
   const unchecked = c.pages.findIndex(p => !p.orientationConfirmed);
   if (unchecked !== -1) return inputs + button('delivery-credit-page', 'בדוק ואשר את הצילום', true, ' data-page="' + unchecked + '"') + more;
+  // v394: זיכוי שעבר מהתעודות ונייר שלו נדחה: קריאת זיכוי שמצאה נייר חיובי — "זו תעודה רגילה"
+  // (מחזיר את הקריאה המקורית, בלי קריאה); קריאת החשבונית שלא עברה כזיכוי — קריאה אחת כזיכוי.
+  if (c.origin && c.status === 'error' && c.errorKind === 'paper') {
+    if (c.notCredit && deliveryCreditCanUnmove(c)) return inputs + button('delivery-credit-unmove', 'זו תעודה רגילה — החזר לתעודות', true) + button('delivery-credit-retake', 'צלם את הזיכוי מחדש', false);
+    if (c.readAs === 'invoice') return inputs + button('delivery-credit-read', 'קרא את הצילום כזיכוי', true) + button('delivery-credit-retake', 'צלם את הזיכוי מחדש', false);
+  }
   if (c.status === 'error' && c.errorKind === 'part') return inputs +
     button('delivery-credit-camera', 'צלם שוב את החלק הבא', true) +
     button('delivery-credit-read', 'קרא את הזיכוי', false) + button('delivery-credit-retake', 'צלם את הזיכוי מחדש', false);
@@ -1851,6 +2300,7 @@ function deliveryCreditAction(role, id, page, row) {
   else if (role === 'delivery-credit-collect') return deliveryCreditRead(id, true);
   else if (role === 'delivery-credit-page') deliveryCreditOpenPage(id, Number(page));
   else if (role === 'delivery-credit-confirm') deliveryCreditConfirm(id);
+  else if (role === 'delivery-credit-unmove') return deliveryCreditUnmove(id); // v394
   else if (role === 'delivery-credit-edit') { c.status = 'review'; c.confirmedAt = null; c.confirmedSignature = null; c.autoConfirmed = false; pendingReceipt = null; saveReceiptDraft(); renderReceiving(); }
   else if (role === 'delivery-credit-edit-barcode') {
     // v365: "תקן ברקוד" בשורה מזוהה — פותח את שדה הברקוד של השורה הזאת בלבד. מצב תצוגה
@@ -1862,6 +2312,75 @@ function deliveryCreditAction(role, id, page, row) {
     if ($('rcDeliveryCredits')) deliveryCreditRefreshCards(); else renderReceiving();
   }
 }
+// v394: "החזר לתעודות" אפשרי בכל מצב של זיכוי שעבר מהתעודות (בבדיקה, מצורף או בשגיאה), חוץ מזיכוי
+// עם הנחה כללית ('discount' — רק "הסר") ובזמן קריאה. תעודה שלמה צריכה את הקריאה המקורית
+// (origin.read, נשמרת גם בטיוטה); עמוד שעבר צריך את הצילום שלו.
+function deliveryCreditCanUnmove(c) {
+  return !!c && !!c.origin && !c.origin.recapture && !deliveryCreditBusy(c) && c.errorKind !== 'discount'
+    && ((c.origin.kind === 'document' && !!c.origin.read) || (c.origin.kind === 'page' && c.pages.length > 0));
+}
+// v394: מאיפה הזיכוי הגיע, ו"זו לא תעודת זיכוי? החזר לתעודות" — גם בכרטיס של זיכוי שצורף.
+function deliveryCreditOriginHtml(c) {
+  const o = c && c.origin;
+  if (!o || o.recapture) return '';
+  const pages = Array.isArray(o.pages) ? o.pages : [];
+  const text = o.kind === 'page'
+    ? (pages.length > 1 ? 'עמודים ' + yotvataNumberList(pages) + ' של "תעודה ' + o.docNumber + '" הועברו לכאן כזיכוי.' : 'עמוד ' + (pages[0] || '') + ' של "תעודה ' + o.docNumber + '" הועבר לכאן כזיכוי.')
+    : 'צולם כ"תעודה ' + o.docNumber + '" וזוהה כתעודת זיכוי' + (o.title ? ' («' + htmlEscape(o.title) + '»)' : '') + '.';
+  return '<p data-credit-origin class="mt-1 text-sm text-slate-600">' + text +
+    (deliveryCreditCanUnmove(c) ? ' <button data-role="delivery-credit-unmove" data-id="' + c.id + '" class="btn-tap text-blue-700 font-bold">' +
+      (o.kind === 'page' ? 'זה לא זיכוי? החזר את העמוד לתעודות' : 'זו לא תעודת זיכוי? החזר לתעודות') + '</button>' : '') + '</p>';
+}
+// v394: מחזיר זיכוי שעבר מהתעודות לרשימת התעודות — בלי קריאה בתשלום. תעודה שלמה חוזרת עם הקריאה
+// המקורית שלה (הצילומים מהזיכרון, או אחרי רענון — לפי מספר העמודים), מסומנת "תעודת משלוח" לפי
+// ההחלטה של העובד (kindDecision), כך שלא תעבור שוב לבד. עמוד שעבר חוזר כתעודה נפרדת לבדיקה במסך
+// הצילום. עד 4 תעודות ו-8 עמודים, כמו בצילום.
+function deliveryCreditUnmove(id) {
+  if (!canEditDraft('receiving')) return false;
+  const c = deliveryCreditFind(id);
+  if (!c || aiScanBusy || receiptFinalizing || !deliveryCreditCanUnmove(c)) return false;
+  const o = c.origin, page = o.kind === 'page';
+  const seeded = () => aiScanDocuments.length === 1 && !aiScanDocuments[0].pages.length && !aiScanDocuments[0].restoredPageCount && !aiScanDocuments[0].scanResult;
+  const pagesBack = () => page ? (c.originPages || c.pages) : ((c.originCache && c.originCache.pages) || c.originPages || c.pages);
+  const others = seeded() ? [] : aiScanDocuments;
+  const total = others.reduce((n, d) => n + (d.pages.length || d.restoredPageCount || 0), 0) + (pagesBack().length || (page ? 0 : Number(o.pageCount) || 0));
+  if (others.length >= 4 || total > 8) { showToast('אי אפשר להחזיר: יש כבר 4 תעודות או 8 עמודים.', null, null, 4500); return false; }
+  showConfirm('להחזיר לתעודות?', page
+    ? 'העמוד יחזור לרשימת התעודות כתעודה נפרדת, והזיכוי יוסר. הוא ייקרא כשתלחץ "התחל קליטת מוצרים".'
+    : 'תעודה ' + o.docNumber + ' תחזור לרשימת התעודות כתעודת משלוח, והזיכוי יוסר. הקריאה שכבר נעשתה נשמרת — אין קריאה נוספת.', 'החזר לתעודות', () => {
+    if (deliveryCreditFind(id) !== c || aiScanBusy || receiptFinalizing || !deliveryCreditCanUnmove(c)) return;
+    const pages = pagesBack();
+    let input;
+    if (!page) {
+      const read = o.read || {};
+      const scanResult = c.originCache ? c.originCache.scanResult : { ok: true, docIndex: 0, doc: cloneSafe(read.doc), serviceVersion: read.serviceVersion || null,
+        model: read.model || null, requestId: read.requestId || null, scanAudit: read.scanAudit || null, verification: read.verification || null, warnings: [] };
+      input = { scanId: o.scanId && !aiScanDocuments.some(d => d.scanId === o.scanId) ? o.scanId : makeOperationId('paper'), noteIndex: 0, amount: null, units: null,
+        pages, restoredPageCount: pages.length ? 0 : Number(o.pageCount) || 0, scanResult, kindDecision: { kind: 'delivery', at: Date.now(), source: 'unmove' } };
+      // הקריאה המקורית שמורה: "התחל" לא ישלח אותה שוב. גם קריאה שעדיין נראית כמו זיכוי (שלילית)
+      // נשמרת — היא תחכה להחלטה בכרטיס, כמו כל תעודה מוחזקת, ולא תעלה שוב בתשלום.
+      const count = pages.length || input.restoredPageCount;
+      if (scanResult && scanResult.ok && (yotvataPaperCheck(scanResult.doc, count).ok || yotvataPaperCreditSignals(scanResult.doc, count).signal)) {
+        input.cachedResult = scanResult; input.cachedPages = pages.slice();
+      }
+    } else {
+      input = { scanId: makeOperationId('paper'), noteIndex: 0, amount: null, units: null, pages, scanResult: null };
+      receiptPhotoCaptureOpen = true;
+    }
+    receiptRememberScanResults();
+    if (seeded()) aiScanDocuments = [input];
+    else aiScanDocuments.splice(Math.max(0, Math.min((Number(o.docNumber) || 1) - 1, aiScanDocuments.length)), 0, input);
+    receiptDeliveryCredits = receiptDeliveryCredits.filter(x => x !== c); pendingReceipt = null;
+    aiScanDropCancelled();
+    if (aiOrientationSession && c.pages.includes(aiOrientationSession.page)) aiCloseOrientationReview();
+    receiptScanChanged();
+    if (receiptEntryMode === 'photo' && (receiptPaperScanState !== 'ok' || yotvataHeldDocuments().length)) yotvataAdoptPaperAnchors();
+    saveReceiptDraft(); renderReceiving();
+    const n = aiScanDocuments.indexOf(input) + 1;
+    showToast(page ? 'העמוד חזר לתעודות כתעודה ' + n + '. הוא ייקרא כשתלחץ "התחל קליטת מוצרים".' : 'תעודה ' + n + ' חזרה לתעודות. הקריאה שכבר נעשתה נשמרה.', null, null, 4500);
+  });
+  return true;
+}
 // v364: כרטיס של זיכוי אחד — כדי ש-deliveryCreditRefreshCards יוכל לבנות מחדש כרטיס בודד.
 function deliveryCreditCardHtml(c) {
   const busy = deliveryCreditBusy(c), rows = c.paper ? deliveryCreditRows(c) : [];
@@ -1871,6 +2390,7 @@ function deliveryCreditCardHtml(c) {
   const pages = c.pages.map((p, i) => '<button data-role="delivery-credit-page" data-id="' + c.id + '" data-page="' + i + '" class="btn-tap border rounded-lg p-1"><img src="' + p.dataUrl + '" alt="עמוד בזיכוי" class="w-16 h-20 object-contain"><span class="text-xs">עמוד ' + (i + 1) + '</span></button>').join('');
   return (confirmed ? '<details data-delivery-credit="' + c.id + '" class="border border-emerald-200 rounded-xl mt-2 bg-white"><summary class="cursor-pointer p-3 text-sm font-black text-emerald-800">זיכוי שאושר · ₪' + fmtMoney(Math.abs(c.paper.subtotalExVat)) + ' לפני מע״מ · פרטים</summary><div class="px-3 pb-3">' : '<article data-delivery-credit="' + c.id + '" class="border-2 border-emerald-200 rounded-xl p-3 mt-3 bg-white">') + '<div class="flex justify-between gap-2"><b>' + (confirmed ? 'זיכוי שאושר למשלוח' : 'תעודת זיכוי מהנהג') + '</b>' +
     '<button data-role="delivery-credit-remove" data-id="' + c.id + '" class="btn-tap text-rose-700 text-sm font-bold">הסר זיכוי</button></div>' +
+    deliveryCreditOriginHtml(c) +
     deliveryCreditNoticeHtml(c) +
     (duplicate ? '<p class="mt-2 text-amber-800 font-bold">מספר הזיכוי הזה כבר צורף. בדוק את המספר או הסר את הכפילות.</p>' : '') +
     (c.status === 'confirmed' && !confirmed && !duplicate ? '<p class="mt-2 text-amber-800 font-bold">פרטי המוצר השתנו. בדוק את הזיכוי ואשר שוב.</p>' : '') +
@@ -1963,7 +2483,11 @@ function deliveryCreditOpenWork(message) {
 function deliveryCreditNotes(credits = receiptDeliveryCredits) {
   return credits.map(c => ({ id: c.id, source: 'delivery_credit_scan', number: c.number,
     amount: Math.abs(r2(c.paper.subtotalExVat)), at: c.confirmedAt, rows: deliveryCreditRows(c), paper: c.paper, scanAudit: c.scanAudit || null,
-    autoConfirmed: c.autoConfirmed === true })); // v365: לביקורת — צורף לבד לפי קריאה מאומתת, בלי אישור של העובד
+    autoConfirmed: c.autoConfirmed === true, // v365: לביקורת — צורף לבד לפי קריאה מאומתת, בלי אישור של העובד
+    // v394: לביקורת — זיכוי שצולם כתעודה רגילה: מאיזו תעודה, אם עבר לבד, ואיך נקרא הנייר. זיכוי של
+    // הכפתור הירוק נשמר בדיוק כמו עד היום.
+    ...(c.origin ? { paperMode: c.paperMode || null, origin: { kind: c.origin.kind, docNumber: c.origin.docNumber, auto: !!c.origin.auto,
+      verdict: c.origin.verdict || '', title: c.origin.title || null } } : {}) }));
 }
 function deliveryCreditSummaryHtml() {
   const p = pendingReceipt, notes = p && p.shortCreditNotes || [];
@@ -2150,6 +2674,14 @@ function readNoteEntry(required, onWaive) {
   const amountInp = $('rcNoteInput'), unitsInp = $('rcNoteUnits');
   const amountRaw = ((amountInp || {}).value || '').trim();
   const unitsRaw = ((unitsInp || {}).value || '').replace(/[^0-9]/g, '');
+  // v394: parseNoteVal מוחק מינוס, ו"-83.52" (או "83.52-", "(83.52)") היה נקלט כ-+83.52 — זיכוי שנספר
+  // כתעודה כפל את הפער. זיכוי מהנהג מצלמים בכפתור הירוק; כאן רק תעודות משלוח.
+  if (/[-−–(]/.test(amountRaw) || /[-−–]/.test((unitsInp || {}).value || '')) {
+    showToast(receiptAttachTarget ? 'סכום עם מינוס הוא זיכוי. כאן מקלידים רק תעודות משלוח; זיכוי רושמים אחרי השמירה בכרטיס התעודה ("התקבל זיכוי מהספק").'
+      : 'סכום עם מינוס הוא זיכוי. זיכוי מהנהג מצלמים בכפתור הירוק "הנהג הביא זיכוי על חוסר? צלם כאן" — כאן מקלידים רק תעודות משלוח.', null, null, 6000);
+    if (amountInp) amountInp.focus();
+    return false;
+  }
   const v = parseNoteVal(amountRaw);
   if (v == null) {
     if (!required && !unitsRaw) return null;
@@ -2181,7 +2713,7 @@ function receiptDraftPayload(includeScan) {
     paperState: receiptPaperScanState, paperProblems: receiptPaperScanProblems, scanHistory: receiptScanHistory,
     deliveryCredits: deliveryCreditSnapshot(),
     photoInputs: aiScanDocuments.map(d => ({ scanId: d.scanId, amount: d.amount, units: d.units, lines: d.lines,
-      pageCount: d.pages.length || d.restoredPageCount || 0 })),
+      pageCount: d.pages.length || d.restoredPageCount || 0, ...(d.kindDecision ? { kindDecision: d.kindDecision } : {}) })), // v394
     analysisCache: includeScan ? receiptAnalysisCache : null,
     aiScan: includeScan ? scan : null };
 }
@@ -2216,12 +2748,17 @@ function receiptRebuildScanResponse() {
     if (result.doc) result.doc.noteIndex = index;
     return result;
   }).filter(Boolean);
-  const good = results.filter(r => r.ok && r.doc);
-  const next = results.length ? { ok: good.length > 0,
-    serviceVersion: good.length ? Math.min(...good.map(r => Number(r.serviceVersion) || 0)) : null,
-    scan: { documents: good.map(r => r.doc), warnings: results.flatMap(r => r.warnings || (r.errorMessage ? [r.errorMessage] : [])) },
-    model: [...new Set(good.map(r => r.model).filter(Boolean))].join(' · ') || null,
-    requestId: good.map(r => r.requestId).filter(Boolean).join(' · ') || null,
+  const ok = results.filter(r => r.ok && r.doc);
+  // v394: aiScanResponse היא תצוגת הכסף. תעודה מוחזקת (נראית כמו זיכוי ומחכה להחלטה) לא נכנסת
+  // אליה — וכך לא לעוגנים, להשוואה, לכמויות בנייר, לבדיקת המחירים, למנתח ולכיסוי הזיכוי. זו נקודת
+  // המעבר היחידה. הקריאה שלה נשמרת בתעודה עצמה (input.scanResult) ובטיוטה (receiptScanSnapshot).
+  const money = ok.filter(r => !yotvataDocumentHeld(aiScanDocuments[r.docIndex]));
+  const shown = results.filter(r => !(r.ok && r.doc) || money.includes(r));
+  const next = results.length ? { ok: money.length > 0,
+    serviceVersion: ok.length ? Math.min(...ok.map(r => Number(r.serviceVersion) || 0)) : null,
+    scan: { documents: money.map(r => r.doc), warnings: shown.flatMap(r => r.warnings || (r.errorMessage ? [r.errorMessage] : [])) },
+    model: [...new Set(ok.map(r => r.model).filter(Boolean))].join(' · ') || null,
+    requestId: ok.map(r => r.requestId).filter(Boolean).join(' · ') || null,
     perDocument: results.map(yotvataScanMetadata) } : null;
   // Preserve identity when only serializing; product confirmation dialogs hold it.
   if (next && aiScanResponse && aiScanResponse.scan && aiScanResponse.scan.documents.length === next.scan.documents.length
@@ -2251,9 +2788,15 @@ function receiptScanSnapshot() {
   receiptRememberScanResults();
   receiptRebuildScanResponse();
   if (!aiScanResponse || !aiScanResponse.scan) return null;
+  // v394: aiScanResponse is the money view; the snapshot keeps every paid read — גם של תעודה
+  // מוחזקת, שאינה בתצוגת הכסף. בלי זה רענון היה מאבד קריאה ששולמה, ו"התחל" היה קורא אותה שוב.
+  // כשאין תעודה מוחזקת התוצאה זהה בדיוק לגרסה 393.
+  const all = aiScanDocuments.map(d => d.scanResult).filter(r => r && r.ok && r.doc);
   return { schemaVersion: 2, ...aiScanResponse,
+    scan: { ...aiScanResponse.scan, documents: all.map(r => r.doc),
+      warnings: aiScanDocuments.map(d => d.scanResult).filter(Boolean).flatMap(r => r.warnings || (r.errorMessage ? [r.errorMessage] : [])) },
     docInputs: aiScanDocuments.map(d => ({ scanId: d.scanId, amount: d.amount, units: d.units, lines: d.lines,
-      pageCount: d.pages.length || d.restoredPageCount || 0 })),
+      pageCount: d.pages.length || d.restoredPageCount || 0, ...(d.kindDecision ? { kindDecision: d.kindDecision } : {}) })),
     pageCounts: aiScanDocuments.map(d => d.pages.length || d.restoredPageCount || 0) };
 }
 function receiptStorageNotice(message) {
@@ -2289,8 +2832,11 @@ function restoreDraftScan(saved) {
     const paper = docs.find(d => d.noteIndex === index);
     const pageCount = Number(counts[index] ?? note.pageCount ?? (paper && paper.pageCount) ?? 0);
     totalPages += pageCount;
+    // v394: "לא, זו תעודת משלוח רגילה" שורדת רענון (רק בצורה התקינה שלה).
+    const decision = note.kindDecision && note.kindDecision.kind === 'delivery' && Number.isFinite(note.kindDecision.at) ? note.kindDecision : null;
     return { scanId: note.scanId || makeOperationId('paper'), noteIndex: index,
-      amount: note.amount, units: note.units, lines: note.lines, pages: [], restoredPageCount: pageCount, scanResult: null };
+      amount: note.amount, units: note.units, lines: note.lines, pages: [], restoredPageCount: pageCount, scanResult: null,
+      ...(decision ? { kindDecision: { kind: 'delivery', at: decision.at, ...(typeof decision.source === 'string' ? { source: decision.source } : {}) } } : {}) };
   });
   if (restored.some(d => !Number.isInteger(d.restoredPageCount) || d.restoredPageCount < 0 || d.restoredPageCount > 8)
     || totalPages > 8 || new Set(restored.map(d => d.scanId)).size !== restored.length) return false;
@@ -2304,8 +2850,10 @@ function restoreDraftScan(saved) {
       model: (meta && meta.model) || saved.model, requestId: (meta && meta.requestId) || saved.requestId,
       warnings: saved.scan.warnings || [], retryAudit: meta && meta.barcodeRetry };
     input.scanResult = result;
+    // v394: גם קריאה של תעודה מוחזקת (נראית כמו זיכוי) נשמרת — היא שולמה, ואינה נקראת שוב.
     if (yotvataPaperCheck(paper, input.restoredPageCount).ok || ((paper.rows || []).some(r => r.paperValuesCorrection)
-      && yotvataPaperCheck(paper.__pricePaper, input.restoredPageCount).ok)) input.cachedResult = result;
+      && yotvataPaperCheck(paper.__pricePaper, input.restoredPageCount).ok)
+      || yotvataPaperCreditSignals(paper, input.restoredPageCount).signal) input.cachedResult = result;
   });
   receiptRebuildScanResponse();
   return docs.length > 0;
@@ -2322,7 +2870,7 @@ function restoreReceiptDraft(incoming) {
     receiptReconcileSession = null; receiptReconcileSource = null; reconcileData = null;
     receiptDeliveryCredits = (Array.isArray(o && o.deliveryCredits) ? o.deliveryCredits : []).filter(c => c && typeof c.id === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(c.id)).slice(0, 4)
       // v365: זיכוי שאושר (גם לבד — autoConfirmed) חוזר מאושר כמו שנשמר; השחזור לעולם לא מאשר ולא קורא.
-      .map(({ waiting, waitingFor, progress, resume, editBarcode, ...c }) => ({ ...c, pages: [], status: deliveryCreditBusy(c) ? 'interrupted' : c.status,
+      .map(({ waiting, waitingFor, progress, resume, editBarcode, originPages, originCache, ...c }) => ({ ...c, pages: [], status: deliveryCreditBusy(c) ? 'interrupted' : c.status,
         // v364: מפתח האיסוף חוזר רק מהטיוטה שבמכשיר (incoming = ענן: אין מפתח).
         ...(!incoming && deliveryCreditValidResume(resume) ? { resume: { scanKey: resume.scanKey, at: resume.at } } : {}) }));
     if (Array.isArray(o)) { receiptCountingMode = 'scan'; receiptList = o; receiptOpened = o.length > 0; }
@@ -2361,9 +2909,15 @@ function restoreReceiptDraft(incoming) {
     recomputeNoteTotal();
     // v272: אחרי recomputeNoteTotal — שחזור הקריאה נשען על העוגנים המחושבים.
     aiScanFromDraft = restoreDraftScan(o && (o.aiScan || (o.photoInputs && o.photoInputs.length ? { scan: { documents: [], warnings: [] }, docInputs: o.photoInputs } : null)));
-    if (receiptEntryMode === 'photo' && receiptAnchorSource === 'paper' && (!aiScanFromDraft || !aiScanDocuments.every(yotvataCachedDoc))) {
+    // v394: טיוטה שגרסה 393 כבר אימצה, ובה תעודה שעכשיו מוחזקת (למשל קריאות שנחלקו בסימן ואומצה
+    // הקריאה החיובית — זיכוי שנספר כחשבונית), מאבדת את האימוץ: העוגנים כללו את הזיכוי. כרטיס
+    // ההחלטה מוצג, ושום דבר לא נקרא ולא עובר בשחזור.
+    const held = yotvataHeldDocuments();
+    if (receiptEntryMode === 'photo' && receiptAnchorSource === 'paper' && (!aiScanFromDraft || !aiScanDocuments.every(yotvataCachedDoc) || held.length)) {
       receiptPaperScanState = 'failed'; receiptAnchorSource = null;
-      receiptPaperScanProblems = ['קריאת התעודה אינה זמינה. הקלד את המספרים או צלם שוב לפני הסיום.'];
+      receiptPaperScanProblems = held.length ? held.map(x => 'תעודה ' + (x.index + 1) + ' נראית כמו תעודת זיכוי — ההחלטה בכרטיס שמתחת.')
+        : ['קריאת התעודה אינה זמינה. הקלד את המספרים או צלם שוב לפני הסיום.'];
+      if (held.length) { receiptNotes = []; recomputeNoteTotal(); }
     }
   } catch (e) {}
 }
@@ -3722,7 +4276,7 @@ async function logAction(type, title, details, meta) {
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'actionLog', id), {
       timestamp: Date.now(), type: type || 'system', title: title || 'פעולה', details: details || '',
       deviceName: actionDeviceLabel(), uid: (auth && auth.currentUser && auth.currentUser.uid) || '',
-      appVersion: 'v393_reconcile_credit_baseline', meta: cloneSafe(meta || {})
+      appVersion: 'v394_credit_as_document', meta: cloneSafe(meta || {})
     });
   } catch (e) { console.warn('action log failed', e); }
 }
@@ -3806,7 +4360,7 @@ async function exportFullBackup() {
       backupType: 'yotvata-firestore-full',
       backupVersion: 1,
       appId,
-      appVersion: 'v393_reconcile_credit_baseline',
+      appVersion: 'v394_credit_as_document',
       exportedAt: Date.now(),
       exportedAtIso: new Date().toISOString(),
       collections: {},
@@ -8460,7 +9014,7 @@ function yotvataScanHistoryHtml(audit, scan) {
     ? '<div class="mt-2 text-slate-500">ממצאי הכמות שנשמרו בסריקה: ' + scan.quantityFindings.map(f => htmlEscape(f.text || '')).join(' · ') + '</div>' : '';
   if (!history.length && !verifiedLine && !quantities) return '';
   return '<details class="rounded-xl bg-slate-50 border border-slate-200 p-2 mt-2 text-xs"><summary class="font-bold cursor-pointer">פרטי פענוח התעודה</summary>' + verifiedLine + quantities +
-    history.map(entry => '<div class="mt-2 border-t pt-2">תעודה ' + (entry.docIndex + 1) + ' · ' + (entry.ok ? 'התקבלה קריאה' : 'הפענוח נכשל') +
+    history.map(entry => '<div class="mt-2 border-t pt-2">תעודה ' + (entry.docIndex + 1) + ' · ' + (entry.movedToCredit ? 'זוהתה כתעודת זיכוי והועברה לזיכויים' : entry.ok ? 'התקבלה קריאה' : 'הפענוח נכשל') + // v394
       (entry.scanAudit && Array.isArray(entry.scanAudit.attempts) ? entry.scanAudit.attempts.map(a => '<div dir="ltr">' +
         htmlEscape(a.model || a.requestedModel || '') + ' · ' + htmlEscape(a.stage || '') + ' · ' + htmlEscape(a.outcome || '') + (a.selected ? ' ✓' : '') + '</div>').join('') :
         '<div dir="ltr">' + htmlEscape(entry.model || 'ללא דיווח מודל מהשרת') + '</div>') + '</div>').join('') + '</details>';
@@ -8504,10 +9058,12 @@ function receiptManualStatusHtml() {
   const running = aiScanBusy || receiptPaperScanState === 'running';
   const ready = !running && receiptPaperScanState === 'ok' && !!aiScanResponse;
   const problems = receiptPaperScanProblems.length ? receiptPaperScanProblems : [aiScanError || 'הפענוח לא הושלם. בדוק את צילומי התעודה כדי להמשיך.'];
-  return running
+  // v394: כרטיס ההחלטה של תעודה שנראית כמו זיכוי — גם במסך הכמויות הידני.
+  const heldHtml = yotvataHeldDocuments().map(x => yotvataCreditDocumentCardHtml(x.index)).join('');
+  return (running
     ? '<div role="status" class="rounded-xl bg-blue-50 border border-blue-200 p-4 mb-3 text-base font-bold text-blue-800"><i class="fa-solid fa-circle-notch fa-spin"></i> ' + htmlEscape(aiScanProgressText || 'מפענח את התעודה…') + '<div class="mt-2 text-sm">בסיום הפענוח אפשר לאשר את הכמויות או לדווח על חוסרים ועודפים.</div></div>'
     : ready ? ''
-    : '<div role="status" class="rounded-xl bg-amber-50 border border-amber-300 p-4 mb-3 text-base font-bold text-amber-900">צריך להשלים את פענוח התעודה<div class="mt-2 text-sm">' + problems.map(htmlEscape).join('<br>') + '</div><button data-role="rc-photo-repair" class="btn-tap w-full bg-white border border-amber-300 rounded-xl py-3 mt-3">בדוק את צילומי התעודה</button></div>';
+    : '<div role="status" class="rounded-xl bg-amber-50 border border-amber-300 p-4 mb-3 text-base font-bold text-amber-900">צריך להשלים את פענוח התעודה<div class="mt-2 text-sm">' + problems.map(htmlEscape).join('<br>') + '</div><button data-role="rc-photo-repair" class="btn-tap w-full bg-white border border-amber-300 rounded-xl py-3 mt-3">בדוק את צילומי התעודה</button></div>') + heldHtml;
 }
 function receiptManualReceivingHtml() {
   const running = aiScanBusy || receiptPaperScanState === 'running';
@@ -8913,6 +9469,13 @@ function finishReceipt() {
   // כדי שגם זיכוי שלא אושר יקבל את ההסבר הנכון; הכרטיס עצמו מוצג במסך (deliveryCreditsHtml).
   if (receiptWithoutPaper() && receiptDeliveryCredits.length) { deliveryCreditOpenWork('לקליטה בלי תעודה אי אפשר לצרף זיכוי — הסר את הזיכוי או הקלד את נתוני התעודה.'); return; }
   if (!deliveryCreditReady()) { deliveryCreditOpenWork('לפני הסיום צריך להשלים ולאשר את תעודות הזיכוי שצורפו, או להסיר אותן.'); return; }
+  // v394: תעודה שנראית כמו זיכוי ומחכה להחלטה לעולם לא נשמרת כחשבונית — בכל דרך קליטה.
+  const heldDocuments = yotvataHeldDocuments();
+  if (heldDocuments.length) {
+    hideReceiptSummary(); pendingReceipt = null; currentView = 'receiving'; renderReceiving();
+    const host = $('rcPaperStatus'); if (host) host.scrollIntoView({ block: 'start' });
+    showToast('לפני הסיום צריך להחליט על תעודה ' + (heldDocuments[0].index + 1) + ' — היא נראית כמו תעודת זיכוי.', null, null, 6000); return;
+  }
   if (!paperRowEnsureBalanced()) return;
   if (!receiptList.length) return;
   if (receiptEntryMode === 'photo' && receiptPaperScanState === 'running') {
@@ -13657,6 +14220,13 @@ function priceAuditLegacyVisible(f) {
 }
 function refreshPriceScannerNotice() {
   const button = $('scanPriceNotice'); if (!button) return;
+  // v394: תעודה שנראית כמו זיכוי מחכה להחלטה — העובד שבסורק שומע על זה כאן, לא רק בסיום.
+  const held = scanPurpose === 'receiving' && !aiScanBusy ? yotvataHeldDocuments() : [];
+  if (held.length) {
+    button.dataset.kind = 'credit-document'; button.classList.remove('hidden');
+    button.textContent = 'תעודה ' + (held[0].index + 1) + ' נראית כמו זיכוי — לחץ להחלטה'; return;
+  }
+  if (button.dataset) delete button.dataset.kind;
   const a = receiptPriceAudit(), pending = priceAuditPendingRows(a);
   const relevant = scanPurpose === 'receiving' && a.state === 'ready' && (pending.length > 0 || !a.complete);
   if (relevant) button.classList.remove('hidden'); else button.classList.add('hidden');
@@ -14841,6 +15411,8 @@ function aiEvaluateInvoiceScan(payload, receivedRows = reconcileData || []) {
     const doc = returned.get(index);
     if (!doc) {
       missingDocuments++;
+      // v394: תעודה מוחזקת לא "נכשלה" — היא נקראה, ומחכה להחלטה אם היא זיכוי. צילום חוזר לא יעזור.
+      if (yotvataDocumentHeld(inputDoc)) { errors.push('תעודה ' + (index + 1) + ' נראית כמו תעודת זיכוי — היא אינה נכללת בהשוואה עד שתחליט עליה.'); return; }
       const why = documentFailureReason(index);
       errors.push('תעודה ' + (index + 1) + ': לא התקבל פענוח מה-AI' + (why ? ' — ' + why : '') + '. צלם את התעודה הזאת שוב — בלעדיה אי אפשר להשוות מול הנייר.');
       return;
@@ -15578,10 +16150,13 @@ async function aiRequestSingleDocScan(token, pages, expected, options = {}) {
     const fresh = remembered && Date.now() - remembered.at < AI_SCAN_RESUME_TTL_MS ? remembered : null;
     if (remembered && !fresh) aiScanCutKeys.delete(fingerprint);
     const scanKey = resumeOnly || (fresh ? fresh.key : aiScanNewKey());
+    // v394: כל קריאת חשבונית מבקשת גם את סוג המסמך ואת הכותרת המודפסת (שרת v151, תיאור
+    // בלבד — לא משנה את הקריאה). שרת ישן מתעלם מהמפתח. זיכוי (documentKind) ואיסוף בלי צילומים
+    // (resumeBody) לא נושאים אותו, וטביעת האצבע של הצילומים לא השתנתה.
     const fullBody = resumeOnly ? null : {
       reviewProtocolVersion: 1,
       scanKey,
-      ...(documentKind ? { documentKind } : {}),
+      ...(documentKind ? { documentKind } : { detectDocumentType: true }),
       documents: [{
         noteIndex: 0,
         pages: pages.map(p => p.dataUrl),
@@ -15765,7 +16340,9 @@ function aiSingleDocScore(returnedDoc, inputDoc) {
   const anchorUnits = inputDoc.units != null ? Number(inputDoc.units) : (printedUnits != null && isFinite(printedUnits) ? Math.round(printedUnits) : null);
   const unitsExact = anchorUnits == null ? 1 : (units === anchorUnits ? 1 : 0);
   const subtotalExact = expectedCents == null ? 1 : (subtotalCents != null && subtotalCents === expectedCents ? 1 : 0);
-  const hasContent = rows.length > 0 && units > 0 ? 1 : 0;
+  // v394: פתק זיכוי שנקרא עם כמות שלילית (-24) הוא תוכן, לא תעודה הפוכה — בלי זה הנתיב שאינו
+  // ברקע שילם עוד עד שתי קריאות מסובבות על אותו פתק.
+  const hasContent = rows.length > 0 && (units > 0 || paperCreditSigns(returnedDoc) === 'negative' || (returnedDoc && returnedDoc.documentType === 'credit')) ? 1 : 0;
   const confidence = returnedDoc && isFinite(Number(returnedDoc.confidence)) ? Number(returnedDoc.confidence) : 0;
   return [unitsExact, subtotalExact, hasContent, confidence];
 }
@@ -15796,11 +16373,11 @@ async function aiScanSingleDocPipeline(token, docIndex, inputDoc = aiScanDocumen
     }
     catch (error) {
       if (runId === aiScanRunId) receiptScanHistory.push({ docIndex, startedAt, completedAt: Date.now(), ok: false,
-        error: error.message, scanAudit: error.scanAudit || null });
+        error: error.message, scanAudit: error.scanAudit || null, scanId: inputDoc.scanId || null }); // v394: לסימון "הועברה לזיכויים"
       throw error;
     }
     if (runId !== aiScanRunId) throw new Error('scan_cancelled');
-    receiptScanHistory.push({ docIndex, startedAt, completedAt: Date.now(), ok: true,
+    receiptScanHistory.push({ docIndex, startedAt, completedAt: Date.now(), ok: true, scanId: inputDoc.scanId || null,
       model: payload.model || null, requestId: payload.requestId || null, scanAudit: payload.scanAudit || null,
       checksumRetryAttempted: !!payload.checksumRetryAttempted, checksumRetryModel: payload.checksumRetryModel || null,
       barcodeRetryAttempted: !!payload.barcodeRetryAttempted, barcodeRetryModel: payload.barcodeRetryModel || null });
@@ -15904,7 +16481,10 @@ async function aiRunInvoiceScan({ background = false } = {}) {
       results.push(result);
       if (result.ok) {
         input.pages = result.pages;
-        if (!paperFirst || yotvataPaperCheck(result.doc, input.pages.length || input.restoredPageCount).ok) {
+        // v394: גם קריאה שנראית כמו זיכוי נשמרת (התעודה מוחזקת עד החלטה) — "התחל", "בדוק צילומים"
+        // ורענון לא ישלחו אותה שוב בתשלום, עד שהצילומים שלה ישתנו.
+        const pageCount = input.pages.length || input.restoredPageCount;
+        if (!paperFirst || yotvataPaperCheck(result.doc, pageCount).ok || yotvataPaperCreditSignals(result.doc, pageCount).signal) {
           const { pages, ...cached } = result;
           input.cachedResult = cached; input.cachedPages = pages.slice();
         }
@@ -15916,7 +16496,9 @@ async function aiRunInvoiceScan({ background = false } = {}) {
     aiScanAutoRotationNote = results.map(r => r.rotationText).filter(Boolean).join(' · ');
     aiScanError = results.filter(r => !r.ok).map(r => 'תעודה ' + (r.docIndex + 1) + ': ' + r.errorMessage).join(' · ');
     aiScanErrorAnchor = results.some(r => r.errorAnchor);
-    if (!background && paperFirst) yotvataAdoptPaperAnchors();
+    // v394: גם בקריאה שאינה ברקע (פענוח מתוך מסך ההשוואה) — ניתוב לפני האימוץ ולפני ההשוואה. בלי
+    // receiptScanChanged: aiScanBusy משתחרר למטה רק כש-runId עדיין של הריצה הזאת.
+    if (!background && paperFirst) { const routed = yotvataRouteCreditDocuments(runId); yotvataAdoptPaperAnchors(); yotvataAnnounceRouting(routed); }
     if (!background && results.some(r => r.ok)) aiScanEvaluation = aiEvaluateInvoiceScan(aiScanResponse);
     saveReceiptDraft();
   } catch (error) {
@@ -24268,7 +24850,10 @@ $('rsBody').addEventListener('click', e => {
   const panel = app.querySelector('[data-price-panel]');
   if (panel) { panel.open = true; panel.scrollIntoView({ block: 'start' }); }
 });
-$('scanPriceNotice').addEventListener('click', () => { closeScanner(); renderReceiving(); const panel = app.querySelector('[data-price-panel]'); if (panel) { panel.open = true; panel.scrollIntoView({ block: 'start' }); } });
+$('scanPriceNotice').addEventListener('click', () => {
+  // v394: "תעודה N נראית כמו זיכוי — לחץ להחלטה" — אל כרטיס ההחלטה שבמצב הנייר.
+  if ($('scanPriceNotice').dataset.kind === 'credit-document') { closeScanner(); renderReceiving(); const host = $('rcPaperStatus'); if (host) host.scrollIntoView({ block: 'start' }); return; }
+  closeScanner(); renderReceiving(); const panel = app.querySelector('[data-price-panel]'); if (panel) { panel.open = true; panel.scrollIntoView({ block: 'start' }); } });
 app.addEventListener('change', (e) => {
   try {
   if (e.target.dataset.role === 'delivery-credit-file') { const input = e.target; deliveryCreditAddFiles(input.dataset.id, Array.from(input.files || []), input.dataset.replace === '1'); input.value = ''; return; }
@@ -24427,6 +25012,8 @@ app.addEventListener('click', (e) => {
   if (role === 'an-share') { anShareText(t.dataset.what === 'product' ? anProductText(anSelectedKey) : anSummaryText()); return; }
   if (role === 'an-copy') { anCopyText(t.dataset.what === 'product' ? anProductText(anSelectedKey) : anSummaryText()); return; }
 
+  // v394: כרטיס ההחלטה של תעודה שנראית כמו זיכוי (מזוהה לפי scanId, לא לפי מספר — המספור משתנה).
+  if (role.startsWith('rc-credit-doc-')) { yotvataCreditDocumentAction(role, t.dataset.scan); return; }
   if (role.startsWith('rc-photo-')) {
     if (aiScanBusy) return;
     const docIndex = Number(t.dataset.doc) || 0;
