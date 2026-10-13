@@ -1275,13 +1275,26 @@ function yotvataPaperCreditSignals(doc, pageCount) {
     pageSplit, rowsClose, typed: !!doc && typeof doc.documentType === 'string',
     signal: negativeSubtotal || readingNegative || anyCredit || titleCredit || !!pageSplit };
 }
-// v394: "לא, זו תעודת משלוח רגילה" (וגם "החזר לתעודות") נשמרת על קריאה חיובית: סכום לפני מע״מ חיובי
-// ואף סכום שלילי — או חשבונית חיובית עם שורת החזרה, שהשורות שלה (גם השלילית) סוגרות בדיוק את הסיכום
-// המודפס — ורק כשרוב הקריאות לא קראו סכום שלילי (אז הקריאה החיובית נבחרה רק כי לקריאה השלילית אין סיכום
-// תקין, לא כי המינוס אינו מודפס). בדיקת הנייר אינה תנאי: תעודה שנשמרה נכנסת לתצוגת הכסף כמו בגרסה 393 —
-// עוברת את הבדיקה ומאומצת, או שהבעיות שלה נאמרות והסכום והיחידות מוקלדים, כמו בכל תעודה. בלי זה תעודת
-// משלוח אמיתית שסך היחידות שלה לא נקרא לא הייתה נשמרת בשום דרך, וכל יציאה הוציאה אותה מסכום התעודות.
-// החלטה על קריאה שלילית אינה הופכת זיכוי לחשבונית.
+// v394: קריאה חיובית — תעודת משלוח, לא זיכוי שהמינוס של הסיכום שלו נשמט: סכום לפני מע״מ חיובי ואף סכום
+// שלילי, או חשבונית עם שורת החזרה — סיכום חיובי מעל שורות שסכומן חיובי. בזיכוי שהמינוס של הסיכום שלו נשמט
+// השורות שליליות, וסכומן שלילי. השורות אינן צריכות לסגור את הסיכום באגורה: מחיר שנקרא באגורה אחרת, פיקדון
+// בלי שורה או הנחה אינם הופכים חשבונית לזיכוי — בדיקת הנייר שלה אומרת אותם, כמו בגרסה 393.
+function yotvataPositiveRead(doc) {
+  if (!doc || typeof doc.subtotalExVat !== 'number' || !(doc.subtotalExVat > 0)) return false;
+  const signs = paperCreditSigns(doc);
+  if (signs !== 'mixed') return signs === 'as_printed';
+  const cents = (Array.isArray(doc.rows) ? doc.rows : []).reduce((sum, row) => {
+    const v = row && row.lineTotalExVat;
+    return sum + (typeof v === 'number' && Number.isFinite(v) ? Math.round(v * 100) : 0);
+  }, 0);
+  return cents > 0;
+}
+// v394: "לא, זו תעודת משלוח רגילה" (וגם "החזר לתעודות") נשמרת על קריאה חיובית (yotvataPositiveRead) שאינה
+// עמודים של שני מסמכים (pageSplit), ורק כשרוב הקריאות לא קראו סכום שלילי (אז הקריאה החיובית נבחרה רק כי
+// לקריאה השלילית אין סיכום תקין, לא כי המינוס אינו מודפס). בדיקת הנייר אינה תנאי: תעודה שנשמרה נכנסת לתצוגת
+// הכסף כמו בגרסה 393 — עוברת את הבדיקה ומאומצת, או שהבעיות שלה נאמרות והסכום והיחידות מוקלדים, כמו בכל
+// תעודה. בלי זה תעודת משלוח אמיתית שסך היחידות שלה לא נקרא, או חשבונית ששורה בה נקראה באגורה אחרת, לא הייתה
+// נשמרת בשום דרך, וכל יציאה הוציאה אותה מסכום התעודות. החלטה על קריאה שלילית אינה הופכת זיכוי לחשבונית.
 function yotvataKeptAsDelivery(input) {
   const doc = input && input.scanResult && input.scanResult.ok ? input.scanResult.doc : null;
   if (!doc || !input.kindDecision || input.kindDecision.kind !== 'delivery') return false;
@@ -1289,7 +1302,7 @@ function yotvataKeptAsDelivery(input) {
   const reads = (doc.modelVerification && Array.isArray(doc.modelVerification.readings) ? doc.modelVerification.readings : [])
     .map(r => r && r.values && r.values.subtotalExVat).filter(v => typeof v === 'number' && Number.isFinite(v));
   if (reads.length > 1 && reads.filter(v => v < 0).length * 2 > reads.length) return false;
-  return typeof doc.subtotalExVat === 'number' && doc.subtotalExVat > 0 && (s.signs === 'as_printed' || (s.signs === 'mixed' && s.rowsClose));
+  return yotvataPositiveRead(doc) && !s.pageSplit;
 }
 // v394: תעודה מוחזקת — פוענחה, יש לה סימן של זיכוי, והעובד לא קבע (בתוקף) שהיא תעודת משלוח.
 // פונקציה טהורה של הקריאה השמורה וההחלטה; נבדקת בכל בנייה של תצוגת הכסף.
@@ -1608,8 +1621,11 @@ function yotvataMoveDocumentToCredit(input, { auto = false, read = false, pages 
   receiptDeliveryCredits.push(c); receiptNoDoc = false; pendingReceipt = null;
   // היסטוריית הקריאות ("פרטי פענוח התעודה"): תעודה שלמה זוהתה כזיכוי והועברה; בפיצול התעודה נשארת
   // ונקלטת — רק העמודים שעברו נרשמים בקריאות שלה. "החזר לתעודות" מוחק את הרישום (deliveryCreditUnmove).
-  receiptScanHistory.forEach(entry => {
-    if (!entry || !input.scanId || entry.scanId !== input.scanId) return;
+  // בפיצול נרשמת רק הקריאה שהפיצול הוחלט עליה (הקריאה הנוכחית של התעודה, לפי requestId) — לא קריאה חוזרת
+  // קודמת של אותה תעודה, שקראה רק את העמודים שנשארו בפיצול קודם שבוטל. בלי מזהה כזה — כל הקריאות שלה.
+  const entries = receiptScanHistory.filter(entry => entry && input.scanId && entry.scanId === input.scanId);
+  const decided = pages && result && result.requestId ? entries.filter(entry => entry.requestId === result.requestId) : [];
+  (decided.length ? decided : entries).forEach(entry => {
     if (pages) entry.movedPagesToCredit = { id: c.id, pages: c.origin.pages.slice() };
     else entry.movedToCredit = c.id;
   });
@@ -1752,6 +1768,33 @@ function yotvataTypedNoteFor(input, creditPages = null) {
 function yotvataTypedNoteText(note) {
   return '₪' + fmtMoney(note.amount) + (note.units != null ? ' · ' + note.units + ' יח׳' : '');
 }
+// v394: בקליטה שהסכום והיחידות בה מוקלדים — תעודה שלמה שנכנסת לתעודות בהחלטה של העובד ("לא, זו תעודת משלוח
+// רגילה", "החזר לתעודות" של העברה שלא לקחה איתה שורה) נכנסת גם לסכום התעודות, כמו כל תעודת משלוח. שורה מוקלדת
+// שמסבירה אותה (yotvataTypedNoteFor — אותה ספירה כמו בהעברה) — אין מה לעשות (null). אחרת: { amount, units }
+// מהקריאה כשבדיקת הנייר שלה עברה (הסכום והיחידות מאומתים בחשבון של הנייר עצמו, כמו באימוץ מהצילום), ו-
+// { amount: null } כשלא — אז העובד מתבקש להקליד אותה. input יכול להיות גם תעודה שעוד אינה ברשימה.
+function yotvataTypedLineIn(input) {
+  if (receiptEntryMode === 'photo' || !input || yotvataTypedNoteFor(input) !== -1) return null;
+  const doc = input.scanResult && input.scanResult.ok ? input.scanResult.doc : null;
+  const check = yotvataPaperCheck(doc, input.pages.length || input.restoredPageCount || 0);
+  return check.ok ? { amount: r2(check.amount), units: check.units } : { amount: null, units: null };
+}
+// v394: מוסיף את השורה של תעודה שנכנסה לתעודות (yotvataTypedLineIn). בהקלדה הקלאסית (תעודת AI i נבנתה מהשורה
+// המוקלדת i, והתעודות האחרות עדיין כך) — לצד התעודה, עם העוגן שלה; אחרת בסוף.
+function yotvataAddTypedLine(input, note) {
+  const at = aiScanDocuments.indexOf(input), others = aiScanDocuments.filter(d => d !== input);
+  const cents = v => typeof v === 'number' && Number.isFinite(v) ? Math.round(v * 100) : null;
+  const inStep = at >= 0 && others.length > 0 && others.length === receiptNotes.length
+    && others.every((d, i) => cents(d.amount) != null && cents(d.amount) === cents(normNote(receiptNotes[i]).amount));
+  yotvataChangeTypedLines(() => receiptNotes.splice(inStep ? at : receiptNotes.length, 0, { amount: note.amount, units: note.units }));
+  if (inStep) { input.amount = note.amount; input.units = receiptNoteUnits != null ? note.units : null; }
+}
+// v394: מה האישור וההודעה אומרים על השורה של תעודה שנכנסה לתעודות (done — אחרי הפעולה).
+function yotvataTypedLineInText(line, done) {
+  if (!line) return '';
+  return line.amount == null ? ' השורה שלה לא בסכום התעודות, והקריאה שלה לא אומתה — הקלד את הסכום והיחידות שלה ("ערוך").'
+    : ' השורה שלה (' + yotvataTypedNoteText(line) + ') ' + (done ? 'נוספה' : 'תתווסף') + ' לסכום התעודות.';
+}
 // v394: השורות המוקלדות כמפתח להשוואה ("21704/58|15000/30") — עם מה שהעברה לזיכויים השאירה (typedNote.left).
 function yotvataTypedLinesKey(notes) {
   return notes.map(n => { const x = normNote(n); return Math.round(x.amount * 100) + '/' + x.units; }).join('|');
@@ -1867,11 +1910,15 @@ function yotvataCreditDocumentAction(role, scanId) {
     const keep = () => {
       if (!aiScanDocuments.includes(input) || aiScanBusy || receiptFinalizing || !yotvataDocumentHeld(input) || !yotvataKeepOffer(input).offered) return;
       input.kindDecision = { kind: 'delivery', at: Date.now(), source: 'card' };
+      // בקליטה שהסכום והיחידות בה מוקלדים — גם סכום התעודות (yotvataTypedLineIn).
+      const line = yotvataTypedLineIn(input);
+      if (line && line.amount != null) yotvataAddTypedLine(input, line);
       yotvataDecisionScanChanged(); settle(); // התעודה נכנסת לתצוגת הכסף ונאמצת עם השאר
-      showToast('תעודה ' + n + ' נקלטת כתעודת משלוח, לפי ההחלטה שלך.', null, null, 4000);
+      const typedText = yotvataTypedLineInText(line, true);
+      showToast('תעודה ' + n + ' נקלטת כתעודת משלוח, לפי ההחלטה שלך.' + typedText, null, null, typedText ? 6000 : 4000);
     };
     if (!offer.confirm) { keep(); return true; }
-    showConfirm('תעודה ' + n + ' היא תעודת משלוח?', yotvataKeepConfirmText(input.scanResult.doc, offer), 'כן, תעודת משלוח', keep);
+    showConfirm('תעודה ' + n + ' היא תעודת משלוח?', yotvataKeepConfirmText(input.scanResult.doc, offer) + yotvataTypedLineInText(yotvataTypedLineIn(input), false), 'כן, תעודת משלוח', keep);
     return true;
   }
   if (role !== 'rc-credit-doc-move' && role !== 'rc-credit-doc-split') return false;
@@ -2269,11 +2316,11 @@ function deliveryCreditPaperError(message) {
 function deliveryCreditApplyPaper(c, paper, meta, readAs, { toast = true } = {}) {
   c.readAs = readAs;
   // סיכום חיובי בקריאה כזיכוי — אין כאן זיכוי, גם כשאחת השורות שלילית (חשבונית עם שורת החזרה:
-  // 'mixed'), אבל רק כשהשורות שלה (גם השלילית) סוגרות את הסיכום החיובי. שורות שנקראו עם מינוס תחת
-  // סיכום שהמינוס שלו נשמט (סכום השורות שלילי) הן זיכוי — לא "תעודה רגילה".
+  // 'mixed', שסכום השורות שלה חיובי — גם כשאינו סוגר את הסיכום באגורה). שורות שנקראו עם מינוס תחת
+  // סיכום שהמינוס שלו נשמט (סכום השורות שלילי) הן זיכוי — לא "תעודה רגילה". אותו כלל כמו לשמירה
+  // כתעודת משלוח (yotvataPositiveRead), כדי שהדרך חזרה תיפתח בדיוק כשהיא תכובד.
   const signs = paper ? paperCreditSigns(paper) : '';
-  const positive = !!paper && typeof paper.subtotalExVat === 'number' && paper.subtotalExVat > 0
-    && (signs === 'as_printed' || (signs === 'mixed' && yotvataPaperCreditSignals(paper, c.pageCount).rowsClose));
+  const positive = yotvataPositiveRead(paper);
   // v394: מה קריאת הזיכוי של נייר שעבר מהתעודות ראתה — על origin, ולכן לא נמחק בצילום מחדש
   // (deliveryCreditInvalidate) ושורד רענון. 'credit' — קריאה כזיכוי ראתה מינוס (סכום או שורות שליליים
   // שאינם שורת החזרה בתוך חשבונית חיובית), גם אם בדיקה אחרת נכשלה (כמויות, סיכום שהמינוס שלו נשמט):
@@ -2561,10 +2608,28 @@ function deliveryCreditAction(role, id, page, row) {
 // כך גם כשקריאת זיכוי כלשהי של הנייר ראתה מינוס (origin.creditRead 'credit') — גם אם נדחתה מסיבה אחרת
 // (כמויות, סיכום שהמינוס שלו נשמט), וגם אחרי "צלם את הזיכוי מחדש" או קריאה חוזרת שנכשלה או שהמינוס נשמט
 // בה: נשארים צלם מחדש / קרא שוב / הסר.
+// ותעודה שלמה חוזרת רק כשההחלטה שהיא חוזרת איתה ("תעודת משלוח") תכובד (deliveryCreditUnmoveHonoured).
 function deliveryCreditCanUnmove(c) {
   return !!c && !!c.origin && !c.origin.recapture && !deliveryCreditBusy(c) && c.errorKind !== 'discount'
     && !(c.origin.kind === 'document' && ((c.paperMode === 'credit' && !!c.paper) || c.origin.creditRead === 'credit'))
-    && ((c.origin.kind === 'document' && !!c.origin.read) || (c.origin.kind === 'page' && c.pages.length > 0));
+    && ((c.origin.kind === 'document' && !!c.origin.read && deliveryCreditUnmoveHonoured(c)) || (c.origin.kind === 'page' && c.pages.length > 0));
+}
+// v394: מה "החזר לתעודות" של תעודה שלמה מחזיר: הקריאה המקורית (מהזיכרון, או מהטיוטה) והעמודים שלה.
+function deliveryCreditOriginBack(c) {
+  const o = c.origin, cache = c.originCache;
+  const scanResult = cache ? cache.scanResult : o.read && o.read.doc ? { ok: true, doc: o.read.doc } : null;
+  const pages = (cache && cache.pages) || c.originPages || c.pages;
+  return { scanResult, pages, restoredPageCount: pages.length ? 0 : Number(o.pageCount) || 0 };
+}
+// v394: התעודה חוזרת עם "תעודת משלוח" (kindDecision) — והיא תכובד: הקריאה נשמרת כתעודת משלוח
+// (yotvataKeptAsDelivery), או שאין בה סימן של זיכוי, או שהיא שלילית וחוזרת להחלטה בחינם ("העבר לזיכויים",
+// 0 קריאות). כל קריאה אחרת (רוב הקריאות קראו מינוס, שורות שליליות תחת סיכום שהמינוס שלו נשמט) הייתה חוזרת
+// מוחזקת, והפעולה הראשית בכרטיס הייתה שוב "העבר וקרא כזיכוי" בתשלום — אותו כרטיס, בלולאה. לכן אין אז דרך חזרה.
+function deliveryCreditUnmoveHonoured(c) {
+  const back = deliveryCreditOriginBack(c), doc = back.scanResult && back.scanResult.ok ? back.scanResult.doc : null;
+  if (!doc) return false;
+  return !yotvataPaperCreditSignals(doc, back.pages.length || back.restoredPageCount).signal || paperCreditSigns(doc) === 'negative'
+    || yotvataKeptAsDelivery({ ...back, kindDecision: { kind: 'delivery', at: 0 } });
 }
 // v394: זיכוי שעבר מהתעודות ונקרא כזיכוי, בטיוטה שנכתבה לפני origin.creditRead: מה שקריאת הזיכוי ראתה
 // נלקח מ-creditReadSigns. בלי עדות כזו (טיוטה מוקדמת יותר, שבה notCredit נקבע גם על שורות שליליות תחת
@@ -2613,31 +2678,41 @@ function deliveryCreditUnmove(id) {
   const total = others.reduce((n, d) => n + (d.pages.length || d.restoredPageCount || 0), 0) + (pagesBack().length || (page ? 0 : Number(o.pageCount) || 0));
   if ((!source && others.length >= 4) || total > 8) { showToast('אי אפשר להחזיר: יש כבר 4 תעודות או 8 עמודים.', null, null, 4500); return false; }
   const intact = intactFor(source), sourceNumber = source ? aiScanDocuments.indexOf(source) + 1 : 0;
+  // תעודה שלמה שהכותרת שלה של זיכוי (או שכל הקריאות סימנו "זיכוי") ותיקלט כתעודת משלוח: האישור אומר זאת,
+  // כמו "לא, זו תעודת משלוח רגילה".
+  const returning = page ? null : deliveryCreditOriginBack(c), backRead = returning && returning.scanResult;
+  const offer = backRead ? yotvataKeepOffer(returning) : null;
   // v394: השורה שהוקלדה לנייר וירדה מסכום התעודות כשעבר לזיכויים (origin.typedNote) חוזרת איתו — רק
   // בקליטה שהסכום והיחידות בה מוקלדים (בקליטה מהצילום הנייר עצמו הוא העוגן), ורק כשהשורות המוקלדות הן
   // מה שההעברה השאירה (typedNote.left, שמתעדכן בשינויים שהאפליקציה עצמה עושה — yotvataChangeTypedLines).
   // אם העובד שינה אותן מאז (למשל הקליד את השורה שוב), השורה לא חוזרת לבד — אחרת היא הייתה נספרת פעמיים —
-  // והאישור וההודעה אומרים זאת.
-  const typedNoteBack = () => {
+  // והאישור וההודעה אומרים זאת. טיוטה של בנייה קודמת (בלי left): השורה חוזרת רק כשאף שורה מוקלדת אינה
+  // מסבירה את התעודה שחוזרת (yotvataTypedNoteFor). העברה שלא לקחה איתה שורה (למשל לפני שהסכומים הוקלדו):
+  // התעודה שחוזרת נכנסת לסכום התעודות כמו כל תעודת משלוח (yotvataTypedLineIn). probe — התעודה שחוזרת.
+  const typedNoteBack = probe => {
+    if (receiptEntryMode === 'photo') return null;
     const t = o.typedNote, amount = t && Number(t.amount);
-    if (!t || receiptEntryMode === 'photo' || !Number.isFinite(amount) || amount <= 0) return null;
-    const unchanged = !Array.isArray(t.left) || yotvataTypedLinesKey(t.left) === yotvataTypedLinesKey(receiptNotes);
+    if (!t || !Number.isFinite(amount) || amount <= 0) {
+      // רק תעודה שתישמר כתעודת משלוח; קריאה שלילית חוזרת להחלטה (מוחזקת), בלי שורה.
+      const line = page || !probe || yotvataDocumentHeld({ ...probe, kindDecision: { kind: 'delivery', at: 0 } }) ? null : yotvataTypedLineIn(probe);
+      return line && { ...line, added: true };
+    }
+    const unchanged = Array.isArray(t.left) ? yotvataTypedLinesKey(t.left) === yotvataTypedLinesKey(receiptNotes)
+      : !page && !!probe && yotvataTypedNoteFor(probe) === -1;
     return { amount: r2(amount), units: Number.isInteger(t.units) && t.units > 0 ? t.units : null, unchanged };
   };
-  const typedBack = typedNoteBack();
-  const typedLine = (t, back, kept) => !t ? '' : t.unchanged ? ' השורה שהוקלדה לה (' + yotvataTypedNoteText(t) + ') ' + back + ' לסכום התעודות.'
-    : ' השורות שהוקלדו השתנו מאז ההעברה לזיכויים, ולכן השורה שהוקלדה לה (' + yotvataTypedNoteText(t) + ') ' + kept + ' — בדוק את סכום התעודות.';
-  // תעודה שלמה שהכותרת שלה של זיכוי (או שכל הקריאות סימנו "זיכוי") ותיקלט כתעודת משלוח: האישור אומר זאת,
-  // כמו "לא, זו תעודת משלוח רגילה".
-  const backRead = page ? null : c.originCache ? c.originCache.scanResult : o.read && o.read.doc ? { ok: true, doc: o.read.doc } : null;
-  const offer = backRead ? yotvataKeepOffer({ scanResult: backRead, pages: pagesBack(), restoredPageCount: Number(o.pageCount) || 0 }) : null;
+  const typedBack = typedNoteBack(returning);
+  // done — אחרי הפעולה (ההודעה), אחרת לפניה (האישור).
+  const typedLine = (t, done) => !t ? '' : t.added ? yotvataTypedLineInText(t, done)
+    : t.unchanged ? ' השורה שהוקלדה לה (' + yotvataTypedNoteText(t) + ') ' + (done ? 'חזרה' : 'חוזרת') + ' לסכום התעודות.'
+    : ' השורות שהוקלדו השתנו מאז ההעברה לזיכויים, ולכן השורה שהוקלדה לה (' + yotvataTypedNoteText(t) + ') ' + (done ? 'לא הוחזרה' : 'לא תחזור לבד') + ' — בדוק את סכום התעודות.';
   showConfirm('להחזיר לתעודות?', (!page
     ? 'תעודה ' + o.docNumber + ' תחזור לרשימת התעודות כתעודת משלוח, והזיכוי יוסר. הקריאה שכבר נעשתה נשמרת — אין קריאה נוספת.' +
       (offer && offer.offered && offer.confirm ? ' ' + yotvataKeepConfirmText(backRead.doc, offer) : '')
     : source ? (pagesBack().length > 1 ? 'העמודים יחזרו למקומם' : 'העמוד יחזור למקומו') + ' בתעודה ' + sourceNumber + ', והזיכוי יוסר. ' +
       (intact ? 'הקריאה הקודמת של התעודה חוזרת — אין קריאה נוספת.' : 'התעודה תיקרא שוב כשתלחץ "התחל קליטת מוצרים".')
     : 'העמוד יחזור לרשימת התעודות כתעודה נפרדת, והזיכוי יוסר. הוא ייקרא כשתלחץ "התחל קליטת מוצרים".') +
-    typedLine(typedBack, 'חוזרת', 'לא תחזור לבד'), 'החזר לתעודות', () => {
+    typedLine(typedBack, false), 'החזר לתעודות', () => {
     if (deliveryCreditFind(id) === c && aiScanBusy && !receiptFinalizing) { showToast(busyText, null, null, 4000); return; }
     if (deliveryCreditFind(id) !== c || aiScanBusy || receiptFinalizing || !deliveryCreditCanUnmove(c)) return;
     const pages = pagesBack(), home = sourceOf();
@@ -2678,8 +2753,9 @@ function deliveryCreditUnmove(id) {
       if (seeded()) aiScanDocuments = [input];
       else aiScanDocuments.splice(Math.max(0, Math.min((Number(o.docNumber) || 1) - 1, aiScanDocuments.length)), 0, input);
     }
-    const note = typedNoteBack(), typedText = typedLine(note, 'חזרה', 'לא הוחזרה');
-    if (note && note.unchanged) {
+    const note = typedNoteBack(page ? null : input), typedText = typedLine(note, true);
+    if (note && note.added) { if (note.amount != null) yotvataAddTypedLine(input, note); }
+    else if (note && note.unchanged) {
       // הקלדה קלאסית (תעודת AI i היא השורה i): השורה חוזרת לצד התעודה, וגם העוגן שלה בתעודה — כמו
       // ש-resetAiInvoiceScan בונה אותן. אחרת — למקום שבו הייתה.
       const at = aiScanDocuments.indexOf(input), beside = !page && !!o.typedNote.inStep && at >= 0 && aiScanDocuments.length === receiptNotes.length + 1;

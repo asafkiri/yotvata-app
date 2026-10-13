@@ -25,7 +25,7 @@ const names = ['receiptReconcileSnapshot','receiptUsesManualQuantities','priceAu
   'deliveryCreditLocalDraft', 'deliveryCreditValidResume',
   // v394: the credit-photographed-as-document helpers the functions above call (money view, adoption,
   // restore, caching, routing at the end of a run).
-  'paperCreditSigns', 'yotvataPaperCreditSignals', 'yotvataKeptAsDelivery', 'yotvataDocumentHeld', 'yotvataHeldDocuments',
+  'paperCreditSigns', 'yotvataPaperCreditSignals', 'yotvataPositiveRead', 'yotvataKeptAsDelivery', 'yotvataDocumentHeld', 'yotvataHeldDocuments',
   'yotvataDocumentKindVerdict', 'yotvataPaperProblemTexts', 'yotvataRouteCreditDocuments', 'yotvataAnnounceRouting'];
 function context(extra = {}) {
   const storage = new Map();
