@@ -352,8 +352,9 @@ cannot be reopened, and `deliveryCreditRead` refuses a busy credit.
   credit title (`/זיכוי|ביטול\s*מכירה|credit/i`) or gallery pages that split by
   sign — is **held**: out of the money view (`receiptRebuildScanResponse`), its
   read cached and kept in the draft, adoption fails with "תעודה N נראית כמו
-  תעודת זיכוי — ההחלטה בכרטיס שמתחת." and the finish waits ("לפני הסיום צריך
-  להחליט על תעודה N…").
+  תעודת זיכוי — ההחלטה בכרטיס שמתחת." and every save waits ("לפני הסיום צריך
+  להחליט על תעודה N…") — the finish, "קלוט תעודה" in the comparison and the
+  summary's confirm.
 - Only a read that is negative throughout, in every read, with no read typed
   `'delivery'` and no decision of the worker moves by itself, once, at the end
   of the read run (`yotvataRouteCreditDocuments` — never on render, restore or
@@ -372,8 +373,11 @@ cannot be reopened, and `deliveryCreditRead` refuses a busy credit.
   calls), "הסר את תעודה N מהקליטה". Attach mode, 4 credits and more than 4
   pages are explained and never adopted.
 - A moved credit says "צולם כ"תעודה N" וזוהה כתעודת זיכוי («…»)." and offers
-  "זו לא תעודת זיכוי? החזר לתעודות" in every state but a document discount:
-  the original read comes back (no call), marked as the worker's "delivery".
+  "זו לא תעודת זיכוי? החזר לתעודות" in every state but a document discount
+  and a credit whose own credit-mode read found a valid credit paper (its
+  original read is the one that dropped the minus; it stays a credit, like a
+  green-button one): the original read comes back (no call), marked as the
+  worker's "delivery".
   A credit-mode read that finds a positive paper offers "זו תעודה רגילה — החזר
   לתעודות" as its main action. Saved notes of moved credits carry `paperMode`
   and `origin`; green-button notes are unchanged.

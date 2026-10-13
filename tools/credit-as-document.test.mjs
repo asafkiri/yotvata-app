@@ -896,7 +896,8 @@ test('v: typed anchors refuse a minus — "-83.52", "83.52-" and "(83.52)" are c
     c.toasts.length = 0;
     c.node('rcNoteInput').value = '83.52'; c.node('rcNoteUnits').value = '-24';
     await c.click('rc-note-add');
-    assert.deepEqual(c.toasts, [expected], 'a minus in the units too');
+    // A minus in the units only: the message is about the units (finding g), not «סכום».
+    assert.deepEqual(c.toasts, [expected.replace('סכום עם מינוס הוא זיכוי.', 'יחידות עם מינוס הן זיכוי.')], 'a minus in the units too');
     c.node('rcNoteInput').value = '83.52'; c.node('rcNoteUnits').value = '24';
     await c.click('rc-note-add');
     assert.deepEqual(json(c, 'receiptNotes'), [{ amount: 83.52, units: 24 }]);
@@ -1205,4 +1206,232 @@ test('w11: a document held by the comparison\'s own read ("פענח") — the co
   assert.equal(c.run('currentView'), 'receiving');
   assert.match(app(c), /data-role="rc-credit-doc-split"[^>]*>העבר את עמוד 2 לזיכויים וקרא מחדש</);
   invariants(c);
+});
+
+// ---- the LOW findings of the review round, each reproduced and pinned ----
+
+test('w12 (a): a document held by the comparison\'s own read ("פענח") on a classic typed receipt — "קלוט תעודה" and the summary\'s confirm both refuse, lead to the card, and nothing is saved', async () => {
+  const { c } = setup();
+  service(c, { papers: { 'delivery.jpg': twice(delivery), 'slip.jpg': twice(VARIANT.A) } });
+  c.run('renderReceiving()');
+  await c.click('rc-photo-manual');
+  c.node('rcNoteInput').value = '217.04'; c.node('rcNoteUnits').value = '58'; await c.click('rc-note-add');
+  c.node('rcNoteInput').value = '83.52'; c.node('rcNoteUnits').value = '24'; await c.click('rc-open'); await flush(c, 5);
+  count(c);
+  pressCart(c); await flush(c, 10);
+  assert.equal(c.run('currentView'), 'reconcile');
+  await c.click('ai-rescan'); await flush(c);
+  await photograph(c, 0, ['delivery.jpg']); await photograph(c, 1, ['slip.jpg']);
+  await c.click('ai-run'); await flush(c);
+  assert.deepEqual(json(c, 'yotvataHeldDocuments().map(x => [x.index, yotvataDocumentKindVerdict(x.input)])'), [[1, 'move']], 'held, not moved: no routing on the classic path');
+  assert.equal(c.run('currentView'), 'reconcile');
+  // «קלוט תעודה» (and «סגור עם הפרש ואטפל אחר כך», the same role) in the comparison.
+  c.toasts.length = 0; c.run('confirmLog = []');
+  await c.click('rc-recon-save');
+  assert.deepEqual(c.toasts, [FINISH_HELD(2)]);
+  assert.deepEqual(json(c, 'confirmLog'), [], 'refused before any "הפרש" question');
+  assert.equal(c.run('pendingReceipt'), null);
+  assert.equal(c.run('currentView'), 'receiving');
+  assert.match(app(c), new RegExp('data-credit-document="' + scanIdOf(c, 1) + '"'), 'the decision card is on the screen');
+  // A summary that was already open (stale) is not confirmed either.
+  c.run("pendingReceipt = { lines: [], ex: 0, status: 'open', noteParts: [], shortCreditNotes: [] }");
+  c.toasts.length = 0;
+  await c.run('confirmReceipt()'); await flush(c);
+  assert.deepEqual(c.toasts, [FINISH_HELD(2)]);
+  assert.equal(c.run('pendingReceipt'), null);
+  assert.equal(c.writes.some(w => w.path && w.path.includes('receipts')), false, 'nothing saved');
+  // The decision, then the finish: the slip is a credit and its typed line leaves the paper sum.
+  await c.click('rc-credit-doc-move', undefined, { scan: scanIdOf(c, 1) }); await flush(c);
+  assert.deepEqual(json(c, 'receiptNotes'), [{ amount: 217.04, units: 58 }]);
+  assert.equal(credit0(c).status, 'confirmed');
+  assert.deepEqual(json(c, 'yotvataHeldDocuments()'), []);
+  assert.equal(c.run('yotvataHeldStopsSave()'), false);
+  invariants(c);
+});
+
+test('w13 (b): a credit that its own credit-mode read verified ("העבר וקרא כזיכוי", attached by itself) offers no way back to the documents — the dropped-sign read is never billed as goods', async () => {
+  const { c, data } = setup();
+  const s = service(c, { papers: { 'delivery.jpg': twice(delivery), 'slip.jpg': ({ credit }) => credit ? [VARIANT.CREDIT(), VARIANT.CREDIT()] : [VARIANT.C(), VARIANT.C()] } });
+  await gate(c, ['delivery.jpg', 'slip.jpg']);
+  await c.click('rc-credit-doc-move', undefined, { scan: scanIdOf(c, 1) }); await flush(c);
+  const credit = credit0(c);
+  assert.deepEqual([credit.status, credit.autoConfirmed, credit.paperMode, credit.origin.kind], ['confirmed', true, 'credit', 'document']);
+  const html = c.run('deliveryCreditsHtml()');
+  assert.match(html, /צולם כ"תעודה 2" וזוהה כתעודת זיכוי \(«ביטול מכירה חלקי ת\.משלוח»\)\./, 'where it came from is still said');
+  assert.doesNotMatch(html, /delivery-credit-unmove/, 'no "זו לא תעודת זיכוי? החזר לתעודות"');
+  assert.match(html, /data-role="delivery-credit-remove"/, '"הסר זיכוי" stays, as on a green-button credit');
+  c.run('confirmLog = []');
+  await c.click('delivery-credit-unmove', credit.id); // a forged or stale tap
+  assert.deepEqual(json(c, 'confirmLog'), []);
+  assert.equal(c.run('receiptDeliveryCredits.length'), 1);
+  assert.equal(c.run('aiScanDocuments.length'), 1);
+  assert.deepEqual(json(c, 'receiptNotes'), [{ amount: 217.04, units: 58 }], 'the slip is not a second delivery note');
+  const r = runtime('yotvata', { data, storage: c.storage });
+  r.run("mainMode = 'receiving'; currentView = 'receiving'; renderReceiving()");
+  assert.doesNotMatch(r.run('deliveryCreditsHtml()'), /delivery-credit-unmove/, 'not after a reload either');
+  count(c);
+  const p = finish(c);
+  assert.deepEqual([p.status, p.ex, p.noteParts.length, p.shortCreditNotes.length], ['ok', 133.52, 1, 1]);
+  assert.equal(s.stats.modelCalls, 6);
+  invariants(c); invariants(r);
+});
+
+test('w14 (c): "פרטי פענוח התעודה" — an undo clears "הועברה לזיכויים"; a page split names only the page that moved, never the delivery note that stayed', async () => {
+  const historyText = c => text(c.run('yotvataScanHistoryHtml(yotvataReceiptScanAudit(), null)'));
+  // Undo after a mistaken "העבר וקרא כזיכוי" (the credit read found positive amounts).
+  const { c } = setup();
+  service(c, { papers: { 'delivery.jpg': twice(delivery), 'slip.jpg': twice(VARIANT.C) } });
+  await gate(c, ['delivery.jpg', 'slip.jpg']);
+  const slipScan = scanIdOf(c, 1);
+  await c.click('rc-credit-doc-move', undefined, { scan: slipScan }); await flush(c);
+  const credit = credit0(c);
+  assert.equal(c.run(`receiptScanHistory.filter(e => e.scanId === ${JSON.stringify(slipScan)}).every(e => e.movedToCredit === ${JSON.stringify(credit.id)})`), true);
+  assert.match(historyText(c), /תעודה 2 · זוהתה כתעודת זיכוי והועברה לזיכויים/);
+  await c.click('delivery-credit-unmove', credit.id);
+  assert.equal(c.run('aiScanDocuments[1].scanId'), slipScan, 'the same paper is back');
+  assert.equal(c.run('receiptScanHistory.some(e => e.movedToCredit)'), false, 'no history entry points at the removed credit');
+  assert.doesNotMatch(historyText(c), /הועברה לזיכויים/);
+  assert.match(historyText(c), /תעודה 2 · התקבלה קריאה/);
+  count(c);
+  const p = finish(c);
+  assert.equal(p.noteParts.length, 2, 'billed as the worker decided');
+  assert.equal(c.run('yotvataReceiptScanAudit().history.some(e => e.movedToCredit)'), false, 'the saved audit agrees');
+  // The page split: "תעודה 1" stays and is billed; only its page 2 moved.
+  const h = setup();
+  const mixed = () => ({ ...delivery(), pageCount: 2, rows: [line(YOGURT, 48, 167.04), line(MILK, 10, 50), line(YOGURT, 24, -83.52, 2)] });
+  service(h.c, { papers: { 'delivery-p.jpg+slip-p.jpg': twice(mixed), 'slip-p.jpg': twice(VARIANT.CREDIT), 'delivery-p.jpg': twice(delivery) } });
+  h.c.run('renderReceiving()');
+  await photograph(h.c, 0, ['delivery-p.jpg', 'slip-p.jpg'], { gallery: true });
+  await h.c.click('rc-photo-start'); await flush(h.c);
+  await h.c.click('rc-credit-doc-split', undefined, { scan: scanIdOf(h.c, 0) }); await flush(h.c);
+  const pageCredit = credit0(h.c);
+  assert.deepEqual(json(h.c, 'receiptScanHistory.map(e => [e.docIndex, !!e.movedToCredit, e.movedPagesToCredit ? e.movedPagesToCredit.pages : null])'),
+    [[0, false, [2]], [0, false, null]], 'the combined read names page 2; the re-read of the delivery note is a plain read');
+  assert.equal(h.c.run(`receiptScanHistory[0].movedPagesToCredit.id === ${JSON.stringify(pageCredit.id)}`), true);
+  const panel = historyText(h.c);
+  assert.doesNotMatch(panel, /זוהתה כתעודת זיכוי והועברה לזיכויים/, 'the delivery note is never said to have moved');
+  assert.match(panel, /תעודה 1 · התקבלה קריאה · עמוד 2 זוהה כתעודת זיכוי והועבר לזיכויים/);
+  await h.c.click('delivery-credit-unmove', pageCredit.id);
+  assert.equal(h.c.run('receiptScanHistory.some(e => e.movedToCredit || e.movedPagesToCredit)'), false, 'the page undo clears it too');
+  invariants(c); invariants(h.c);
+});
+
+test('w15 (d): "זו תעודה רגילה — החזר לתעודות" while an invoice read runs says why it waits, then works once the read ends', async () => {
+  const { c } = setup();
+  const s = service(c, { papers: { 'delivery.jpg': twice(delivery), 'slip.jpg': twice(VARIANT.C), 'third.jpg': twice(() => delivery({ number: '9073800003' })) },
+    hold: entry => entry.name === 'third.jpg' });
+  await gate(c, ['delivery.jpg', 'slip.jpg']);
+  await c.click('rc-credit-doc-move', undefined, { scan: scanIdOf(c, 1) }); await flush(c);
+  const credit = credit0(c);
+  assert.equal(credit.notCredit, true);
+  // One more delivery note, and "התחל": its read is slow.
+  await c.click('rc-photo-repair'); await flush(c, 10);
+  await c.click('rc-photo-add-doc');
+  await c.click('ai-add-photo', undefined, { doc: '1' });
+  c.events.get('app:change')({ target: { id: '', dataset: { role: 'ai-file', doc: '1' }, getAttribute: n => n === 'data-role' ? 'ai-file' : null, files: [{ name: 'third.jpg' }], value: 'x' } });
+  await flush(c, 6);
+  // After an earlier read the photo opens for viewing only (as in v393); the worker taps it and confirms.
+  c.run('aiCloseOrientationReview()');
+  await c.click('ai-review-page', undefined, { doc: '1', page: '0' });
+  await c.events.get('aiOrientationConfirm:click')({ type: 'click', target: c.node('aiOrientationConfirm') }); await flush(c, 6);
+  assert.equal(c.run('aiScanDocuments[1].pages[0].orientationConfirmed'), true);
+  await c.click('rc-photo-start'); await flush(c, 20);
+  assert.equal(c.run('aiScanBusy'), true, 'the read of the third paper is in the air');
+  c.toasts.length = 0; c.run('confirmLog = []');
+  await c.click('delivery-credit-unmove', credit.id);
+  assert.deepEqual(c.toasts, ['ממתין לסיום קריאת התעודות — אחרי הקריאה אפשר להחזיר לתעודות.'], 'not a silent refusal');
+  assert.deepEqual(json(c, 'confirmLog'), []);
+  assert.equal(c.run('receiptDeliveryCredits.length'), 1);
+  s.scans().find(e => e.name === 'third.jpg').release(); await flush(c);
+  assert.equal(c.run('aiScanBusy'), false);
+  c.toasts.length = 0;
+  await c.click('delivery-credit-unmove', credit.id);
+  assert.equal(c.run('receiptDeliveryCredits.length'), 0);
+  assert.ok(c.toasts.includes('תעודה 2 חזרה לתעודות. הקריאה שכבר נעשתה נשמרה.'), c.toasts.join(' | '));
+  invariants(c);
+});
+
+test('w16 (e): a false alarm (one read typed a real delivery note "credit", no credit title) — the card never claims minus signs were lost, and a mistaken move\'s origin line carries no "delivery" title', async () => {
+  const { c } = setup();
+  const second = (type = 'delivery') => delivery({ number: '9073800002', type });
+  service(c, { papers: { 'delivery.jpg': twice(delivery), 'second.jpg': ({ credit }) => credit ? [second(), second()] : [second(), second('credit')] } });
+  await gate(c, ['delivery.jpg', 'second.jpg']);
+  const card = cardOf(c, 1);
+  assert.doesNotMatch(card, /בלי סימן מינוס/);
+  assert.match(card, /הכותרת שנקראה: «תעודת משלוח»/);
+  assert.match(card, /הסכומים בה חיוביים\./);
+  assert.match(card, /קריאה אחת סימנה אותה כזיכוי והשנייה כתעודת משלוח\./);
+  await c.click('rc-credit-doc-move', undefined, { scan: scanIdOf(c, 1) }); await flush(c);
+  const credit = credit0(c);
+  assert.deepEqual([credit.notCredit, credit.origin.title], [true, null]);
+  assert.match(c.run('deliveryCreditsHtml()'), /צולם כ"תעודה 2" וזוהה כתעודת זיכוי\./);
+  assert.doesNotMatch(c.run('deliveryCreditsHtml()'), /«תעודת משלוח»/);
+  invariants(c);
+  // One read typed it "credit", the other "unclear": the card says what that one read said.
+  const u = setup();
+  service(u.c, { papers: { 'delivery.jpg': twice(delivery), 'second.jpg': () => [second('unclear'), second('credit')] } });
+  await gate(u.c, ['delivery.jpg', 'second.jpg']);
+  assert.match(cardOf(u.c, 1), /קריאה אחת סימנה אותה כזיכוי, אבל הסכומים בה חיוביים\./);
+  assert.doesNotMatch(cardOf(u.c, 1), /בלי סימן מינוס/);
+  // Control: the dropped-sign slip under a credit title still says it (test c).
+  invariants(u.c);
+});
+
+test('w17 (f): two slips that move and attach by themselves — one toast that says they were attached, and their cards in the order they were photographed', async () => {
+  const { c } = setup();
+  const s = service(c, { papers: { 'delivery.jpg': twice(delivery), 'slip.jpg': twice(VARIANT.A), 'slip2.jpg': twice(() => milkSlip()) } });
+  await gate(c, ['delivery.jpg', 'slip.jpg', 'slip2.jpg']);
+  assert.deepEqual(json(c, 'receiptDeliveryCredits.map(x => [x.origin.docNumber, x.status, x.autoConfirmed])'), [[2, 'confirmed', true], [3, 'confirmed', true]]);
+  assert.ok(c.toasts.includes('תעודות 2 ו-3 הן תעודות זיכוי — הועברו לזיכויים וצורפו למשלוח. בסיום הספירה נבדוק איזה חוסר הן מכסות.'), c.toasts.join(' | '));
+  assert.deepEqual([...c.run('deliveryCreditsHtml()').matchAll(/צולם כ"תעודה (\d)"/g)].map(m => m[1]), ['2', '3']);
+  count(c, 24, 5);
+  const p = finish(c);
+  assert.deepEqual([p.status, p.ex], ['ok', 108.52]);
+  assert.deepEqual(p.shortCreditNotes.map(n => n.origin.docNumber), [2, 3]);
+  assert.equal(s.stats.modelCalls, 6);
+  invariants(c);
+  // v150 (no types): both move but wait for a tap — the toast still asks to check them.
+  const v = setup();
+  service(v.c, { version: 150, papers: { 'delivery.jpg': twice(delivery), 'slip.jpg': twice(VARIANT.A), 'slip2.jpg': twice(() => milkSlip()) } });
+  await gate(v.c, ['delivery.jpg', 'slip.jpg', 'slip2.jpg']);
+  assert.deepEqual(json(v.c, 'receiptDeliveryCredits.map(x => [x.origin.docNumber, x.status])'), [[2, 'review'], [3, 'review']]);
+  assert.ok(v.c.toasts.includes('תעודות 2 ו-3 הן תעודות זיכוי — הועברו לזיכויים. בדוק אותן בכרטיסי הזיכוי.'), v.c.toasts.join(' | '));
+  invariants(v.c);
+});
+
+test('w18 (g): the minus refusal in typed anchors names the green button as it is on the screen — absent before the delivery note is typed, "צלם תעודת זיכוי נוספת" once a credit exists — and a minus only in the units is about the units', async () => {
+  const typeMinus = async (c, amount, units, role = 'rc-note-add') => {
+    const focused = [];
+    c.node('rcNoteInput').focus = () => focused.push('amount'); c.node('rcNoteUnits').focus = () => focused.push('units');
+    c.node('rcNoteInput').value = amount; c.node('rcNoteUnits').value = units;
+    c.toasts.length = 0;
+    await c.click(role); await flush(c, 5);
+    return focused;
+  };
+  // "אין תעודה בכלל", then "מצאתי את התעודה — הזן את המספרים": no green button until a delivery note is typed.
+  const n = setup();
+  n.c.run('renderReceiving()');
+  await n.c.click('rc-photo-manual'); await n.c.click('rc-open-nodoc'); await n.c.click('rc-nodoc-found');
+  n.c.run('renderReceiving()');
+  assert.doesNotMatch(app(n.c), /data-role="delivery-credit-add"/);
+  assert.deepEqual(await typeMinus(n.c, '-83.52', '24'), ['amount']);
+  assert.deepEqual(n.c.toasts, ['סכום עם מינוס הוא זיכוי. כאן מקלידים רק תעודות משלוח. הקלד קודם את תעודת המשלוח; אחר כך יופיע הכפתור הירוק לצילום הזיכוי.']);
+  assert.deepEqual(json(n.c, 'receiptNotes'), []);
+  // A credit already on the receipt: the button reads "צלם תעודת זיכוי נוספת".
+  const k = setup();
+  service(k.c, { papers: { 'delivery.jpg': twice(delivery), 'slip.jpg': twice(VARIANT.A) } });
+  await gate(k.c, ['delivery.jpg', 'slip.jpg']);
+  await k.c.click('rc-notes-edit');
+  k.c.run('renderReceiving()');
+  assert.match(app(k.c), /data-role="delivery-credit-add"[^>]*>[^<]*<i[^>]*><\/i> צלם תעודת זיכוי נוספת</);
+  assert.deepEqual(await typeMinus(k.c, '-25.00', '5'), ['amount']);
+  assert.deepEqual(k.c.toasts, ['סכום עם מינוס הוא זיכוי. זיכוי מהנהג מצלמים בכפתור הירוק "צלם תעודת זיכוי נוספת" — כאן מקלידים רק תעודות משלוח.']);
+  assert.deepEqual(json(k.c, 'receiptNotes'), [{ amount: 217.04, units: 58 }]);
+  // Only the units carry the minus: the units field is named and focused.
+  const m = setup();
+  m.c.run('renderReceiving()');
+  await m.c.click('rc-photo-manual');
+  assert.deepEqual(await typeMinus(m.c, '83.52', '-24', 'rc-open'), ['units']);
+  assert.deepEqual(m.c.toasts, ['יחידות עם מינוס הן זיכוי. זיכוי מהנהג מצלמים בכפתור הירוק "הנהג הביא זיכוי על חוסר? צלם כאן" — כאן מקלידים רק תעודות משלוח.']);
+  assert.deepEqual(json(m.c, 'receiptNotes'), []);
 });
