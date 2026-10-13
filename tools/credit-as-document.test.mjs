@@ -434,8 +434,10 @@ test('e: reads split on the sign (v150, no types): the positive read selected, t
   assert.equal(c.run('receiptDeliveryCredits.length'), 0, 'not moved');
   assert.equal(c.run('yotvataDocumentKindVerdict(aiScanDocuments[1])'), 'ask-read');
   assert.equal(c.run('yotvataPaperCreditSignals(aiScanDocuments[1].scanResult.doc, 1).readingNegative'), true);
-  assert.match(cardOf(c, 1), /קריאה אחת קראה סכום שלילי \(‎-83\.52\) והשנייה חיובי \(83\.52\)\./);
+  // Three readings (the verifier included) are counted as three: 2 of 3 read the minus.
+  assert.match(cardOf(c, 1), /2 מתוך 3 הקריאות קראו סכום שלילי \(‎-83\.52\), ואחת חיובי \(83\.52\)\./);
   assert.match(cardOf(c, 1), /כן, זו תעודת זיכוי — העבר וקרא כזיכוי/);
+  assert.doesNotMatch(cardOf(c, 1), /rc-credit-doc-keep/, 'most readings saw the minus: "לא, זו תעודת משלוח רגילה" is not offered');
   assert.ok(c.toasts.includes(HELD_TOAST(2)));
   assert.deepEqual(json(c, 'receiptNotes'), []);
   invariants(c);
@@ -446,7 +448,7 @@ test('e: reads split on the sign (v150, no types): the positive read selected, t
   await gate(n.c, ['delivery.jpg', 'slip.jpg']);
   assert.equal(n.c.run('receiptDeliveryCredits.length'), 0, 'reads that split on the sign never move by themselves');
   assert.equal(n.c.run('yotvataDocumentKindVerdict(aiScanDocuments[1])'), 'ask-move');
-  assert.match(cardOf(n.c, 1), /קריאה אחת קראה סכום שלילי \(‎-83\.52\) והשנייה חיובי \(83\.52\)\./);
+  assert.match(cardOf(n.c, 1), /2 מתוך 3 הקריאות קראו סכום שלילי \(‎-83\.52\), ואחת חיובי \(83\.52\)\./);
   invariants(n.c);
 });
 
@@ -913,5 +915,294 @@ test('v: typed anchors refuse a minus — "-83.52", "83.52-" and "(83.52)" are c
   pressCart(c);
   assert.deepEqual(c.toasts, [FINISH_HELD(2)]);
   assert.equal(c.run('pendingReceipt'), null);
+  invariants(c);
+});
+
+// ---- review fixes (each test pins one finding of the integration, money-safety, state and UX reviews) ----
+
+// A second slip (5 milk = −25.00, number 22230012) whose invoice reads dropped the minus under the credit title.
+const milkSlip = ({ sign = -1, qty = 5, printedUnits = null } = {}) => ({ noteIndex: 0, invoiceNumber: '22230012', pageCount: 1, subtotalExVat: sign * 25,
+  vatAmount: cents(sign * 4.5), totalInclVat: cents(sign * 29.5), printedUnits, printedLines: 1, documentDiscountExVat: null, confidence: 0.9, warnings: [],
+  rows: [line(MILK, qty, sign * 25)], documentType: 'credit', printedTitle: SLIP_TITLE });
+// An invoice with one store return line (positive summary 207.04 / 56; the rows close it: 167.04 + 50 − 10).
+const withReturnLine = ({ type = 'delivery', pageCount = 1, returnPage = 1 } = {}) => ({ ...delivery({ type, title: 'חשבונית מס' }), pageCount,
+  subtotalExVat: 207.04, vatAmount: 37.27, totalInclVat: 244.31, printedUnits: 56, printedLines: 3,
+  rows: [line(YOGURT, 48, 167.04), line(MILK, 10, 50), { ...line(MILK, -2, -10, returnPage), description: 'החזרה חלב בדיקה' }] });
+const RETURN_LINE_PROBLEM = 'תעודה 1: בשורה 3 נקרא סכום שלילי (‎-10.00) — אם זו שורת החזרה בתוך התעודה, הקלד את הסכום והיחידות ידנית.';
+async function typeNotes(c, lines) {
+  await c.click('rc-photo-manual');
+  for (const [amount, units] of lines.slice(0, -1)) { c.node('rcNoteInput').value = amount; c.node('rcNoteUnits').value = units; await c.click('rc-note-add'); }
+  const [amount, units] = lines.at(-1);
+  c.node('rcNoteInput').value = amount; c.node('rcNoteUnits').value = units;
+  await c.click('rc-notes-done'); await flush(c);
+}
+
+test('w1: a slip that moves by itself ahead of a held one — the toast names both, the held card keeps the number it was photographed as, and the two credits never share "תעודה 2"', async () => {
+  const { c, data } = setup();
+  const s = service(c, { papers: { 'delivery.jpg': twice(delivery), 'slip.jpg': twice(VARIANT.A),
+    'slip2.jpg': ({ credit }) => credit ? [milkSlip({ qty: -5 }), milkSlip({ qty: -5 })] : [milkSlip({ sign: 1, printedUnits: 5 }), milkSlip({ sign: 1, printedUnits: 5 })] } });
+  await gate(c, ['delivery.jpg', 'slip.jpg', 'slip2.jpg']);
+  assert.equal(credit0(c).origin.docNumber, 2);
+  assert.deepEqual(json(c, 'yotvataHeldDocuments().map(x => [x.index, x.input.shotAs])'), [[1, 3]], 'the held slip is now second, photographed as third');
+  assert.ok(c.toasts.includes(ATTACHED_TOAST + ' תעודה 3 (עכשיו תעודה 2) נראית כמו תעודת זיכוי — צריך החלטה שלך לפני הסיום.'), c.toasts.join(' | '));
+  assert.match(cardOf(c, 1), /תעודה 2 \(צולמה כ"תעודה 3"\) נראית כמו תעודת זיכוי/);
+  const r = runtime('yotvata', { data, storage: c.storage });
+  assert.equal(r.run('aiScanDocuments[1].shotAs'), 3, 'the number survives a reload');
+  assert.match(r.run('yotvataCreditDocumentCardHtml(1)'), /צולמה כ"תעודה 3"/);
+  c.toasts.length = 0;
+  await c.click('rc-credit-doc-move', undefined, { scan: scanIdOf(c, 1) });
+  await flush(c);
+  assert.ok(c.toasts.includes('תעודה 3 הועברה לזיכויים ונקראת עכשיו כזיכוי.'), c.toasts.join(' | '));
+  assert.deepEqual(json(c, 'receiptDeliveryCredits.map(x => [x.number, x.origin.docNumber, x.status])'), [[SLIP_NUMBER, 2, 'confirmed'], ['22230012', 3, 'confirmed']]);
+  assert.match(c.run('deliveryCreditsHtml()'), /צולם כ"תעודה 3" וזוהה כתעודת זיכוי/);
+  count(c, 24, 5);
+  const p = finish(c);
+  assert.equal(p.status, 'ok');
+  assert.deepEqual(p.shortCreditNotes.map(n => [n.number, n.origin.docNumber]), [[SLIP_NUMBER, 2], ['22230012', 3]]);
+  assert.equal(p.ex, 108.52);
+  assert.equal(s.stats.modelCalls, 8, '2 + 2 + 2 invoice reads, 2 credit reads');
+  invariants(c);
+});
+
+test('w2: a real 2-page invoice whose return line is alone on page 2 is one document (its rows close the printed summary) — no split, no hold, as v393; a real split that is undone puts the page back in its document with the original read', async () => {
+  const { c } = setup();
+  const s = service(c, { papers: { 'inv-p1.jpg+inv-p2.jpg': twice(() => withReturnLine({ pageCount: 2, returnPage: 2 })) } });
+  c.run('renderReceiving()');
+  await photograph(c, 0, ['inv-p1.jpg', 'inv-p2.jpg'], { gallery: true });
+  await c.click('rc-photo-start'); await flush(c);
+  const signals = json(c, 'yotvataPaperCreditSignals(aiScanDocuments[0].scanResult.doc, 2)');
+  assert.deepEqual([signals.rowsClose, signals.pageSplit, signals.signal], [true, null, false]);
+  assert.deepEqual(json(c, 'yotvataHeldDocuments()'), []);
+  assert.equal(s.stats.modelCalls, 2, 'no split, no credit read, no re-read');
+  assert.ok(json(c, 'receiptPaperScanProblems').includes(RETURN_LINE_PROBLEM), json(c, 'receiptPaperScanProblems').join(' | '));
+  assert.equal(c.run('aiScanResponse.scan.documents.length'), 1, 'in the money view, as in v393');
+  invariants(c);
+  // A real mixed pick (test h) split, then "זה לא זיכוי? החזר את העמוד לתעודות".
+  const mixed = () => ({ ...delivery(), pageCount: 2, rows: [line(YOGURT, 48, 167.04), line(MILK, 10, 50), line(YOGURT, 24, -83.52, 2)] });
+  const papers = { 'delivery-p.jpg+slip-p.jpg': twice(mixed), 'slip-p.jpg': twice(VARIANT.CREDIT), 'delivery-p.jpg': twice(delivery) };
+  const h = setup();
+  const hs = service(h.c, { papers });
+  h.c.run('renderReceiving()');
+  await photograph(h.c, 0, ['delivery-p.jpg', 'slip-p.jpg'], { gallery: true });
+  await h.c.click('rc-photo-start'); await flush(h.c);
+  h.c.run('allPages = aiScanDocuments[0].pages.slice()');
+  await h.c.click('rc-credit-doc-split', undefined, { scan: scanIdOf(h.c, 0) }); await flush(h.c);
+  assert.equal(hs.scans().length, 3);
+  h.c.toasts.length = 0;
+  await h.c.click('delivery-credit-unmove', credit0(h.c).id);
+  assert.deepEqual(json(h.c, 'confirmLog').at(-1), ['להחזיר לתעודות?', 'העמוד יחזור למקומו בתעודה 1, והזיכוי יוסר. הקריאה הקודמת של התעודה חוזרת — אין קריאה נוספת.', 'החזר לתעודות']);
+  assert.deepEqual(h.c.toasts, ['העמוד חזר לתעודה 1. הקריאה הקודמת שלה נשמרה — אין קריאה נוספת.']);
+  assert.equal(h.c.run('aiScanDocuments.length'), 1, 'one document again — not a new "תעודה 1" ahead of the invoice');
+  assert.equal(h.c.run('aiScanDocuments[0].pages.length === 2 && aiScanDocuments[0].pages.every((p, i) => p === allPages[i])'), true, 'the same pages, in their order');
+  assert.equal(h.c.run('aiScanDocuments[0].scanResult.doc.pageCount'), 2, 'the original two-page read');
+  assert.equal(h.c.run('yotvataCachedDoc(aiScanDocuments[0])'), true);
+  assert.equal(h.c.run('yotvataDocumentKindVerdict(aiScanDocuments[0])'), 'ask-split', 'back to the decision it was');
+  assert.equal(h.c.run('receiptDeliveryCredits.length'), 0);
+  await h.c.click('rc-photo-repair'); await h.c.click('rc-photo-start'); await flush(h.c);
+  assert.equal(hs.scans().length, 3, 'nothing is uploaded again');
+  invariants(h.c);
+  // The invoice changed after the split (a page added): the page goes back into it, and it is read again on "התחל".
+  const g = setup();
+  service(g.c, { papers });
+  g.c.run('renderReceiving()');
+  await photograph(g.c, 0, ['delivery-p.jpg', 'slip-p.jpg'], { gallery: true });
+  await g.c.click('rc-photo-start'); await flush(g.c);
+  await g.c.click('rc-credit-doc-split', undefined, { scan: scanIdOf(g.c, 0) }); await flush(g.c);
+  g.c.run(`aiScanDocuments[0].pages.push({ name: 'extra.jpg', dataUrl: 'data:image/jpeg;base64,' + btoa('extra.jpg'), orientationConfirmed: true }); yotvataInvalidatePhotoDoc(aiScanDocuments[0])`);
+  g.c.toasts.length = 0;
+  await g.c.click('delivery-credit-unmove', credit0(g.c).id);
+  assert.deepEqual(g.c.toasts, ['העמוד חזר לתעודה 1. היא תיקרא שוב כשתלחץ "התחל קליטת מוצרים".']);
+  assert.deepEqual(json(g.c, 'aiScanDocuments[0].pages.map(p => p.name)'), ['delivery-p.jpg', 'slip-p.jpg', 'extra.jpg']);
+  assert.deepEqual(json(g.c, 'receiptPaperScanProblems'), ['תעודה 1 עוד לא נקראה — היא תיקרא כשתלחץ "התחל קליטת מוצרים" (בדוק צילומים).'], 'not four checks of a paper that was never read');
+  invariants(g.c);
+});
+
+test('w3: an invoice with a return line that one read typed "credit" — "לא, זו תעודת משלוח רגילה" is offered (0 calls); a mistaken "העבר וקרא כזיכוי" finds a positive summary, offers the free way back, and the way back does not hold it again', async () => {
+  const papers = { 'invoice.jpg': ({ credit }) => credit ? [withReturnLine(), withReturnLine()] : [withReturnLine(), withReturnLine({ type: 'credit' })] };
+  const { c } = setup();
+  const s = service(c, { papers });
+  await gate(c, ['invoice.jpg']);
+  assert.equal(c.run('yotvataDocumentKindVerdict(aiScanDocuments[0])'), 'ask-read');
+  assert.match(cardOf(c, 0), /data-role="rc-credit-doc-keep"[^>]*>לא, זו תעודת משלוח רגילה</);
+  await c.click('rc-credit-doc-keep', undefined, { scan: scanIdOf(c, 0) });
+  assert.deepEqual(json(c, 'yotvataHeldDocuments()'), []);
+  assert.equal(c.run('aiScanResponse.scan.documents.length'), 1, 'it is in the money view, as in v393');
+  assert.ok(json(c, 'receiptPaperScanProblems').includes(RETURN_LINE_PROBLEM));
+  assert.equal(s.stats.modelCalls, 2, 'the false alarm cost nothing');
+  invariants(c);
+  // The mistaken tap: one credit read, then the free way back.
+  const m = setup();
+  const ms = service(m.c, { papers });
+  await gate(m.c, ['invoice.jpg']);
+  await m.c.click('rc-credit-doc-move', undefined, { scan: scanIdOf(m.c, 0) }); await flush(m.c);
+  const credit = credit0(m.c);
+  assert.deepEqual([credit.status, credit.errorKind, credit.notCredit], ['error', 'paper', true], 'a positive summary is no credit, return line or not');
+  const html = m.c.run('deliveryCreditsHtml()');
+  assert.match(html, /<button data-role="delivery-credit-unmove"[^>]*class="btn-tap w-full bg-emerald-600[^>]*>זו תעודה רגילה — החזר לתעודות</);
+  assert.match(html, /הקריאה כזיכוי מצאה סכומים חיוביים — נראה שזו תעודת משלוח רגילה\./);
+  assert.doesNotMatch(html, /נסה לקרוא שוב את אותו צילום/, 'no paid re-read is offered');
+  await m.c.click('delivery-credit-unmove', credit.id);
+  assert.deepEqual(json(m.c, 'yotvataHeldDocuments()'), [], 'the way back is not a loop');
+  assert.equal(m.c.run('aiScanDocuments[0].kindDecision.source'), 'unmove');
+  assert.ok(json(m.c, 'receiptPaperScanProblems').includes(RETURN_LINE_PROBLEM));
+  assert.equal(ms.stats.modelCalls, 4, 'two invoice reads, two credit reads, nothing after');
+  invariants(m.c);
+});
+
+test('w4: removing the only document from its card leaves an empty "תעודה 1" — the paper status says it was not photographed, not four checks of a paper never read', async () => {
+  const { c } = setup();
+  service(c, { papers: { 'slip.jpg': twice(VARIANT.C) } });
+  await gate(c, ['slip.jpg']);
+  await c.click('rc-credit-doc-remove', undefined, { scan: scanIdOf(c, 0) });
+  assert.deepEqual(json(c, 'receiptPaperScanProblems'), ['תעודה 1 עוד לא צולמה — צלם אותה (בדוק צילומים) או הקלד את הסכום והיחידות שלה.']);
+  assert.equal(c.run('receiptPaperScanState'), 'failed');
+  invariants(c);
+});
+
+test('w5: a v393 draft that failed on the slip restored on v394 — the stale lines of the held document become the hold line; the other lines stay', async () => {
+  const { c, data } = setup();
+  service(c, { papers: { 'delivery.jpg': twice(delivery), 'slip.jpg': () => [VARIANT.A(), slip({ type: 'delivery', title: null })] } });
+  await gate(c, ['delivery.jpg', 'slip.jpg']);
+  const draft = JSON.parse(c.storage.get(c.run('RECEIPT_DRAFT_KEY')));
+  // What v393 saved for the same papers: not adopted, its paper check of the negative slip asks to photograph again.
+  Object.assign(draft, { paperState: 'failed', anchorSource: null, notes: [], paperProblems: ['תעודה 2: חסרים כמות, סכום נטו או שיוך לעמוד באחת השורות',
+    'תעודה 2: הסכום ללא מע״מ לא נקרא בסיכום התעודה', 'תעודה 1: מספר השורות אינו תואם למספר המודפס'] });
+  const storage = new Map(c.storage); storage.set(c.run('RECEIPT_DRAFT_KEY'), JSON.stringify(draft));
+  const r = runtime('yotvata', { data, storage });
+  assert.equal(r.run('receiptPaperScanState'), 'failed');
+  assert.deepEqual(json(r, 'receiptPaperScanProblems'), ['תעודה 2 נראית כמו תעודת זיכוי — ההחלטה בכרטיס שמתחת.', 'תעודה 1: מספר השורות אינו תואם למספר המודפס']);
+  assert.equal(r.requests.filter(q => q.url.endsWith('/scan')).length, 0);
+  // A v394 draft is restored exactly as saved.
+  const same = runtime('yotvata', { data, storage: c.storage });
+  assert.deepEqual(json(same, 'receiptPaperScanProblems'), json(c, 'receiptPaperScanProblems'));
+});
+
+test('w6: "לא, זו תעודת משלוח רגילה" is not offered when most readings saw the minus, and asks first when every read typed it "credit"', async () => {
+  const { c } = setup();
+  service(c, { papers: { 'delivery.jpg': twice(delivery), 'slip.jpg': () => ({ reads: [slip({ printedUnits: 24 }), VARIANT.C(), slip({ printedUnits: 24 })], selected: 1 }) } });
+  await gate(c, ['delivery.jpg', 'slip.jpg']);
+  assert.equal(c.run('yotvataDocumentKindVerdict(aiScanDocuments[1])'), 'ask-read');
+  assert.match(cardOf(c, 1), /2 מתוך 3 הקריאות קראו סכום שלילי \(‎-83\.52\), ואחת חיובי \(83\.52\)\./);
+  assert.doesNotMatch(cardOf(c, 1), /rc-credit-doc-keep/);
+  await c.click('rc-credit-doc-keep', undefined, { scan: scanIdOf(c, 1) });
+  assert.deepEqual(json(c, 'yotvataHeldDocuments().map(x => x.index)'), [1], 'a keep that is not offered changes nothing');
+  assert.equal(c.run('receiptNoteTotal'), null, 'never billed as goods');
+  invariants(c);
+  const k = setup();
+  service(k.c, { papers: { 'delivery.jpg': twice(delivery), 'slip.jpg': twice(VARIANT.C) } });
+  await gate(k.c, ['delivery.jpg', 'slip.jpg']);
+  k.c.run('confirmLog = []; showConfirm = (t, x, l, fn) => { confirmLog.push([t, x, l]); }'); // the worker has not answered yet
+  await k.c.click('rc-credit-doc-keep', undefined, { scan: scanIdOf(k.c, 1) });
+  assert.deepEqual(json(k.c, 'confirmLog'), [['תעודה 2 היא תעודת משלוח?',
+    'כל הקריאות סימנו אותה כתעודת זיכוי («ביטול מכירה חלקי ת.משלוח»). אם תאשר, הסכום שלה (₪83.52 לפני מע״מ · 24 יח׳) ייכנס לתעודות כסחורה שהתקבלה.', 'כן, תעודת משלוח']]);
+  assert.deepEqual(json(k.c, 'yotvataHeldDocuments().map(x => x.index)'), [1], 'nothing changes before the answer');
+  invariants(k.c);
+});
+
+test('w8: typed anchors — moving the held slip removes the line typed for it, so it is never billed as goods next to its own credit (photo-first "או הקלד סכום ויחידות", and the classic typed receipt)', async () => {
+  const { c } = setup();
+  const s = service(c, { papers: { 'delivery.jpg': twice(delivery), 'slip.jpg': ({ credit }) => credit ? [VARIANT.CREDIT(), VARIANT.CREDIT()] : [VARIANT.C(), VARIANT.C()] } });
+  await gate(c, ['delivery.jpg', 'slip.jpg']);
+  await typeNotes(c, [['217.04', '58'], ['83.52', '24']]);
+  assert.equal(c.run('receiptEntryMode'), 'manual');
+  assert.equal(c.run('receiptNoteTotal'), 300.56);
+  c.toasts.length = 0;
+  await c.click('rc-credit-doc-move', undefined, { scan: scanIdOf(c, 1) }); await flush(c);
+  assert.ok(c.toasts.includes('תעודה 2 הועברה לזיכויים ונקראת עכשיו כזיכוי. השורה שהוקלדה לה (₪83.52 · 24 יח׳) הוסרה מסכום התעודות.'), c.toasts.join(' | '));
+  assert.deepEqual(json(c, 'receiptNotes'), [{ amount: 217.04, units: 58 }]);
+  assert.equal(credit0(c).status, 'confirmed');
+  assert.equal(s.stats.modelCalls, 6);
+  count(c);
+  const p = finish(c);
+  assert.equal(p.status, 'ok');
+  assert.deepEqual(p.noteParts, [{ amount: 217.04, units: 58 }]);
+  assert.equal(p.ex, 133.52);
+  invariants(c);
+  // Classic: typed 217.04/58 and 83.52/24, "סרוק את התעודות" in the comparison — AI document i is typed line i.
+  const k = setup();
+  service(k.c, { papers: { 'delivery.jpg': twice(delivery), 'slip.jpg': twice(VARIANT.A) } });
+  k.c.run('renderReceiving()');
+  await k.c.click('rc-photo-manual');
+  k.c.node('rcNoteInput').value = '217.04'; k.c.node('rcNoteUnits').value = '58'; await k.c.click('rc-note-add');
+  k.c.node('rcNoteInput').value = '83.52'; k.c.node('rcNoteUnits').value = '24'; await k.c.click('rc-open'); await flush(k.c, 5);
+  count(k.c);
+  pressCart(k.c); await flush(k.c, 10);
+  assert.equal(k.c.run('currentView'), 'reconcile');
+  await k.c.click('ai-rescan'); await flush(k.c);
+  await photograph(k.c, 0, ['delivery.jpg']); await photograph(k.c, 1, ['slip.jpg']);
+  k.c.toasts.length = 0;
+  await k.c.click('ai-run'); await flush(k.c);
+  assert.deepEqual(json(k.c, 'yotvataHeldDocuments().map(x => x.index)'), [1]);
+  assert.equal(k.c.run('receiptDeliveryCredits.length'), 0, 'no routing on the classic path');
+  assert.ok(k.c.toasts.includes(HELD_TOAST(2)), 'the classic read names the held document: ' + k.c.toasts.join(' | '));
+  k.c.run("currentView = 'receiving'; renderReceiving()");
+  await k.c.click('rc-credit-doc-move', undefined, { scan: scanIdOf(k.c, 1) }); await flush(k.c);
+  assert.deepEqual(json(k.c, 'receiptNotes'), [{ amount: 217.04, units: 58 }], 'typed line 2 was this paper');
+  assert.equal(k.c.run('aiScanDocuments.length'), 1, 'AI documents and typed lines stay in step');
+  assert.equal(credit0(k.c).origin.docNumber, 2);
+  invariants(k.c);
+});
+
+test('w9: the page split on a receipt whose anchors were typed never leaves the paper "running" — the receipt still saves', async () => {
+  const { c } = setup();
+  const mixed = () => ({ ...delivery(), pageCount: 2, rows: [line(YOGURT, 48, 167.04), line(MILK, 10, 50), line(YOGURT, 24, -83.52, 2)] });
+  const s = service(c, { papers: { 'delivery-p.jpg+slip-p.jpg': twice(mixed), 'slip-p.jpg': twice(VARIANT.CREDIT), 'delivery-p.jpg': twice(delivery) } });
+  c.run('renderReceiving()');
+  await photograph(c, 0, ['delivery-p.jpg', 'slip-p.jpg'], { gallery: true });
+  await c.click('rc-photo-start'); await flush(c);
+  await typeNotes(c, [['217.04', '58']]);
+  assert.equal(c.run('receiptEntryMode'), 'manual');
+  assert.match(c.run('yotvataPaperStatusHtml()'), /rc-credit-doc-split/, 'the card still shows on a typed-anchors receipt');
+  await c.click('rc-credit-doc-split', undefined, { scan: scanIdOf(c, 0) }); await flush(c);
+  assert.deepEqual(s.kinds(), ['invoice:delivery-p.jpg+slip-p.jpg', 'credit:slip-p.jpg', 'invoice:delivery-p.jpg']);
+  assert.notEqual(c.run('receiptPaperScanState'), 'running');
+  assert.equal(c.run('handoffDraft("receiving").scanRunning'), false);
+  assert.equal(c.run('receiptPriceAudit().state'), 'ready');
+  assert.equal(credit0(c).status, 'confirmed');
+  assert.deepEqual(json(c, 'receiptNotes'), [{ amount: 217.04, units: 58 }], 'no typed line was the slip page\'s');
+  count(c);
+  const p = finish(c);
+  assert.equal(p.status, 'ok');
+  c.toasts.length = 0;
+  await c.run('confirmReceipt()'); await flush(c);
+  assert.ok(c.writes.some(w => w.path && w.path.includes('receipts')), 'saved: ' + c.toasts.join(' | '));
+  assert.ok(!c.toasts.includes('קריאת התעודה עדיין רצה — המתן לסיומה.'));
+});
+
+test('w10: while a document waits for a decision, the price check covers the documents that were read — their rows are not "partial"', async () => {
+  const { c } = setup();
+  service(c, { papers: { 'delivery.jpg': twice(delivery), 'slip.jpg': twice(VARIANT.C) } });
+  await gate(c, ['delivery.jpg', 'slip.jpg']);
+  assert.deepEqual(json(c, 'yotvataHeldDocuments().map(x => x.index)'), [1]);
+  count(c);
+  const audit = json(c, 'receiptPriceAudit()');
+  assert.equal(audit.complete, true);
+  assert.equal(audit.rows.length, 2);
+  assert.deepEqual(audit.rows.filter(r => r.capability === 'partial').map(r => r.reason), []);
+  assert.doesNotMatch(c.run('receiptPriceAuditHtml()'), /שורות לטיפול/);
+  invariants(c);
+});
+
+test('w11: a document held by the comparison\'s own read ("פענח") — the comparison says so outside "מה לא נסגר?" and leads to the decision card', async () => {
+  const { c } = setup();
+  const twoPages = () => ({ ...delivery(), pageCount: 2, rows: [line(YOGURT, 48, 167.04), line(MILK, 10, 50), line(YOGURT, 24, -83.52, 2)] });
+  service(c, { papers: { 'delivery.jpg': twice(delivery), 'delivery.jpg+slip.jpg': twice(twoPages) } });
+  await gate(c, ['delivery.jpg']);
+  count(c);
+  pressCart(c); await flush(c, 10);
+  assert.equal(c.run('currentView'), 'reconcile');
+  // The driver hands over the slip late: added as page 2 of "תעודה 1", then "פענח".
+  await c.click('ai-edit-images'); await flush(c);
+  await photograph(c, 0, ['slip.jpg']);
+  c.toasts.length = 0;
+  await c.click('ai-run'); await flush(c);
+  assert.deepEqual(json(c, 'yotvataHeldDocuments().map(x => yotvataDocumentKindVerdict(x.input))'), ['ask-split']);
+  assert.ok(c.toasts.includes(HELD_TOAST(1)), c.toasts.join(' | '));
+  const html = app(c);
+  assert.match(html, /<div data-credit-document-pending[^>]*><div class="font-black text-amber-900 text-sm">תעודה 1 נראית כמו תעודת זיכוי — היא אינה נכללת בהשוואה עד שתחליט עליה\.<\/div>/);
+  assert.match(html, /data-role="rc-credit-doc-open"[^>]*>להחלטה על תעודה 1</);
+  await c.click('rc-credit-doc-open', undefined, { scan: scanIdOf(c, 0) });
+  assert.equal(c.run('currentView'), 'receiving');
+  assert.match(app(c), /data-role="rc-credit-doc-split"[^>]*>העבר את עמוד 2 לזיכויים וקרא מחדש</);
   invariants(c);
 });

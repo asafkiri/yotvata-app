@@ -28,13 +28,19 @@ negative subtotal in any read (`modelVerification.readings`, service ≥ 149 —
 works on v150); a read typed `'credit'` (v151); a printed title matching
 `/זיכוי|ביטול\s*מכירה|credit/i` (v151); a gallery pick whose pages split cleanly
 by sign (`pageSplit`: every row on a page, one sign per page, both signs, 1–4
-negative pages). Not signals: a negative row under a positive subtotal (a
+negative pages, and the rows do NOT close the printed summary — when all rows,
+less a separate document discount, equal the subtotal to the agora
+(`rowsClose`) it is one document, e.g. a 2-page invoice whose return line is
+alone on page 2). Not signals: a negative row under a positive subtotal (a
 return line inside an invoice), a negative discount, `'unclear'`, free-text
 warnings.
 
 **Held** = signal and not kept. "Kept" requires the worker's "לא, זו תעודת
 משלוח רגילה" (`kindDecision: { kind: 'delivery' }`) on a read that is a valid
-positive invoice (subtotal > 0, signs not negative, `yotvataPaperCheck` ok).
+positive invoice (subtotal > 0, signs not negative, `yotvataPaperCheck` ok) —
+or a positive invoice with a return line whose rows close the printed summary
+(signs `'mixed'`, `rowsClose`): it then enters the money view exactly as in
+v393, and its paper check says "בשורה R נקרא סכום שלילי…".
 A held document:
 
 - is out of the money view (`receiptRebuildScanResponse` — the single choke
@@ -77,18 +83,49 @@ for one tap with "הזיכוי צולם כתעודה רגילה — בדוק א�
 | ask-split | "העבר את עמוד K לזיכויים וקרא מחדש" — the page(s) become a credit (read as a credit), the rest is read again | two reads, both named |
 | blocked-* | the reason, and what to do | — |
 
-"לא, זו תעודת משלוח רגילה" appears only for a valid positive invoice (0
-calls); "הסר את תעודה N מהקליטה" always. On the gate a kept document says
-"סומנה כתעודת משלוח רגילה לפי ההחלטה שלך." with "בטל — זו כן תעודת זיכוי".
+"לא, זו תעודת משלוח רגילה" appears only when the decision would be kept (see
+**Held**; 0 calls) and not when most readings (e.g. 2 of 3, the verifier
+included) read the minus — the positive read is selected only because a
+negative read has no valid summary in the paper check. When every read typed
+it `'credit'` or the title is a credit title, it asks first ("תעודה N היא
+תעודת משלוח?"): one tap bills the paper as goods. "הסר את תעודה N מהקליטה"
+always. On the gate a kept document says "סומנה כתעודת משלוח רגילה לפי ההחלטה
+שלך." with "בטל — זו כן תעודת זיכוי".
+
+**Numbers.** A document keeps the number it was photographed as (`shotAs`, in
+the draft) when a document before it moves to the credits in the same moment:
+its card reads "תעודה 2 (צולמה כ"תעודה 3") נראית כמו תעודת זיכוי", the routing
+toast adds "תעודה 3 (עכשיו תעודה 2) נראית כמו…", and a later move gives the
+credit `origin.docNumber` 3 — two credits never both say "צולם כ"תעודה 2"".
+
+**Typed anchors** ("או הקלד סכום ויחידות", or the classic typed receipt with
+"סרוק את התעודות"): moving, splitting, recapturing or removing a held document
+also removes the line typed for that paper — line i in the classic flow (AI
+document i was built from it), otherwise the one line with the same amount
+(and units, when known) — and the toast says so ("השורה שהוקלדה לה (₪83.52 ·
+24 יח׳) הוסרה מסכום התעודות."). Several lines with that amount: the worker
+deletes the right one first. The re-read after a split sets the paper state
+"running" only on a photo receipt, so a typed receipt is never left
+unsaveable. On the classic path (no routing) a held document is announced,
+and the comparison shows "תעודה N נראית כמו תעודת זיכוי — היא אינה נכללת
+בהשוואה עד שתחליט עליה." with "להחלטה על תעודה N", which opens the receiving
+screen at the card. While a document is held, the price check covers the
+documents that were read (their rows are not "partial").
 
 **A moved credit** says where it came from ("צולם כ"תעודה N" וזוהה כתעודת
 זיכוי («title»)." / "עמוד K של "תעודה N" הועבר לכאן כזיכוי.") and offers "זו
 לא תעודת זיכוי? החזר לתעודות" in every state except a whole-document discount
 and while it is read. The undo restores the document with its original read
 (photos from memory, or paper-only after a reload), marks it `kindDecision:
-'delivery'` (source `'unmove'`) and adopts — no call. A credit-mode read that
-comes back positive as printed sets `notCredit`, and the card's main action
-becomes "זו תעודה רגילה — החזר לתעודות".
+'delivery'` (source `'unmove'`) and adopts — no call. A page undo puts the
+page(s) back in their document at their places; when that document is as the
+split left it, its original read comes back too (no call), otherwise it is
+read again on "התחל". A credit-mode read with a positive summary (as printed,
+or with a return line) sets `notCredit`, and the card's main action becomes
+"זו תעודה רגילה — החזר לתעודות". After a card decision or an undo, a document
+never read says "תעודה N עוד לא נקראה…" / "תעודה N עוד לא צולמה…" instead of
+the paper checks of a paper that was not read; a v393 draft that failed on the
+slip shows the hold line instead of its stale "צלם שוב" lines.
 
 Money is unchanged: a credit closes only a counted shortage of the same
 product, quantity and money (`deliveryCreditCoverage`); the payable stays the
@@ -123,8 +160,8 @@ two rotated paid re-reads on the non-background path; the scanner shows
   enters `issues`, never escalates and costs no call.
 - The app reads typed evidence only when `typeof doc.documentType ===
   'string'`; per-read subtotals come from `modelVerification.readings` (v149+).
-- Drafts gain only additive fields: `kindDecision` on photo inputs and
-  `docInputs` (only when set); `origin`, `paperMode`, `readAs`, `notCredit` on
+- Drafts gain only additive fields: `kindDecision` and `shotAs` on photo
+  inputs and `docInputs` (only when set); `origin`, `paperMode`, `readAs`, `notCredit` on
   credits; `paperMode` and `origin` on saved `shortCreditNotes` of moved
   credits (green-button notes are byte-identical). `originPages` /
   `originCache` (photos) never reach a draft.
@@ -141,6 +178,7 @@ two rotated paid re-reads on the non-background path; the scanner shows
 | False alarm | 0 extra; "לא, זו תעודת משלוח רגילה" adopts the read |
 | Gallery pages split | one credit read + one re-read of the rest |
 | Held read, "בדוק צילומים" + "התחל", reload, undo, keep | 0 |
+| A slip read as −24 on "ai-run" (the comparison) | 2 (v393: 4 more — two rotated re-reads of 2 calls each) |
 | App v394 + service v150 | same; a moved credit always waits for one tap; dropped signs are not detected |
 | App v393 + service v151 | exactly v150's bodies and counts |
 
@@ -172,14 +210,15 @@ node --test tools/*.test.mjs tools/photo-first-test.mjs tests/*.test.mjs
 YOTVATA_AI_SCAN=<yotvata-ai-scan v151 checkout> node --test tools/credit-service-contract.test.mjs
 ```
 
-- `tools/credit-as-document.test.mjs` (25 tests): the complete app module
+- `tools/credit-as-document.test.mjs` (35 tests): the complete app module
   driven through its own UI events (photo, orientation confirm, "+ תעודה
   נוספת", "התחל", the card buttons, "סיים"), against a fetch-level service fake
   that answers exactly as the contract says (typed for v151, untyped for v150).
   Each scenario ends with the invariants: no paper is both a document and a
   credit, no negative note amount, a held document is never in the money
-  view, nothing is left busy. All 25 fail against the v393 `index.html`
-  (`RECEIPT_TEST_APP=…`).
+  view, nothing is left busy. All 25 of the feature tests fail against the
+  v393 `index.html` (`RECEIPT_TEST_APP=…`); the 10 review tests (w1–w11) fail
+  against the first v394 commit.
 - `tools/credit-service-contract.test.mjs`: the app's own typed invoice body
   of the slip through the REAL service code — v151 moves and attaches it with
   its own read; the v150 checkout moves it on its signs and waits for one tap.
