@@ -1457,7 +1457,8 @@ test('w19: typed anchors — a mistaken move of a real delivery note drops its t
   assert.deepEqual(json(c, 'receiptNotes'), [{ amount: 217.04, units: 58 }]);
   const credit = credit0(c);
   assert.deepEqual([credit.status, credit.notCredit], ['error', true], 'the credit read found positive amounts');
-  assert.deepEqual(credit.origin.typedNote, { index: 1, amount: 150, units: 30, inStep: false }, 'the dropped line is kept on the credit (and in the draft)');
+  assert.deepEqual(credit.origin.typedNote, { index: 1, amount: 150, units: 30, inStep: false, left: [{ amount: 217.04, units: 58 }] },
+    'the dropped line is kept on the credit (and in the draft), with the typed lines the move left');
   // After a reload (photos gone) the way back is paper-only, and the line still comes back.
   const r = runtime('yotvata', { data, storage: c.storage });
   service(r, { papers: thirtyPapers });
@@ -1591,4 +1592,273 @@ test('w22: a credit whose own credit-mode read saw the minus but failed another 
     assert.equal(s.stats.modelCalls, 6, name);
     invariants(c); invariants(r);
   }
+});
+
+// ---- convergence round 1 (each test pins one finding; all fail on e28aeda) ----
+
+// The same real second delivery note (30 milk = ₪150.00 / 30), its own paper check failing for an ordinary reason.
+const thirtyNoUnits = (type = 'delivery') => ({ ...thirty(type), printedUnits: null });
+const thirtyAgora = (type = 'delivery') => ({ ...thirty(type), rows: [line(MILK, 30, 150.01)] });
+const papersOf = paper => ({ 'delivery.jpg': twice(delivery), 'second.jpg': ({ credit }) => credit ? [paper(), paper()] : [paper(), paper('credit')] });
+
+test('w23: a real second delivery note that one read typed "credit" and whose own paper check fails for an ordinary reason (printed units not read, a row 1 agora off) can be kept — typed anchors save as typed; from the photo its problems are named until the anchors are typed; after a mistaken move the free way back keeps it', async () => {
+  for (const [name, paper] of Object.entries({ 'units not read': thirtyNoUnits, 'a row 1 agora off': thirtyAgora })) {
+    // Typed anchors (photo-first, "או הקלד סכום ויחידות").
+    const { c } = setup();
+    const s = service(c, { papers: papersOf(paper) });
+    await gate(c, ['delivery.jpg', 'second.jpg']);
+    assert.equal(c.run('yotvataDocumentKindVerdict(aiScanDocuments[1])'), 'ask-read', name);
+    assert.equal(c.run('yotvataPaperCheck(aiScanDocuments[1].scanResult.doc, 1).ok'), false, name);
+    assert.match(cardOf(c, 1), /data-role="rc-credit-doc-keep"[^>]*>לא, זו תעודת משלוח רגילה</, name + ': the keep is offered');
+    await typeNotes(c, [['217.04', '58'], ['150', '30']]);
+    c.run('confirmLog = []');
+    await c.click('rc-credit-doc-keep', undefined, { scan: scanIdOf(c, 1) });
+    assert.deepEqual(json(c, 'confirmLog'), [], name + ': no credit title, nothing to confirm');
+    assert.deepEqual(json(c, 'yotvataHeldDocuments()'), [], name);
+    assert.deepEqual(json(c, 'receiptNotes'), BOTH_TYPED, name + ': the line typed for it stays');
+    count(c, 48, 40);
+    const p = finish(c);
+    assert.deepEqual([p.status, p.ex, p.noteParts], ['ok', 367.04, BOTH_TYPED], name);
+    assert.equal(s.stats.modelCalls, 4, name + ': the keep costs nothing');
+    invariants(c);
+    // From the photo alone: kept, in the money view, its own problems named — never "read and verified" without it.
+    const f = setup();
+    service(f.c, { papers: papersOf(paper) });
+    await gate(f.c, ['delivery.jpg', 'second.jpg']);
+    await f.c.click('rc-credit-doc-keep', undefined, { scan: scanIdOf(f.c, 1) });
+    assert.equal(f.c.run('aiScanResponse.scan.documents.length'), 2, name);
+    assert.equal(f.c.run('receiptPaperScanState'), 'failed', name);
+    assert.ok(json(f.c, 'receiptPaperScanProblems').every(p => p.startsWith('תעודה 2: ')), name + ': ' + json(f.c, 'receiptPaperScanProblems').join(' | '));
+    pressCart(f.c); await flush(f.c, 10);
+    assert.equal(f.c.run('currentView'), 'receiving', name + ': no finish before the anchors are complete (as v393)');
+    await typeNotes(f.c, [['217.04', '58'], ['150', '30']]);
+    count(f.c, 48, 40);
+    const fp = finish(f.c);
+    assert.deepEqual([fp.status, fp.ex, fp.noteParts], ['ok', 367.04, BOTH_TYPED], name);
+    invariants(f.c);
+  }
+  // A mistaken "העבר וקרא כזיכוי": the credit read is positive; the free way back puts the line back, and the note is kept, not held again.
+  const m = setup();
+  const ms = service(m.c, { papers: papersOf(thirtyNoUnits) });
+  await gate(m.c, ['delivery.jpg', 'second.jpg']);
+  await typeNotes(m.c, [['217.04', '58'], ['150', '30']]);
+  await m.c.click('rc-credit-doc-move', undefined, { scan: scanIdOf(m.c, 1) }); await flush(m.c);
+  assert.deepEqual([credit0(m.c).notCredit, credit0(m.c).origin.creditRead], [true, 'no-minus']);
+  await m.c.click('delivery-credit-unmove', credit0(m.c).id);
+  assert.deepEqual(json(m.c, 'yotvataHeldDocuments()'), [], 'kept, not held again');
+  assert.deepEqual(json(m.c, 'receiptNotes'), BOTH_TYPED);
+  count(m.c, 48, 40);
+  const mp = finish(m.c);
+  assert.deepEqual([mp.status, mp.ex, mp.noteParts], ['ok', 367.04, BOTH_TYPED]);
+  assert.equal(ms.stats.modelCalls, 6, 'the mistaken tap cost one credit read; the way back costs nothing');
+  invariants(m.c);
+});
+
+test('w24: typed anchors — the worker types the moved note\'s line again before the free way back: the line does not come back a second time, the confirm and the toast say why, and the receipt saves as typed (photo-first and the classic typed receipt); two moves undone in either order each put their own line back once', async () => {
+  const CHANGED_CONFIRM = ' השורות שהוקלדו השתנו מאז ההעברה לזיכויים, ולכן השורה שהוקלדה לה (₪150.00 · 30 יח׳) לא תחזור לבד — בדוק את סכום התעודות.';
+  const CHANGED_TOAST = 'תעודה 2 חזרה לתעודות. הקריאה שכבר נעשתה נשמרה. השורות שהוקלדו השתנו מאז ההעברה לזיכויים, ולכן השורה שהוקלדה לה (₪150.00 · 30 יח׳) לא הוחזרה — בדוק את סכום התעודות.';
+  const retype = async c => {
+    await c.click('rc-notes-edit'); await flush(c, 3);
+    c.node('rcNoteInput').value = '150'; c.node('rcNoteUnits').value = '30'; await c.click('rc-note-add');
+    c.node('rcNoteInput').value = ''; c.node('rcNoteUnits').value = '';
+    await c.click('rc-notes-done'); await flush(c);
+    assert.deepEqual(json(c, 'receiptNotes'), BOTH_TYPED, 'the worker typed the line again');
+  };
+  const { c } = setup();
+  const s = service(c, { papers: thirtyPapers });
+  await gate(c, ['delivery.jpg', 'second.jpg']);
+  await typeNotes(c, [['217.04', '58'], ['150', '30']]);
+  await c.click('rc-credit-doc-move', undefined, { scan: scanIdOf(c, 1) }); await flush(c);
+  assert.deepEqual(json(c, 'receiptNotes'), [{ amount: 217.04, units: 58 }]);
+  await retype(c);
+  c.toasts.length = 0;
+  await c.click('delivery-credit-unmove', credit0(c).id);
+  assert.ok(json(c, 'confirmLog').at(-1)[1].endsWith(CHANGED_CONFIRM), json(c, 'confirmLog').at(-1)[1]);
+  assert.ok(c.toasts.includes(CHANGED_TOAST), c.toasts.join(' | '));
+  assert.deepEqual(json(c, 'receiptNotes'), BOTH_TYPED, 'not 517.04: the line is not counted twice');
+  count(c, 48, 40);
+  const p = finish(c);
+  assert.deepEqual([p.status, p.ex, p.noteParts], ['ok', 367.04, BOTH_TYPED]);
+  assert.equal(s.stats.modelCalls, 6);
+  invariants(c);
+  // Classic: typed lines first, "סרוק את התעודות" + "פענח" in the comparison, then the card.
+  const k = setup();
+  service(k.c, { papers: thirtyPapers });
+  k.c.run('renderReceiving()');
+  await k.c.click('rc-photo-manual');
+  k.c.node('rcNoteInput').value = '217.04'; k.c.node('rcNoteUnits').value = '58'; await k.c.click('rc-note-add');
+  k.c.node('rcNoteInput').value = '150'; k.c.node('rcNoteUnits').value = '30'; await k.c.click('rc-open'); await flush(k.c, 5);
+  count(k.c, 47, 40);
+  pressCart(k.c); await flush(k.c, 10);
+  await k.c.click('ai-rescan'); await flush(k.c);
+  await photograph(k.c, 0, ['delivery.jpg']); await photograph(k.c, 1, ['second.jpg']);
+  await k.c.click('ai-run'); await flush(k.c);
+  k.c.run("currentView = 'receiving'; renderReceiving()");
+  await k.c.click('rc-credit-doc-move', undefined, { scan: scanIdOf(k.c, 1) }); await flush(k.c);
+  assert.equal(credit0(k.c).origin.typedNote.inStep, true);
+  await retype(k.c);
+  k.c.toasts.length = 0;
+  await k.c.click('delivery-credit-unmove', credit0(k.c).id);
+  assert.ok(k.c.toasts.includes(CHANGED_TOAST), k.c.toasts.join(' | '));
+  assert.deepEqual(json(k.c, 'receiptNotes'), BOTH_TYPED);
+  count(k.c, 48, 40);
+  pressCart(k.c); await flush(k.c, 10);
+  if (k.c.run('currentView') === 'reconcile') k.c.run('aiApplyInvoiceResult(); saveReconciledReceipt({ skipChecked: true })');
+  const kp = json(k.c, 'pendingReceipt');
+  assert.deepEqual([kp.status, kp.ex, kp.noteParts], ['ok', 367.04, BOTH_TYPED]);
+  invariants(k.c);
+  // Only the worker's edits count: two moves (the slip, then the real note by mistake) undone in either order — each
+  // line comes back once, beside its document, after a reload too.
+  const THREE = [{ amount: 217.04, units: 58 }, { amount: 150, units: 30 }, { amount: 83.52, units: 24 }];
+  for (const order of [[3, 2], [2, 3]]) {
+    const t = setup();
+    service(t.c, { papers: { ...thirtyPapers, 'slip.jpg': twice(VARIANT.A) } });
+    t.c.run('renderReceiving()');
+    await t.c.click('rc-photo-manual');
+    for (const [a, u] of [['217.04', '58'], ['150', '30']]) { t.c.node('rcNoteInput').value = a; t.c.node('rcNoteUnits').value = u; await t.c.click('rc-note-add'); }
+    t.c.node('rcNoteInput').value = '83.52'; t.c.node('rcNoteUnits').value = '24'; await t.c.click('rc-open'); await flush(t.c, 5);
+    count(t.c, 23, 40);
+    pressCart(t.c); await flush(t.c, 10);
+    await t.c.click('ai-rescan'); await flush(t.c);
+    await photograph(t.c, 0, ['delivery.jpg']); await photograph(t.c, 1, ['second.jpg']); await photograph(t.c, 2, ['slip.jpg']);
+    await t.c.click('ai-run'); await flush(t.c);
+    t.c.run("currentView = 'receiving'; renderReceiving()");
+    await t.c.click('rc-credit-doc-move', undefined, { scan: scanIdOf(t.c, 2) }); await flush(t.c);
+    await t.c.click('rc-credit-doc-move', undefined, { scan: scanIdOf(t.c, 1) }); await flush(t.c);
+    assert.deepEqual(json(t.c, 'receiptNotes'), [{ amount: 217.04, units: 58 }], 'both lines left with their papers');
+    const r = runtime('yotvata', { data: t.data, storage: t.c.storage });
+    service(r, { papers: { ...thirtyPapers, 'slip.jpg': twice(VARIANT.A) } });
+    r.run("confirmLog = []; showConfirm = (t, x, l, fn) => { confirmLog.push([t, x, l]); fn(); }; mainMode = 'receiving'; currentView = 'receiving'; renderReceiving()");
+    for (const n of order) {
+      r.toasts.length = 0;
+      await r.click('delivery-credit-unmove', r.run(`receiptDeliveryCredits.find(x => x.origin.docNumber === ${n}).id`)); await flush(r, 5);
+      assert.ok(r.toasts.some(x => /חזרה לסכום התעודות\.$/.test(x)), 'order ' + order + ': ' + r.toasts.join(' | '));
+    }
+    assert.deepEqual(json(r, 'receiptNotes'), THREE, 'order ' + order + ': each line once');
+    assert.deepEqual(json(r, 'aiScanDocuments.map(d => d.amount)'), [217.04, 150, 83.52], 'order ' + order + ': AI documents and typed lines in step');
+    invariants(r);
+  }
+});
+
+test('w25: once a credit-mode read of the paper saw the minus, the way back stays closed — after "צלם את הזיכוי מחדש" (waiting for its check), after a retake read that fails, after one that drops the minus, and after a reload', async () => {
+  const { c, data } = setup();
+  const s = service(c, { papers: { 'delivery.jpg': twice(delivery),
+    'slip.jpg': ({ credit }) => credit ? [slip({ qty: -24, printedUnits: 25 }), slip({ qty: -24, printedUnits: 25 })] : [VARIANT.C(), VARIANT.C()],
+    'slip-again.jpg': () => { throw new TypeError('Load failed'); }, 'slip-third.jpg': () => [VARIANT.C(), VARIANT.C()] } });
+  await gate(c, ['delivery.jpg', 'slip.jpg']);
+  await c.click('rc-credit-doc-move', undefined, { scan: scanIdOf(c, 1) }); await flush(c);
+  const id = credit0(c).id;
+  assert.deepEqual([credit0(c).status, credit0(c).readAs, credit0(c).notCredit], ['error', 'credit', false], 'the credit read saw the minus (the units failed)');
+  const closed = async label => {
+    const html = c.run('deliveryCreditsHtml()');
+    assert.doesNotMatch(html, /delivery-credit-unmove/, label);
+    assert.doesNotMatch(html, /נראה שזו תעודת משלוח רגילה/, label);
+    c.run('confirmLog = []');
+    await c.click('delivery-credit-unmove', id);
+    assert.deepEqual(json(c, 'confirmLog'), [], label + ': a forged or stale tap does nothing');
+    assert.deepEqual(json(c, 'receiptNotes'), [{ amount: 217.04, units: 58 }], label + ': the slip is never a second delivery note');
+  };
+  // "צלם את הזיכוי מחדש": the new photo waits for "בדוק ואשר את הצילום".
+  const retake = name => c.events.get('app:change')({ target: { id: 'creditRetake_' + id, dataset: { role: 'delivery-credit-file', id, replace: '1' }, files: [{ name }], value: 'x' } });
+  retake('slip-again.jpg');
+  await flush(c, 10);
+  assert.equal(credit0(c).status, 'capture');
+  await closed('waiting for the check of the retake');
+  // The retake read ends on the network.
+  if (c.run('!aiOrientationSession')) c.run('deliveryCreditOpenPage(' + JSON.stringify(id) + ', 0)');
+  // not awaited: a read that ends on the network waits for the harness' parked retry timers (flush runs them)
+  const confirmed = c.events.get('aiOrientationConfirm:click')({ type: 'click', target: c.node('aiOrientationConfirm') });
+  await flush(c); await confirmed;
+  assert.equal(credit0(c).status, 'error');
+  await closed('after a retake read that failed');
+  // Another retake whose read drops the minus says "positive", but the paper is the one that was read with its minus.
+  retake('slip-third.jpg'); await flush(c, 10);
+  if (c.run('!aiOrientationSession')) c.run('deliveryCreditOpenPage(' + JSON.stringify(id) + ', 0)');
+  const third = c.events.get('aiOrientationConfirm:click')({ type: 'click', target: c.node('aiOrientationConfirm') });
+  await flush(c); await third;
+  assert.equal(credit0(c).notCredit, true);
+  await closed('after a retake read that dropped the minus');
+  assert.equal(credit0(c).origin.creditRead, 'credit', 'what the credit reads saw is on the origin, not on the paper state');
+  const r = runtime('yotvata', { data, storage: c.storage });
+  r.run("mainMode = 'receiving'; currentView = 'receiving'; renderReceiving()");
+  assert.doesNotMatch(r.run('deliveryCreditsHtml()'), /delivery-credit-unmove/, 'not after a reload either');
+  invariants(c); invariants(r);
+  assert.ok(s.stats.modelCalls >= 6);
+  // A credit read that failed saw nothing: the way back stays — and its confirm names the credit title, as "לא, זו תעודת משלוח רגילה" does.
+  const n = setup();
+  service(n.c, { papers: { 'delivery.jpg': twice(delivery), 'slip.jpg': ({ credit }) => { if (credit) throw new TypeError('Load failed'); return [VARIANT.C(), VARIANT.C()]; } } });
+  await gate(n.c, ['delivery.jpg', 'slip.jpg']);
+  const moved = n.c.click('rc-credit-doc-move', undefined, { scan: scanIdOf(n.c, 1) }); await flush(n.c); await moved;
+  assert.equal(credit0(n.c).origin.creditRead, undefined);
+  await n.c.click('delivery-credit-unmove', credit0(n.c).id);
+  assert.deepEqual(json(n.c, 'confirmLog').at(-1), ['להחזיר לתעודות?', 'תעודה 2 תחזור לרשימת התעודות כתעודת משלוח, והזיכוי יוסר. הקריאה שכבר נעשתה נשמרת — אין קריאה נוספת. ' +
+    'כל הקריאות סימנו אותה כתעודת זיכוי («' + SLIP_TITLE + '»). אם תאשר, הסכום שלה (₪83.52 לפני מע״מ · 24 יח׳) ייכנס לתעודות כסחורה שהתקבלה.', 'החזר לתעודות']);
+  invariants(n.c);
+});
+
+test('w26: drafts written by earlier v394 builds — a moved credit whose credit-mode read is not on record offers no way back; one whose read was positive still does; a hold line of a document that is no longer held becomes that document\'s own problems; nothing is read', async () => {
+  const KEY = c => c.run('RECEIPT_DRAFT_KEY');
+  const reopen = async (c, data, edit) => {
+    const draft = JSON.parse(c.storage.get(KEY(c)));
+    edit(draft);
+    const storage = new Map(c.storage); storage.set(KEY(c), JSON.stringify(draft));
+    const r = runtime('yotvata', { data, storage });
+    r.run("mainMode = 'receiving'; currentView = 'receiving'; renderReceiving()");
+    return r;
+  };
+  // (Y) The credit-mode read had negative rows under a summary whose minus was dropped; the old build saved notCredit and nothing else.
+  const y = setup();
+  service(y.c, { papers: { 'delivery.jpg': twice(delivery), 'slip.jpg': ({ credit }) => credit
+    ? [{ ...slip({ qty: -24, printedUnits: 24 }), subtotalExVat: 83.52, vatAmount: 15.03, totalInclVat: 98.55 }, { ...slip({ qty: -24, printedUnits: 24 }), subtotalExVat: 83.52, vatAmount: 15.03, totalInclVat: 98.55 }]
+    : [VARIANT.C(), VARIANT.C()] } });
+  await gate(y.c, ['delivery.jpg', 'slip.jpg']);
+  await y.c.click('rc-credit-doc-move', undefined, { scan: scanIdOf(y.c, 1) }); await flush(y.c);
+  const old = await reopen(y.c, y.data, d => { const x = d.deliveryCredits[0]; delete x.origin.creditRead; delete x.creditReadSigns; x.notCredit = true; });
+  assert.doesNotMatch(old.run('deliveryCreditsHtml()'), /delivery-credit-unmove|נראה שזו תעודת משלוח רגילה/);
+  assert.match(old.run('deliveryCreditsHtml()'), /data-role="delivery-credit-retake"/);
+  assert.equal(json(old, 'receiptDeliveryCredits[0].origin.creditRead'), 'credit');
+  assert.equal(old.requests.filter(q => q.url.endsWith('/scan')).length, 0);
+  invariants(old);
+  // The build before that recorded what the credit read saw (creditReadSigns): a positive read keeps the way back, a negative one does not.
+  const t = setup();
+  service(t.c, { papers: thirtyPapers });
+  await gate(t.c, ['delivery.jpg', 'second.jpg']);
+  await t.c.click('rc-credit-doc-move', undefined, { scan: scanIdOf(t.c, 1) }); await flush(t.c);
+  for (const [signs, open] of [['as_printed', true], ['negative', false]]) {
+    const r = await reopen(t.c, t.data, d => { const x = d.deliveryCredits[0]; delete x.origin.creditRead; x.creditReadSigns = signs; x.notCredit = signs === 'as_printed'; });
+    assert.equal(/delivery-credit-unmove/.test(r.run('deliveryCreditsHtml()')), open, signs);
+  }
+  // (X) A 2-page invoice whose return line is alone on page 2, one price 1 agora off: an earlier build held it; this one does not.
+  const x = setup();
+  const base = withReturnLine({ pageCount: 2, returnPage: 2 });
+  service(x.c, { papers: { 'inv-p1.jpg+inv-p2.jpg': twice(() => ({ ...structuredClone(base), rows: [line(YOGURT, 48, 167.03), ...structuredClone(base.rows.slice(1))] })) } });
+  x.c.run('renderReceiving()');
+  await photograph(x.c, 0, ['inv-p1.jpg', 'inv-p2.jpg'], { gallery: true });
+  await x.c.click('rc-photo-start'); await flush(x.c);
+  const now = json(x.c, 'receiptPaperScanProblems');
+  const held = await reopen(x.c, x.data, d => { d.paperProblems = ['תעודה 1 נראית כמו תעודת זיכוי — ההחלטה בכרטיס שמתחת.']; });
+  assert.deepEqual(json(held, 'yotvataHeldDocuments()'), []);
+  assert.deepEqual(json(held, 'receiptPaperScanProblems'), now, 'the problems this build says for the same read');
+  assert.ok(now.includes(RETURN_LINE_PROBLEM), now.join(' | '));
+  assert.equal(held.requests.filter(q => q.url.endsWith('/scan')).length, 0);
+  invariants(held);
+});
+
+test('w27: "לא, זו תעודת משלוח רגילה" is a decision, not a read — the saved aiAudit counts the reads that happened, as v393 does for the same papers', async () => {
+  const second = (type = 'delivery') => delivery({ number: '9073800002', type });
+  const attempts = async typedCredit => {
+    const { c } = setup();
+    service(c, { papers: { 'delivery.jpg': twice(delivery), 'second.jpg': () => [second(), second(typedCredit ? 'credit' : 'delivery')] } });
+    await gate(c, ['delivery.jpg', 'second.jpg']);
+    if (typedCredit) await c.click('rc-credit-doc-keep', undefined, { scan: scanIdOf(c, 1) });
+    assert.deepEqual(json(c, 'yotvataHeldDocuments()'), []);
+    count(c, 95, 20); // one yogurt short, so the comparison builds the audit
+    pressCart(c); await flush(c, 10);
+    assert.equal(c.run('currentView'), 'reconcile');
+    c.run('aiApplyInvoiceResult(); saveReconciledReceipt({ skipChecked: true })');
+    invariants(c);
+    return json(c, 'pendingReceipt.aiAudit.attempts');
+  };
+  assert.equal(await attempts(true), await attempts(false));
+  assert.equal(await attempts(true), 2);
 });
