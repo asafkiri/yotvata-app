@@ -530,7 +530,8 @@ test('h: delivery note and slip picked together from the gallery into one docume
   await c.click('rc-photo-start'); await flush(c);
   assert.equal(c.run('receiptDeliveryCredits.length'), 0, 'a split is never automatic');
   assert.equal(c.run('yotvataDocumentKindVerdict(aiScanDocuments[0])'), 'ask-split');
-  assert.deepEqual(json(c, 'yotvataPaperCreditSignals(aiScanDocuments[0].scanResult.doc, 2).pageSplit'), { creditPages: [2], deliveryPages: [1] });
+  // The delivery page's rows close the summary to the agora: two papers for sure, so no keep (keepable false).
+  assert.deepEqual(json(c, 'yotvataPaperCreditSignals(aiScanDocuments[0].scanResult.doc, 2).pageSplit'), { creditPages: [2], deliveryPages: [1], keepable: false });
   const card = cardOf(c, 0);
   assert.match(card, /בתעודה 1 צולמו יחד שני מסמכים: עמוד 2 נראה כמו תעודת זיכוי\./);
   assert.match(card, /data-role="rc-credit-doc-split"[^>]*>העבר את עמוד 2 לזיכויים וקרא מחדש</);
@@ -2146,7 +2147,9 @@ const twoRowSlip = ({ summary = -1, yogurt = summary, milk = summary, type = 'cr
   rows: [line(YOGURT, 24, cents(yogurt * 83.52)), line(MILK, 5, cents(milk * 25))], documentType: type, printedTitle: title });
 
 test('w33: a credit read that lost the minus on its summary and on one of two rows (+108.52 over +83.52 and −25.00: the rows sum to 58.52) is a credit — no "זו תעודה רגילה — החזר לתעודות", no way back, and the same shape in the invoice read offers no keep; an invoice whose rows close its summary but for a read error stays positive', async () => {
-  // The rule: a 'mixed' read is positive only when its rows sum positive AND close to the printed summary.
+  // The rule (since round 4): a 'mixed' read is positive when its rows sum positive and the absolute values of its rows do
+  // NOT add up to the printed summary (that is the shape of a credit whose minus was dropped, whatever the size of the rows
+  // that kept it — w36); how far the rows are from the summary does not decide (a deposit with no row — w35).
   const positive = paper => c0.run(`yotvataPositiveRead(${JSON.stringify(paper)})`);
   const { c: c0 } = setup();
   assert.equal(positive(twoRowSlip({ summary: 1, yogurt: 1, milk: -1 })), false, 'the partial-minus slip: 58.52 under a printed 108.52');
@@ -2156,7 +2159,8 @@ test('w33: a credit read that lost the minus on its summary and on one of two ro
   assert.equal(positive(agoraReturnLine()), true, 'an invoice with a return line, one row 1 agora off (207.03 / 207.04)');
   assert.equal(positive({ ...withReturnLine(), subtotalExVat: 210.04 }), true, 'a deposit of 3.00 with no row (207.04 / 210.04)');
   assert.equal(positive({ ...withReturnLine(), subtotalExVat: 202.04, documentDiscountExVat: -5 }), true, 'a document discount read with a minus');
-  assert.equal(positive({ ...withReturnLine(), subtotalExVat: 250 }), false, 'rows far from the summary are no evidence of an invoice');
+  assert.equal(positive({ ...withReturnLine(), subtotalExVat: 215.04 }), true, 'a deposit of 8.00 with no row (207.04 / 215.04, 3.7%)');
+  assert.equal(positive({ ...withReturnLine(), subtotalExVat: 227.04 }), false, 'the absolute values of the rows are the summary: a credit whose minus was dropped on the summary and on two of its three rows');
   for (const notitle of [false, true]) {
     const label = notitle ? 'no credit title, one read typed "credit"' : 'every read typed "credit" under the title';
     const invoiceReads = notitle ? [twoRowSlip({ summary: 1, type: 'credit', title: null }), twoRowSlip({ summary: 1, type: 'unclear', title: null })]
@@ -2242,4 +2246,217 @@ test('w34: typed anchors — a document kept as a delivery note with no typed li
   await f.c.click('rc-credit-doc-keep', undefined, { scan: scanIdOf(f.c, 1) });
   f.c.run('receiptNotes.splice(1, 1); recomputeNoteTotal(); renderReceiving()');
   assert.ok(!app(f.c).includes('data-kept-without-line'));
+});
+
+// ---- convergence round 4 (each test pins one finding; all fail on 1d09291) ----
+
+// A tax invoice with a store return line whose printed summary includes a deposit with no row (the read skips deposit
+// charges): 167.04 + 50 − 10 = 207.04 under a printed 215.04 / 56 — 8.00, 3.7%, beyond any closeness of the rows.
+const depositReturnLine = (type = 'delivery') => ({ ...withReturnLine({ type }), invoiceNumber: '9073800002', subtotalExVat: 215.04, vatAmount: 38.71, totalInclVat: 253.75 });
+const depositPapers = (typed = true) => ({ 'delivery.jpg': twice(delivery),
+  'invoice.jpg': ({ credit }) => credit ? [depositReturnLine(), depositReturnLine()] : [depositReturnLine(), depositReturnLine(typed ? 'credit' : 'delivery')] });
+const DEPOSIT_TYPED = [{ amount: 217.04, units: 58 }, { amount: 215.04, units: 56 }];
+// The same receipt as v393 saves it (no read typed the invoice "credit": never held).
+async function depositControl(typedNotes) {
+  const { c } = setup();
+  service(c, { papers: depositPapers(false) });
+  await gate(c, ['delivery.jpg', 'invoice.jpg']);
+  assert.deepEqual(json(c, 'yotvataHeldDocuments()'), []);
+  if (typedNotes) await typeNotes(c, [['217.04', '58'], ['215.04', '56']]);
+  count(c, 96, 18);
+  const p = finish(c);
+  return p && [p.status, p.ex, p.noteParts]; // null: the finish waits for typed amounts (the deposit fails the paper check)
+}
+const reopenDraft = (c, data, edit = () => {}) => {
+  const key = c.run('RECEIPT_DRAFT_KEY');
+  const draft = JSON.parse(c.storage.get(key));
+  edit(draft);
+  const storage = new Map(c.storage); storage.set(key, JSON.stringify(draft));
+  const r = runtime('yotvata', { data, storage });
+  r.run("confirmLog = []; showConfirm = (t, x, l, fn) => { confirmLog.push([t, x, l]); fn(); }; mainMode = 'receiving'; currentView = 'receiving'; renderReceiving()");
+  return r;
+};
+
+test('w35: an invoice with a return line whose summary includes a deposit with no row (rows 3.7% under it), that one read typed "credit" — the keep is offered and saves as v393; a mistaken "העבר וקרא כזיכוי" keeps its free way back, also after a reload; a kept one is not held again when reopened', async () => {
+  assert.equal(setup().c.run(`yotvataPositiveRead(${JSON.stringify(depositReturnLine())})`), true);
+  const photoControl = await depositControl(false), typedControl = await depositControl(true);
+  assert.deepEqual(typedControl[2], DEPOSIT_TYPED);
+  // From the photo: kept, in the money view, saved exactly as v393 saves it.
+  const { c, data } = setup();
+  const s = service(c, { papers: depositPapers() });
+  await gate(c, ['delivery.jpg', 'invoice.jpg']);
+  assert.equal(c.run('yotvataDocumentKindVerdict(aiScanDocuments[1])'), 'ask-read');
+  assert.match(cardOf(c, 1), /data-role="rc-credit-doc-keep"[^>]*>לא, זו תעודת משלוח רגילה</, 'the keep is offered');
+  await c.click('rc-credit-doc-keep', undefined, { scan: scanIdOf(c, 1) });
+  assert.deepEqual(json(c, 'yotvataHeldDocuments()'), []);
+  assert.equal(c.run('aiScanResponse.scan.documents.length'), 2, 'in the money view');
+  // Reopened (a reload, or the draft of the build before this rule, which kept it the same way): still kept.
+  const r = reopenDraft(c, data);
+  service(r, { papers: depositPapers() });
+  assert.deepEqual(json(r, 'yotvataHeldDocuments()'), [], 'the decision stays honoured after reopening');
+  count(r, 96, 18);
+  const rp = finish(r);
+  assert.deepEqual(rp && [rp.status, rp.ex, rp.noteParts], photoControl, 'the same as v393 for the same papers');
+  assert.equal(s.stats.modelCalls, 4, 'the keep costs nothing');
+  invariants(r);
+  // Typed anchors, the mistaken tap: the credit read finds the same positive invoice — the way back is the main action,
+  // it survives a reload, and it keeps the invoice and its typed line.
+  const m = setup();
+  const ms = service(m.c, { papers: depositPapers() });
+  await gate(m.c, ['delivery.jpg', 'invoice.jpg']);
+  await typeNotes(m.c, [['217.04', '58'], ['215.04', '56']]);
+  await m.c.click('rc-credit-doc-move', undefined, { scan: scanIdOf(m.c, 1) }); await flush(m.c);
+  assert.deepEqual([credit0(m.c).status, credit0(m.c).notCredit, credit0(m.c).origin.creditRead, credit0(m.c).origin.creditReadRule], ['error', true, 'no-minus', 'abs-rows']);
+  assert.deepEqual(json(m.c, 'receiptNotes'), [{ amount: 217.04, units: 58 }], 'its typed line left with it');
+  assert.match(m.c.run('deliveryCreditsHtml()'), /<button data-role="delivery-credit-unmove"[^>]*class="btn-tap w-full bg-emerald-600[^>]*>זו תעודה רגילה — החזר לתעודות</);
+  const back = reopenDraft(m.c, m.data);
+  service(back, { papers: depositPapers() });
+  // The photos stay on the phone that took them; the origin line keeps the free way back.
+  assert.match(back.run('deliveryCreditsHtml()'), /<button data-role="delivery-credit-unmove"[^>]*>זו לא תעודת זיכוי\? החזר לתעודות</);
+  await back.click('delivery-credit-unmove', credit0(back).id);
+  assert.deepEqual(json(back, 'yotvataHeldDocuments()'), [], 'kept, not held again');
+  assert.deepEqual(json(back, 'receiptNotes'), DEPOSIT_TYPED, 'its typed line is back');
+  count(back, 96, 18);
+  const mp = finish(back);
+  assert.deepEqual([mp.status, mp.ex, mp.noteParts], typedControl);
+  assert.equal(ms.stats.modelCalls, 6, 'the mistaken tap cost one credit read; the way back costs nothing');
+  invariants(back);
+});
+
+// A big slip whose SMALL row kept its minus: 64 milk −320.00 and 1 yogurt −3.48 = −323.48 / 65 (the kept row is 1.1% of
+// it), against a delivery note of 100 milk and 48 yogurt (667.04 / 148). summary/milk/yogurt: the sign each was read with.
+const bigNote = () => ({ ...delivery(), subtotalExVat: 667.04, vatAmount: 120.07, totalInclVat: 787.11, printedUnits: 148, rows: [line(MILK, 100, 500), line(YOGURT, 48, 167.04)] });
+const bigSlip = ({ summary = -1, milk = summary, yogurt = summary, type = 'credit', title = SLIP_TITLE } = {}) => ({ noteIndex: 0, invoiceNumber: SLIP_NUMBER, pageCount: 1,
+  subtotalExVat: cents(summary * 323.48), vatAmount: cents(summary * 58.23), totalInclVat: cents(summary * 381.71), printedUnits: 65, printedLines: 2,
+  documentDiscountExVat: null, confidence: 0.9, warnings: [], rows: [line(MILK, 64, cents(milk * 320)), line(YOGURT, 1, cents(yogurt * 3.48))], documentType: type, printedTitle: title });
+
+test('w36: a credit read that lost the minus on its summary and on its big row, while its small row kept it (+323.48 over +320.00 and −3.48: the rows are within 3% of the summary) is a credit — no "זו תעודה רגילה — החזר לתעודות", no way back, and the same shape in the invoice read offers no keep', async () => {
+  const { c: c0 } = setup();
+  const positive = paper => c0.run(`yotvataPositiveRead(${JSON.stringify(paper)})`);
+  assert.equal(positive(bigSlip({ summary: 1, milk: 1, yogurt: -1 })), false, 'the small row kept its minus: 316.52 under 323.48, but 320.00 + 3.48 is the summary');
+  assert.equal(positive(bigSlip({ summary: 1, milk: -1, yogurt: 1 })), false, 'the big row kept it');
+  assert.equal(positive(bigSlip({ summary: 1, milk: 1, yogurt: 1 })), true, 'every minus dropped (as printed): the card and the reads decide, as before');
+  for (const notitle of [false, true]) {
+    const label = notitle ? 'no credit title, one read typed "credit"' : 'every read typed "credit" under the title';
+    const asPrinted = bigSlip({ summary: 1, milk: 1, yogurt: 1 });
+    const invoiceReads = notitle ? [{ ...asPrinted, type: 'credit', printedTitle: null, documentType: 'credit' }, { ...asPrinted, documentType: 'unclear', printedTitle: null }] : [asPrinted, asPrinted];
+    const partial = () => bigSlip({ summary: 1, milk: 1, yogurt: -1 });
+    const { c } = setup();
+    service(c, { papers: { 'delivery.jpg': twice(bigNote), 'slip.jpg': ({ credit }) => credit ? [partial(), partial()] : structuredClone(invoiceReads) } });
+    await gate(c, ['delivery.jpg', 'slip.jpg']);
+    assert.equal(c.run('yotvataDocumentKindVerdict(aiScanDocuments[1])'), 'ask-read', label);
+    await c.click('rc-credit-doc-move', undefined, { scan: scanIdOf(c, 1) }); await flush(c);
+    const credit = credit0(c);
+    assert.deepEqual([credit.status, credit.notCredit, credit.origin.creditRead], ['error', false, 'credit'], label + ': the credit read saw a minus');
+    const html = c.run('deliveryCreditsHtml()');
+    assert.doesNotMatch(html, /delivery-credit-unmove/, label + ': no way back that would bill the credit as goods');
+    assert.doesNotMatch(html, /נראה שזו תעודת משלוח רגילה/, label);
+    assert.match(html, /data-role="delivery-credit-retake"/, label);
+    c.run('confirmLog = []');
+    await c.click('delivery-credit-unmove', credit.id); // a forged or stale tap
+    assert.deepEqual(json(c, 'confirmLog'), [], label);
+    assert.equal(c.run('aiScanDocuments.length'), 1, label);
+    invariants(c);
+  }
+  // The same shape in the invoice read itself: held, and "לא, זו תעודת משלוח רגילה" is not offered.
+  const k = setup();
+  service(k.c, { papers: { 'delivery.jpg': twice(bigNote), 'slip.jpg': twice(() => bigSlip({ summary: 1, milk: 1, yogurt: -1 })) } });
+  await gate(k.c, ['delivery.jpg', 'slip.jpg']);
+  assert.equal(k.c.run('yotvataDocumentKindVerdict(aiScanDocuments[1])'), 'ask-read');
+  assert.doesNotMatch(cardOf(k.c, 1), /rc-credit-doc-keep/);
+  await k.c.click('rc-credit-doc-keep', undefined, { scan: scanIdOf(k.c, 1) }); // a forged or stale tap
+  assert.deepEqual(json(k.c, 'yotvataHeldDocuments().map(x => x.index)'), [1], 'still held');
+  invariants(k.c);
+});
+
+test('w37: two pages picked together whose signs split, one read typing them "credit" — the summary decides to the agora a row: all the rows → one invoice (no split); the delivery page alone → two papers (split, no keep); neither (a deposit or a discount with no row) → the worker decides: the split AND the keep', async () => {
+  const twoPages = ({ summary, yogurt = 167.04, slip = line(YOGURT, 1, -3.48, 2) }) => () => ({ ...delivery(), pageCount: 2, subtotalExVat: summary,
+    rows: [line(YOGURT, 48, yogurt), line(MILK, 10, 50), slip] });
+  const typedCredit = paper => () => [paper(), { ...paper(), documentType: 'credit' }];
+  const pick = async (paper, extra = {}) => {
+    const { c } = setup();
+    const s = service(c, { papers: { 'delivery-p.jpg+slip-p.jpg': typedCredit(paper), ...extra } });
+    c.run('renderReceiving()');
+    await photograph(c, 0, ['delivery-p.jpg', 'slip-p.jpg'], { gallery: true });
+    await c.click('rc-photo-start'); await flush(c);
+    return { c, s };
+  };
+  // A delivery note (its summary 218.84 includes 1.80 of deposit with no row) and the driver's slip for 1 damaged yogurt
+  // (−3.48), picked together. The slip is within 3% of the note — before, its "credit" type stopped counting and the split
+  // was gone. Now both are offered; the split attaches the slip.
+  const smallSlip = () => ({ ...slip({ qty: -1 }), subtotalExVat: -3.48, vatAmount: -0.63, totalInclVat: -4.11, rows: [line(YOGURT, -1, -3.48)] });
+  const noteAlone = () => ({ ...delivery(), subtotalExVat: 218.84 });
+  const p = await pick(twoPages({ summary: 218.84 }), { 'slip-p.jpg': twice(smallSlip), 'delivery-p.jpg': twice(noteAlone) });
+  assert.equal(p.c.run('yotvataDocumentKindVerdict(aiScanDocuments[0])'), 'ask-split');
+  assert.deepEqual(json(p.c, 'yotvataPaperCreditSignals(aiScanDocuments[0].scanResult.doc, 2).pageSplit'), { creditPages: [2], deliveryPages: [1], keepable: true });
+  const card = cardOf(p.c, 0);
+  assert.match(card, /בתעודה 1 אולי צולמו יחד שני מסמכים: עמוד 2 נראה כמו תעודת זיכוי\./);
+  assert.match(card, /data-role="rc-credit-doc-split"[^>]*>העבר את עמוד 2 לזיכויים וקרא מחדש</);
+  assert.match(card, /data-role="rc-credit-doc-keep"[^>]*>לא, זו תעודת משלוח רגילה</);
+  assert.match(card, /אם זו חשבונית אחת ששורות ההחזרה שלה בעמוד 2 — "לא, זו תעודת משלוח רגילה"\./);
+  await p.c.click('rc-credit-doc-split', undefined, { scan: scanIdOf(p.c, 0) }); await flush(p.c);
+  assert.equal(p.c.run('receiptDeliveryCredits.length'), 1, 'the slip is a credit');
+  assert.deepEqual([credit0(p.c).origin.kind, credit0(p.c).paper.subtotalExVat], ['page', -3.48]);
+  assert.equal(p.c.run('aiScanDocuments.length === 1 && aiScanDocuments[0].pages.length === 1'), true, 'the delivery note stays, without the slip page');
+  invariants(p.c);
+  // The 2-page tax invoice whose return line is alone on page 2 and whose summary includes 8.00 of deposit with no row:
+  // the same choice; the keep puts it in the money view as v393, with its read and no further call.
+  const d = await pick(twoPages({ summary: 215.04, slip: { ...line(MILK, -2, -10, 2), description: 'החזרה חלב בדיקה' } }));
+  assert.equal(d.c.run('yotvataDocumentKindVerdict(aiScanDocuments[0])'), 'ask-split');
+  assert.match(cardOf(d.c, 0), /data-role="rc-credit-doc-keep"/);
+  await d.c.click('rc-credit-doc-keep', undefined, { scan: scanIdOf(d.c, 0) });
+  assert.deepEqual(json(d.c, 'yotvataHeldDocuments()'), []);
+  assert.equal(d.c.run('aiScanResponse.scan.documents.length'), 1, 'in the money view, as in v393');
+  assert.ok(json(d.c, 'receiptPaperScanProblems').includes(RETURN_LINE_PROBLEM), json(d.c, 'receiptPaperScanProblems').join(' | '));
+  assert.equal(d.s.stats.modelCalls, 2, 'no split, no credit read');
+  invariants(d.c);
+  // The delivery page's rows are its summary but for an agora (167.03 for 167.04) and a 5.00 slip: two papers — the split
+  // and no keep (as for test h).
+  const a = await pick(twoPages({ summary: 217.04, yogurt: 167.03, slip: line(MILK, 1, -5, 2) }));
+  assert.equal(a.c.run('yotvataDocumentKindVerdict(aiScanDocuments[0])'), 'ask-split');
+  assert.equal(json(a.c, 'yotvataPaperCreditSignals(aiScanDocuments[0].scanResult.doc, 2).pageSplit').keepable, false);
+  assert.doesNotMatch(cardOf(a.c, 0), /rc-credit-doc-keep/);
+  invariants(a.c);
+  // All the rows are the summary but for an agora (a return line, one price 1 agora off): one invoice, no split (w20).
+  const o = await pick(twoPages({ summary: 207.04, yogurt: 167.03, slip: { ...line(MILK, -2, -10, 2), description: 'החזרה חלב בדיקה' } }));
+  assert.equal(json(o.c, 'yotvataPaperCreditSignals(aiScanDocuments[0].scanResult.doc, 2).pageSplit'), null);
+  assert.equal(o.c.run('yotvataDocumentKindVerdict(aiScanDocuments[0])'), 'ask-read');
+  assert.match(cardOf(o.c, 0), /data-role="rc-credit-doc-keep"/);
+  invariants(o.c);
+});
+
+test('w38: a moved credit whose credit-mode read was recorded "no-minus" by an earlier v394 build (no creditReadRule) is reopened as a credit — no way back, also while a retake waits; the current build\'s records keep their way back across reloads', async () => {
+  // The two-row slip of w33: an earlier build recorded its partial-minus credit read as 'no-minus' with notCredit.
+  const { c, data } = setup();
+  service(c, { papers: { 'delivery.jpg': twice(delivery), 'slip.jpg': ({ credit }) => credit
+    ? [twoRowSlip({ summary: 1, yogurt: 1, milk: -1 }), twoRowSlip({ summary: 1, yogurt: 1, milk: -1 })] : [twoRowSlip({ summary: 1, yogurt: 1, milk: 1 }), twoRowSlip({ summary: 1, yogurt: 1, milk: 1 })] } });
+  await gate(c, ['delivery.jpg', 'slip.jpg']);
+  await c.click('rc-credit-doc-move', undefined, { scan: scanIdOf(c, 1) }); await flush(c);
+  const asOld = d => { const x = d.deliveryCredits[0]; x.origin.creditRead = 'no-minus'; delete x.origin.creditReadRule; x.notCredit = true; };
+  for (const [label, edit] of [['as written', asOld], ['while a retake waits', d => { asOld(d); delete d.deliveryCredits[0].readAs; d.deliveryCredits[0].status = 'capture'; }]]) {
+    const r = reopenDraft(c, data, edit);
+    assert.equal(json(r, 'receiptDeliveryCredits[0].origin.creditRead'), 'credit', label);
+    assert.doesNotMatch(r.run('deliveryCreditsHtml()'), /delivery-credit-unmove|נראה שזו תעודת משלוח רגילה/, label);
+    await r.click('delivery-credit-unmove', credit0(r).id); // a forged or stale tap
+    assert.deepEqual(json(r, 'confirmLog'), [], label);
+    assert.equal(r.run('aiScanDocuments.length'), 1, label);
+    assert.equal(r.requests.filter(q => q.url.endsWith('/scan')).length, 0, label + ': nothing is read');
+    invariants(r);
+  }
+  // This build's record of a positive credit read (a real delivery note moved by mistake) keeps its way back, reload after reload.
+  const t = setup();
+  service(t.c, { papers: thirtyPapers });
+  await gate(t.c, ['delivery.jpg', 'second.jpg']);
+  await t.c.click('rc-credit-doc-move', undefined, { scan: scanIdOf(t.c, 1) }); await flush(t.c);
+  const once = reopenDraft(t.c, t.data);
+  once.run('saveReceiptDraft()');
+  const twiceReopened = reopenDraft(once, t.data);
+  assert.deepEqual([credit0(twiceReopened).origin.creditRead, credit0(twiceReopened).origin.creditReadRule], ['no-minus', 'abs-rows']);
+  assert.match(twiceReopened.run('deliveryCreditsHtml()'), /data-role="delivery-credit-unmove"/);
+  // A draft of the build that recorded only the signs (creditReadSigns 'as_printed'): mapped once, and stays mapped.
+  const e = reopenDraft(t.c, t.data, d => { const x = d.deliveryCredits[0]; delete x.origin.creditRead; delete x.origin.creditReadRule; x.creditReadSigns = 'as_printed'; });
+  e.run('saveReceiptDraft()');
+  const e2 = reopenDraft(e, t.data);
+  assert.equal(json(e2, 'receiptDeliveryCredits[0].origin.creditRead'), 'no-minus');
+  assert.match(e2.run('deliveryCreditsHtml()'), /data-role="delivery-credit-unmove"/);
 });

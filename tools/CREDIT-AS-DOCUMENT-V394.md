@@ -28,20 +28,29 @@ negative subtotal in any read (`modelVerification.readings`, service ≥ 149 —
 works on v150); a read typed `'credit'` (v151); a printed title matching
 `/זיכוי|ביטול\s*מכירה|credit/i` (v151); a gallery pick whose pages split cleanly
 by sign (`pageSplit`: every row on a page, one sign per page, both signs, 1–4
-negative pages, and the rows do NOT close the printed summary — when all rows,
-less a separate document discount taken by its absolute value, equal the
-subtotal to the agora (`rowsClose`) it is one document, e.g. a 2-page invoice
-whose return line is alone on page 2 — and there is evidence of a second paper:
-the rows of the positive pages alone close the summary (it is the delivery
-note's own), or a read already says credit (a negative summary or reading, or
-a `'credit'` type or credit title on a read that is not positive — see
-`yotvataPositiveRead` below)). Without that evidence a 2-page invoice whose
-return line is alone on its last page and whose rows miss the summary (a
-negative discount, a deposit with no row, a price 1 agora off) is one invoice
-with a return line, as in v393. When a read also typed it `'credit'`, it is
-held as `ask-read` with the free keep, exactly like the 1-page invoice — not
-as a paid split whose credit read fails and whose page undo returns the same
-card. Not signals: a negative row under a positive
+negative pages, and the rows do NOT close the printed summary, not even to 1
+agora per row — when all rows, less a separate document discount taken by its
+absolute value, equal the subtotal that closely it is one document, e.g. a
+2-page invoice whose return line is alone on page 2 with a price read an agora
+off — and there is evidence of a second paper: strong — the rows of the
+positive pages alone close the summary to the agora (it is the delivery note's
+own), or a negative summary or reading; or weak — a `'credit'` type or credit
+title). Without any evidence a 2-page invoice whose return line is alone on its
+last page and whose rows miss the summary (a negative discount, a deposit with
+no row) is one invoice with a return line, as in v393. With only the weak
+evidence the arithmetic cannot tell the two shapes apart when the summary
+belongs to neither the delivery page's rows nor all the rows, even to 1 agora a
+row (a deposit with no row on a one-invoice summary looks like a discount with
+no row on a delivery note's summary): the split is offered, and on a positive
+read (`yotvataPositiveRead` below) so is "לא, זו תעודת משלוח רגילה"
+(`pageSplit.keepable`), and the card says "בתעודה N אולי צולמו יחד שני
+מסמכים… אם זו חשבונית אחת ששורות ההחזרה שלה בעמוד K — "לא, זו תעודת משלוח
+רגילה"." The worker, with the paper in hand, decides; a wrong split comes back
+with the page undo to the same card, where the keep is still offered (no
+loop), and a wrong keep of a real pair bills the delivery note as printed and
+leaves the slip's shortage open (no credit is billed as goods). When the
+delivery page's rows are the summary but for an agora a row, it is two papers
+(no keep); when all the rows are, one invoice (no split). Not signals: a negative row under a positive
 subtotal (a return line inside an invoice), a negative discount, `'unclear'`,
 free-text warnings.
 
@@ -49,17 +58,20 @@ free-text warnings.
 משלוח רגילה" (`kindDecision: { kind: 'delivery' }`, also set by "החזר
 לתעודות") on a positive read (`yotvataPositiveRead`): subtotal > 0 and no
 negative amount (signs `'as_printed'`), or a positive invoice with a return
-line whose rows sum positive AND close to the printed summary (signs
-`'mixed'`; within 1 agora per row, and at least 3% of the summary, after a
-separate document discount taken by its absolute value) — they need not close
-it to the agora (a price read an agora off, a deposit with no row, a
-discount). A credit whose summary was read without its minus has rows that
-sum to the summary less twice the rows that kept their minus: negative when
-every row kept it, and far from the summary when some rows lost it too (the
-two-row slip +108.52 over +83.52 and −25.00 sums to 58.52) — a credit, not an
-invoice. The same predicate decides the keep, the credit-mode read
-(`notCredit` / `origin.creditRead`), the undo and the page-split evidence —
-and not a page split (`ask-split` stays the decision), and not
+line whose rows sum positive (signs `'mixed'`) and whose rows' ABSOLUTE
+values do not add up to the summary. That is the structure of a dropped
+minus, not the size of a gap: every row of a credit is part of the credit, so
+when its summary was read without its minus the absolute values of its rows
+are the summary (within 1 agora per row; less a separate document discount
+taken by its absolute value), however small the rows that kept their minus —
+the two-row slip +108.52 over +83.52 and −25.00, or +323.48 over +320.00 and
+−3.48 (the kept row 1.1% of it). An invoice's absolute values are its summary
+plus twice its return lines, give or take a deposit with no row, a discount
+or a price read an agora off, so those never make it a credit: the drinks
+invoice whose summary includes 7.20 of deposit with no row (rows 7.6% under
+it) is positive. The same predicate decides the keep, the credit-mode read
+(`notCredit` / `origin.creditRead`), the undo and the keep of a page split —
+and not a page split unless `pageSplit.keepable` (above), and not
 when most readings (e.g. 2 of 3, the verifier included) read the minus. The read's own paper
 check is not a condition: a kept document enters the money view exactly as in
 v393 — adopted when its paper check passes, otherwise its problems are named
@@ -68,10 +80,12 @@ units are typed, as for any document. (Until this rule a real second delivery
 note whose printed units were not read, or whose row was 1 agora off, could
 never be kept: every way to finish took it out of the paper total; until the
 rows' sign replaced their closure, the same held for an invoice with a return
-line whose row was 1 agora off. Until the rows had to be close to the
-summary, a credit read that lost the minus on its summary and on one of two
-rows counted as positive: "זו תעודה רגילה — החזר לתעודות" billed the driver's
-credit as goods.)
+line whose row was 1 agora off. Until the rows' absolute values decided, a
+credit read that lost the minus on its summary and on some rows counted as
+positive — by the rows' sign, and then when its kept rows were small (within
+3% of the summary): "זו תעודה רגילה — החזר לתעודות" billed the driver's
+credit as goods; and the 3% closeness lost the keep of an invoice with a
+return line whose summary includes a deposit with no row.)
 A held document:
 
 - is out of the money view (`receiptRebuildScanResponse` — the single choke
@@ -206,7 +220,14 @@ check — printed units that do not match, or a summary read without its minus:
 "צלם את הזיכוי מחדש", "נסה לקרוא שוב" and "הסר זיכוי" stay. (A credit restored
 from a draft of an earlier v394 build takes this from its `creditReadSigns`;
 with no record of what its credit-mode read saw, it is treated as having seen
-the minus.) Pressed while an invoice
+the minus. `origin.creditReadRule: 'abs-rows'` records the rule a
+`'no-minus'` was decided by; a `'no-minus'` without it — written by an
+earlier v394 build, whose rule also called some dropped-minus credits
+positive — is restored as `'credit'`, also while a retake waits: the
+credit-mode paper is not stored when its check fails, so it cannot be judged
+again, and the safe direction is no way back. The exits are "הסר זיכוי", then
+photographing the paper again as a document (the keep is offered when its
+read is positive) or, on a typed receipt, typing its line.) Pressed while an invoice
 read runs, the undo says "ממתין לסיום קריאת התעודות — אחרי הקריאה אפשר להחזיר
 לתעודות." instead of doing nothing. The undo restores the document with its original read
 (photos from memory, or paper-only after a reload), marks it `kindDecision:
@@ -218,8 +239,8 @@ waiting for a decision (it can never be kept); its confirm and toast say so
 ("תעודה N תחזור לרשימת התעודות ותחכה להחלטה — הסכומים בה שליליים, ולכן היא
 לא תיקלט כתעודת משלוח…", "תעודה N חזרה לתעודות ומחכה להחלטה בכרטיס…")
 instead of promising a delivery note. A credit-mode read with a positive
-summary (as printed, or with a return line whose rows sum positive and close
-to the summary — the keep's rule) sets
+summary (as printed, or with a return line whose rows sum positive and whose
+absolute values are not the summary — the keep's rule) sets
 `notCredit`, and the card's main action becomes
 "זו תעודה רגילה — החזר לתעודות". After a card decision or an undo, a document
 never read says "תעודה N עוד לא נקראה…" / "תעודה N עוד לא צולמה…" instead of
@@ -286,8 +307,8 @@ two rotated paid re-reads on the non-background path; the scanner shows
   'string'`; per-read subtotals come from `modelVerification.readings` (v149+).
 - Drafts gain only additive fields: `kindDecision` and `shotAs` on photo
   inputs and `docInputs` (only when set); `origin` (with `typedNote` when a
-  typed line left with the paper, and `creditRead` once a credit-mode read
-  ran), `paperMode`, `readAs`, `notCredit` on credits; `paperMode` and `origin` on saved `shortCreditNotes` of moved
+  typed line left with the paper, and `creditRead` with `creditReadRule` once
+  a credit-mode read ran), `paperMode`, `readAs`, `notCredit` on credits; `paperMode` and `origin` on saved `shortCreditNotes` of moved
   credits (green-button notes are byte-identical); `movedToCredit` /
   `movedPagesToCredit` on scan-history entries. `originPages` /
   `originCache` (photos) never reach a draft.
@@ -336,7 +357,7 @@ node --test tools/*.test.mjs tools/photo-first-test.mjs tests/*.test.mjs
 YOTVATA_AI_SCAN=<yotvata-ai-scan v151 checkout> node --test tools/credit-service-contract.test.mjs
 ```
 
-- `tools/credit-as-document.test.mjs` (56 tests): the complete app module
+- `tools/credit-as-document.test.mjs` (62 tests): the complete app module
   driven through its own UI events (photo, orientation confirm, "+ תעודה
   נוספת", "התחל", the card buttons, "סיים"), against a fetch-level service fake
   that answers exactly as the contract says (typed for v151, untyped for v150).
@@ -359,7 +380,12 @@ YOTVATA_AI_SCAN=<yotvata-ai-scan v151 checkout> node --test tools/credit-service
   w33–w34 with the updated n, w20 and w29 (one per finding of its third
   round: a credit read that lost the minus on its summary and on one of two
   rows, a kept document with no typed line; the negative undo's text and the
-  2-page invoice that one read typed "credit" are pinned in n, w29 and w20).
+  2-page invoice that one read typed "credit" are pinned in n, w29 and w20),
+  and w35–w38 with the updated h and w33 (one per finding of its fourth
+  round: an invoice with a return line and a deposit with no row, a credit
+  whose small row kept its minus, a delivery note and a small slip picked
+  together, a `'no-minus'` recorded by an earlier build); w35–w38 fail
+  against 1d09291.
 - `tools/credit-service-contract.test.mjs`: the app's own typed invoice body
   of the slip through the REAL service code — v151 moves and attaches it with
   its own read; the v150 checkout moves it on its signs and waits for one tap.
@@ -386,7 +412,12 @@ YOTVATA_AI_SCAN=<yotvata-ai-scan v151 checkout> node --test tools/credit-service
   the split's history mark); and each of the 5 parts of the third-round fixes
   (the closeness of the rows in `yotvataPositiveRead`, the positive read in
   the page-split evidence, the negative undo's confirm and its toast, the
-  paper-box line of a kept document with no typed line).
+  paper-box line of a kept document with no typed line); and each of the 10
+  parts of the fourth-round fixes (the absolute values in
+  `yotvataPositiveRead`, the keepable split, its 1-agora guard on the delivery
+  page, the 1-agora closure of all the rows, the keep of a keepable split, its
+  card head, the rule on the record, its restore, its restore while a retake
+  waits, the rule on the mapped `creditReadSigns`).
 - The v393 app's own contract, transport and gate tests pass unchanged against
   both the v150 and the v151 service.
 - Not verified: no phone, no deployed service, no paid model call.
@@ -414,12 +445,26 @@ YOTVATA_AI_SCAN=<yotvata-ai-scan v151 checkout> node --test tools/credit-service
   evidence of a second paper. It is held as `ask-split` with no "לא, זו תעודת
   משלוח רגילה"; the exit is "הסר את תעודה N" and typed anchors (no money is
   billed wrongly; the read and the price audit of that document are lost).
-  (The other shape — a 2-page invoice whose rows miss the summary by a read
-  error and that one read typed "credit" — is no longer split: a `'credit'`
-  type or title is no evidence of a second paper on a positive read.)
+  (A 2-page invoice whose rows miss the summary by an agora a row is never
+  split; one whose summary includes a deposit with no row and that one read
+  typed "credit" is offered the split and the keep — above.)
+- Made conservative rather than derived: a document whose pages split by sign
+  and whose only evidence of a second paper is a `'credit'` type or title
+  offers both the split and the keep, because a deposit with no row on one
+  invoice and a discount with no row on a delivery note picked with a slip
+  leave the same numbers. A worker who keeps a real pair leaves the slip's
+  shortage open (as v393 does for every such pick); one who splits a real
+  invoice pays one credit read and returns the page with its undo.
+- Known limit for in-flight drafts of earlier v394 builds (none of which is on
+  main): a moved credit whose credit-mode read was recorded `'no-minus'` is
+  reopened as `'credit'` (above) — a real delivery note moved by mistake in
+  such a draft loses its free "החזר לתעודות"; the exits are "הסר זיכוי" and
+  photographing it again as a document, or typing its line. A document such
+  a build kept as a delivery note whose read is now a dropped-minus credit
+  is held again on reopening and asks for the decision again.
 - Known limit for drafts of the v394 build dfeb839 only: a tax invoice with a
   return line moved by mistake with "העבר וקרא כזיכוי", whose credit-mode read
-  had rows that sum positive and close to the summary but not to the agora,
+  had rows that sum positive but do not close the summary to the agora,
   was recorded by that build as `origin.creditRead: 'credit'`. The credit-mode
   paper is not stored when its check fails, so this cannot be told apart from
   a real credit whose minus was dropped on the summary and on some rows (the
