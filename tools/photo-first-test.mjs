@@ -22,7 +22,9 @@ const names = ['receiptReconcileSnapshot','receiptUsesManualQuantities','priceAu
   'aiSingleDocScore', 'aiSingleDocScoreBetter', 'aiFetchWithRetry', 'aiRequestSingleDocScan',
   'aiScanNewKey', 'aiScanPagesFingerprint', 'aiScanSendOnce', 'aiScanWaitVisible', 'aiScanPrepareConnection',
   'aiScanWithUploadLock', 'aiScanDropCancelled', 'aiScanCancelledError', 'aiScanInvoiceProgress', 'deliveryCreditBusy',
-  'deliveryCreditLocalDraft', 'deliveryCreditValidResume'];
+  'deliveryCreditLocalDraft', 'deliveryCreditValidResume',
+  // v394: the credit-photographed-as-document guard that yotvataAdoptPaperAnchors calls.
+  'yotvataCreditLikeDocument', 'yotvataCreditDocumentProblem'];
 function context(extra = {}) {
   const storage = new Map();
   const c = vm.createContext({ console, setTimeout, clearTimeout, AbortController, Date, JSON, Math, Number,

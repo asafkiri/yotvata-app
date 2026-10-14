@@ -331,6 +331,41 @@ cannot be reopened, and `deliveryCreditRead` refuses a busy credit.
 - Display only. Tests: `tools/quantity-finding-row.test.mjs`,
   `tools/receipt-quantity-detail.test.mjs`, `tools/receipt-history-credit.test.mjs`.
 
+### v394: a credit photographed as a regular document is stopped, not moved
+
+- A driver's slip photographed with the document buttons is read as an
+  invoice (no `documentKind`). In v393 it failed the paper check with
+  misleading texts ("הסכום ללא מע״מ לא נקרא…"), or, when the read dropped
+  the minus signs, it was adopted as a second delivery note (billed goods,
+  a phantom shortage claim).
+- Every invoice full body now carries `detectDocumentType: true` (service
+  v151 answers `documentType`, `printedTitle` and
+  `modelVerification.documentType`; v150 ignores the key). Credit bodies and
+  resume bodies never carry it.
+- `yotvataCreditLikeDocument(doc)` → `null | { title }`: credit-like when the
+  subtotal is negative, when any read's `modelVerification.readings[].values.subtotalExVat`
+  is negative (reads split on the sign, service ≥ 149), or when a printed
+  title (`printedTitle` or a `documentType.readings[].printedTitle`) matches
+  `זיכוי | ביטול מכירה | credit`. Not on its own: a `credit` vote with
+  positive money and a delivery title, a return row under a positive
+  subtotal, a negative printed discount.
+- `yotvataAdoptPaperAnchors`: such a document gives one problem instead of its
+  paper-check problems — "תעודה N נראית כמו תעודת זיכוי («title») — הסר אותה
+  מהתעודות (בדוק צילומים) וצלם אותה בכפתור הירוק …" (attach mode: record it
+  with "התקבל זיכוי מהספק" on the saved receipt). The all-or-nothing rule fails
+  the paper and blocks the finish. Exits are unchanged: "בדוק צילומים" (the
+  other documents are cached) and "או הקלד סכום ויחידות".
+- `aiEvaluateInvoiceScan` (typed anchors, read at the comparison): the same
+  message comes first in `errors`, so the result is invalid and cannot be
+  applied as goods. Nothing else in the evaluator changed.
+- `readNoteEntry`: a typed amount or units with a minus is refused with a
+  toast and kept for correction (until v393 the minus was stripped silently).
+- Nothing is moved, split or kept automatically; the credit itself is still
+  read and attached only through the green button. Limitation: on service
+  v150 a slip read without its minus signs is not recognised (as in v393).
+- Tests: `tools/credit-document-guard.test.mjs` (also against the real
+  service when it is checked out; `YOTVATA_AI_SCAN=<dir>` for v151).
+
 ## Correcting an OCR row
 
 “הפענוח שגוי — תקן לפי הנייר” now opens a form for the identified product's
