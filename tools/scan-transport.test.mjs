@@ -81,6 +81,8 @@ test('v148: a dropped connection is resumed by the same key; one paid upload, th
   assert.equal(full.reviewProtocolVersion, 1);
   assert.equal(full.documents.length, 1);
   assert.equal('documentKind' in full, false, 'an invoice read carries no credit marker');
+  // v394: every invoice full body asks for the document type (service v151; older services ignore the key).
+  assert.equal(full.detectDocumentType, true);
   assert.deepEqual(resume, { reviewProtocolVersion: 1, scanKey: full.scanKey, resume: true });
   assert.equal(c.run('aiScanServiceStatus.scanResume'), true);
   assert.equal(c.run('receiptPaperScanState'), 'ok');
@@ -277,6 +279,7 @@ test('one paid upload at a time: a credit read waits for the invoice document in
   assert.equal(c.run('receiptPaperScanState'), 'ok');
   const body = s.log.at(-1).body;
   assert.equal(body.documentKind, 'credit');
+  assert.equal('detectDocumentType' in body, false, 'v394: a credit body never asks for the document type');
   assert.match(body.scanKey, KEY);
   assert.equal(body.documents[0].expectedSubtotalExVat, null);
   assert.equal(body.documents[0].expectedUnits, null);

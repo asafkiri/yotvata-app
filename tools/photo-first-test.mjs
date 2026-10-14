@@ -22,7 +22,9 @@ const names = ['receiptReconcileSnapshot','receiptUsesManualQuantities','priceAu
   'aiSingleDocScore', 'aiSingleDocScoreBetter', 'aiFetchWithRetry', 'aiRequestSingleDocScan',
   'aiScanNewKey', 'aiScanPagesFingerprint', 'aiScanSendOnce', 'aiScanWaitVisible', 'aiScanPrepareConnection',
   'aiScanWithUploadLock', 'aiScanDropCancelled', 'aiScanCancelledError', 'aiScanInvoiceProgress', 'deliveryCreditBusy',
-  'deliveryCreditLocalDraft', 'deliveryCreditValidResume'];
+  'deliveryCreditLocalDraft', 'deliveryCreditValidResume',
+  // v394: the credit-photographed-as-document guard that yotvataAdoptPaperAnchors calls.
+  'yotvataCreditLikeDocument', 'yotvataCreditDocumentProblem'];
 function context(extra = {}) {
   const storage = new Map();
   const c = vm.createContext({ console, setTimeout, clearTimeout, AbortController, Date, JSON, Math, Number,
@@ -46,7 +48,10 @@ function context(extra = {}) {
     r2: n => Math.round(n * 100) / 100, refreshScanHost() {}, renderReceiving() {}, showToast() {},
     openReceivingScanner() {}, yotvataEnsurePhotoService: async () => {}, aiOpenNextUnconfirmedOrientation() {}, aiReceivedProductIds: () => [],
     normalizeBarcode: s => String(s), aiIsActionableFinding: () => false,
+    // v388/v390 helpers the hand-picked list above never had (closeReceivingEditors is DOM-only here).
+    closeReceivingEditors() {},
     ...extra });
+  vm.runInContext(source('priceAuditIncompleteDocumentWarning'), c);
   vm.runInContext(names.map(source).join('\n'), c);
   return c;
 }
