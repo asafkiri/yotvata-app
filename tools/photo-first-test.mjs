@@ -46,7 +46,10 @@ function context(extra = {}) {
     r2: n => Math.round(n * 100) / 100, refreshScanHost() {}, renderReceiving() {}, showToast() {},
     openReceivingScanner() {}, yotvataEnsurePhotoService: async () => {}, aiOpenNextUnconfirmedOrientation() {}, aiReceivedProductIds: () => [],
     normalizeBarcode: s => String(s), aiIsActionableFinding: () => false,
+    // v388/v390 helpers the hand-picked list above never had (closeReceivingEditors is DOM-only here).
+    closeReceivingEditors() {},
     ...extra });
+  vm.runInContext(source('priceAuditIncompleteDocumentWarning'), c);
   vm.runInContext(names.map(source).join('\n'), c);
   return c;
 }
