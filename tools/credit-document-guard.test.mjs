@@ -39,9 +39,11 @@ const health = version => ({ ok: true, keyConfigured: true, photoFirst: true, se
 const summary = (doc, subtotalExVat = doc.subtotalExVat) => ({ pageCount: doc.pageCount, subtotalExVat, printedUnits: doc.printedUnits,
   printedLines: doc.printedLines, documentDiscountExVat: doc.documentDiscountExVat ?? null, vatAmount: doc.vatAmount ?? null, totalInclVat: doc.totalInclVat ?? null });
 // `subtotals`: what each read saw (read 0 is the selected one). `types`: [documentType, printedTitle] per read (v151).
+// As in the service, `issues` is exactly the summary fields no other read supports.
 function typed(doc, version, { subtotals = [doc.subtotalExVat, doc.subtotalExVat], types = null } = {}) {
-  doc.modelVerification = { version: 1, issues: [], values: summary(doc),
-    support: { pageCount: [1], subtotalExVat: subtotals[1] === subtotals[0] ? [1] : [], printedUnits: [1], documentDiscountExVat: [1], rowCount: [1] },
+  const support = { pageCount: [1], subtotalExVat: subtotals.slice(1).map((s, i) => s === subtotals[0] ? i + 1 : null).filter(i => i != null),
+    printedUnits: [1], documentDiscountExVat: [1], rowCount: [1] };
+  doc.modelVerification = { version: 1, issues: Object.keys(support).filter(field => !support[field].length), values: summary(doc), support,
     readings: subtotals.map((s, read) => ({ read, values: summary(doc, s), discountSeparate: false })) };
   if (version >= 151 && types) {
     Object.assign(doc, { documentType: types[0][0], printedTitle: types[0][1] });
@@ -128,8 +130,20 @@ test('yotvataCreditLikeDocument: a negative subtotal, a negative read or a credi
   assert.equal(like(null), null);
   assert.equal(like(delivery), null);
   assert.deepEqual(like({ ...delivery, subtotalExVat: -48.8 }), { title: null });
-  assert.deepEqual(like({ ...delivery, modelVerification: { readings: [{ read: 0, values: { subtotalExVat: 48.8 } }, { read: 1, values: { subtotalExVat: -48.8 } }] } }), { title: null },
+  const split = [{ read: 0, values: { subtotalExVat: 48.8 } }, { read: 1, values: { subtotalExVat: -48.8 } }];
+  assert.deepEqual(like({ ...delivery, modelVerification: { issues: ['subtotalExVat'], readings: split } }), { title: null },
     'reads split on the sign');
+  // Deliberate: two reads (or a read and the verifier) settled a positive subtotal and one read saw a minus.
+  // By the signs alone this is a slip that lost its minus in two reads, so it is stopped too.
+  assert.deepEqual(like({ ...delivery, modelVerification: { issues: [], readings: [...split, { read: 2, values: { subtotalExVat: 48.8 } }] } }), { title: null },
+    'a settled positive subtotal with one negative read is still stopped (when in doubt, stop)');
+  const types = (t, ...votes) => ({ ...delivery, printedTitle: t, modelVerification: { documentType: { readings: votes.map(documentType => ({ documentType, printedTitle: t })) } } });
+  // Credit titles as printed by suppliers (the service lists זיכוי, ביטול מכירה and החזרה as credit).
+  for (const t of ['חשבונית זכוי', 'חשבונית מס זכוי', 'ביטול מכירות', 'ביטול-מכירה', 'ביטול־מכירה', 'ביטול חשבונית', 'ביטולמכירה'])
+    assert.deepEqual(like(types(t, 'delivery', 'unclear')), { title: t }, t + ': the title alone, whatever the reads typed it');
+  assert.deepEqual(like(types('תעודת החזרה', 'credit', 'unclear')), { title: 'תעודת החזרה' }, '"החזרה" with a credit vote');
+  assert.equal(like(types('תעודת משלוח והחזרה', 'delivery', 'unclear')), null, '"החזרה" without a credit vote: a delivery note with returns');
+  assert.equal(like(types('תעודת משלוח והחזרות', 'credit', 'delivery')), null, '"החזרות" (return lines) is not a credit title');
   assert.deepEqual(like({ ...delivery, printedTitle: TITLE }), { title: TITLE }, 'v151: a slip whose minus signs were lost, by its title');
   assert.deepEqual(like({ ...delivery, printedTitle: null, modelVerification: { documentType: { readings: [{ printedTitle: null }, { printedTitle: 'תעודת זיכוי' }] } } }), { title: 'תעודת זיכוי' },
     'the title one of the other reads saw');
@@ -192,6 +206,40 @@ test('reads split on the sign: the selected read is positive, another read saw t
     service(c, version, { invoice: deliveryNote(data, version), slip: slip(data, version, { minus: false, title: 'תעודה', type: 'unclear', subtotals: [48.8, -48.8] }) });
     await start(c);
     assertStopped(c, MESSAGE(2));
+  }
+});
+
+// Two reads keep the dropped minus and one read sees it: on service 150 (no title) only the per-read sign
+// can hold the slip. A real delivery note with one misread minus looks the same and is stopped too (the worker
+// types its anchors) — the price of not billing a slip as goods.
+test('reads split on the sign, the positive side settled (2 of 3): a slip is stopped — so is a delivery note with one misread minus', async () => {
+  for (const version of [150, 151]) {
+    const { c, data } = setup();
+    const s = slip(data, version, { minus: false, title: null, type: 'unclear' });
+    typed(s.scan.documents[0], version, { subtotals: [48.8, -48.8, 48.8], types: [['unclear', null], ['unclear', null], ['unclear', null]] });
+    assert.deepEqual(s.scan.documents[0].modelVerification.issues, [], 'the service settled the positive subtotal');
+    service(c, version, { invoice: deliveryNote(data, version), slip: s });
+    await start(c);
+    assertStopped(c, MESSAGE(2));
+  }
+  const { c, data } = setup();
+  c.run('aiScanDocuments = [gateDocs[0]]');
+  const note = deliveryNote(data, 151);
+  typed(note.scan.documents[0], 151, { subtotals: [93.8, -93.8, 93.8], types: [['delivery', 'תעודת משלוח'], ['delivery', 'תעודת משלוח'], ['delivery', 'תעודת משלוח']] });
+  service(c, 151, { invoice: note });
+  await start(c);
+  assert.equal(c.run('receiptPaperScanState'), 'failed');
+  assert.deepEqual(json(c, 'receiptPaperScanProblems'), [MESSAGE(1)]);
+  assert.match(c.run('yotvataPaperStatusHtml()'), /data-role="rc-photo-manual"[^>]*>או הקלד סכום ויחידות</, 'the typed way out is offered');
+});
+
+test('v151: a dropped-minus slip is stopped under every credit title spelling the service calls credit, even when every read typed it "delivery"', async () => {
+  for (const [title, type] of [['חשבונית זכוי', 'credit'], ['חשבונית מס זכוי', 'credit'], ['תעודת החזרה', 'credit'], ['ביטול מכירות', 'credit'],
+    ['ביטול-מכירה', 'credit'], ['ביטול חשבונית', 'credit'], [TITLE, 'delivery'], ['חשבונית זכוי', 'delivery']]) {
+    const { c, data } = setup();
+    service(c, 151, { invoice: deliveryNote(data, 151), slip: slip(data, 151, { minus: false, title, type }) });
+    await start(c);
+    assertStopped(c, MESSAGE(2, title));
   }
 });
 
@@ -276,7 +324,12 @@ test('a typed amount or units with a minus is refused and kept for correction (n
     const { c } = setup({ attach });
     c.run(`receiptEntryMode = 'manual'; receiptOpened = true; editingNotes = true; receiptList = structuredClone(testData.items); renderReceiving()`);
     const amount = c.node('rcNoteInput'), units = c.node('rcNoteUnits');
-    for (const [a, u] of [['-83.52', '24'], ['83.52', '-24'], ['83.52-', '24'], ['−83.52', '24']]) {
+    // Every dash parseNoteVal would strip: hyphen-minus, U+2010..U+2015 (hyphen, non-breaking hyphen,
+    // figure dash, en dash, em dash, horizontal bar), minus sign, Hebrew maqaf, small and fullwidth
+    // hyphen-minus, and accounting parentheses — in the amount and in the units.
+    const dashes = ['-', '‐', '‑', '‒', '–', '—', '―', '−', '־', '﹣', '－'];
+    const typedMinus = [['83.52-', '24'], ['(83.52)', '24'], ['83.52', '(24)'], ...dashes.flatMap(d => [[d + '83.52', '24'], ['83.52', d + '24']])];
+    for (const [a, u] of typedMinus) {
       amount.value = a; units.value = u;
       await c.click('rc-note-add');
       assert.deepEqual(json(c, 'receiptNotes'), [], a + ' / ' + u + ' is not added');
@@ -288,13 +341,15 @@ test('a typed amount or units with a minus is refused and kept for correction (n
     assert.deepEqual(json(c, 'receiptNotes'), [{ amount: 93.8, units: 16 }], 'a positive entry is added as before');
   }
   // The first entry ("rc-open") is refused the same way: the receipt does not open.
-  const { c } = setup();
-  c.run(`receiptEntryMode = 'manual'; renderReceiving()`);
-  c.node('rcNoteInput').value = '-48.80'; c.node('rcNoteUnits').value = '7';
-  await c.click('rc-open');
-  assert.equal(c.run('receiptOpened'), false);
-  assert.deepEqual(json(c, 'receiptNotes'), []);
-  assert.equal(c.toasts.at(-1), MINUS_TOAST);
+  for (const a of ['-48.80', '—48.80', '‐48.80', '(48.80)']) {
+    const { c } = setup();
+    c.run(`receiptEntryMode = 'manual'; renderReceiving()`);
+    c.node('rcNoteInput').value = a; c.node('rcNoteUnits').value = '7';
+    await c.click('rc-open');
+    assert.equal(c.run('receiptOpened'), false, a);
+    assert.deepEqual(json(c, 'receiptNotes'), []);
+    assert.equal(c.toasts.at(-1), MINUS_TOAST);
+  }
 });
 
 test('typed anchors, read at the comparison (classic path): the credit message comes first and the result cannot be applied', async () => {

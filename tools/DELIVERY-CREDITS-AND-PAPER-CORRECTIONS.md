@@ -346,9 +346,19 @@ cannot be reopened, and `deliveryCreditRead` refuses a busy credit.
   subtotal is negative, when any read's `modelVerification.readings[].values.subtotalExVat`
   is negative (reads split on the sign, service ≥ 149), or when a printed
   title (`printedTitle` or a `documentType.readings[].printedTitle`) matches
-  `זיכוי | ביטול מכירה | credit`. Not on its own: a `credit` vote with
-  positive money and a delivery title, a return row under a positive
-  subtotal, a negative printed discount.
+  `זיכוי / זכוי | ביטול מכירה / מכירות / ביטול-מכירה / ביטול חשבונית | credit`,
+  or `החזרה` when a read also typed the paper `credit` ("תעודת משלוח והחזרה"
+  is a delivery note). Not on its own: a `credit` vote with positive money
+  and a delivery title, a return row under a positive subtotal, a negative
+  printed discount.
+- Deliberate false alarms (when in doubt, stop): a real delivery note in which
+  one read saw a minus is stopped even when the other read and the verifier
+  settled the positive subtotal — by the signs alone it is a slip that lost its
+  minus in two reads, and letting that through bills the slip as goods. A title
+  that contains a credit word is stopped even when every read typed it
+  `delivery` (a slip mis-typed `delivery` looks the same). The worker's way out
+  is "או הקלד סכום ויחידות"; the AI comparison is then not applied to that
+  receipt and the paper quantities are entered by hand.
 - `yotvataAdoptPaperAnchors`: such a document gives one problem instead of its
   paper-check problems — "תעודה N נראית כמו תעודת זיכוי («title») — הסר אותה
   מהתעודות (בדוק צילומים) וצלם אותה בכפתור הירוק …" (attach mode: record it
@@ -360,6 +370,9 @@ cannot be reopened, and `deliveryCreditRead` refuses a busy credit.
   applied as goods. Nothing else in the evaluator changed.
 - `readNoteEntry`: a typed amount or units with a minus is refused with a
   toast and kept for correction (until v393 the minus was stripped silently).
+  Every dash `parseNoteVal` would strip counts (hyphen-minus, U+2010–U+2015,
+  U+2212, the Hebrew maqaf, small and fullwidth hyphen-minus) and accounting
+  parentheses.
 - Nothing is moved, split or kept automatically; the credit itself is still
   read and attached only through the green button. Limitation: on service
   v150 a slip read without its minus signs is not recognised (as in v393).

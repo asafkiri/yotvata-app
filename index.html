@@ -1184,13 +1184,18 @@ function yotvataPaperCheck(doc, pageCount) {
 // שנבחרה או באחת הקריאות (קריאות שנחלקו על הסימן, שירות 149 ומעלה), או כותרת זיכוי מודפסת (שירות
 // 151 — כך נתפס גם זיכוי שהמינוס שלו אבד בקריאה). לא זיכוי לבדו: קול 'credit' עם כסף חיובי וכותרת
 // רגילה, שורת החזרה שלילית תחת סיכום חיובי, הנחה מודפסת שלילית.
+// במחלוקת עוצרים: גם תעודת משלוח שאחת הקריאות ראתה בה מינוס נעצרת (העובד מקליד סכום ויחידות),
+// כי לפי הסימנים בלבד היא נראית בדיוק כמו זיכוי ששתי קריאות איבדו את המינוס שלו.
 function yotvataCreditLikeDocument(doc) {
   if (!doc || typeof doc !== 'object') return null;
-  const creditTitle = /זיכוי|ביטול\s*מכירה|credit/i;
+  const creditTitle = /זי?כוי|ביטול[\s\-־]*(?:מכיר|חשבונית)|credit/i;
   const negative = value => typeof value === 'number' && Number.isFinite(value) && value < 0;
   const proof = doc.modelVerification && typeof doc.modelVerification === 'object' ? doc.modelVerification : {};
   const typed = proof.documentType && Array.isArray(proof.documentType.readings) ? proof.documentType.readings : [];
-  const title = [doc.printedTitle].concat(typed.map(r => r && r.printedTitle)).find(t => typeof t === 'string' && creditTitle.test(t)) || null;
+  // "החזרה" — כותרת זיכוי רק כשקריאה גם סיווגה את המסמך 'credit' ("תעודת משלוח והחזרה" היא תעודת משלוח).
+  const creditVote = typed.some(r => r && r.documentType === 'credit');
+  const title = [doc.printedTitle].concat(typed.map(r => r && r.printedTitle))
+    .find(t => typeof t === 'string' && (creditTitle.test(t) || (creditVote && /החזרה/.test(t)))) || null;
   const readings = Array.isArray(proof.readings) ? proof.readings : [];
   const negativeRead = negative(doc.subtotalExVat) || readings.some(r => r && r.values && negative(r.values.subtotalExVat));
   return title || negativeRead ? { title } : null;
@@ -2178,7 +2183,8 @@ function readNoteEntry(required, onWaive) {
   const amountRaw = ((amountInp || {}).value || '').trim();
   const unitsRaw = ((unitsInp || {}).value || '').replace(/[^0-9]/g, '');
   // v394: עד היום המינוס נמחק בשקט, וזיכוי שהוקלד כתעודה נוסף כסכום חיובי. השדות נשארים לתיקון.
-  const minus = /[-−–]/;
+  // כל סוגי המקף (גם מקף עברי ומקפים ממקלדות אנדרואיד) וסוגריים חשבונאיים — parseNoteVal מוחק את כולם.
+  const minus = /[\-‐-―−־﹣－()]/;
   if (minus.test(amountRaw) || minus.test((unitsInp || {}).value || '')) {
     showToast('סכום עם מינוס הוא תעודת זיכוי — אל תקליד אותו כתעודה. ' + (receiptAttachTarget ? 'את הזיכוי רושמים בקליטה השמורה ב«התקבל זיכוי מהספק».' : 'זיכוי מהנהג מצלמים בכפתור הירוק.'), null, null, 5000);
     const field = minus.test(amountRaw) ? amountInp : unitsInp;
