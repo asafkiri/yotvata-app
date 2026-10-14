@@ -157,6 +157,8 @@ test('yotvataCreditLikeDocument: a negative subtotal, a negative read or a credi
     'a "credit" vote with positive money and a delivery title');
   assert.equal(like({ subtotalExVat: 42.7, printedTitle: 'חשבונית מס', rows: [{ quantity: 10, lineTotalExVat: 50 }, { quantity: 1, lineTotalExVat: -7.3 }] }), null, 'a return row inside an invoice');
   assert.equal(like({ ...delivery, documentDiscountExVat: -5 }), null, 'a negative printed discount');
+  assert.equal(like({ ...delivery, printedTitle: 'תעודת משלוח — כל הזכויות שמורות' }), null, '"זכויות" (rights reserved) is not a credit title');
+  assert.deepEqual(like({ ...delivery, printedTitle: 'ריכוז זיכויים' }), { title: 'ריכוז זיכויים' }, '"זיכויים" (credits) is');
   // tools/photo-first-test.mjs extracts functions only: the rule must stand alone.
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   const from = html.indexOf('function yotvataCreditLikeDocument(');
@@ -307,6 +309,18 @@ test('the way out: remove the slip in «בדוק צילומים» — the delive
   const p = json(c, 'pendingReceipt');
   assert.ok(p); assert.equal(p.status, 'ok'); assert.equal(p.ex, 45);
   assert.deepEqual(p.shortCreditNotes.map(n => [n.number, n.amount]), [['22230011', 48.8]]);
+});
+
+test('the message names the green button as it is shown: another credit, and the 4-credit limit', () => {
+  const { c } = setup();
+  const slipDoc = { subtotalExVat: -48.8, rows: [] };
+  c.context.slipDoc = slipDoc;
+  c.run(`receiptDeliveryCredits = [{ id: 'credit-a', status: 'confirmed', pages: [] }]`);
+  assert.equal(c.run('yotvataCreditDocumentProblem(slipDoc, 1)'),
+    'תעודה 2 נראית כמו תעודת זיכוי — הסר אותה מהתעודות (בדוק צילומים) וצלם אותה בכפתור הירוק «צלם תעודת זיכוי נוספת».');
+  c.run(`receiptDeliveryCredits = ['a','b','c','d'].map(id => ({ id: 'credit-' + id, status: 'confirmed', pages: [] }))`);
+  assert.equal(c.run('yotvataCreditDocumentProblem(slipDoc, 1)'),
+    'תעודה 2 נראית כמו תעודת זיכוי — הסר אותה מהתעודות (בדוק צילומים). כבר צורפו לקליטה 4 זיכויים, וזה המקסימום.');
 });
 
 test('attach mode (paper for a saved receipt): the message does not point to a green button that is not there', async () => {

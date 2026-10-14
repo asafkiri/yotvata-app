@@ -1188,7 +1188,8 @@ function yotvataPaperCheck(doc, pageCount) {
 // כי לפי הסימנים בלבד היא נראית בדיוק כמו זיכוי ששתי קריאות איבדו את המינוס שלו.
 function yotvataCreditLikeDocument(doc) {
   if (!doc || typeof doc !== 'object') return null;
-  const creditTitle = /זי?כוי|ביטול[\s\-־]*(?:מכיר|חשבונית)|credit/i;
+  // "זכויות" (כל הזכויות שמורות) אינה זיכוי; "זיכויים" כן.
+  const creditTitle = /זי?כוי(?!ות)|ביטול[\s\-־]*(?:מכיר|חשבונית)|credit/i;
   const negative = value => typeof value === 'number' && Number.isFinite(value) && value < 0;
   const proof = doc.modelVerification && typeof doc.modelVerification === 'object' ? doc.modelVerification : {};
   const typed = proof.documentType && Array.isArray(proof.documentType.readings) ? proof.documentType.readings : [];
@@ -1206,7 +1207,9 @@ function yotvataCreditDocumentProblem(doc, index) {
   const credit = yotvataCreditLikeDocument(doc);
   if (!credit) return '';
   return 'תעודה ' + (index + 1) + ' נראית כמו תעודת זיכוי' + (credit.title ? ' («' + credit.title + '»)' : '') + ' — הסר אותה מהתעודות (בדוק צילומים)' +
-    (receiptAttachTarget ? '. את הזיכוי רושמים בקליטה השמורה ב«התקבל זיכוי מהספק».' : ' וצלם אותה בכפתור הירוק «הנהג הביא זיכוי על חוסר? צלם כאן».');
+    (receiptAttachTarget ? '. את הזיכוי רושמים בקליטה השמורה ב«התקבל זיכוי מהספק».'
+      : receiptDeliveryCredits.length >= 4 ? '. כבר צורפו לקליטה 4 זיכויים, וזה המקסימום.'
+      : ' וצלם אותה בכפתור הירוק «' + (receiptDeliveryCredits.length ? 'צלם תעודת זיכוי נוספת' : 'הנהג הביא זיכוי על חוסר? צלם כאן') + '».');
 }
 
 // v325: capture now, count independently, reconcile the saved paper at the end.
