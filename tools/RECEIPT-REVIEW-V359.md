@@ -319,3 +319,38 @@ the document gate; only the one-tap approval changes.
   (6 × 16.04 = 96.24 against 96.18) used to expect the one-tap approval; it
   now expects the reason line and no approval, and the manual-approval flow is
   tested on the `unitUnsupported` row (6 × 16.03 = 96.18).
+
+## v396: the second strong read of service 153 ("קריאה 4")
+
+Service 153 adds step (3) of the owner's design: when the verifier (read 2) is
+the selected read and a quantity or price/amount field of an ordinary invoice
+row still has no supporting read, it reads the original photos once more with
+the strong model (Terra#2, read 3) and closes the field when that read sees the
+same value — only on a paper that closes against its printed summary and a row
+whose own arithmetic closes in agorot. A closed field leaves `issues`, gets 3 in
+`fieldSupport`, and the row turns `verified`; the record is server-side
+(`scan.verification.secondVerifier`, the `invoice_scan_audit` log line).
+
+- Nothing new for the worker: a closed field is an agreed field, so
+  `aiModelReviewIssues`, `priceAuditConsensusConfirmed` and the card already
+  treat it as settled. Only `aiScanDiagnosticsHtml` (collapsed) adds one line per
+  document — outcome, fields closed of fields asked, and Terra#2's tokens — and
+  none for `disabled` / `not_needed` or a service-152 answer.
+- `aiScanReadLabel(r)` names the reads in both dispute cards: read 2 stays
+  "קריאה 3 (המודל החזק)", read 3 is "קריאה 4 (המודל החזק, פעם שנייה)".
+- `priceAuditRowDisputeHtml`: when the row carries a read-3 reading and the
+  verifier `disagreed`, the tail names both strong reads ("גם הקריאה השלישית
+  והקריאה הרביעית (המודל החזק, פעמיים) קראו את הנייר, …"). It ends with
+  "ועדיין אין שתי קריאות שמסכימות" only when no two readings share a value in
+  the listed fields; otherwise "ועדיין אף קריאה אחרת לא ראתה את מה שהפענוח
+  קרא", since Terra#2 may have read a cheap read's value. Without a read 3 the
+  v367 sentences are unchanged.
+- Read 3 never votes on identity or becomes the selected read:
+  `AI_SCAN_IDENTITY_READS` ([0, 1, 2]) replaces the literal lists in
+  `aiModelPriceAgreement` and the `model_consensus` branch of
+  `aiResolveInvoiceBarcode`, and the strong tie-break in
+  `aiModelPriceResolution` is `AI_SCAN_STRONG_READ` (2). Behaviour unchanged.
+- Tests: `tools/second-strong-read.test.mjs` — the imitated service answer
+  (closed, a cheap read's value, a fourth value, failed, off, service 152) and
+  the same through the real service code when `../yotvata-ai-scan` is v153
+  (the off/152 case runs against v152 too), which checks the imitation.
