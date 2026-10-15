@@ -172,7 +172,10 @@ test('against the real service, a quantity the arithmetic does not prove still r
   assert.match(html, /צריך להשלים את הבדיקה/);
   assert.match(html, /הקריאות לא הסכימו על הכמות: קריאה 1 – 3 · קריאה 2 – 6 · קריאה 3 \(המודל החזק\) – 2\./);
   assert.match(html, /החשבון לא מכריע: מחיר היחידה × הכמות לא יוצא סכום השורה באף אחת מהקריאות\./);
-  assert.match(html, /data-role="price-confirm-values"/);
+  // v395 (replaces the v367 expectation of a one-tap approval): 6 × 16.04 = 96.24 against the gross 96.18 the
+  // service returned on the same row — no "כן, הכמות והמחיר נכונים לפי הנייר", only the correction from the paper.
+  assert.doesNotMatch(html, /data-role="price-confirm-values"/);
+  assert.match(html, /מחיר × כמות אינו תואם לסכום הברוטו בשורה — תקן לפי הנייר/);
   assert.match(html, /data-role="paper-row-edit"/);
 });
 

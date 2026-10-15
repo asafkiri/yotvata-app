@@ -289,3 +289,33 @@ arithmetic holds, the paper balances, and only the worker can tell.
   ones ("an actual price gap has a working yes action…", "unresolved paper
   values can be confirmed as-is…").
 - Not verified: no phone, no deployed service, no paid model call.
+
+## v395: the one-tap approval needs the row's own arithmetic
+
+`priceAuditCanConfirmValues` offered "כן, הכמות והמחיר נכונים לפי הנייר" on a
+row whose cells contradict each other (6 × 16.13 = 96.78 against a gross of
+96.18), because `aiRowArithmeticError` skips unit × quantity against the
+gross whenever the net was read (v183). That skip stays for the evaluator and
+the document gate; only the one-tap approval changes.
+
+- `priceAuditValuesArithmeticError(row, qty)`: with a gross,
+  |round(qty × unit × 100) − gross| must be within `aiRowArithmeticError`'s
+  tolerance (half an agora per unit for a unit price printed in agorot, one
+  agora otherwise); without a gross, |qty × unit − |discount| − net| within
+  the same tolerance when both were read. A gross of 0 when qty × unit is
+  positive is not a gross that was read (v181 deposit rows, as in
+  `aiLineTotal`).
+- `priceAuditValuesConfirmation(source)` returns `{ ok, hold }`;
+  `priceAuditCanConfirmValues` is its `ok`, so `priceAuditConfirmValues` (the
+  token path) refuses too. `hold` is set only when the other conditions of the
+  approval hold, and the card then shows one line ("מחיר × כמות אינו תואם
+  לסכום הברוטו בשורה — תקן לפי הנייר", or "מחיר × כמות פחות ההנחה אינו תואם
+  לסכום השורה — …") with "הפענוח שגוי — תקן לפי הנייר".
+- An approval already saved in a draft is not re-checked
+  (`aiModelReviewIssues` compares its token only).
+- Tests: `tools/values-confirm-arithmetic.test.mjs`. In
+  `tools/quantity-arithmetic.test.mjs` and
+  `tools/quantity-arithmetic-contract.test.mjs` the unit-price-16.04 case
+  (6 × 16.04 = 96.24 against 96.18) used to expect the one-tap approval; it
+  now expects the reason line and no approval, and the manual-approval flow is
+  tested on the `unitUnsupported` row (6 × 16.03 = 96.18).
