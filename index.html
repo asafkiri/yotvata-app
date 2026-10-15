@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v394 זיכוי שצולם כתעודה</title>
+    <title>הזמנות יטבתה - v395 אישור שורה לפי החשבון</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -125,7 +125,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v394 זיכוי שצולם כתעודה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v395 אישור שורה לפי החשבון</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -669,7 +669,7 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '394';
+const APP_VERSION = '395';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -3766,7 +3766,7 @@ async function logAction(type, title, details, meta) {
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'actionLog', id), {
       timestamp: Date.now(), type: type || 'system', title: title || 'פעולה', details: details || '',
       deviceName: actionDeviceLabel(), uid: (auth && auth.currentUser && auth.currentUser.uid) || '',
-      appVersion: 'v394_credit_document_guard', meta: cloneSafe(meta || {})
+      appVersion: 'v395_values_confirm_arithmetic', meta: cloneSafe(meta || {})
     });
   } catch (e) { console.warn('action log failed', e); }
 }
@@ -3850,7 +3850,7 @@ async function exportFullBackup() {
       backupType: 'yotvata-firestore-full',
       backupVersion: 1,
       appId,
-      appVersion: 'v394_credit_document_guard',
+      appVersion: 'v395_values_confirm_arithmetic',
       exportedAt: Date.now(),
       exportedAtIso: new Date().toISOString(),
       collections: {},
@@ -13478,12 +13478,42 @@ function priceAuditValuesReviewToken(source) {
     [proof.version, proof.status, proof.selectedRead, proof.identity && proof.identity.productId, proof.identity && proof.identity.barcode,
       (proof.issues || []).slice().sort(), (proof.identitySupport || []).slice().sort(), Object.keys(evidence).sort().map(key => [key, evidence[key]])]]);
 }
-function priceAuditCanConfirmValues(source) {
-  if (!source || !priceAuditIdentity(source.mapped, source.row)) return false;
+// v395: האישור בהקשה אחת ("כן, הכמות והמחיר נכונים לפי הנייר") אינו מאשר שורה שהחשבון שלה סותר
+// את עצמו. aiRowArithmeticError מדלגת בכוונה (v183) על מחיר × כמות מול הברוטו כשנטו השורה נקרא —
+// שם השער הקשה הוא סגירת המסמך, וזה נשאר. אבל כאן העובד מאשר את התאים עצמם: 6 × 16.13 = 96.78
+// מול ברוטו 96.18 פירושו שאחד התאים נקרא לא נכון, ואישור "כמו שנקרא" היה מקבע אותו. הדרך היא
+// "הפענוח שגוי — תקן לפי הנייר". אותה סובלנות כמו ב-aiRowArithmeticError: מחיר יחידה שמודפס
+// באגורות עשוי להיות תצוגה מעוגלת, עד חצי אגורה ליחידה. בלי ברוטו — מחיר × כמות פחות ההנחה מול
+// סכום השורה, רק כששניהם נקראו. ברוטו 0 כשמחיר × כמות חיובי אינו ברוטו שנקרא (v181: שורת
+// פיקדון מדפיסה 0 בעמודת הברוטו), בדיוק כמו ב-aiLineTotal.
+function priceAuditValuesArithmeticError(row, qty) {
+  const unitRaw = priceAuditNumber(row.unitPriceExVat);
+  if (unitRaw == null || qty == null) return '';
+  const unitQtyCents = aiMoneyCents(unitRaw * qty);
+  const unitPrintedInCents = Math.abs((unitRaw * 100) - Math.round(unitRaw * 100)) < 0.000001;
+  const unitToleranceCents = unitPrintedInCents ? Math.max(1, Math.ceil(Math.abs(Number(qty) || 0) * 0.5 + 0.5)) : 1;
+  const grossRead = aiMoneyCents(row.grossLineTotalExVat);
+  const gross = grossRead === 0 && unitQtyCents > 0 ? null : grossRead;
+  const discountRaw = aiMoneyCents(row.lineDiscountExVat);
+  const discount = discountRaw == null ? null : Math.abs(discountRaw); // v180
+  const total = aiMoneyCents(row.lineTotalExVat);
+  if (gross != null) return Math.abs(gross - unitQtyCents) > unitToleranceCents ? 'מחיר × כמות אינו תואם לסכום הברוטו בשורה' : '';
+  if (discount != null && total != null && Math.abs((unitQtyCents - discount) - total) > unitToleranceCents) return 'מחיר × כמות פחות ההנחה אינו תואם לסכום השורה';
+  return '';
+}
+// v395: { ok, hold } — ok: האישור בהקשה אחת מוצע. hold: למה הוא לא מוצע, כשמחיר × כמות סותר את סכומי
+// השורה (שורה אחת בכרטיס, עם "תקן לפי הנייר"). כשהאישור נמנע מסיבה אחרת hold ריק והכרטיס כמו קודם.
+function priceAuditValuesConfirmation(source) {
+  if (!source || !priceAuditIdentity(source.mapped, source.row)) return { ok: false, hold: '' };
   const row = source.row, qty = priceAuditNumber(row.quantity), unit = priceAuditNumber(row.unitPriceExVat), total = priceAuditNumber(row.lineTotalExVat);
   const issues = aiModelReviewIssues(source.mapped);
-  return issues.some(f => f !== 'identity') && !issues.includes('identity') && Number.isSafeInteger(qty) && qty > 0
-    && unit > 0 && total != null && total >= 0 && !aiRowArithmeticError(row, qty);
+  if (!(issues.some(f => f !== 'identity') && !issues.includes('identity') && Number.isSafeInteger(qty) && qty > 0
+    && unit > 0 && total != null && total >= 0)) return { ok: false, hold: '' };
+  const hold = priceAuditValuesArithmeticError(row, qty);
+  return { ok: !hold && !aiRowArithmeticError(row, qty), hold };
+}
+function priceAuditCanConfirmValues(source) {
+  return priceAuditValuesConfirmation(source).ok;
 }
 function priceAuditConfirmValues(documentIndex, rowIndex, token) {
   const source = aiSourceRow(documentIndex, rowIndex);
@@ -13609,8 +13639,11 @@ function priceAuditActionCardHtml(r) {
   const source = aiSourceRow(r.documentIndex, r.rowIndex);
   // v367: למה השורה נשארה לטיפול — איזה שדה, מה כל קריאה ראתה, ולמה החשבון לא מכריע.
   const dispute = r.modelReviewIssues ? priceAuditRowDisputeHtml(r.documentIndex, r.rowIndex, r.modelReviewIssues) : '';
-  if (r.modelReviewIssues && priceAuditCanConfirmValues(source)) action = '<p class="mt-2 font-bold">בדוק את הכמות, מחיר היחידה וסכום השורה מול הנייר.</p>' +
+  const valuesCheck = r.modelReviewIssues ? priceAuditValuesConfirmation(source) : { ok: false, hold: '' };
+  if (valuesCheck.ok) action = '<p class="mt-2 font-bold">בדוק את הכמות, מחיר היחידה וסכום השורה מול הנייר.</p>' +
     '<button data-role="price-confirm-values" data-doc="' + r.documentIndex + '" data-row="' + r.rowIndex + '" data-review-token="' + htmlEscape(priceAuditValuesReviewToken(source)) + '" class="btn-tap w-full rounded-xl bg-emerald-700 text-white py-3 mt-3 font-black">כן, הכמות והמחיר נכונים לפי הנייר</button>' + paperRowCorrectionButton(r.documentIndex, r.rowIndex);
+  // v395: החשבון של השורה סותר את עצמו — אין אישור בהקשה אחת, רק תיקון לפי הנייר.
+  else if (valuesCheck.hold) action = '<p class="mt-2 font-bold">' + htmlEscape(valuesCheck.hold) + ' — תקן לפי הנייר</p>' + paperRowCorrectionButton(r.documentIndex, r.rowIndex);
   else if (difference) action = '<p class="mt-2 font-bold">' + (promoGap ? 'בדוק בתעודה: האם זה הסכום שהספק חייב בפועל?' : 'האם המחיר והכמות כאן הם מה שמודפס בשורה של המוצר שבחרת?') + '</p>' +
     '<button data-role="price-confirm-paper" data-doc="' + r.documentIndex + '" data-row="' + r.rowIndex + '" data-review-token="' + htmlEscape(priceAuditPaperReviewToken(r)) + '" class="btn-tap w-full rounded-xl bg-emerald-700 text-white py-3 mt-3 font-black">' + (promoGap ? 'כן — שמור את ההנחה החסרה לטיפול מול הספק' : 'כן, כך כתוב בתעודה — שמור את הפער') + '</button>' + (promoGap ? '<p class="text-xs text-slate-600 mt-2">האישור שומר את הפער ואינו משנה את סכום התעודה או מאשר שהתקבל זיכוי.</p>' : '') + paperRowCorrectionButton(r.documentIndex, r.rowIndex) +
     aiManualPaperBarcodeButton(r.documentIndex, r.rowIndex) + '<details class="mt-2 text-sm"><summary class="cursor-pointer py-2 font-bold">הנתונים מהנייר נכונים, והמחיר במאגר לא מעודכן</summary>' + editProduct + '</details>';

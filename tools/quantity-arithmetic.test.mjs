@@ -120,8 +120,11 @@ test('a quantity the arithmetic does not prove stays pending, and the card names
   assert.match(h, /צריך להשלים את הבדיקה/);
   assert.match(h, new RegExp('<p data-row-dispute-field="quantity">הקריאות לא הסכימו על הכמות: ' + READINGS + '\\. גם הקריאה השלישית \\(המודל החזק\\) קראה את הנייר, ועדיין אין שתי קריאות שמסכימות\\.</p>'));
   assert.match(h, /<p class="mt-1">החשבון לא מכריע: מחיר היחידה × הכמות לא יוצא סכום השורה באף אחת מהקריאות\.<\/p>/);
-  assert.match(h, /בדוק את הכמות, מחיר היחידה וסכום השורה מול הנייר\./);
-  assert.match(h, /data-role="price-confirm-values"/);
+  // v395 (replaces the v367 expectation of a one-tap approval here): 6 × 16.04 = 96.24 against the gross
+  // 96.18 read on the same row is beyond the 4-agorot tolerance, so the row contradicts its own cells —
+  // no "כן, הכמות והמחיר נכונים לפי הנייר"; the card says why and keeps the correction from the paper.
+  assert.doesNotMatch(h, /data-role="price-confirm-values"/);
+  assert.match(h, /<p class="mt-2 font-bold">מחיר × כמות אינו תואם לסכום הברוטו בשורה — תקן לפי הנייר<\/p>/);
   assert.match(h, /data-role="paper-row-edit"/);
   const visible = (h.match(/<div[^>]*data-row-dispute>[\s\S]*?<\/div>/) || [''])[0].replace(/<[^>]+>/g, ' ');
   assert.ok(visible.length > 40 && !/[A-Za-z]/.test(visible), 'no raw English in the explanation: ' + visible);
@@ -250,7 +253,10 @@ test('the service v150 answer (status verified, fieldSupport.quantity [\'arithme
 });
 
 test('the manual "כן, הכמות והמחיר נכונים לפי הנייר" flow is unchanged for a row the arithmetic does not prove', async () => {
-  const { c, data } = setup({ unit: 16.04 });
+  // v395: the row's own cells must agree (6 × 16.03 = 96.18); only the unit price lacks a supporting read.
+  // Until v394 this test used unit 16.04 (6 × 16.04 ≠ 96.18), which v395 no longer approves in one tap —
+  // that refusal is pinned in values-confirm-arithmetic.test.mjs.
+  const { c, data } = setup({ unitUnsupported: true });
   const before = values(c);
   assert.match(html(c), /data-role="price-confirm-values"/);
   const token = c.run('priceAuditValuesReviewToken(aiSourceRow(0,5))');
@@ -263,7 +269,7 @@ test('the manual "כן, הכמות והמחיר נכונים לפי הנייר" 
   assert.equal(c.run('aiScanEvaluation.valid'), true);
   assert.deepEqual(pending(runtime('yotvata', { data, storage: c.storage })), []);
   // A stale token cannot approve changed data.
-  const { c: stale } = setup({ unit: 16.04 });
+  const { c: stale } = setup({ unitUnsupported: true });
   const staleToken = stale.run('priceAuditValuesReviewToken(aiSourceRow(0,5))');
   stale.run(`${row(stale, 5)}.description='changed'`);
   await stale.click('price-confirm-values', '', { doc: '0', row: '5', reviewToken: staleToken });
