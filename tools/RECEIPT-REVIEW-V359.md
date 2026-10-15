@@ -324,7 +324,9 @@ the document gate; only the one-tap approval changes.
 
 Service 153 adds step (3) of the owner's design: when the verifier (read 2) is
 the selected read and a quantity or price/amount field of an ordinary invoice
-row still has no supporting read, it reads the original photos once more with
+row still has no supporting read, and the two cheap reads disagreed on that
+field with each other (a field they both saw the same way stays with the
+worker, as in v395 — its review round), it reads the original photos once more with
 the strong model (Terra#2, read 3) and closes the field when that read sees the
 same value — only on a paper that closes against its printed summary and a row
 whose own arithmetic closes in agorot. A closed field leaves `issues`, gets 3 in
