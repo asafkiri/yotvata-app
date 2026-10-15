@@ -24,7 +24,7 @@ import crypto from 'node:crypto';
 import { Readable } from 'node:stream';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { runtime, fixture } from './receipt-scan-harness.mjs';
-import { PRODUCTS, SUBTOTAL, UNITS, catalog, readRows, modelDoc } from './quantity-arithmetic-fixture.mjs';
+import { PRODUCTS, SUBTOTAL, UNITS, catalog, readRows, modelDoc, ean13 } from './quantity-arithmetic-fixture.mjs';
 
 const MILKY = 5, PRINTED = 16.03, CHEAP = [16.13, 16.3];
 const r2 = n => Math.round(n * 100) / 100;
@@ -249,7 +249,7 @@ const unsigned = encode({ alg: 'RS256', kid: jwk.kid }) + '.' + encode({
   aud: 'globrands-db', iss: 'https://securetoken.google.com/globrands-db', sub: 'fixture', iat: now, exp: now + 3600 });
 const token = unsigned + '.' + crypto.sign('RSA-SHA256', Buffer.from(unsigned), privateKey).toString('base64url');
 const answer = d => ({ output_text: JSON.stringify({ documents: [d], warnings: [] }) });
-async function service(responses, env = {}) {
+async function service(responses, env = {}, { products = catalog } = {}) {
   const calls = [];
   const server = createServer({ env: { OPENAI_API_KEY: 'fixture-only', OPENAI_MODEL: 'gpt-5.6-luna',
     OPENAI_RETRY_MODEL: 'gpt-5.6-terra', OPENAI_RETRY_SERVICE_TIER: 'priority', ...env },
@@ -264,7 +264,7 @@ async function service(responses, env = {}) {
       return Response.json({ ...next, model: call.model, id: 'test-' + calls.length, usage: { input_tokens: 10, output_tokens: 20 } });
     } });
   const body = { reviewProtocolVersion: 1, documents: [{ noteIndex: 0, pages: [image, image, image], expectedSubtotalExVat: null, expectedUnits: null }],
-    receivedProductIds: [], catalog };
+    receivedProductIds: [], catalog: products };
   const output = await new Promise(resolve => {
     const req = Readable.from([Buffer.from(JSON.stringify(body))]);
     req.method = 'POST'; req.url = '/scan'; req.socket = { remoteAddress: '127.0.0.1' };
@@ -323,4 +323,83 @@ test('against the real service with SECOND_STRONG_READ=off: three reads, and the
   assert.equal(withoutTokens(assertService152Card(old)), withoutTokens(html));
   const audit = x => json(x, 'receiptPriceAudit()').rows.map(r => [r.capability, r.result, r.modelReviewIssues || null, r.quantity]);
   assert.deepEqual(audit(old), audit(c));
+});
+
+// ---- service 153, second review round: read 3 never proves a quantity both cheap reads read alike ----
+// Before the round, service 153 asked Terra#2 about the money of a row whose quantity was open and that both cheap
+// reads had read alike (they agreed against the verifier there; only the money split). Read 3 then entered the
+// row's fieldSupport, and the app's own v367 arithmetic, which counted any read, proved the verifier's quantity
+// with no card (v395 too). The service now asks nothing in such a row; the app counts read 3 in that arithmetic
+// only on a row whose quantity Terra#2 was asked about (proof.secondStrongRead.fields), as the service's own
+// re-check does, so an answer of that earlier build still gives the worker the card.
+test('read 3 proves no quantity it was not asked about: the unit price Terra#2 closed in a row whose quantity both cheap reads read as 3 leaves the verifier\'s 6 to the worker', async () => {
+  const answer = splitInvoice({ fourth: PRINTED });
+  const row = answer.scan.documents[0].rows[MILKY], proof = row.modelVerification;
+  for (const r of proof.readings) if (r.read === 0 || r.read === 1) r.values.quantity = 3;
+  Object.assign(proof, { issues: ['quantity'], status: 'needs_review', fieldSupport: { ...proof.fieldSupport, quantity: [] } });
+  answer.scan.verification.status = 'needs_review';
+  assert.deepEqual(proof.fieldSupport.unitPriceExVat, [3]); assert.deepEqual(proof.secondStrongRead.fields, ['unitPriceExVat']);
+  const { c } = await scanInApp(structuredClone(answer));
+  assert.equal(c.run(R + '.quantity'), 6);
+  assert.equal(c.run('priceAuditQuantityArithmetic(' + R + ', true).proven'), false);
+  assert.deepEqual(json(c, 'priceAuditQuantityArithmetic(' + R + ', true).reasons'), ['unit']);
+  assert.deepEqual(json(c, 'aiModelReviewIssues(' + R + ')'), ['quantity']);
+  assert.equal(c.run('priceAuditConsensusConfirmed(' + R + ')'), false);
+  assert.deepEqual(pending(c).map(r => r.rowIndex), [MILKY]);
+  assert.match(auditHtml(c), /צריך להשלים את הבדיקה/);
+  assert.equal(c.run('aiEvaluateInvoiceScan(aiScanResponse).valid'), false, 'the receipt waits for the worker');
+  // A quantity Terra#2 was asked about: read 3 counts, as in the service's re-check (which marks it 'arithmetic')
+  c.run(`${R}.modelVerification.secondStrongRead.fields = ['quantity', 'unitPriceExVat']`);
+  assert.equal(c.run('priceAuditQuantityArithmetic(' + R + ', true).proven'), true);
+  assert.deepEqual(json(c, 'aiModelReviewIssues(' + R + ')'), []);
+});
+
+// The case of the second review round through the real service: 22 rows, A (row 7) 12 × 3.86 = 46.32 and B (row 8)
+// 6 × 3.86 = 23.16, the same unit price. Both cheap reads read A's and B's quantities right; cheap read 0 misread
+// another row's money and cheap read 1 a digit of A's and B's money, so neither paper balances. Terra#1 and Terra#2
+// swap A and B (6 / 23.16 and 12 / 46.32): the paper and every row's arithmetic still close. Before the round the
+// app accepted 6 and 12 with no card. And a lone cheap read (the other failed) is never outvoted by Terra twice.
+const SWAP_A = 6, SWAP_B = 7;
+const SWAP_LINES = Array.from({ length: 22 }, (_, i) => i === SWAP_A ? ['שוקו בקבוק 1 ליטר', 12, 3.86] : i === SWAP_B ? ['שוקו בקבוק חצי ליטר', 6, 3.86] : ['מוצר החלפה ' + (i + 1), 13, 5]);
+const SWAP_PRODUCTS = SWAP_LINES.map(([name, , price], i) => ({ id: 'swap_' + (i + 1), name, barcode: ean13('72900002' + String(i + 1).padStart(4, '0')), price }));
+const swapRow = (i, { qty = SWAP_LINES[i][1], money = r2(SWAP_LINES[i][1] * SWAP_LINES[i][2]) } = {}) => ({ sourcePage: i < 8 ? 1 : i < 16 ? 2 : 3, lineNumber: i + 1,
+  rowRegion: null, barcode: SWAP_PRODUCTS[i].barcode, barcodeReadType: 'full', catalogHintId: null, catalogCandidateHintIds: [], supplierItemCode: null,
+  description: SWAP_LINES[i][0], quantity: qty, unitPriceExVat: SWAP_LINES[i][2], grossLineTotalExVat: money, lineDiscountExVat: 0, lineTotalExVat: money,
+  promotionText: null, confidence: 0.9 });
+const SWAP_CATALOG = SWAP_PRODUCTS.map(p => ({ id: p.id, name: p.name, barcode: p.barcode }));
+const SWAP_SUBTOTAL = r2(SWAP_LINES.reduce((n, [, q, u]) => n + r2(q * u), 0));
+const swapDoc = (edit = {}) => ({ noteIndex: 0, invoiceNumber: '9073800001', pageCount: 3, subtotalExVat: SWAP_SUBTOTAL, vatAmount: r2(SWAP_SUBTOTAL * 0.18),
+  totalInclVat: r2(SWAP_SUBTOTAL * 1.18), printedUnits: SWAP_LINES.reduce((n, [, q]) => n + q, 0), printedLines: 22, documentDiscountExVat: null, confidence: 0.9,
+  warnings: [], rows: SWAP_LINES.map((_, i) => swapRow(i, edit[i])) });
+const SWAPPED = () => answer(swapDoc({ [SWAP_A]: { qty: 6, money: 23.16 }, [SWAP_B]: { qty: 12, money: 46.32 } }));
+async function swapScanInApp(paper) {
+  const data = fixture('yotvata');
+  data.products = SWAP_PRODUCTS.map(p => ({ ...p })); data.items = []; data.paper = paper;
+  const c = runtime('yotvata', { data });
+  c.run(`receiptOpened=false;receiptList=[];receiptDupConfirmed=true;
+    aiScanDocuments=[{noteIndex:0,amount:null,units:null,pages:Array.from({length:3},()=>({dataUrl:'data:image/jpeg;base64,Zml4dHVyZQ==',orientationConfirmed:true}))}];`);
+  await c.run('yotvataStartPaperScan()');
+  c.run("receiptDocDate='2026-09-25';saveReceiptDraft();renderReceiving()");
+  assert.equal(c.run('receiptPaperScanState'), 'ok', c.run('JSON.stringify(receiptPaperScanProblems)'));
+  return c;
+}
+const swapRowsOf = c => [SWAP_A, SWAP_B].map(i => [c.run('aiScanResponse.scan.documents[0].rows[' + i + '].quantity'),
+  json(c, 'aiModelReviewIssues(aiScanResponse.scan.documents[0].rows[' + i + '])')]);
+const SWAP_PENDING = [[6, ['quantity', 'grossLineTotalExVat', 'lineTotalExVat']], [12, ['quantity', 'grossLineTotalExVat', 'lineTotalExVat']]];
+
+test('against the real service v153: two strong reads that swap two same-price rows the cheap reads read right never pass the worker by — split money or a lone cheap read', { skip: skip153 }, async () => {
+  const cheap = [answer(swapDoc({ 9: { money: 56 } })), answer(swapDoc({ [SWAP_A]: { money: 48.32 }, [SWAP_B]: { money: 28.16 } }))];
+  const lone = [answer(swapDoc()), new Error('test network failure')];
+  for (const [label, reads] of [['the cheap reads split only on the money', cheap], ['a lone cheap read', lone]]) {
+    // Three answers each: a fourth call would find no answer (the fake model's assertion fails that read) and is counted.
+    const off = await service([...reads, SWAPPED()], { SECOND_STRONG_READ: 'off' }, { products: SWAP_CATALOG });
+    const on = await service([...reads, SWAPPED()], {}, { products: SWAP_CATALOG });
+    assert.equal(on.calls.length, 3, label + ': no fourth call');
+    assert.equal(on.output.scan.verification.secondVerifier.outcome, 'not_needed', label);
+    const c = await swapScanInApp(structuredClone(on.output)), old = await swapScanInApp(structuredClone(off.output));
+    assert.deepEqual(swapRowsOf(c), SWAP_PENDING, label);
+    assert.deepEqual(pending(c).map(r => r.rowIndex), [SWAP_A, SWAP_B], label);
+    assert.equal(c.run('aiEvaluateInvoiceScan(aiScanResponse).valid'), false, label + ': the receipt waits for the worker');
+    assert.deepEqual(swapRowsOf(old), swapRowsOf(c), label + ': what the switch off shows');
+  }
 });

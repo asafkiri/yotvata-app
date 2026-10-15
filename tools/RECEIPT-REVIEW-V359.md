@@ -326,7 +326,9 @@ Service 153 adds step (3) of the owner's design: when the verifier (read 2) is
 the selected read and a quantity or price/amount field of an ordinary invoice
 row still has no supporting read, and the two cheap reads disagreed on that
 field with each other (a field they both saw the same way stays with the
-worker, as in v395 — its review round), it reads the original photos once more with
+worker, as in v395 — its review round; since the second review round both must
+have read the row, and a row whose quantity they read alike is not asked about
+at all), it reads the original photos once more with
 the strong model (Terra#2, read 3) and closes the field when that read sees the
 same value — only on a paper that closes against its printed summary and a row
 whose own arithmetic closes in agorot. A closed field leaves `issues`, gets 3 in
@@ -347,6 +349,16 @@ whose own arithmetic closes in agorot. A closed field leaves `issues`, gets 3 in
   the listed fields; otherwise "ועדיין אף קריאה אחרת לא ראתה את מה שהפענוח
   קרא", since Terra#2 may have read a cheap read's value. Without a read 3 the
   v367 sentences are unchanged.
+- Read 3 proves no quantity it was not asked about (service 153's second
+  review round): `priceAuditQuantityArithmetic`, the app's own v367 arithmetic,
+  counts read 3 as support only in a row whose `secondStrongRead.fields`
+  includes `quantity`, as the service's own re-check does (it marks a proof it
+  completes with `arithmetic`). Before that round the service could close the
+  gross and net of a row whose open quantity both cheap reads read alike (two
+  same-price rows swapped by both strong reads), and this arithmetic, which
+  counted any read, accepted the verifier's quantity with no card — v395 too.
+  The service no longer asks anything in such a row; the app check also keeps
+  an answer of that earlier build with the worker.
 - Read 3 never votes on identity or becomes the selected read:
   `AI_SCAN_IDENTITY_READS` ([0, 1, 2]) replaces the literal lists in
   `aiModelPriceAgreement` and the `model_consensus` branch of
@@ -356,3 +368,8 @@ whose own arithmetic closes in agorot. A closed field leaves `issues`, gets 3 in
   (closed, a cheap read's value, a fourth value, failed, off, service 152) and
   the same through the real service code when `../yotvata-ai-scan` is v153
   (the off/152 case runs against v152 too), which checks the imitation.
+  The second review round added the imitated earlier-build answer (a unit
+  price closed by read 3 in a row whose quantity both cheap reads read as 3:
+  the card stays) and, through the real service, the same-price swap with
+  split money and with a lone cheap read (three calls, rows A and B pending,
+  as with the switch off).

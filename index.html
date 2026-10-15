@@ -704,7 +704,9 @@ const AI_SCAN_MIN_SERVICE_VERSION = 127;
 // ויומן invoice_scan_audit); כאן רק שורה בנתוני האבחון. הערכים תמיד מהקריאה שנבחרה: קריאה 4 רק מצביעה,
 // לעולם אינה נבחרת ולעולם אינה מצביעה על זהות המוצר — לכן כל מה שבוחר קריאה או מכריע זהות נשאר על
 // AI_SCAN_IDENTITY_READS, ושובר השוויון "המודל החזק" בזהות הוא קריאה 3 בלבד (AI_SCAN_STRONG_READ). שירות
-// 152 (וגם 153 עם SECOND_STRONG_READ=off) אינו שולח קריאה 3 — ואז הכול בדיוק כמו v395.
+// 152 (וגם 153 עם SECOND_STRONG_READ=off) אינו שולח קריאה 3 — ואז הכול בדיוק כמו v395. סבב הבדיקה השני של
+// שירות 153: הוא שואל רק כששתי הזולות קראו את השורה ונחלקו על השדה, ולעולם לא בשורה ששתיהן ראו בה את הכמות
+// אותו דבר; והחשבון של הכמות כאן (priceAuditQuantityArithmetic) סופר את קריאה 4 רק בשורה שנשאלה על הכמות.
 const AI_SCAN_STRONG_READ = 2;
 const AI_SCAN_SECOND_STRONG_READ = 3;
 const AI_SCAN_IDENTITY_READS = [0, 1, 2];
@@ -12783,7 +12785,13 @@ function priceAuditQuantityArithmetic(row, balanced, credit = false) {
   const reasons = [];
   const qty = num(row.quantity), unit = num(row.unitPriceExVat);
   if (!Number.isInteger(qty) || qty <= 0 || !(unit > 0) || num(row.lineTotalExVat) == null) reasons.push('values');
-  const supported = field => Array.isArray(support[field]) && support[field].some(Number.isInteger);
+  // v396 (שירות 153, סבב בדיקה שני): קריאה 4 (AI_SCAN_SECOND_STRONG_READ) נספרת כאן רק בשורה שהשירות שאל אותה על
+  // הכמות (secondStrongRead.fields) — כמו הבדיקה החוזרת של השירות, שמסמנת 'arithmetic' בעצמה. בשורה שהכמות שלה
+  // פתוחה ושתי הקריאות הזולות ראו אותה אותו דבר, הקול שלה על המחיר או הסכום אינו מוכיח את הכמות של קריאת ההכרעה
+  // שהן סתרו (העובד מחליט, כמו ב-v395). שירות 153 כבר אינו שואל בשורה כזאת דבר; כך גם תשובה של הבנייה הקודמת שלו.
+  const second = proof.secondStrongRead;
+  const secondCounts = !!second && Array.isArray(second.fields) && second.fields.includes('quantity');
+  const supported = field => Array.isArray(support[field]) && support[field].some(read => Number.isInteger(read) && (read !== AI_SCAN_SECOND_STRONG_READ || secondCounts));
   if (!supported('unitPriceExVat')) reasons.push('unit');
   if (!supported('lineTotalExVat')) reasons.push('net');
   if (row.grossLineTotalExVat != null && !supported('grossLineTotalExVat')) reasons.push('gross');
