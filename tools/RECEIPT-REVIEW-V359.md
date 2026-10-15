@@ -397,3 +397,16 @@ whose own arithmetic closes in agorot. A closed field leaves `issues`, gets 3 in
   other's `noteIndex` leaves rows A and B of note 0 pending, as with the switch
   off (`valid: false`). This covers both Terra#2 (four calls, `disagreed`) and a
   cheap read (three calls, `not_needed`). Scans of one note are unchanged.
+- Service 153's fifth review round judges the row's quantity by its printed
+  line too. Until then its rule "nothing in a row whose quantity is open and
+  both cheap reads read alike" ran only when the vote left the quantity open,
+  and the vote decides that by its row alignment. A cheap read that listed line
+  8 before line 7 then "supported" Terra's swapped quantity on line 7 with its
+  reading of line 8, step 3 closed the row's money, and the app accepted A as
+  6 (printed 12) and B as 12 (printed 6) with no card (`valid: true`). Now the
+  service asks nothing in a row where, on that printed line, both cheap reads
+  read another quantity than Terra#1, or neither read Terra#1's (for example
+  one left it `null`), even when the vote supported it. The app logic is
+  unchanged. Through the real service, the reviewers' repro-qty-hidden and its
+  `null` variant make three calls (`not_needed`) and leave lines 7 and 8
+  pending, as with the switch off (`valid: false`).

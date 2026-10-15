@@ -557,3 +557,52 @@ test('against the real service v153: two notes of one supplier — a read that r
     assert.deepEqual(docRowsOf(old), docRowsOf(c), label);
   }
 });
+
+// ---- service 153, fifth review round: a quantity both cheap reads read alike by the printed line, even when the vote "supported" another ----
+// The reviewers' repro-qty-hidden on the 22-row swap paper. Cheap read 0 reads A and B right (and slips row 10's money); cheap read 1
+// reads both quantities right (A 12, B 6), slips both moneys (48.32, 28.16) and lists line 8 before line 7. Terra#1 and Terra#2 swap A
+// and B. The vote's positional alignment credits cheap read 1's B (6) to Terra's A and its A (12) to Terra's B, so service 152 leaves only
+// the money open. Until this round step 3 then asked that money by the printed line, Terra#2 confirmed it, and the app showed no card:
+// valid: true, A accepted as 6 (printed 12) and B as 12 (printed 6). Now the service asks nothing in a row whose quantity both cheap
+// reads read alike on that printed line, unlike Terra#1 — whether or not service 152 left the quantity open.
+test('against the real service v153: a cheap read that lists line 8 before line 7 never lets Terra#2 close the money of the swapped rows — no fourth call, A and B with the worker as with the switch off', { skip: skip153 }, async () => {
+  const order = SWAP_ORDER.map(i => i === SWAP_A ? SWAP_B : i === SWAP_B ? SWAP_A : i);
+  const reads = () => [answer(swapDoc({ 9: { money: 56 } })), answer(swapOrdered({ [SWAP_A]: { money: 48.32 }, [SWAP_B]: { money: 28.16 } }, order)), SWAPPED()];
+  // Three answers each: a fourth call would find no answer (the fake model's assertion fails that read) and is counted.
+  const off = await service(reads(), { SECOND_STRONG_READ: 'off' }, { products: SWAP_CATALOG });
+  const on = await service(reads(), {}, { products: SWAP_CATALOG });
+  assert.equal(on.calls.length, 3, 'no fourth call');
+  assert.equal(on.output.scan.verification.secondVerifier.outcome, 'not_needed');
+  assert.deepEqual(on.output.scan.verification.secondVerifier.closed, []);
+  const c = await swapScanInApp(structuredClone(on.output)), old = await swapScanInApp(structuredClone(off.output));
+  const MONEY = ['grossLineTotalExVat', 'lineTotalExVat'];
+  assert.deepEqual(swapRowsOf(c), [[6, MONEY], [12, MONEY]], 'the swapped quantities (printed 12 and 6) wait for the worker with their money');
+  assert.deepEqual(pending(c).map(r => r.rowIndex), [SWAP_A, SWAP_B]);
+  assert.equal(c.run('aiEvaluateInvoiceScan(aiScanResponse).valid'), false, 'the receipt waits for the worker');
+  assert.deepEqual(swapRowsOf(old), swapRowsOf(c), 'what the switch off shows');
+  assert.deepEqual(pending(old).map(r => r.rowIndex), pending(c).map(r => r.rowIndex));
+});
+
+// The same root without the cheap reads agreeing: cheap read 0 left A's and B's quantities unread (null) and read their money right;
+// cheap read 1 is the one above (quantities right, money slipped, line 8 listed first). By the printed line no cheap read read
+// Terra#1's quantity, and the only one that read it saw the printed value. Until this round the money closed and A and B passed
+// with no card; now a row whose quantity the vote "supported" only through another printed line is not asked about.
+test('against the real service v153: a cheap read that left A and B null and one that listed line 8 first — no fourth call, A and B with the worker as with the switch off', { skip: skip153 }, async () => {
+  const order = SWAP_ORDER.map(i => i === SWAP_A ? SWAP_B : i === SWAP_B ? SWAP_A : i);
+  const nullQuantities = swapDoc({ 9: { money: 56 } }); for (const i of [SWAP_A, SWAP_B]) nullQuantities.rows[i].quantity = null;
+  const reads = () => [answer(structuredClone(nullQuantities)), answer(swapOrdered({ [SWAP_A]: { money: 48.32 }, [SWAP_B]: { money: 28.16 } }, order)), SWAPPED()];
+  // Three answers each: a fourth call would find no answer (the fake model's assertion fails that read) and is counted.
+  const off = await service(reads(), { SECOND_STRONG_READ: 'off' }, { products: SWAP_CATALOG });
+  const on = await service(reads(), {}, { products: SWAP_CATALOG });
+  assert.equal(on.calls.length, 3, 'no fourth call');
+  const second = on.output.scan.verification.secondVerifier;
+  assert.equal(second.outcome, 'not_needed'); assert.deepEqual(second.closed, []);
+  assert.deepEqual([...new Set(second.notAsked.map(e => e.reason))], ['cheap_quantity_unconfirmed']);
+  const c = await swapScanInApp(structuredClone(on.output)), old = await swapScanInApp(structuredClone(off.output));
+  const MONEY = ['grossLineTotalExVat', 'lineTotalExVat'];
+  assert.deepEqual(swapRowsOf(c), [[6, MONEY], [12, MONEY]]);
+  assert.deepEqual(pending(c).map(r => r.rowIndex), [SWAP_A, SWAP_B]);
+  assert.equal(c.run('aiEvaluateInvoiceScan(aiScanResponse).valid'), false, 'the receipt waits for the worker');
+  assert.deepEqual(swapRowsOf(old), swapRowsOf(c), 'what the switch off shows');
+  assert.deepEqual(pending(old).map(r => r.rowIndex), pending(c).map(r => r.rowIndex));
+});
