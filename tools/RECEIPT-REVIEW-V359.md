@@ -373,3 +373,18 @@ whose own arithmetic closes in agorot. A closed field leaves `issues`, gets 3 in
   the card stays) and, through the real service, the same-price swap with
   split money and with a lone cheap read (three calls, rows A and B pending,
   as with the switch off).
+- Service 153's third review round reads every read by the printed line (same
+  page, line number and product, that product on one row only), not by the
+  vote's alignment. The app logic is unchanged. Through the real service, these
+  cases give three calls and leave rows A and B pending, as with the switch off:
+  a cheap read that lists A after its neighbour; one that skipped A and read
+  another line twice; and one product on lines 7 and 8 (`not_matchable`). With a
+  cheap read that left A's and B's quantities `null`, read 4 closes only their
+  money, and the swapped quantities stay pending.
+- The card's "החשבון לא מכריע" line no longer calls a field "לא מוסכם בין
+  הקריאות" when read 4 confirmed it in a row whose quantity it was not asked
+  about. `priceAuditQuantityArithmetic` returns `unit_second`, `net_second` or
+  `gross_second` for such a field in place of `unit`, `net` or `gross`; it is
+  still not proof. The card turns these into one sentence: "… אושר/ו רק בקריאה
+  הרביעית (המודל החזק, פעם שנייה), שלא נשאלה על הכמות". Proofs, issues and
+  approvals are unchanged.

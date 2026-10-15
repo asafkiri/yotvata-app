@@ -706,7 +706,9 @@ const AI_SCAN_MIN_SERVICE_VERSION = 127;
 // AI_SCAN_IDENTITY_READS, ושובר השוויון "המודל החזק" בזהות הוא קריאה 3 בלבד (AI_SCAN_STRONG_READ). שירות
 // 152 (וגם 153 עם SECOND_STRONG_READ=off) אינו שולח קריאה 3 — ואז הכול בדיוק כמו v395. סבב הבדיקה השני של
 // שירות 153: הוא שואל רק כששתי הזולות קראו את השורה ונחלקו על השדה, ולעולם לא בשורה ששתיהן ראו בה את הכמות
-// אותו דבר; והחשבון של הכמות כאן (priceAuditQuantityArithmetic) סופר את קריאה 4 רק בשורה שנשאלה על הכמות.
+// אותו דבר; והחשבון של הכמות כאן (priceAuditQuantityArithmetic) סופר את קריאה 4 רק בשורה שנשאלה על הכמות. סבב הבדיקה
+// השלישי של השירות: כל קריאה נמדדת לפי השורה המודפסת (עמוד, מספר שורה ומוצר) ולא לפי היישור של ההצבעה — אין כאן
+// שינוי בלוגיקה; ובכרטיס, שדה שרק קריאה 4 אישרה בשורה שלא נשאלה על הכמות נקרא כך ולא "לא מוסכם בין הקריאות".
 const AI_SCAN_STRONG_READ = 2;
 const AI_SCAN_SECOND_STRONG_READ = 3;
 const AI_SCAN_IDENTITY_READS = [0, 1, 2];
@@ -12765,7 +12767,8 @@ function priceAuditRowArithmeticHolds(values, credit = false) {
 // וסך היחידות המודפס נקרא (המתקשר בודק: לחשבונית ולזיכוי בדיקות נייר שונות). מחזירה
 // { proven, server, reasons } ובהוכחה גם { unit, gross, net, printedUnitsBalanced } כמו בשרת.
 // reasons אומר למה החשבון לא מכריע (להסבר בכרטיס): 'support' (אין fieldSupport — שרת ישן),
-// 'values' (כמות או מחיר לא תקינים), 'unit' / 'net' / 'gross' (השדה בלי קריאה תומכת),
+// 'values' (כמות או מחיר לא תקינים), 'unit' / 'net' / 'gross' (השדה בלי קריאה תומכת), 'unit_second' / 'net_second' /
+// 'gross_second' (v396: השדה אושר רק בקריאה 4, שהשירות לא שאל על הכמות — ולכן היא אינה נספרת כאן),
 // 'arithmetic' (החשבון לא נסגר), 'paper' (הנייר לא מתאזן), 'deposit' (שורת פיקדון — הנייר אינו
 // מאשש את הכמות שלה). תמיכה היא קריאה אחרת (מספר קריאה);
 // סמן מחרוזת אינו קריאה. סמן השרת (v150: fieldSupport.quantity מכיל 'arithmetic') מתקבל כמו שהוא.
@@ -12792,9 +12795,12 @@ function priceAuditQuantityArithmetic(row, balanced, credit = false) {
   const second = proof.secondStrongRead;
   const secondCounts = !!second && Array.isArray(second.fields) && second.fields.includes('quantity');
   const supported = field => Array.isArray(support[field]) && support[field].some(read => Number.isInteger(read) && (read !== AI_SCAN_SECOND_STRONG_READ || secondCounts));
-  if (!supported('unitPriceExVat')) reasons.push('unit');
-  if (!supported('lineTotalExVat')) reasons.push('net');
-  if (row.grossLineTotalExVat != null && !supported('grossLineTotalExVat')) reasons.push('gross');
+  // v396 (סבב בדיקה שלישי): שדה שקריאה 4 אישרה אבל אינה נספרת כאן — הסיבה אומרת זאת ('…_second'), כדי שהכרטיס לא
+  // יכתוב "לא מוסכם בין הקריאות" על שדה שקריאה 4 ראתה בו את הערך שנבחר (השירות כבר הוציא אותו מ-issues).
+  const lacking = (field, code) => reasons.push(Array.isArray(support[field]) && support[field].includes(AI_SCAN_SECOND_STRONG_READ) ? code + '_second' : code);
+  if (!supported('unitPriceExVat')) lacking('unitPriceExVat', 'unit');
+  if (!supported('lineTotalExVat')) lacking('lineTotalExVat', 'net');
+  if (row.grossLineTotalExVat != null && !supported('grossLineTotalExVat')) lacking('grossLineTotalExVat', 'gross');
   if (!reasons.includes('values') && !priceAuditRowArithmeticHolds(row, credit)) reasons.push('arithmetic');
   if (!balanced) reasons.push('paper');
   if (reasons.length) return { proven: false, server: false, reasons };
@@ -12868,6 +12874,13 @@ function priceAuditRowDisputeHtml(documentIndex, rowIndex, issues) {
     deposit: 'שורת פיקדון לא נספרת בסך היחידות המודפס, ולכן הנייר לא מאשש את הכמות שלה',
     arithmetic: 'מחיר היחידה × הכמות לא יוצא סכום השורה ' + (lone ? 'בקריאה היחידה' : readings.some(r => priceAuditRowArithmeticHolds(r.values)) ? 'בקריאה שנבחרה' : 'באף אחת מהקריאות') };
   // v367: בקריאה יחידה אין "קריאות" שלא הסכימו — המשפט למעלה כבר הסביר שאין קריאה תומכת לשדות; נשארות רק סיבות של הנייר והחשבון.
+  // v396 (סבב בדיקה שלישי של שירות 153): שדה שרק קריאה 4 אישרה, בשורה שהשירות לא שאל אותה על הכמות שלה, אינו "לא מוסכם
+  // בין הקריאות" — קריאה 4 ראתה בו את הערך שנבחר. המשפט אומר זאת, פעם אחת לכל השדות האלה, במקום הראשון שבהם.
+  const secondOnly = { unit_second: 'מחיר היחידה', net_second: 'סכום השורה', gross_second: 'הסכום לפני הנחה' };
+  const secondNames = proof.reasons.filter(code => secondOnly[code]).map(code => secondOnly[code]);
+  if (secondNames.length) why[proof.reasons.find(code => secondOnly[code])] = (secondNames.length > 1
+    ? secondNames.slice(0, -1).join(', ') + ' ו' + secondNames[secondNames.length - 1] + ' אושרו' : secondNames[0] + ' אושר') +
+    ' רק בקריאה הרביעית (המודל החזק, פעם שנייה), שלא נשאלה על הכמות';
   const reasons = proof.reasons.filter(code => why[code] && !(lone && ['unit', 'net', 'gross'].includes(code))).map(code => why[code]);
   return '<div class="mt-2 text-sm text-slate-700" data-row-dispute>' + what +
     (reasons.length ? '<p class="mt-1">החשבון לא מכריע: ' + htmlEscape(reasons.join(' · ')) + '.</p>' : '') +
