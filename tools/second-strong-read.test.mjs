@@ -251,7 +251,8 @@ const unsigned = encode({ alg: 'RS256', kid: jwk.kid }) + '.' + encode({
   aud: 'globrands-db', iss: 'https://securetoken.google.com/globrands-db', sub: 'fixture', iat: now, exp: now + 3600 });
 const token = unsigned + '.' + crypto.sign('RSA-SHA256', Buffer.from(unsigned), privateKey).toString('base64url');
 const answer = d => ({ output_text: JSON.stringify({ documents: [d], warnings: [] }) });
-async function service(responses, env = {}, { products = catalog } = {}) {
+// documents (service 153, fourth review round) — the scan's notes, for a scan of more than one note; by default one note of three pages.
+async function service(responses, env = {}, { products = catalog, documents = null } = {}) {
   const calls = [];
   const server = createServer({ env: { OPENAI_API_KEY: 'fixture-only', OPENAI_MODEL: 'gpt-5.6-luna',
     OPENAI_RETRY_MODEL: 'gpt-5.6-terra', OPENAI_RETRY_SERVICE_TIER: 'priority', ...env },
@@ -265,7 +266,7 @@ async function service(responses, env = {}, { products = catalog } = {}) {
       assert.ok(next, 'unexpected paid model call');
       return Response.json({ ...next, model: call.model, id: 'test-' + calls.length, usage: { input_tokens: 10, output_tokens: 20 } });
     } });
-  const body = { reviewProtocolVersion: 1, documents: [{ noteIndex: 0, pages: [image, image, image], expectedSubtotalExVat: null, expectedUnits: null }],
+  const body = { reviewProtocolVersion: 1, documents: documents || [{ noteIndex: 0, pages: [image, image, image], expectedSubtotalExVat: null, expectedUnits: null }],
     receivedProductIds: [], catalog: products };
   const output = await new Promise(resolve => {
     const req = Readable.from([Buffer.from(JSON.stringify(body))]);
@@ -489,4 +490,70 @@ test('against the real service v153: a cheap read that read a quantity as null d
   assert.equal(c.run('priceAuditQuantityArithmetic(' + A + ', true).proven'), false, 'read 4 was not asked about the quantity');
   assert.deepEqual(json(c, 'priceAuditQuantityArithmetic(' + A + ', true).reasons'), ['net_second', 'gross_second']);
   assert.match(auditHtml(c), new RegExp('<p class="mt-1">החשבון לא מכריע: ' + SECOND_ONLY + '\\.</p>'));
+});
+
+// ---- service 153, fourth review round: the reading of a row is the reading of that paper ----
+// The reviewers' repro-doc-swap. Two one-page notes of one supplier in one scan ("+ תעודה נוספת מהנהג / הספק"), the same 8
+// products in the same order. A (line 3) and B (line 4) have the same unit price, 3.86; note 0 prints A 12 / 46.32 and B 6 / 23.16.
+// Until this round the service found each read's note by the noteIndex the read reported about itself. A read that returned the
+// two notes under each other's noteIndex then "read" the line from the other paper (same page, line and product, the product
+// unique in each note), and with the switch on the app accepted Terra's swap of A and B on note 0 with no card (valid: true).
+// Now, in a scan of several notes, a read's note is the same paper only with the same invoice number.
+const DOC_A = 2, DOC_B = 3;
+const DOC_NAMES = ['גבינה לבנה 5%', 'יוגורט 3%', 'שוקו בקבוק 1 ליטר', 'שוקו בקבוק חצי ליטר', 'חלב 3% קרטון', 'קוטג׳ 5%', 'שמנת חמוצה', 'לבן 1.5%'];
+const docPrice = i => i === DOC_A || i === DOC_B ? 3.86 : 5;
+const DOC_PRODUCTS = DOC_NAMES.map((name, i) => ({ id: 'ds_' + (i + 1), name, barcode: ean13('72900004' + String(i + 1).padStart(4, '0')), price: docPrice(i) }));
+const DOC_CATALOG = DOC_PRODUCTS.map(p => ({ id: p.id, name: p.name, barcode: p.barcode }));
+const DOC_Q0 = [13, 13, 12, 6, 13, 13, 13, 13], DOC_N0 = '9073800101', DOC_N1 = '9073800102';
+const docRow = (i, qty, money = r2(qty * docPrice(i))) => ({ sourcePage: 1, lineNumber: i + 1, rowRegion: null, barcode: DOC_PRODUCTS[i].barcode, barcodeReadType: 'full',
+  catalogHintId: null, catalogCandidateHintIds: [], supplierItemCode: null, description: DOC_NAMES[i], quantity: qty, unitPriceExVat: docPrice(i),
+  grossLineTotalExVat: money, lineDiscountExVat: 0, lineTotalExVat: money, promotionText: null, confidence: 0.9 });
+// One note as a read returned it: noteIndex — the label the read gave it; Q and the number — the paper it really read.
+const docNote = (noteIndex, Q, invoiceNumber, edit = {}) => { const sub = r2(Q.reduce((n, q, i) => n + r2(q * docPrice(i)), 0));
+  return { noteIndex, invoiceNumber, pageCount: 1, subtotalExVat: sub, vatAmount: r2(sub * 0.18), totalInclVat: r2(sub * 1.18), printedUnits: Q.reduce((n, q) => n + q, 0),
+    printedLines: 8, documentDiscountExVat: null, confidence: 0.9, warnings: [], rows: Q.map((q, i) => edit[i] ? docRow(i, edit[i].qty, edit[i].money) : docRow(i, q)) }; };
+const notesAnswer = docs => ({ output_text: JSON.stringify({ documents: docs, warnings: [] }) });
+const docSwapped = () => docNote(0, DOC_Q0, DOC_N0, { [DOC_A]: { qty: 6, money: 23.16 }, [DOC_B]: { qty: 12, money: 46.32 } });
+const TWO_NOTES = [0, 1].map(noteIndex => ({ noteIndex, pages: [image], expectedSubtotalExVat: null, expectedUnits: null }));
+async function twoNotesInApp(paper) {
+  const data = fixture('yotvata');
+  data.products = DOC_PRODUCTS.map(p => ({ ...p })); data.items = []; data.paper = paper;
+  const c = runtime('yotvata', { data });
+  c.run(`receiptOpened=false;receiptList=[];receiptDupConfirmed=true;
+    aiScanDocuments=[0,1].map(noteIndex=>({noteIndex,amount:null,units:null,pages:[{dataUrl:'data:image/jpeg;base64,Zml4dHVyZQ==',orientationConfirmed:true}]}));`);
+  await c.run('yotvataStartPaperScan()');
+  c.run("receiptDocDate='2026-09-25';saveReceiptDraft();renderReceiving()");
+  assert.equal(c.run('receiptPaperScanState'), 'ok', c.run('JSON.stringify(receiptPaperScanProblems)'));
+  return c;
+}
+const docRowsOf = c => [DOC_A, DOC_B].map(i => [c.run('aiScanResponse.scan.documents[0].rows[' + i + '].quantity'),
+  json(c, 'aiModelReviewIssues(aiScanResponse.scan.documents[0].rows[' + i + '])')]);
+const notesPending = c => pending(c).map(r => [r.documentIndex, r.rowIndex]);
+
+test('against the real service v153: two notes of one supplier — a read that returned the notes under each other\'s noteIndex never confirms the other paper\'s line; A and B with the worker as with the switch off', { skip: skip153 }, async () => {
+  const t2Q1 = [10, 10, 6, 12, 10, 10, 10, 10], cheapQ1 = [10, 10, 7, 5, 10, 10, 10, 10];
+  for (const [label, reads, fourth, calls, outcome] of [
+    // case 't2': note 1 prints A 6 and B 12 (Terra#1's swap on note 0). Cheap read 0 reads A and B as packs, cheap read 1 reads them right
+    // and slips line 6's money. Terra#2 reads every number right but returns note 1 as noteIndex 0 — its vote is not counted.
+    ['Terra#2 returned note 1 as noteIndex 0', [notesAnswer([docNote(0, DOC_Q0, DOC_N0, { [DOC_A]: { qty: 1, money: 3.86 }, [DOC_B]: { qty: 1, money: 3.86 } }), docNote(1, t2Q1, DOC_N1)]),
+      notesAnswer([docNote(0, DOC_Q0, DOC_N0, { 5: { qty: 13, money: 66 } }), docNote(1, t2Q1, DOC_N1)]), notesAnswer([docSwapped(), docNote(1, t2Q1, DOC_N1)])],
+      notesAnswer([docNote(0, t2Q1, DOC_N1), docNote(1, DOC_Q0, DOC_N0)]), 4, 'disagreed'],
+    // case 'cheap': cheap read 0 returns note 1 (A 7, B 5) as noteIndex 0; cheap read 1 reads note 0 right. By the paper read 1 is a lone
+    // cheap read that saw the printed values, so nothing is asked.
+    ['a cheap read returned note 1 as noteIndex 0', [notesAnswer([docNote(0, cheapQ1, DOC_N1), docNote(1, DOC_Q0, DOC_N0, { 5: { qty: 13, money: 66 } })]),
+      notesAnswer([docNote(0, DOC_Q0, DOC_N0, { 6: { qty: 13, money: 66 } }), docNote(1, cheapQ1, DOC_N1)]), notesAnswer([docSwapped(), docNote(1, cheapQ1, DOC_N1)])],
+      notesAnswer([docSwapped(), docNote(1, cheapQ1, DOC_N1)]), 3, 'not_needed'],
+  ]) {
+    const off = await service(reads.slice(), { SECOND_STRONG_READ: 'off' }, { products: DOC_CATALOG, documents: TWO_NOTES });
+    const on = await service(calls === 4 ? [...reads, fourth] : reads.slice(), {}, { products: DOC_CATALOG, documents: TWO_NOTES });
+    assert.equal(on.calls.length, calls, label);
+    const second = on.output.scan.verification.secondVerifier;
+    assert.equal(second.outcome, outcome, label); assert.deepEqual(second.closed, [], label);
+    const c = await twoNotesInApp(structuredClone(on.output)), old = await twoNotesInApp(structuredClone(off.output));
+    assert.deepEqual(docRowsOf(c), [[6, ['quantity', 'grossLineTotalExVat', 'lineTotalExVat']], [12, ['quantity', 'grossLineTotalExVat', 'lineTotalExVat']]], label);
+    assert.ok(notesPending(c).some(([d, i]) => d === 0 && i === DOC_A) && notesPending(c).some(([d, i]) => d === 0 && i === DOC_B), label + ': A and B are pending');
+    assert.deepEqual(notesPending(c), notesPending(old), label + ': what the switch off shows');
+    assert.equal(c.run('aiEvaluateInvoiceScan(aiScanResponse).valid'), false, label + ': the receipt waits for the worker');
+    assert.deepEqual(docRowsOf(old), docRowsOf(c), label);
+  }
 });

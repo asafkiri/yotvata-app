@@ -388,3 +388,12 @@ whose own arithmetic closes in agorot. A closed field leaves `issues`, gets 3 in
   still not proof. The card turns these into one sentence: "… אושר/ו רק בקריאה
   הרביעית (המודל החזק, פעם שנייה), שלא נשאלה על הכמות". Proofs, issues and
   approvals are unchanged.
+- Service 153's fourth review round reads every read on the same paper. In a
+  scan of more than one note, a read's note counts only with the same invoice
+  number (without whitespace, not empty, on one note only), not by the
+  `noteIndex` the read reported about itself. The app logic is unchanged.
+  Through the real service, two one-page notes of one supplier with the same 8
+  products in the same order, a read that returned the notes under each
+  other's `noteIndex` leaves rows A and B of note 0 pending, as with the switch
+  off (`valid: false`). This covers both Terra#2 (four calls, `disagreed`) and a
+  cheap read (three calls, `not_needed`). Scans of one note are unchanged.
