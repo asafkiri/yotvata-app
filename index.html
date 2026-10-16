@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v395 אישור שורה לפי החשבון</title>
+    <title>הזמנות יטבתה - v396 קריאה רביעית במודל החזק</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -125,7 +125,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v395 אישור שורה לפי החשבון</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v396 קריאה רביעית במודל החזק</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -669,7 +669,7 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '395';
+const APP_VERSION = '396';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -682,10 +682,38 @@ const AI_SCAN_MAX_AUTO_ROTATION_RETRIES = 2;
 // מחק תעודה שלמה מהסריקה בלי ניסיון נוסף. הטיימאאוט המקומי מעט מעל התקרה
 // של השרת (שתי קריאות במקביל עד 180 שניות + הכרעה עד 180 שניות), כדי שבקשה תקועה תיפול אצלנו
 // מהר ותנוסה שוב, במקום להמתין עד שהרשת חותכת אותה בשקט.
+// v396: שירות 153 מוסיף לפעמים קריאה רביעית (ראה AI_SCAN_SECOND_STRONG_READ). היא רצה רק אם תיגמר לכל המאוחר
+// 360 שניות אחרי שהבקשה הגיעה לשירות (לפני אימות הטוקן והעלאת הצילומים) — לא אחרי מה ששתי הקריאות במקביל
+// וההכרעה לבדן כבר יכולות להימשך אחרי ההעלאה (180 + 180, כמו בשירות 152). לכן היא לעולם אינה מאריכה סריקה
+// מעבר למה שהיה אפשרי קודם, המרווח להעלאה ולתשובה מתחת ל-420 כאן נשאר כמו שהיה, והטיימאאוט לא השתנה.
+// (שלוש הקריאות הראשונות אינן כפופות למועד הזה, ולכן "כל הסריקה נגמרת תוך 390 שניות" — הניסוח הקודם — לא היה נכון.)
 const AI_SCAN_NETWORK_RETRIES = 2;
 const AI_SCAN_FETCH_TIMEOUT_MS = 420000;
 const AI_SCAN_NETWORK_RETRY_DELAY_MS = 2500;
 const AI_SCAN_MIN_SERVICE_VERSION = 127;
+// ===== v396: הקריאה החזקה השנייה של שירות הפענוח 153 =====
+// מספרי הקריאות של השרת (readings[].read, fieldSupport, selectedRead): 0 ו-1 — שתי הקריאות הזולות; 2 —
+// קריאת ההכרעה במודל החזק ("קריאה 3"); 3 — שירות 153: קריאה שנייה במודל החזק ("קריאה 4").
+// התכנון של בעל העסק: (1) שתי הקריאות הזולות הסכימו — מתקבל; (2) לא הסכימו — קריאת הכרעה, ושדה שבו היא
+// מסכימה עם אחת הזולות מתקבל; (3) שדה שבו היא אינה מסכימה עם אף אחת — השרת קורא שוב את כל התעודה במודל החזק;
+// (4) אחרת העובד מאשר או מתקן כמו היום. הכלל הסופי של בעל העסק לשלב (3): השרת משווה את הקריאה השלמה השנייה
+// לקריאה השלמה של קריאת ההכרעה — אותן תעודות, אותן שורות באותו סדר, ובכל שורה אותו מוצר, כמות, מחיר וסכומים, ואותו
+// סיכום. רק כשהן זהות לגמרי, השדות שנשאל עליהם נסגרים בלי העובד; הבדל אחד בכל מקום — שום דבר אינו נסגר, והכרטיס
+// נשאר כמו היום. השרת סוגר כך רק כמות ומחיר/סכום של שורת חשבונית רגילה (לא זהות, לא סיכום, לא זיכוי, לא פיקדון
+// ולא החזרה), על נייר שנסגר מול הסיכום המודפס ובשורה שהחשבון שלה נסגר באגורות, ומוציא את השדה מ-issues
+// (secondStrongRead.closed, והשורה 'verified' כשלא נשאר בה דבר; fieldSupport אינו מקבל את קריאה 3, ולכן שום חשבון — גם של
+// v395 — אינו נשען עליה). לכן כאן שדה כזה הוא פשוט שדה מוסכם — בלי כרטיס ובלי
+// שום הודעה חדשה לעובד. התיעוד המלא בשרת (scan.verification.secondVerifier ויומן invoice_scan_audit); כאן רק שורה
+// בנתוני האבחון. הערכים תמיד מהקריאה שנבחרה: קריאה 4 לעולם אינה נבחרת ולעולם אינה מכריעה את זהות המוצר — לכן כל
+// מה שבוחר קריאה או מכריע זהות נשאר על AI_SCAN_IDENTITY_READS, ושובר השוויון "המודל החזק" בזהות הוא קריאה 3 בלבד
+// (AI_SCAN_STRONG_READ). שירות 152 (וגם 153 עם SECOND_STRONG_READ=off) אינו שולח קריאה 3 — ואז הכול בדיוק כמו v395.
+// מתי השרת שואל את קריאה 4 — רק כששתי הזולות קראו את השורה ונחלקו על השדה, לפי השורה המודפסת (עמוד, מספר שורה ומוצר,
+// ובכמה תעודות — אותו מספר תעודה), ולעולם לא בשורה ששתיהן ראו בה את הכמות אותו דבר. כאן אין בזה לוגיקה. מה שכן כאן:
+// הכרטיס אומר מה קרה בקריאה 4 (לא זהה — לא אישרה דבר; זהה — השדה שבכרטיס לא נשאל בה), ושורת "החשבון לא מכריע" אומרת
+// על כסף שקריאה 4 סגרה שהוא אושר רק בה.
+const AI_SCAN_STRONG_READ = 2;
+const AI_SCAN_SECOND_STRONG_READ = 3;
+const AI_SCAN_IDENTITY_READS = [0, 1, 2];
 // ===== v364: קריאה ששורדת נתק (פורט מתנובה v107) =====
 // "Load failed" באייפון = שום תשובה לא הגיעה לדפדפן, אבל השרת אולי כבר קורא
 // ומשלם. לכן כל קריאה בתשלום נושאת מפתח (scanKey). שרת v148 ומעלה ממשיך
@@ -3766,7 +3794,7 @@ async function logAction(type, title, details, meta) {
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'actionLog', id), {
       timestamp: Date.now(), type: type || 'system', title: title || 'פעולה', details: details || '',
       deviceName: actionDeviceLabel(), uid: (auth && auth.currentUser && auth.currentUser.uid) || '',
-      appVersion: 'v395_values_confirm_arithmetic', meta: cloneSafe(meta || {})
+      appVersion: 'v396_second_strong_read', meta: cloneSafe(meta || {})
     });
   } catch (e) { console.warn('action log failed', e); }
 }
@@ -3850,7 +3878,7 @@ async function exportFullBackup() {
       backupType: 'yotvata-firestore-full',
       backupVersion: 1,
       appId,
-      appVersion: 'v395_values_confirm_arithmetic',
+      appVersion: 'v396_second_strong_read',
       exportedAt: Date.now(),
       exportedAtIso: new Date().toISOString(),
       collections: {},
@@ -12741,7 +12769,8 @@ function priceAuditRowArithmeticHolds(values, credit = false) {
 // וסך היחידות המודפס נקרא (המתקשר בודק: לחשבונית ולזיכוי בדיקות נייר שונות). מחזירה
 // { proven, server, reasons } ובהוכחה גם { unit, gross, net, printedUnitsBalanced } כמו בשרת.
 // reasons אומר למה החשבון לא מכריע (להסבר בכרטיס): 'support' (אין fieldSupport — שרת ישן),
-// 'values' (כמות או מחיר לא תקינים), 'unit' / 'net' / 'gross' (השדה בלי קריאה תומכת),
+// 'values' (כמות או מחיר לא תקינים), 'unit' / 'net' / 'gross' (השדה בלי קריאה תומכת), 'unit_second' / 'net_second' /
+// 'gross_second' (v396: השדה בלי קריאה תומכת, שקריאה 4 של שירות 153 סגרה — ראה למטה),
 // 'arithmetic' (החשבון לא נסגר), 'paper' (הנייר לא מתאזן), 'deposit' (שורת פיקדון — הנייר אינו
 // מאשש את הכמות שלה). תמיכה היא קריאה אחרת (מספר קריאה);
 // סמן מחרוזת אינו קריאה. סמן השרת (v150: fieldSupport.quantity מכיל 'arithmetic') מתקבל כמו שהוא.
@@ -12762,9 +12791,16 @@ function priceAuditQuantityArithmetic(row, balanced, credit = false) {
   const qty = num(row.quantity), unit = num(row.unitPriceExVat);
   if (!Number.isInteger(qty) || qty <= 0 || !(unit > 0) || num(row.lineTotalExVat) == null) reasons.push('values');
   const supported = field => Array.isArray(support[field]) && support[field].some(Number.isInteger);
-  if (!supported('unitPriceExVat')) reasons.push('unit');
-  if (!supported('lineTotalExVat')) reasons.push('net');
-  if (row.grossLineTotalExVat != null && !supported('grossLineTotalExVat')) reasons.push('gross');
+  // v396 (הכלל הסופי של שירות 153): קריאה 4 לעולם אינה ב-fieldSupport — השירות מוציא שדה שסגר בה מ-issues ורושם אותו
+  // ב-secondStrongRead.closed בלבד, ולכן החשבון כאן (כמו בשירות) אינו נשען עליה, בלי שום בדיקה מיוחדת. כמות שנשארה פתוחה בשורה
+  // שבה קריאה 4 סגרה כסף לא נשאלה בכוונה, והיא נשארת לעובד. שדה כזה בלי קריאה תומכת — הסיבה אומרת שקריאה 4 סגרה אותו
+  // ('…_second'), כדי שהכרטיס לא יכתוב "לא מוסכם בין הקריאות" על שדה שהשירות כבר הוציא מ-issues.
+  const closedBySecond = proof.secondStrongRead && typeof proof.secondStrongRead === 'object' && proof.secondStrongRead.closed && typeof proof.secondStrongRead.closed === 'object'
+    ? proof.secondStrongRead.closed : {};
+  const lacking = (field, code) => reasons.push(closedBySecond[field] === 'second_strong_read' ? code + '_second' : code);
+  if (!supported('unitPriceExVat')) lacking('unitPriceExVat', 'unit');
+  if (!supported('lineTotalExVat')) lacking('lineTotalExVat', 'net');
+  if (row.grossLineTotalExVat != null && !supported('grossLineTotalExVat')) lacking('grossLineTotalExVat', 'gross');
   if (!reasons.includes('values') && !priceAuditRowArithmeticHolds(row, credit)) reasons.push('arithmetic');
   if (!balanced) reasons.push('paper');
   if (reasons.length) return { proven: false, server: false, reasons };
@@ -12780,6 +12816,13 @@ function priceAuditQuantityProvenByArithmetic(doc, row) {
   if (!doc || !row) return false;
   const check = yotvataPaperCheck(priceAuditSource(doc) || doc, priceAuditDocumentPageCount(doc));
   return priceAuditQuantityArithmetic(row, check.ok && Number.isInteger(check.units) && check.units > 0).proven;
+}
+// v396: השם של קריאה בכרטיסים: "קריאה N", ולקריאות המודל החזק — "(המודל החזק)" לקריאת ההכרעה ו"(המודל
+// החזק, פעם שנייה)" לקריאה הרביעית של שירות 153 (AI_SCAN_SECOND_STRONG_READ). עד v395 שתיהן נקראו "(המודל
+// החזק)", והעובד לא יכול היה לדעת שאותו מודל קרא פעמיים. תצוגה בלבד.
+function aiScanReadLabel(r) {
+  return 'קריאה ' + (r.read + 1) + (r.read === AI_SCAN_SECOND_STRONG_READ ? ' (המודל החזק, פעם שנייה)'
+    : r.strong === true || r.read >= AI_SCAN_STRONG_READ ? ' (המודל החזק)' : '');
 }
 // v367: הקריאות של השורה (readings של שרת v147+, ממוינות לפי מספר הקריאה). בלי readings — רשימה ריקה.
 function priceAuditRowReadings(row) {
@@ -12799,14 +12842,21 @@ function priceAuditRowDisputeHtml(documentIndex, rowIndex, issues) {
   // v367: אותה רשימה בשני ניסוחים — "הסכימו על X ועל Y" ו"מאשרת את X ואת Y".
   const listOf = conj => names.length <= 1 ? names.join('') : names.slice(0, -1).join(', ') + conj + names[names.length - 1];
   const list = listOf(' ועל ');
-  const label = r => 'קריאה ' + (r.read + 1) + (r.strong === true || r.read >= 2 ? ' (המודל החזק)' : '');
   const show = (f, v) => v == null ? 'לא נקרא' : typeof v === 'number' && Number.isFinite(v) ? (f === 'quantity' ? String(v) : f === 'unitPriceExVat' ? fmtUnitPrice(v, true) : fmtMoney(v)) : htmlEscape(String(v));
-  const perRead = f => readings.map(r => htmlEscape(label(r)) + ' – ' + show(f, r.values[f])).join(' · ');
+  const perRead = f => readings.map(r => htmlEscape(aiScanReadLabel(r)) + ' – ' + show(f, r.values[f])).join(' · ');
   const line = f => '<p class="mt-1" data-row-dispute-field="' + htmlEscape(f) + '">' + htmlEscape(PAPER_ROW_FIELD_NAMES[f]) + ': ' + perRead(f) + '</p>';
   const verification = priceAuditDocumentVerification(source.doc), verifier = verification && verification.verifier;
   const failed = priceAuditVerifierFailed(verification);
   const disagreed = !failed && !!verifier && verifier.attempted === true && verifier.outcome === 'disagreed';
+  // v396 (הכלל הסופי של שירות 153): השירות שאל את קריאה 4 על השורה הזאת (proof.secondStrongRead). הקריאה השלמה שלה לא
+  // הייתה זהה לזו של קריאת ההכרעה (identical: false) — היא לא אישרה אף שדה, גם כשבשורה הזאת ראתה אותו ערך, וזה מה שנאמר. הייתה
+  // זהה — השדות שנשאלה עליהם כבר נסגרו, ומה שנשאר בכרטיס לא נשאל בה. בלי קריאה 4 לשורה (שירות 152, או כשהיא לא רצה, נכשלה
+  // או לא נשאלה על השורה) — המשפטים של v367 כמו שהם.
+  const secondStrong = row.modelVerification && row.modelVerification.secondStrongRead;
+  const asked = !!secondStrong && typeof secondStrong === 'object' && typeof secondStrong.identical === 'boolean';
   const tail = failed ? ' הקריאה השלישית (המודל החזק) נכשלה, לכן נשארו שתי קריאות שלא הסכימו.'
+    : disagreed && asked && !secondStrong.identical ? ' גם הקריאה השלישית והקריאה הרביעית (המודל החזק, פעמיים) קראו את הנייר, אבל הקריאה הרביעית לא הייתה זהה לשלישית בכל התעודה, ולכן היא לא אישרה אף שדה.'
+    : disagreed && asked ? ' גם הקריאה השלישית והקריאה הרביעית (המודל החזק, פעמיים) קראו את הנייר והיו זהות, אבל הקריאה הרביעית לא נשאלה על ' + htmlEscape(list) + '.'
     : disagreed ? ' גם הקריאה השלישית (המודל החזק) קראה את הנייר, ועדיין אין שתי קריאות שמסכימות.' : '';
   let what;
   if (lone) what = '<p>רק קריאה אחת קראה את השורה הזאת' + (failed ? ' (הקריאה השלישית, המודל החזק, נכשלה)' : '') + ', ולכן אין קריאה נוספת שמאשרת את ' + htmlEscape(listOf(' ואת ')) + '.</p>';
@@ -12821,6 +12871,13 @@ function priceAuditRowDisputeHtml(documentIndex, rowIndex, issues) {
     deposit: 'שורת פיקדון לא נספרת בסך היחידות המודפס, ולכן הנייר לא מאשש את הכמות שלה',
     arithmetic: 'מחיר היחידה × הכמות לא יוצא סכום השורה ' + (lone ? 'בקריאה היחידה' : readings.some(r => priceAuditRowArithmeticHolds(r.values)) ? 'בקריאה שנבחרה' : 'באף אחת מהקריאות') };
   // v367: בקריאה יחידה אין "קריאות" שלא הסכימו — המשפט למעלה כבר הסביר שאין קריאה תומכת לשדות; נשארות רק סיבות של הנייר והחשבון.
+  // v396 (סבב בדיקה שלישי של שירות 153): שדה שרק קריאה 4 אישרה, בשורה שהשירות לא שאל אותה על הכמות שלה, אינו "לא מוסכם
+  // בין הקריאות" — קריאה 4 ראתה בו את הערך שנבחר. המשפט אומר זאת, פעם אחת לכל השדות האלה, במקום הראשון שבהם.
+  const secondOnly = { unit_second: 'מחיר היחידה', net_second: 'סכום השורה', gross_second: 'הסכום לפני הנחה' };
+  const secondNames = proof.reasons.filter(code => secondOnly[code]).map(code => secondOnly[code]);
+  if (secondNames.length) why[proof.reasons.find(code => secondOnly[code])] = (secondNames.length > 1
+    ? secondNames.slice(0, -1).join(', ') + ' ו' + secondNames[secondNames.length - 1] + ' אושרו' : secondNames[0] + ' אושר') +
+    ' רק בקריאה הרביעית (המודל החזק, פעם שנייה), שלא נשאלה על הכמות';
   const reasons = proof.reasons.filter(code => why[code] && !(lone && ['unit', 'net', 'gross'].includes(code))).map(code => why[code]);
   return '<div class="mt-2 text-sm text-slate-700" data-row-dispute>' + what +
     (reasons.length ? '<p class="mt-1">החשבון לא מכריע: ' + htmlEscape(reasons.join(' · ')) + '.</p>' : '') +
@@ -12928,7 +12985,8 @@ function priceAuditDocumentDisputeHtml(doc, paper) {
   const readings = priceAuditDocumentReadings(doc), lone = readings.length === 1;
   const moneyField = f => ['subtotalExVat', 'documentDiscountExVat', 'vatAmount', 'totalInclVat'].includes(f);
   const show = (f, v) => v == null ? 'לא נקרא' : typeof v === 'number' && Number.isFinite(v) ? (moneyField(f) ? fmtMoney(v) : String(v)) : htmlEscape(String(v));
-  const label = r => 'קריאה ' + (r.read + 1) + (r.strong === true || r.read >= 2 ? ' (המודל החזק)' : '');
+  // v396: אותו שם קריאה כמו בכרטיס השורה. קריאה 4 של שירות 153 אינה מצביעה על הסיכום ואינה מופיעה כאן.
+  const label = aiScanReadLabel;
   // v365: שרת v149 משווה את הנחת המסמך לפי ההשפעה על החשבון ולא לפי הספרות, לכן שתי קריאות
   // יכולות להדפיס אותו סכום ועדיין לחלוק אם הוא יורד מהסכום לפני מע״מ (readings[].discountSeparate).
   // בלי ההסבר העובד רואה "5.00 · 5.00" תחת "לא הסכימו". רק כשיש סכום וכשהשרת שלח את הדגל
@@ -13007,17 +13065,20 @@ function aiModelIdentityCandidates(row) {
 // The user's rule separates reading the price from choosing the catalog name.
 // Two independent reads prove the printed price; the catalog then selects the
 // closest name at exactly that price. The OCR row and its votes stay untouched.
+// v396: רק הקריאות שמכריעות זהות (AI_SCAN_IDENTITY_READS: 0, 1 וקריאת ההכרעה 2). קריאה 4 של שירות 153
+// (read 3) אינה נספרת כאן גם כשהיא ב-fieldSupport של המחיר: לפי התכנון היא לעולם אינה מצביעה על זהות
+// המוצר, וכאן המחיר שהוכח בוחר את המוצר. השרת ממילא אינו שולח אותה לשורה שהזהות שלה פתוחה.
 function aiModelPriceAgreement(row) {
   const proof = row && row.modelVerification, evidence = proof && proof.evidence;
   const unit = priceAuditNumber(row && row.unitPriceExVat);
-  if (!proof || proof.version !== 1 || ![0, 1, 2].includes(proof.selectedRead) || !(unit > 0)
+  if (!proof || proof.version !== 1 || !AI_SCAN_IDENTITY_READS.includes(proof.selectedRead) || !(unit > 0)
       || !evidence || (proof.issues || []).includes('unitPriceExVat')) return null;
   const boundFields = ['barcode', 'barcodeReadType', 'catalogHintId', 'catalogCandidateHintIds', 'description', 'sourcePage', 'lineNumber',
     'quantity', 'unitPriceExVat', 'grossLineTotalExVat', 'lineDiscountExVat', 'lineTotalExVat'];
   if (!boundFields.every(key => JSON.stringify(evidence[key] ?? null) === JSON.stringify(row[key] ?? null))) return null;
   const readings = Array.isArray(proof.readings) ? proof.readings : [];
   if (new Set(readings.map(r => r.read)).size !== readings.length) return null;
-  const matches = readings.filter(r => [0, 1, 2].includes(r.read) && r.values
+  const matches = readings.filter(r => AI_SCAN_IDENTITY_READS.includes(r.read) && r.values
     && r.values.sourcePage === row.sourcePage && priceAuditNumber(r.values.unitPriceExVat) === unit);
   if (!matches.some(r => r.read === proof.selectedRead)) return null;
   const support = proof.fieldSupport && proof.fieldSupport.unitPriceExVat || [];
@@ -13038,7 +13099,9 @@ function aiModelPriceResolution(row, hinted = aiModelIdentityCandidates(row)) {
   const agreement = aiModelPriceAgreement(row);
   if (!agreement || !(row.modelVerification.issues || []).includes('identity')) return null;
   const day = receiptPromoDay(row), hintedIds = new Set(hinted.map(c => String(c.product.id)));
-  const strong = agreement.readings.find(r => r.read === 2), candidates = [];
+  // v396: שובר השוויון "המודל החזק" הוא קריאת ההכרעה בלבד (AI_SCAN_STRONG_READ) — לעולם לא קריאה 4 של שירות
+  // 153, שאינה מצביעה על זהות (ואינה ב-agreement.readings ממילא).
+  const strong = agreement.readings.find(r => r.read === AI_SCAN_STRONG_READ), candidates = [];
   for (const product of products) {
     const base = priceAuditNumber(product.price);
     let basis = base === agreement.unitPrice ? 'catalog_base' : null;
@@ -14323,8 +14386,9 @@ function aiResolveInvoiceBarcode(row) {
     const evidence = proof && proof.evidence;
     const bound = evidence && ['barcode', 'barcodeReadType', 'catalogHintId', 'catalogCandidateHintIds', 'description', 'sourcePage', 'lineNumber']
       .every(key => JSON.stringify(evidence[key] ?? null) === JSON.stringify(row[key] ?? null));
-    const supported = proof && proof.version === 1 && [0, 1, 2].includes(proof.selectedRead)
-      && Array.isArray(proof.identitySupport) && proof.identitySupport.some(i => [0, 1, 2].includes(i) && i !== proof.selectedRead);
+    // v396: זהות מוסכמת רק בין הקריאות שמכריעות זהות (AI_SCAN_IDENTITY_READS) — קריאה 4 של שירות 153 לעולם אינה כאן.
+    const supported = proof && proof.version === 1 && AI_SCAN_IDENTITY_READS.includes(proof.selectedRead)
+      && Array.isArray(proof.identitySupport) && proof.identitySupport.some(i => AI_SCAN_IDENTITY_READS.includes(i) && i !== proof.selectedRead);
     const matches = identity && aiCatalogBarcodeMatches(identity.barcode, false);
     if (!bound || !supported || !identity || resolved !== identity.barcode || !aiIsValidRetailBarcode(resolved)
         || matches.length !== 1 || String(matches[0].product.id) !== identity.productId) return { error: 'זהות המוצר השתנתה מאז אימות הסריקות — אשר אותה לפי הנייר' };
@@ -16494,6 +16558,21 @@ function aiScanDiagnosticsHtml(ev) {
     if (aiScanResponse) {
       tokenLine('קריאת תעודות', aiScanResponse.usage);
       if (aiScanResponse.barcodeRetryAudit && aiScanResponse.barcodeRetryAudit.attempted) tokenLine('סיבוב ברקוד (' + (Number(aiScanResponse.barcodeRetryAudit.targetCount) || 0) + ' יעדים)', aiScanResponse.barcodeRetryAudit.usage);
+      // v396: הקריאה החזקה השנייה של שירות 153 — רק כאן, בנתוני האבחון: מה קרה בה (secondVerifier.outcome), כמה
+      // שדות נשאלו וכמה נסגרו, והטוקנים שלה (usage של התעודה הוא של הקריאה שנבחרה בלבד). כששדה נסגר בה העובד לא
+      // רואה שום דבר חדש; התיעוד המלא בשרת. 'disabled' / 'not_needed' (ושירות 152, בלי secondVerifier) — אין שורה.
+      // הכלל הסופי של השירות: כשהקריאה השלמה שלה לא הייתה זהה ('not_identical') — גם כמה הבדלים היו והמקום של הראשון.
+      (Array.isArray(aiScanResponse.scan && aiScanResponse.scan.documents) ? aiScanResponse.scan.documents : []).forEach(doc => {
+        const verification = priceAuditDocumentVerification(doc), second = verification && verification.secondVerifier;
+        if (!second || typeof second !== 'object' || !second.outcome || ['disabled', 'not_needed'].includes(second.outcome)) return;
+        const count = list => Array.isArray(list) ? list.length : 0, name = 'תעודה ' + (Number(doc.noteIndex) + 1);
+        const first = Array.isArray(second.differences) && second.differences[0] && typeof second.differences[0] === 'object' ? second.differences[0] : null;
+        const where = first && (Number.isInteger(first.rowIndex) ? 'שורה ' + (first.rowIndex + 1) + ' ' : '') + String(first.field || '').slice(0, 40);
+        lines.push('קריאה 4 (המודל החזק, פעם שנייה) · ' + name + ': ' + String(second.outcome) + (second.error ? ' (' + String(second.error).slice(0, 40) + ')' : '') +
+          ' · נסגרו ' + count(second.closed) + ' מתוך ' + count(second.fields) + ' שדות' +
+          (first ? ' · הבדלים: ' + (Number(second.differenceCount) || count(second.differences)) + ', הראשון: ' + where : ''));
+        tokenLine('קריאה 4 ב' + name, second.usage);
+      });
     }
     if (aiAnalyzeResult && aiAnalyzeResult.usage) tokenLine('המנתח', aiAnalyzeResult.usage);
     return '<details class="mt-3 bg-slate-50 border border-slate-200 rounded-xl"><summary class="p-2.5 text-[11px] font-black text-slate-500"><i class="fa-solid fa-microscope"></i> נתוני אבחון — צלם מסך כשמשהו נראה מוזר</summary><div class="px-3 pb-3 text-[10px] text-slate-600 leading-relaxed" style="font-family: monospace">' + lines.map(htmlEscape).join('<br>') + '</div></details>';
