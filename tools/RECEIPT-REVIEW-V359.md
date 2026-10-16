@@ -322,91 +322,89 @@ the document gate; only the one-tap approval changes.
 
 ## v396: the second strong read of service 153 ("קריאה 4")
 
-Service 153 adds step (3) of the owner's design: when the verifier (read 2) is
+Service 153 adds step (3) of the owner's design. When the verifier (read 2) is
 the selected read and a quantity or price/amount field of an ordinary invoice
-row still has no supporting read, and the two cheap reads disagreed on that
-field with each other (a field they both saw the same way stays with the
-worker, as in v395 — its review round; since the second review round both must
-have read the row, and a row whose quantity they read alike is not asked about
-at all), it reads the original photos once more with
-the strong model (Terra#2, read 3) and closes the field when that read sees the
-same value — only on a paper that closes against its printed summary and a row
-whose own arithmetic closes in agorot. A closed field leaves `issues`, gets 3 in
-`fieldSupport`, and the row turns `verified`; the record is server-side
+row still has no supporting read, and the two cheap reads both read that field
+on the same printed line and disagreed with each other and with the verifier,
+the service reads the original photos once more with the strong model
+(Terra#2, read 3). When it asks is unchanged by the owner's final rule: a field
+both cheap reads saw the same way, a row whose quantity they read alike, a lone
+cheap read, a row that is not one printed line, and (in a scan of several
+notes) a note without the same invoice number are never asked; neither is a
+paper that does not close against its printed summary, a row whose own
+arithmetic does not close in agorot, a typed anchor the printed summary
+contradicts, or a read with too little time left.
+
+**How it decides — the owner's final rule.** The service compares Terra#2's
+whole read with the verifier's whole read: the same notes in the same order,
+the same number of rows in the same order, on every row the same product,
+quantity, unit price, gross, discount and net, and the same summary fields the
+consensus compares, with the consensus's own normalisation. Only when they are
+identical does every asked field close (`closedBy: 'second_strong_read'`): it
+leaves `issues`, is recorded in `secondStrongRead.closed`, and the row turns
+`verified` when nothing else is open. Read 3 never enters `fieldSupport`. Any difference anywhere closes nothing
+(`secondVerifier.outcome: 'not_identical'`, the first differences in
+`secondVerifier.differences`). There is no per-row vote and no v150 arithmetic
+after Terra#2 any more. The record is server-side
 (`scan.verification.secondVerifier`, the `invoice_scan_audit` log line).
 
-- Nothing new for the worker: a closed field is an agreed field, so
-  `aiModelReviewIssues`, `priceAuditConsensusConfirmed` and the card already
-  treat it as settled. Only `aiScanDiagnosticsHtml` (collapsed) adds one line per
-  document — outcome, fields closed of fields asked, and Terra#2's tokens — and
-  none for `disabled` / `not_needed` or a service-152 answer.
+- Nothing new for the worker when a field closes: a closed field is an agreed
+  field, so `aiModelReviewIssues`, `priceAuditConsensusConfirmed` and the card
+  already treat it as settled. Only `aiScanDiagnosticsHtml` (collapsed) adds one
+  line per document: the outcome, fields closed of fields asked, Terra#2's
+  tokens, and for `not_identical` the number of differences and where the first
+  one is. There is no line for `disabled` / `not_needed` or a service-152 answer.
 - `aiScanReadLabel(r)` names the reads in both dispute cards: read 2 stays
-  "קריאה 3 (המודל החזק)", read 3 is "קריאה 4 (המודל החזק, פעם שנייה)".
-- `priceAuditRowDisputeHtml`: when the row carries a read-3 reading and the
-  verifier `disagreed`, the tail names both strong reads ("גם הקריאה השלישית
-  והקריאה הרביעית (המודל החזק, פעמיים) קראו את הנייר, …"). It ends with
-  "ועדיין אין שתי קריאות שמסכימות" only when no two readings share a value in
-  the listed fields; otherwise "ועדיין אף קריאה אחרת לא ראתה את מה שהפענוח
-  קרא", since Terra#2 may have read a cheap read's value. Without a read 3 the
-  v367 sentences are unchanged.
-- Read 3 proves no quantity it was not asked about (service 153's second
-  review round): `priceAuditQuantityArithmetic`, the app's own v367 arithmetic,
-  counts read 3 as support only in a row whose `secondStrongRead.fields`
-  includes `quantity`, as the service's own re-check does (it marks a proof it
-  completes with `arithmetic`). Before that round the service could close the
-  gross and net of a row whose open quantity both cheap reads read alike (two
-  same-price rows swapped by both strong reads), and this arithmetic, which
-  counted any read, accepted the verifier's quantity with no card — v395 too.
-  The service no longer asks anything in such a row; the app check also keeps
-  an answer of that earlier build with the worker.
+  "קריאה 3 (המודל החזק)", read 3 is "קריאה 4 (המודל החזק, פעם שנייה)". The
+  service adds read 3's reading to a row it asked about only for the same
+  printed line on the same paper.
+- `priceAuditRowDisputeHtml`: the tail follows the row's
+  `secondStrongRead.identical`. When it is `false`, the tail is "גם הקריאה
+  השלישית והקריאה הרביעית (המודל החזק, פעמיים) קראו את הנייר, אבל הקריאה
+  הרביעית לא הייתה זהה לשלישית בכל התעודה, ולכן היא לא אישרה אף שדה". This
+  holds also when read 4 saw the verifier's value in this row. When it is
+  `true`, the asked fields closed, so what the card still shows was not asked:
+  "… והיו זהות, אבל הקריאה הרביעית לא נשאלה על …". Without a read 3 on the row,
+  the v367 sentences are unchanged. (Before the final rule the tail counted
+  pairs of equal readings: "ועדיין אין שתי קריאות שמסכימות" / "ועדיין אף
+  קריאה אחרת לא ראתה את מה שהפענוח קרא". That was removed with the per-row
+  vote.)
+- Read 3 never proves a quantity. The service never puts read 3 in
+  `fieldSupport` and never proves a quantity by arithmetic after Terra#2. An
+  asked quantity closes there only by an identical whole read. So
+  `priceAuditQuantityArithmetic`, the app's own v367 arithmetic, is v395's
+  again (any integer read in `fieldSupport` supports), with no special case
+  for read 3. The same holds for app v395 with service 153. A quantity the
+  service left open in a row where read 3 closed money was not asked on
+  purpose, for example when one cheap read left it `null`. Counting read 3
+  there would accept the verifier's quantity with no card, including two
+  same-price rows swapped by both strong reads. Before the final rule the
+  service added 3 to `fieldSupport`, and the app counted it only on a row whose
+  quantity was asked, as a mirror of the service's v150 re-check, which the
+  rule removed. Both special cases are gone. A field with no supporting read
+  that `secondStrongRead.closed` lists gives `unit_second`, `net_second` or
+  `gross_second` instead of `unit`, `net` or `gross`. The card turns these into
+  one sentence: "… אושר/ו רק בקריאה הרביעית (המודל החזק, פעם שנייה), שלא
+  נשאלה על הכמות". Proofs, issues and approvals are otherwise unchanged.
 - Read 3 never votes on identity or becomes the selected read:
   `AI_SCAN_IDENTITY_READS` ([0, 1, 2]) replaces the literal lists in
   `aiModelPriceAgreement` and the `model_consensus` branch of
   `aiResolveInvoiceBarcode`, and the strong tie-break in
   `aiModelPriceResolution` is `AI_SCAN_STRONG_READ` (2). Behaviour unchanged.
-- Tests: `tools/second-strong-read.test.mjs` — the imitated service answer
+- Tests: `tools/second-strong-read.test.mjs` covers the imitated service answer
   (closed, a cheap read's value, a fourth value, failed, off, service 152) and
   the same through the real service code when `../yotvata-ai-scan` is v153
-  (the off/152 case runs against v152 too), which checks the imitation.
-  The second review round added the imitated earlier-build answer (a unit
-  price closed by read 3 in a row whose quantity both cheap reads read as 3:
-  the card stays) and, through the real service, the same-price swap with
-  split money and with a lone cheap read (three calls, rows A and B pending,
-  as with the switch off).
-- Service 153's third review round reads every read by the printed line (same
-  page, line number and product, that product on one row only), not by the
-  vote's alignment. The app logic is unchanged. Through the real service, these
-  cases give three calls and leave rows A and B pending, as with the switch off:
-  a cheap read that lists A after its neighbour; one that skipped A and read
-  another line twice; and one product on lines 7 and 8 (`not_matchable`). With a
-  cheap read that left A's and B's quantities `null`, read 4 closes only their
-  money, and the swapped quantities stay pending.
-- The card's "החשבון לא מכריע" line no longer calls a field "לא מוסכם בין
-  הקריאות" when read 4 confirmed it in a row whose quantity it was not asked
-  about. `priceAuditQuantityArithmetic` returns `unit_second`, `net_second` or
-  `gross_second` for such a field in place of `unit`, `net` or `gross`; it is
-  still not proof. The card turns these into one sentence: "… אושר/ו רק בקריאה
-  הרביעית (המודל החזק, פעם שנייה), שלא נשאלה על הכמות". Proofs, issues and
-  approvals are unchanged.
-- Service 153's fourth review round reads every read on the same paper. In a
-  scan of more than one note, a read's note counts only with the same invoice
-  number (without whitespace, not empty, on one note only), not by the
-  `noteIndex` the read reported about itself. The app logic is unchanged.
-  Through the real service, two one-page notes of one supplier with the same 8
-  products in the same order, a read that returned the notes under each
-  other's `noteIndex` leaves rows A and B of note 0 pending, as with the switch
-  off (`valid: false`). This covers both Terra#2 (four calls, `disagreed`) and a
-  cheap read (three calls, `not_needed`). Scans of one note are unchanged.
-- Service 153's fifth review round judges the row's quantity by its printed
-  line too. Until then its rule "nothing in a row whose quantity is open and
-  both cheap reads read alike" ran only when the vote left the quantity open,
-  and the vote decides that by its row alignment. A cheap read that listed line
-  8 before line 7 then "supported" Terra's swapped quantity on line 7 with its
-  reading of line 8, step 3 closed the row's money, and the app accepted A as
-  6 (printed 12) and B as 12 (printed 6) with no card (`valid: true`). Now the
-  service asks nothing in a row where, on that printed line, both cheap reads
-  read another quantity than Terra#1, or neither read Terra#1's (for example
-  one left it `null`), even when the vote supported it. The app logic is
-  unchanged. Through the real service, the reviewers' repro-qty-hidden and its
-  `null` variant make three calls (`not_needed`) and leave lines 7 and 8
-  pending, as with the switch off (`valid: false`).
+  (the off/152 case runs against v152 too), which checks the imitation. Through
+  the real service it also covers the review rounds' cases. These are the
+  same-price swap with split money or a lone cheap read, a cheap read in
+  another order, a skipped or doubled line, one product on two lines, two notes
+  returned under each other's `noteIndex`, and a quantity the vote "supported"
+  through another line. Each leaves rows A and B pending, as with the switch
+  off. The null-quantity case shows read 4 closing only the money while the
+  swapped quantities stay pending. The final rule adds the reviewers'
+  app-whole repro: Terra#2 reads the milky price as the verifier but another
+  row's quantity, the subtotal or the row count differently. Nothing closes,
+  the card shows read 4 at 16.03 with the "not identical" sentence, and the
+  receipt is not valid. The card test that relied on the per-field vote
+  (read 4 16.13 / 96.18 against 16.03 / 96.18 closing the money) now expects
+  nothing closed and the plain reasons.

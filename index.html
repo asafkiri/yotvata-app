@@ -695,24 +695,22 @@ const AI_SCAN_MIN_SERVICE_VERSION = 127;
 // מספרי הקריאות של השרת (readings[].read, fieldSupport, selectedRead): 0 ו-1 — שתי הקריאות הזולות; 2 —
 // קריאת ההכרעה במודל החזק ("קריאה 3"); 3 — שירות 153: קריאה שנייה במודל החזק ("קריאה 4").
 // התכנון של בעל העסק: (1) שתי הקריאות הזולות הסכימו — מתקבל; (2) לא הסכימו — קריאת הכרעה, ושדה שבו היא
-// מסכימה עם אחת הזולות מתקבל; (3) שדה שבו היא אינה מסכימה עם אף אחת — השרת קורא שוב במודל החזק, ואם
-// הקריאה השנייה רואה אותו ערך, השדה מתקבל בלי העובד; (4) אחרת העובד מאשר או מתקן כמו היום. "מתקבל" הוא
-// לפי שדה ושורה, לעולם לא לפי מסמך. השרת סוגר כך רק כמות ומחיר/סכום של שורת חשבונית רגילה (לא זהות, לא
-// סיכום, לא זיכוי ולא פיקדון), על נייר שנסגר מול הסיכום המודפס ובשורה שהחשבון שלה נסגר באגורות, ומוציא
-// את השדה מ-issues (fieldSupport מקבל 3, והשורה 'verified' כשלא נשאר בה דבר). לכן כאן שדה כזה הוא פשוט
-// שדה מוסכם — בלי כרטיס ובלי שום הודעה חדשה לעובד. התיעוד המלא בשרת (scan.verification.secondVerifier
-// ויומן invoice_scan_audit); כאן רק שורה בנתוני האבחון. הערכים תמיד מהקריאה שנבחרה: קריאה 4 רק מצביעה,
-// לעולם אינה נבחרת ולעולם אינה מצביעה על זהות המוצר — לכן כל מה שבוחר קריאה או מכריע זהות נשאר על
-// AI_SCAN_IDENTITY_READS, ושובר השוויון "המודל החזק" בזהות הוא קריאה 3 בלבד (AI_SCAN_STRONG_READ). שירות
-// 152 (וגם 153 עם SECOND_STRONG_READ=off) אינו שולח קריאה 3 — ואז הכול בדיוק כמו v395. סבב הבדיקה השני של
-// שירות 153: הוא שואל רק כששתי הזולות קראו את השורה ונחלקו על השדה, ולעולם לא בשורה ששתיהן ראו בה את הכמות
-// אותו דבר; והחשבון של הכמות כאן (priceAuditQuantityArithmetic) סופר את קריאה 4 רק בשורה שנשאלה על הכמות. סבב הבדיקה
-// השלישי של השירות: כל קריאה נמדדת לפי השורה המודפסת (עמוד, מספר שורה ומוצר) ולא לפי היישור של ההצבעה — אין כאן
-// שינוי בלוגיקה; ובכרטיס, שדה שרק קריאה 4 אישרה בשורה שלא נשאלה על הכמות נקרא כך ולא "לא מוסכם בין הקריאות". סבב
-// הבדיקה הרביעי של השירות: בסריקה של כמה תעודות — רק באותו נייר (אותו מספר תעודה), לא לפי ה-noteIndex שהקריאה דיווחה;
-// גם כאן אין שינוי בלוגיקה. סבב הבדיקה החמישי של השירות: גם הכמות של השורה לפי השורה המודפסת — שורה ששתי הזולות ראו בה
-// כמות אחרת מזו של Terra#1, או שאף אחת מהן לא ראתה בה את הכמות שלה, אינה נשאלת גם כשההצבעה "תמכה" בכמות דרך שורה
-// שכנה; אין שינוי בלוגיקה כאן.
+// מסכימה עם אחת הזולות מתקבל; (3) שדה שבו היא אינה מסכימה עם אף אחת — השרת קורא שוב את כל התעודה במודל החזק;
+// (4) אחרת העובד מאשר או מתקן כמו היום. הכלל הסופי של בעל העסק לשלב (3): השרת משווה את הקריאה השלמה השנייה
+// לקריאה השלמה של קריאת ההכרעה — אותן תעודות, אותן שורות באותו סדר, ובכל שורה אותו מוצר, כמות, מחיר וסכומים, ואותו
+// סיכום. רק כשהן זהות לגמרי, השדות שנשאל עליהם נסגרים בלי העובד; הבדל אחד בכל מקום — שום דבר אינו נסגר, והכרטיס
+// נשאר כמו היום. השרת סוגר כך רק כמות ומחיר/סכום של שורת חשבונית רגילה (לא זהות, לא סיכום, לא זיכוי, לא פיקדון
+// ולא החזרה), על נייר שנסגר מול הסיכום המודפס ובשורה שהחשבון שלה נסגר באגורות, ומוציא את השדה מ-issues
+// (secondStrongRead.closed, והשורה 'verified' כשלא נשאר בה דבר; fieldSupport אינו מקבל את קריאה 3, ולכן שום חשבון — גם של
+// v395 — אינו נשען עליה). לכן כאן שדה כזה הוא פשוט שדה מוסכם — בלי כרטיס ובלי
+// שום הודעה חדשה לעובד. התיעוד המלא בשרת (scan.verification.secondVerifier ויומן invoice_scan_audit); כאן רק שורה
+// בנתוני האבחון. הערכים תמיד מהקריאה שנבחרה: קריאה 4 לעולם אינה נבחרת ולעולם אינה מכריעה את זהות המוצר — לכן כל
+// מה שבוחר קריאה או מכריע זהות נשאר על AI_SCAN_IDENTITY_READS, ושובר השוויון "המודל החזק" בזהות הוא קריאה 3 בלבד
+// (AI_SCAN_STRONG_READ). שירות 152 (וגם 153 עם SECOND_STRONG_READ=off) אינו שולח קריאה 3 — ואז הכול בדיוק כמו v395.
+// מתי השרת שואל את קריאה 4 — רק כששתי הזולות קראו את השורה ונחלקו על השדה, לפי השורה המודפסת (עמוד, מספר שורה ומוצר,
+// ובכמה תעודות — אותו מספר תעודה), ולעולם לא בשורה ששתיהן ראו בה את הכמות אותו דבר. כאן אין בזה לוגיקה. מה שכן כאן:
+// הכרטיס אומר מה קרה בקריאה 4 (לא זהה — לא אישרה דבר; זהה — השדה שבכרטיס לא נשאל בה), ושורת "החשבון לא מכריע" אומרת
+// על כסף שקריאה 4 סגרה שהוא אושר רק בה.
 const AI_SCAN_STRONG_READ = 2;
 const AI_SCAN_SECOND_STRONG_READ = 3;
 const AI_SCAN_IDENTITY_READS = [0, 1, 2];
@@ -12772,7 +12770,7 @@ function priceAuditRowArithmeticHolds(values, credit = false) {
 // { proven, server, reasons } ובהוכחה גם { unit, gross, net, printedUnitsBalanced } כמו בשרת.
 // reasons אומר למה החשבון לא מכריע (להסבר בכרטיס): 'support' (אין fieldSupport — שרת ישן),
 // 'values' (כמות או מחיר לא תקינים), 'unit' / 'net' / 'gross' (השדה בלי קריאה תומכת), 'unit_second' / 'net_second' /
-// 'gross_second' (v396: השדה אושר רק בקריאה 4, שהשירות לא שאל על הכמות — ולכן היא אינה נספרת כאן),
+// 'gross_second' (v396: השדה בלי קריאה תומכת, שקריאה 4 של שירות 153 סגרה — ראה למטה),
 // 'arithmetic' (החשבון לא נסגר), 'paper' (הנייר לא מתאזן), 'deposit' (שורת פיקדון — הנייר אינו
 // מאשש את הכמות שלה). תמיכה היא קריאה אחרת (מספר קריאה);
 // סמן מחרוזת אינו קריאה. סמן השרת (v150: fieldSupport.quantity מכיל 'arithmetic') מתקבל כמו שהוא.
@@ -12792,16 +12790,14 @@ function priceAuditQuantityArithmetic(row, balanced, credit = false) {
   const reasons = [];
   const qty = num(row.quantity), unit = num(row.unitPriceExVat);
   if (!Number.isInteger(qty) || qty <= 0 || !(unit > 0) || num(row.lineTotalExVat) == null) reasons.push('values');
-  // v396 (שירות 153, סבב בדיקה שני): קריאה 4 (AI_SCAN_SECOND_STRONG_READ) נספרת כאן רק בשורה שהשירות שאל אותה על
-  // הכמות (secondStrongRead.fields) — כמו הבדיקה החוזרת של השירות, שמסמנת 'arithmetic' בעצמה. בשורה שהכמות שלה
-  // פתוחה ושתי הקריאות הזולות ראו אותה אותו דבר, הקול שלה על המחיר או הסכום אינו מוכיח את הכמות של קריאת ההכרעה
-  // שהן סתרו (העובד מחליט, כמו ב-v395). שירות 153 כבר אינו שואל בשורה כזאת דבר; כך גם תשובה של הבנייה הקודמת שלו.
-  const second = proof.secondStrongRead;
-  const secondCounts = !!second && Array.isArray(second.fields) && second.fields.includes('quantity');
-  const supported = field => Array.isArray(support[field]) && support[field].some(read => Number.isInteger(read) && (read !== AI_SCAN_SECOND_STRONG_READ || secondCounts));
-  // v396 (סבב בדיקה שלישי): שדה שקריאה 4 אישרה אבל אינה נספרת כאן — הסיבה אומרת זאת ('…_second'), כדי שהכרטיס לא
-  // יכתוב "לא מוסכם בין הקריאות" על שדה שקריאה 4 ראתה בו את הערך שנבחר (השירות כבר הוציא אותו מ-issues).
-  const lacking = (field, code) => reasons.push(Array.isArray(support[field]) && support[field].includes(AI_SCAN_SECOND_STRONG_READ) ? code + '_second' : code);
+  const supported = field => Array.isArray(support[field]) && support[field].some(Number.isInteger);
+  // v396 (הכלל הסופי של שירות 153): קריאה 4 לעולם אינה ב-fieldSupport — השירות מוציא שדה שסגר בה מ-issues ורושם אותו
+  // ב-secondStrongRead.closed בלבד, ולכן החשבון כאן (כמו בשירות) אינו נשען עליה, בלי שום בדיקה מיוחדת. כמות שנשארה פתוחה בשורה
+  // שבה קריאה 4 סגרה כסף לא נשאלה בכוונה, והיא נשארת לעובד. שדה כזה בלי קריאה תומכת — הסיבה אומרת שקריאה 4 סגרה אותו
+  // ('…_second'), כדי שהכרטיס לא יכתוב "לא מוסכם בין הקריאות" על שדה שהשירות כבר הוציא מ-issues.
+  const closedBySecond = proof.secondStrongRead && typeof proof.secondStrongRead === 'object' && proof.secondStrongRead.closed && typeof proof.secondStrongRead.closed === 'object'
+    ? proof.secondStrongRead.closed : {};
+  const lacking = (field, code) => reasons.push(closedBySecond[field] === 'second_strong_read' ? code + '_second' : code);
   if (!supported('unitPriceExVat')) lacking('unitPriceExVat', 'unit');
   if (!supported('lineTotalExVat')) lacking('lineTotalExVat', 'net');
   if (row.grossLineTotalExVat != null && !supported('grossLineTotalExVat')) lacking('grossLineTotalExVat', 'gross');
@@ -12852,18 +12848,15 @@ function priceAuditRowDisputeHtml(documentIndex, rowIndex, issues) {
   const verification = priceAuditDocumentVerification(source.doc), verifier = verification && verification.verifier;
   const failed = priceAuditVerifierFailed(verification);
   const disagreed = !failed && !!verifier && verifier.attempted === true && verifier.outcome === 'disagreed';
-  // v396: שירות 153 — המודל החזק קרא את השורה פעם שנייה (קריאה 4 ב-readings) ועדיין לא ראה את אותו ערך (אחרת
-  // השדה היה נסגר ולא היה כרטיס). "אין שתי קריאות שמסכימות" נאמר רק כשבאמת אין שתי קריאות עם אותו ערך באף
-  // אחד מהשדות; כשקריאה 4 ראתה ערך של קריאה אחרת, שתיים כן מסכימות — אבל לא על מה שהפענוח קרא, וזה מה
-  // שנאמר. בלי קריאה 4 (שירות 152, או כשהיא לא רצה או נכשלה) — המשפטים של v367 כמו שהם.
-  const secondStrong = readings.some(r => r.read === AI_SCAN_SECOND_STRONG_READ);
-  const somePair = fields.some(f => {
-    const seen = readings.map(r => r.values[f]).filter(v => v != null).map(v => JSON.stringify(v));
-    return new Set(seen).size < seen.length;
-  });
+  // v396 (הכלל הסופי של שירות 153): השירות שאל את קריאה 4 על השורה הזאת (proof.secondStrongRead). הקריאה השלמה שלה לא
+  // הייתה זהה לזו של קריאת ההכרעה (identical: false) — היא לא אישרה אף שדה, גם כשבשורה הזאת ראתה אותו ערך, וזה מה שנאמר. הייתה
+  // זהה — השדות שנשאלה עליהם כבר נסגרו, ומה שנשאר בכרטיס לא נשאל בה. בלי קריאה 4 לשורה (שירות 152, או כשהיא לא רצה, נכשלה
+  // או לא נשאלה על השורה) — המשפטים של v367 כמו שהם.
+  const secondStrong = row.modelVerification && row.modelVerification.secondStrongRead;
+  const asked = !!secondStrong && typeof secondStrong === 'object' && typeof secondStrong.identical === 'boolean';
   const tail = failed ? ' הקריאה השלישית (המודל החזק) נכשלה, לכן נשארו שתי קריאות שלא הסכימו.'
-    : disagreed && secondStrong ? ' גם הקריאה השלישית והקריאה הרביעית (המודל החזק, פעמיים) קראו את הנייר, ' +
-      (somePair ? 'ועדיין אף קריאה אחרת לא ראתה את מה שהפענוח קרא.' : 'ועדיין אין שתי קריאות שמסכימות.')
+    : disagreed && asked && !secondStrong.identical ? ' גם הקריאה השלישית והקריאה הרביעית (המודל החזק, פעמיים) קראו את הנייר, אבל הקריאה הרביעית לא הייתה זהה לשלישית בכל התעודה, ולכן היא לא אישרה אף שדה.'
+    : disagreed && asked ? ' גם הקריאה השלישית והקריאה הרביעית (המודל החזק, פעמיים) קראו את הנייר והיו זהות, אבל הקריאה הרביעית לא נשאלה על ' + htmlEscape(list) + '.'
     : disagreed ? ' גם הקריאה השלישית (המודל החזק) קראה את הנייר, ועדיין אין שתי קריאות שמסכימות.' : '';
   let what;
   if (lone) what = '<p>רק קריאה אחת קראה את השורה הזאת' + (failed ? ' (הקריאה השלישית, המודל החזק, נכשלה)' : '') + ', ולכן אין קריאה נוספת שמאשרת את ' + htmlEscape(listOf(' ואת ')) + '.</p>';
@@ -16568,12 +16561,16 @@ function aiScanDiagnosticsHtml(ev) {
       // v396: הקריאה החזקה השנייה של שירות 153 — רק כאן, בנתוני האבחון: מה קרה בה (secondVerifier.outcome), כמה
       // שדות נשאלו וכמה נסגרו, והטוקנים שלה (usage של התעודה הוא של הקריאה שנבחרה בלבד). כששדה נסגר בה העובד לא
       // רואה שום דבר חדש; התיעוד המלא בשרת. 'disabled' / 'not_needed' (ושירות 152, בלי secondVerifier) — אין שורה.
+      // הכלל הסופי של השירות: כשהקריאה השלמה שלה לא הייתה זהה ('not_identical') — גם כמה הבדלים היו והמקום של הראשון.
       (Array.isArray(aiScanResponse.scan && aiScanResponse.scan.documents) ? aiScanResponse.scan.documents : []).forEach(doc => {
         const verification = priceAuditDocumentVerification(doc), second = verification && verification.secondVerifier;
         if (!second || typeof second !== 'object' || !second.outcome || ['disabled', 'not_needed'].includes(second.outcome)) return;
         const count = list => Array.isArray(list) ? list.length : 0, name = 'תעודה ' + (Number(doc.noteIndex) + 1);
+        const first = Array.isArray(second.differences) && second.differences[0] && typeof second.differences[0] === 'object' ? second.differences[0] : null;
+        const where = first && (Number.isInteger(first.rowIndex) ? 'שורה ' + (first.rowIndex + 1) + ' ' : '') + String(first.field || '').slice(0, 40);
         lines.push('קריאה 4 (המודל החזק, פעם שנייה) · ' + name + ': ' + String(second.outcome) + (second.error ? ' (' + String(second.error).slice(0, 40) + ')' : '') +
-          ' · נסגרו ' + count(second.closed) + ' מתוך ' + count(second.fields) + ' שדות');
+          ' · נסגרו ' + count(second.closed) + ' מתוך ' + count(second.fields) + ' שדות' +
+          (first ? ' · הבדלים: ' + (Number(second.differenceCount) || count(second.differences)) + ', הראשון: ' + where : ''));
         tokenLine('קריאה 4 ב' + name, second.usage);
       });
     }

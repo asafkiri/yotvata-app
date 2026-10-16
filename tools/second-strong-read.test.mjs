@@ -1,10 +1,13 @@
 // v396: the second strong read of the companion service v153 (Terra#2, "קריאה 4") in the app.
 // The owner's design: (1) the cheap reads agree — accepted; (2) they disagree — the strong read (Terra, read 2,
 // "קריאה 3"), and a field where it agrees with a cheap read is accepted; (3) a field where it agrees with neither
-// — the service reads once more with the strong model (Terra#2, read 3), and when it sees the same value the
-// field is accepted with no worker action; (4) otherwise the worker approves or corrects as today. The service
-// closes such a field by taking it out of `issues` (fieldSupport gets 3, the row turns 'verified') and records
-// it in scan.verification.secondVerifier and its audit log; the app shows the worker nothing new for it.
+// — the service reads the whole paper once more with the strong model (Terra#2, read 3); (4) otherwise the worker
+// approves or corrects as today. The owner's final rule for step (3): the service compares Terra#2's WHOLE read with
+// the verifier's whole read (the same notes, the same rows in the same order, on every row the same product,
+// quantity and money, the same summary). Only when they are identical are the asked fields closed with no worker
+// action; any difference anywhere closes nothing ('not_identical'), and the card stays as today. The service closes
+// such a field by taking it out of `issues` (the row turns 'verified'; read 3 never enters fieldSupport) and records it in
+// secondStrongRead.closed, scan.verification.secondVerifier and its audit log; the app shows the worker nothing new for it.
 //
 // The paper is invoice 9073807997 of quantity-arithmetic-fixture.mjs (3 pages, 22 rows, ₪1,717.49, 285 units).
 // The unit price of row 6 ("מארז 8 מילקי בטעם שוקולד", 6 × 16.03 = 96.18) is read three ways: 16.13 by cheap
@@ -36,7 +39,8 @@ const readDoc = unit => { const rows = readRows('selected'); rows[MILKY].unitPri
 
 // The service answer (imitated; the contract tests below compare it with the real one). `server`: 152 — no
 // second strong read at all (no secondVerifier, no read 3); 153 — with it. `fourth` (153 only): Terra#2's milky
-// unit price (16.03 closes the field; anything else leaves it to the worker), 'failed' (Terra#2 timed out —
+// unit price, every other value as the verifier read it (16.03: the whole read is identical and the field closes;
+// anything else: not identical, the worker decides), 'failed' (Terra#2 timed out —
 // nothing changes), 'off' (SECOND_STRONG_READ=off — outcome 'disabled', three reads), or the outcomes where the
 // service made no fourth call: 'skipped_deadline' (too little time left) and 'not_provable' (C1 failed).
 function splitInvoice({ server = 153, fourth = PRINTED } = {}) {
@@ -52,18 +56,20 @@ function splitInvoice({ server = 153, fourth = PRINTED } = {}) {
     return { ...row, barcodeObserved: row.barcode, barcodeMatchMethod: 'model_consensus', barcodeResolvedProductId: PRODUCTS[i].id, barcodeRetryConflict: false,
       modelVerification: { version: 1, status: issues.length ? 'needs_review' : 'verified', selectedRead: 2, strongSelected: true, issues, identity,
         identitySupport: both, candidates: [identity],
-        fieldSupport: { quantity: both, unitPriceExVat: milky ? (closed ? [3] : []) : both, grossLineTotalExVat: both, lineDiscountExVat: both, lineTotalExVat: both },
+        // the owner's final rule: read 3 never enters fieldSupport — a closed field leaves issues and is in secondStrongRead.closed
+        fieldSupport: { quantity: both, unitPriceExVat: milky ? [] : both, grossLineTotalExVat: both, lineDiscountExVat: both, lineTotalExVat: both },
         readings, evidence: evidence(row),
-        ...(milky && read3 ? { secondStrongRead: { version: 1, read: 3, fields: ['unitPriceExVat'], closed: closed ? { unitPriceExVat: 'second_strong_read' } : {} } } : {}) } };
+        ...(milky && read3 ? { secondStrongRead: { version: 1, read: 3, fields: ['unitPriceExVat'], identical: closed, closed: closed ? { unitPriceExVat: 'second_strong_read' } : {} } } : {}) } };
   });
   const summary = { pageCount: 3, subtotalExVat: SUBTOTAL, printedUnits: UNITS, printedLines: 22, documentDiscountExVat: null, vatAmount: r2(SUBTOTAL * 0.18), totalInclVat: r2(SUBTOTAL * 1.18) };
   const doc = { ...docs[2], rows, modelVerification: { version: 1, issues: [], values: { pageCount: 3, subtotalExVat: SUBTOTAL, printedUnits: UNITS, documentDiscountExVat: null },
     readings: [2, 0, 1].map(read => ({ read, values: summary, discountSeparate: false })),
     support: Object.fromEntries(['pageCount', 'subtotalExVat', 'printedUnits', 'documentDiscountExVat', 'rowCount'].map(f => [f, both])) } };
-  // Service 153, third review round: a field Terra#2 read and did not close says why (here 'disagrees': another value).
+  // Service 153: a field Terra#2 read and did not close says why ('not_identical': its whole read differs — here in that price).
   const entry = { noteIndex: 0, rowIndex: MILKY, sourcePage: 1, lineNumber: MILKY + 1, field: 'unitPriceExVat', closedBy: closed ? 'second_strong_read' : null,
     values: [{ read: 2, value: PRINTED }, { read: 0, value: CHEAP[0] }, { read: 1, value: CHEAP[1] }, ...(read3 ? [{ read: 3, value: fourth }] : [])],
-    ...(read3 && !closed ? { reason: 'disagrees' } : {}) };
+    ...(read3 && !closed ? { reason: 'not_identical' } : {}) };
+  const differences = closed ? [] : [{ noteIndex: 0, rowIndex: MILKY, field: 'unitPriceExVat', values: [{ read: 2, value: PRINTED }, { read: 3, value: fourth }] }];
   const secondVerifier = server < 153 ? null
     : fourth === 'off' ? { attempted: false, outcome: 'disabled', read: 3, model: null, requestId: null, error: null, usage: null, fields: [], closed: [] }
     : fourth === 'not_provable' ? { attempted: false, outcome: 'not_provable', read: 3, model: null, requestId: null, error: null, usage: null, fields: [], closed: [] }
@@ -71,8 +77,9 @@ function splitInvoice({ server = 153, fourth = PRINTED } = {}) {
       remainingMs: 100_000, fields: [entry], closed: [] }
     : fourth === 'failed' ? { attempted: true, outcome: 'failed', read: 3, model: 'gpt-5.6-terra', requestId: null, error: 'timeout', usage: null,
       remainingMs: 200_000, timeoutMs: 180_000, fields: [entry], closed: [] }
-    : { attempted: true, outcome: closed ? 'closed' : 'disagreed', read: 3, model: 'gpt-5.6-terra', requestId: 'resp-second', error: null,
-      usage: { input_tokens: 41_000, output_tokens: 9_000 }, remainingMs: 200_000, timeoutMs: 180_000, fields: [entry], closed: closed ? [entry] : [] };
+    : { attempted: true, outcome: closed ? 'closed' : 'not_identical', read: 3, model: 'gpt-5.6-terra', requestId: 'resp-second', error: null,
+      usage: { input_tokens: 41_000, output_tokens: 9_000 }, remainingMs: 200_000, timeoutMs: 180_000, fields: [entry], closed: closed ? [entry] : [],
+      differences, differenceCount: differences.length };
   const verification = { version: 1, status: closed ? 'verified' : 'needs_review', primaryReads: 2, escalationAttempted: true, selectedRead: 2,
     readCount: read3 || fourth === 'failed' ? 4 : 3,
     verifier: { attempted: true, model: 'gpt-5.6-terra', requestId: 'resp-verifier', outcome: closed ? 'agreed' : 'disagreed', error: null, selected: true },
@@ -146,8 +153,9 @@ async function assertFourReadCard(c, fourth, tail) {
   assert.deepEqual(pending(c), [], 'the worker approved it, as today');
   assert.equal(c.run(R + '.unitPriceExVat'), PRINTED, 'the OCR value is kept');
 }
-const SOME_PAIR = 'גם הקריאה השלישית והקריאה הרביעית \\(המודל החזק, פעמיים\\) קראו את הנייר, ועדיין אף קריאה אחרת לא ראתה את מה שהפענוח קרא\\.';
-const NO_PAIR = 'גם הקריאה השלישית והקריאה הרביעית \\(המודל החזק, פעמיים\\) קראו את הנייר, ועדיין אין שתי קריאות שמסכימות\\.';
+// The owner's final rule: Terra#2's whole read differs from the verifier's somewhere, so it confirmed nothing — also when it
+// read the disputed field like the verifier. The card says so (until the rule: "no two agree" / "no other read saw it").
+const NOT_IDENTICAL = 'גם הקריאה השלישית והקריאה הרביעית \\(המודל החזק, פעמיים\\) קראו את הנייר, אבל הקריאה הרביעית לא הייתה זהה לשלישית בכל התעודה, ולכן היא לא אישרה אף שדה\\.';
 
 // What the worker saw before v396 (service 152), byte for byte: three reads, the verifier named once, the v367 tail.
 const V152_CARD = '<p data-row-dispute-field="unitPriceExVat">הקריאות לא הסכימו על מחיר היחידה: קריאה 1 – 16.13 · קריאה 2 – 16.30 · קריאה 3 (המודל החזק) – 16.03.' +
@@ -185,16 +193,16 @@ test('a field Terra#2 closed (second_strong_read) is settled: no card, the value
   assert.equal(reloaded.requests.length, 0, 'no new read');
 });
 
-test('Terra#2 read a cheap read\'s value: the card lists all four reads, names the fourth as the strong model\'s second read, and the worker approves as today', async () => {
+test('Terra#2 read a cheap read\'s value: the card lists all four reads, names the fourth as the strong model\'s second read, says it was not identical, and the worker approves as today', async () => {
   const { c } = await scanInApp(splitInvoice({ fourth: CHEAP[0] }));
-  await assertFourReadCard(c, CHEAP[0], SOME_PAIR);
-  assert.doesNotMatch(auditHtml(c), /אין שתי קריאות שמסכימות/);
-  assert.match(diagnostics(c), /קריאה 4 \(המודל החזק, פעם שנייה\) · תעודה 1: disagreed · נסגרו 0 מתוך 1 שדות/);
+  await assertFourReadCard(c, CHEAP[0], NOT_IDENTICAL);
+  assert.doesNotMatch(auditHtml(c), /אין שתי קריאות שמסכימות|אף קריאה אחרת לא ראתה/);
+  assert.match(diagnostics(c), /קריאה 4 \(המודל החזק, פעם שנייה\) · תעודה 1: not_identical · נסגרו 0 מתוך 1 שדות · הבדלים: 1, הראשון: שורה 6 unitPriceExVat/);
 });
 
-test('Terra#2 read a fourth value: four reads, no two agree — the familiar sentence, naming both strong reads', async () => {
+test('Terra#2 read a fourth value: four reads, and the same sentence — the fourth read was not identical, so it confirmed nothing', async () => {
   const { c } = await scanInApp(splitInvoice({ fourth: 16.33 }));
-  await assertFourReadCard(c, 16.33, NO_PAIR);
+  await assertFourReadCard(c, 16.33, NOT_IDENTICAL);
 });
 
 test('a service 152 answer (no second strong read) shows exactly the v395 card: three reads, the verifier named once, no diagnostics line', async () => {
@@ -307,8 +315,9 @@ test('against the real service v153: Terra#2 read another value — the worker\'
   const { output, calls } = await service([...SPLIT(), answer(readDoc(CHEAP[0]))]);
   assert.equal(calls.length, 4);
   assertImitation(output, splitInvoice({ fourth: CHEAP[0] }));
+  assert.deepEqual(output.scan.verification.secondVerifier.differences, splitInvoice({ fourth: CHEAP[0] }).scan.verification.secondVerifier.differences);
   const { c } = await scanInApp(structuredClone(output));
-  await assertFourReadCard(c, CHEAP[0], SOME_PAIR);
+  await assertFourReadCard(c, CHEAP[0], NOT_IDENTICAL);
 });
 
 test('against the real service with SECOND_STRONG_READ=off: three reads, and the app shows the worker exactly what it shows for a service 152 answer', { skip: missing }, async () => {
@@ -328,35 +337,35 @@ test('against the real service with SECOND_STRONG_READ=off: three reads, and the
   assert.deepEqual(audit(old), audit(c));
 });
 
-// ---- service 153, second review round: read 3 never proves a quantity both cheap reads read alike ----
-// Before the round, service 153 asked Terra#2 about the money of a row whose quantity was open and that both cheap
-// reads had read alike (they agreed against the verifier there; only the money split). Read 3 then entered the
-// row's fieldSupport, and the app's own v367 arithmetic, which counted any read, proved the verifier's quantity
-// with no card (v395 too). The service now asks nothing in such a row; the app counts read 3 in that arithmetic
-// only on a row whose quantity Terra#2 was asked about (proof.secondStrongRead.fields), as the service's own
-// re-check does, so an answer of that earlier build still gives the worker the card.
-test('read 3 proves no quantity it was not asked about: the unit price Terra#2 closed in a row whose quantity both cheap reads read as 3 leaves the verifier\'s 6 to the worker', async () => {
+// ---- read 3 never proves a quantity ----
+// Before service 153's second review round, Terra#2 could close the money of a row whose quantity was open and that both cheap
+// reads had read alike. Read 3 then entered the row's fieldSupport, and the app's own v367 arithmetic, which counts any read,
+// proved the verifier's quantity with no card (v395 too). Under the owner's final rule the service never puts read 3 in
+// fieldSupport: a field it closes leaves `issues` and is recorded in secondStrongRead.closed only. So no arithmetic — the
+// service's, this app's or v395's — can lean on read 3, and the app needs no special case for it. (Until the final rule the
+// service did add 3, and this app counted it only on a row whose quantity Terra#2 was asked about; this test changed with it.)
+test('read 3 proves no quantity: a unit price Terra#2 closed in a row whose quantity stayed open leaves the verifier\'s 6 to the worker, and the card names read 4', async () => {
   const answer = splitInvoice({ fourth: PRINTED });
   const row = answer.scan.documents[0].rows[MILKY], proof = row.modelVerification;
   for (const r of proof.readings) if (r.read === 0 || r.read === 1) r.values.quantity = 3;
   Object.assign(proof, { issues: ['quantity'], status: 'needs_review', fieldSupport: { ...proof.fieldSupport, quantity: [] } });
-  answer.scan.verification.status = 'needs_review';
-  assert.deepEqual(proof.fieldSupport.unitPriceExVat, [3]); assert.deepEqual(proof.secondStrongRead.fields, ['unitPriceExVat']);
+  answer.scan.verification.status = 'needs_review'; answer.scan.verification.verifier.outcome = 'disagreed'; // as the service says with a field left
+  assert.deepEqual(proof.fieldSupport.unitPriceExVat, []); assert.deepEqual(proof.secondStrongRead.closed, { unitPriceExVat: 'second_strong_read' });
   const { c } = await scanInApp(structuredClone(answer));
   assert.equal(c.run(R + '.quantity'), 6);
   assert.equal(c.run('priceAuditQuantityArithmetic(' + R + ', true).proven'), false);
-  // Service 153, third review round: the reason names read 4 — the unit price is not "not agreed between the reads"
+  // the reason names read 4 — the unit price is not "not agreed between the reads"
   assert.deepEqual(json(c, 'priceAuditQuantityArithmetic(' + R + ', true).reasons'), ['unit_second']);
   assert.match(auditHtml(c), /<p class="mt-1">החשבון לא מכריע: מחיר היחידה אושר רק בקריאה הרביעית \(המודל החזק, פעם שנייה\), שלא נשאלה על הכמות\.<\/p>/);
+  assert.match(auditHtml(c), /והיו זהות, אבל הקריאה הרביעית לא נשאלה על הכמות\./);
   assert.deepEqual(json(c, 'aiModelReviewIssues(' + R + ')'), ['quantity']);
   assert.equal(c.run('priceAuditConsensusConfirmed(' + R + ')'), false);
   assert.deepEqual(pending(c).map(r => r.rowIndex), [MILKY]);
   assert.match(auditHtml(c), /צריך להשלים את הבדיקה/);
   assert.equal(c.run('aiEvaluateInvoiceScan(aiScanResponse).valid'), false, 'the receipt waits for the worker');
-  // A quantity Terra#2 was asked about: read 3 counts, as in the service's re-check (which marks it 'arithmetic')
-  c.run(`${R}.modelVerification.secondStrongRead.fields = ['quantity', 'unitPriceExVat']`);
+  // The arithmetic is v395's: a cheap read that supports the price proves the quantity, as before
+  c.run(`${R}.modelVerification.fieldSupport.unitPriceExVat = [1]`);
   assert.equal(c.run('priceAuditQuantityArithmetic(' + R + ', true).proven'), true);
-  assert.deepEqual(json(c, 'aiModelReviewIssues(' + R + ')'), []);
 });
 
 // The case of the second review round through the real service: 22 rows, A (row 7) 12 × 3.86 = 46.32 and B (row 8)
@@ -446,28 +455,37 @@ test('against the real service v153: a cheap read that lists A after its neighbo
 });
 
 // ---- the card's "החשבון לא מכריע" and read 4 ----
-// Since the second review round the app's own arithmetic counts read 4 (read 3) only in a row whose quantity the service
-// asked it about. In a row where read 4 closed the money but was not asked about the quantity, the card listed the money
-// as "לא מוסכם בין הקריאות" — though read 4 had agreed with the selected read on it. The card now says what is true: the
-// money was confirmed by read 4 only, which was not asked about the quantity (so it does not prove it).
+// The app's own arithmetic never counts read 4 (read 3). In a row where read 4 closed the money (an identical whole read)
+// but was not asked about the quantity, the card would list the money as "לא מוסכם בין הקריאות" — though the service had
+// accepted it. The card says what is true: the money was confirmed by read 4 only, which was not asked about the quantity
+// (so it does not prove it). A read 4 whose whole read differs confirms nothing, and then the plain reasons stay.
 const SECOND_ONLY = 'סכום השורה והסכום לפני הנחה אושרו רק בקריאה הרביעית \\(המודל החזק, פעם שנייה\\), שלא נשאלה על הכמות';
 const reasonsLine = html => (html.match(/<p class="mt-1">החשבון לא מכריע: [^<]*<\/p>/) || [''])[0];
 
-test('the card: money read 4 confirmed in a row it was not asked the quantity of is not "not agreed between the reads" — read 4 is named, as the reason it proves no quantity', { skip: skip153 }, async () => {
+// The owner's final rule changed this test (until the rule: "money read 4 confirmed in a row it was not asked the quantity of is
+// not 'not agreed between the reads'"). That scenario relied on the per-field vote: Terra#2 read 16.13 / 96.18 against the
+// verifier's 16.03 / 96.18 and still closed the gross and the net. Now its whole read differs (the unit price), nothing closes,
+// and the card keeps the plain reasons; the read-4 sentence is covered by the null-quantity test below, where read 4 is identical.
+test('the card: a read 4 that agrees on the money but not on the unit price confirms nothing — four reads, "not identical", and the plain reasons', { skip: skip153 }, async () => {
   // The milky row: the cheap reads saw 16.13 / 96.78 and 16.3 / 97.80, the verifier 16.03 / 96.18, Terra#2 16.13 / 96.18. The
-  // quantity (6) is agreed; Terra#2 closes the gross and the net and leaves the unit price to the worker.
+  // quantity (6) is agreed; the unit price, the gross and the net are asked.
   const read = (unit, money) => { const rows = readRows('selected'); Object.assign(rows[MILKY], { unitPriceExVat: unit, grossLineTotalExVat: money, lineTotalExVat: money }); return answer(modelDoc(rows)); };
   const { output, calls } = await service([read(16.13, 96.78), read(16.3, 97.8), read(16.03, 96.18), read(16.13, 96.18)]);
   assert.equal(calls.length, 4);
+  const second = output.scan.verification.secondVerifier;
+  assert.equal(second.outcome, 'not_identical'); assert.deepEqual(second.closed, []);
   const proof = output.scan.documents[0].rows[MILKY].modelVerification;
-  assert.deepEqual(proof.issues, ['unitPriceExVat']);
-  assert.deepEqual([proof.fieldSupport.grossLineTotalExVat, proof.fieldSupport.lineTotalExVat], [[3], [3]]);
-  assert.deepEqual(proof.secondStrongRead.fields, ['unitPriceExVat', 'grossLineTotalExVat', 'lineTotalExVat']);
+  assert.deepEqual(proof.issues, ['unitPriceExVat', 'grossLineTotalExVat', 'lineTotalExVat']);
+  assert.deepEqual([proof.fieldSupport.grossLineTotalExVat, proof.fieldSupport.lineTotalExVat], [[], []]);
+  assert.deepEqual(proof.secondStrongRead, { version: 1, read: 3, fields: ['unitPriceExVat', 'grossLineTotalExVat', 'lineTotalExVat'], identical: false, closed: {} });
   const { c } = await scanInApp(structuredClone(output));
-  assert.deepEqual(json(c, 'priceAuditQuantityArithmetic(' + R + ', true).reasons'), ['unit', 'net_second', 'gross_second']);
-  const line = reasonsLine(auditHtml(c));
-  assert.match(line, new RegExp('החשבון לא מכריע: מחיר היחידה לא מוסכם בין הקריאות · ' + SECOND_ONLY + '\\.'));
-  assert.doesNotMatch(line, /סכום השורה לא מוסכם|הסכום לפני הנחה לא מוסכם/);
+  assert.deepEqual(json(c, 'priceAuditQuantityArithmetic(' + R + ', true).reasons'), ['unit', 'net', 'gross']);
+  const html = auditHtml(c);
+  assert.match(reasonsLine(html), /החשבון לא מכריע: מחיר היחידה לא מוסכם בין הקריאות · סכום השורה לא מוסכם בין הקריאות · הסכום לפני הנחה לא מוסכם בין הקריאות\./);
+  assert.doesNotMatch(html, /אושרו רק בקריאה הרביעית|אושר רק בקריאה הרביעית/);
+  assert.match(html, new RegExp('<p>הקריאות לא הסכימו על [^<]*\\. ' + NOT_IDENTICAL + '</p>'));
+  assert.match(html, /הסכום לפני הנחה: [^<]*קריאה 3 \(המודל החזק\) – 96\.18 · קריאה 4 \(המודל החזק, פעם שנייה\) – 96\.18</, 'read 4 is shown on the money it read like the verifier');
+  assert.equal(c.run('aiEvaluateInvoiceScan(aiScanResponse).valid'), false);
 });
 
 test('against the real service v153: a cheap read that read a quantity as null does not split it — the swapped quantities stay with the worker, and the card says read 4 confirmed only the money', { skip: skip153 }, async () => {
@@ -490,6 +508,9 @@ test('against the real service v153: a cheap read that read a quantity as null d
   assert.equal(c.run('priceAuditQuantityArithmetic(' + A + ', true).proven'), false, 'read 4 was not asked about the quantity');
   assert.deepEqual(json(c, 'priceAuditQuantityArithmetic(' + A + ', true).reasons'), ['net_second', 'gross_second']);
   assert.match(auditHtml(c), new RegExp('<p class="mt-1">החשבון לא מכריע: ' + SECOND_ONLY + '\\.</p>'));
+  // הכלל הסופי: הקריאה השלמה של Terra#2 זהה לזו של Terra#1 — הכסף נסגר, והכרטיס של הכמות אומר שהקריאה הרביעית לא נשאלה עליה
+  assert.equal(second.outcome, 'closed'); assert.deepEqual(second.differences, []);
+  assert.match(auditHtml(c), /גם הקריאה השלישית והקריאה הרביעית \(המודל החזק, פעמיים\) קראו את הנייר והיו זהות, אבל הקריאה הרביעית לא נשאלה על הכמות\./);
 });
 
 // ---- service 153, fourth review round: the reading of a row is the reading of that paper ----
@@ -537,7 +558,7 @@ test('against the real service v153: two notes of one supplier — a read that r
     // and slips line 6's money. Terra#2 reads every number right but returns note 1 as noteIndex 0 — its vote is not counted.
     ['Terra#2 returned note 1 as noteIndex 0', [notesAnswer([docNote(0, DOC_Q0, DOC_N0, { [DOC_A]: { qty: 1, money: 3.86 }, [DOC_B]: { qty: 1, money: 3.86 } }), docNote(1, t2Q1, DOC_N1)]),
       notesAnswer([docNote(0, DOC_Q0, DOC_N0, { 5: { qty: 13, money: 66 } }), docNote(1, t2Q1, DOC_N1)]), notesAnswer([docSwapped(), docNote(1, t2Q1, DOC_N1)])],
-      notesAnswer([docNote(0, t2Q1, DOC_N1), docNote(1, DOC_Q0, DOC_N0)]), 4, 'disagreed'],
+      notesAnswer([docNote(0, t2Q1, DOC_N1), docNote(1, DOC_Q0, DOC_N0)]), 4, 'not_identical'],
     // case 'cheap': cheap read 0 returns note 1 (A 7, B 5) as noteIndex 0; cheap read 1 reads note 0 right. By the paper read 1 is a lone
     // cheap read that saw the printed values, so nothing is asked.
     ['a cheap read returned note 1 as noteIndex 0', [notesAnswer([docNote(0, cheapQ1, DOC_N1), docNote(1, DOC_Q0, DOC_N0, { 5: { qty: 13, money: 66 } })]),
@@ -606,3 +627,30 @@ test('against the real service v153: a cheap read that left A and B null and one
   assert.deepEqual(swapRowsOf(old), swapRowsOf(c), 'what the switch off shows');
   assert.deepEqual(pending(old).map(r => r.rowIndex), pending(c).map(r => r.rowIndex));
 });
+
+// ---- the owner's final rule: Terra#2's whole read decides ----
+// The reviewers' app-whole repro, through the real service and the complete app. Terra#2 reads the milky unit price as the verifier
+// (16.03) but differs somewhere else in its read: one row's quantity, the subtotal, or a row left out. Until the rule the service closed
+// the price by its per-row vote (closedBy 'second_strong_read'), the app showed nothing pending and the receipt was valid. Now nothing
+// closes, the card stays — with read 4 shown at 16.03 and the sentence that it was not identical — and the receipt waits for the worker.
+const WHOLE_DIFFERS = {
+  'another row\'s quantity': d => { const r = d.rows[0]; r.quantity -= 1; r.grossLineTotalExVat = r.lineTotalExVat = r2(r.quantity * r.unitPriceExVat); return d; },
+  'the subtotal': d => { d.subtotalExVat = r2(d.subtotalExVat + 0.45); return d; },
+  'a row left out': d => { d.rows.splice(20, 1); return d; },
+};
+for (const [label, mutate] of Object.entries(WHOLE_DIFFERS)) {
+  test('against the real service v153, the final rule: Terra#2 reads the milky price as the verifier but differs in ' + label + ' — nothing closes, the card stays and says read 4 was not identical', { skip: skip153 }, async () => {
+    const { output, calls } = await service([...SPLIT(), answer(mutate(readDoc(PRINTED)))]);
+    assert.equal(calls.length, 4);
+    const second = output.scan.verification.secondVerifier;
+    assert.equal(second.outcome, 'not_identical'); assert.deepEqual(second.closed, []); assert.ok(second.differences.length > 0);
+    assert.deepEqual(output.scan.documents[0].rows[MILKY].modelVerification.issues, ['unitPriceExVat']);
+    const { c } = await scanInApp(structuredClone(output));
+    assert.deepEqual(pending(c).map(r => r.rowIndex), [MILKY]);
+    const html = auditHtml(c);
+    assert.match(html, new RegExp('<p data-row-dispute-field="unitPriceExVat">הקריאות לא הסכימו על מחיר היחידה: קריאה 1 – 16\\.13 · קריאה 2 – 16\\.30 · ' +
+      'קריאה 3 \\(המודל החזק\\) – 16\\.03 · קריאה 4 \\(המודל החזק, פעם שנייה\\) – 16\\.03\\. ' + NOT_IDENTICAL + '</p>'));
+    assert.equal(c.run('aiEvaluateInvoiceScan(aiScanResponse).valid'), false, 'the receipt waits for the worker');
+    assert.match(diagnostics(c), /קריאה 4 \(המודל החזק, פעם שנייה\) · תעודה 1: not_identical · נסגרו 0 מתוך 1 שדות · הבדלים: \d+, הראשון: /);
+  });
+}
