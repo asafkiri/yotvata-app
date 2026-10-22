@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v398 מצב התעודה במילים</title>
+    <title>הזמנות יטבתה - v399 תעודה שלא מתאזנת</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -125,7 +125,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v398 מצב התעודה במילים</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v399 תעודה שלא מתאזנת</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -669,9 +669,9 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '398'; // מצב התעודה במילים: משפט אחד ופעולה אחת לכל קליטה, פרטים טכניים מקופלים, סטטוס שמור שמתעדכן, סיכום בראש הגיבוי
+const APP_VERSION = '399'; // תעודה שלא מתאזנת: מה חסר, איפה ההפרש ואילו שורות לבדוק; תיקון שמאזן את התעודה משחרר את הקליטה
 // v398: תווית הגרסה ביומן הפעולות ובקובץ הגיבוי (עד כאן מחרוזת קבועה שנשארה 'v396_second_strong_read')
-const APP_VERSION_LABEL = 'v' + APP_VERSION + '_plain_receipt_status';
+const APP_VERSION_LABEL = 'v' + APP_VERSION + '_paper_gap';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -1328,11 +1328,166 @@ function yotvataPhotoGateHtml() {
     '<button data-role="rc-photo-quantity" ' + (ready ? '' : 'disabled') + ' class="btn-tap w-full py-3 mt-2 bg-white border-2 border-emerald-300 text-emerald-800 rounded-xl font-black text-base">פענח תעודה — הכמויות נבדקות ידנית</button>' +
     '<button data-role="rc-photo-manual" ' + (aiScanBusy ? 'disabled' : '') + ' class="btn-tap w-full py-3 text-sm font-bold text-slate-500">הקלדת סכום ויחידות ידנית</button>' + receivingNoDocGateHtml() + '</div>';
 }
+// ===== v399: תעודה שלא מתאזנת — איפה ההפרש ומה לבדוק =====
+// מהשטח (קליטה פתוחה מ-22.10.2026, שירות 153, אפליקציה v397/398): תעודת משלוח 9073907315, 3 עמודים, 28 שורות,
+// ₪1,816.37 ו-348 יחידות מודפסים. שלוש קריאות ואף אחת לא מתאזנת. הקריאה שנבחרה (המודל החזק) החליקה בעמוד 1
+// את המספרים בשורה: דילגה על הלאבנה (12 × ₪9.10 = ₪109.20) וספרה ₪52.80 פעמיים, ולכן Σ ₪1,759.97. קריאה זולה
+// אחת החליקה באותו מקום, ולכן ההצבעה "אישרה" את הערכים השגויים. הקריאה הזולה השנייה קראה את עמוד 1 נכון
+// (₪527.76; המחיר של כל שורה תואם למאגר) וטעתה בעמודים 2–3. העובד ראה "תעודה 1: סכום שורות הנטו אינו תואם
+// בדיוק לסיכום המודפס", כפתור "בדוק צילומים / הוסף עמוד חסר" (לא חסר עמוד: כל השורות וכל היחידות נקראו)
+// ו-36 כרטיסים "הפענוח חלקי או חסר עמוד", גם לתעודה השנייה שנקראה מושלם. ובנוסף באג, שהתגלה בהרצה של הטיוטה
+// הזאת (העובד עוד לא תיקן שורה): תיקון שלוש השורות לפי הנייר מאזן את התעודה, אבל הקליטה נשארת חסומה ("השלם
+// צילום או הזן ידנית...") — ראה yotvataRecheckFailedPaper.
+// הכלל. כשהבעיה היחידה בנייר היא הכסף (העמודים, היחידות ומונה השורות תואמים), מחפשים עמוד שבו קריאה אחרת —
+// שקראה את כל שורות העמוד, באותו מספר שורות כמו הקריאה שנבחרה (support.rowCount) — מסכמת את העמוד לסכום
+// שסוגר את התעודה בדיוק באגורה (גם מול הנחת מסמך נפרדת שמודפסת). עמוד אחד כזה הוא "ההפרש בעמוד N", והשורות
+// לבדיקה הן השורות בעמוד שבהן קריאה כזאת ראתה כמות, מחיר יחידה או סכום אחרים. מה שהיא ראתה מוצע לעובד רק
+// כמילוי של חלון התיקון הקיים (openPaperRowCorrection): העובד משווה לנייר ומאשר, בדיוק כמו תיקון ידני. אין
+// עמוד כזה (או יותר מאחד) — השורות שבהן קריאה כלשהי ראתה כסף אחר, עד 8. שורה שהעובד כבר תיקן לפי הנייר אינה
+// מוצעת שוב. קריאה 4 (המודל החזק, פעם שנייה) אינה רצה כשהנייר לא נסגר, ובכל מקרה אינה מוצעת כאן. שום ערך
+// OCR אינו משתנה ושום קריאה אינה מורכבת מקריאות אחרות: זו תצוגה, והערכים הם תמיד של הקריאה שנבחרה או של העובד.
+// הכסף והיחידות. תיקון של שורה אחת מתוך כמה שורות שהוחלקו משנה גם את היחידות (בשטח: הלאבנה 24 → 12, ורק אחרי
+// שלוש השורות סך היחידות חוזר ל-348), ולכן גם פער יחידות, לבד או עם הכסף, מקבל את אותו כרטיס, ועמוד "נסגר" רק
+// כשהקריאה האחרת מביאה בו גם את הכסף וגם את היחידות לסיכום המודפס.
+const YOTVATA_PAPER_MONEY_PROBLEM = 'סכום שורות הנטו אינו תואם בדיוק לסיכום המודפס';
+const YOTVATA_PAPER_UNITS_PROBLEM = 'סכום כמויות המוצרים אינו תואם לסך היחידות המודפס (פיקדון בכסף בלבד)';
+const YOTVATA_GAP_ROW_LIMIT = 8;
+function yotvataDocumentGap(doc, pageCount) {
+  if (!doc || !Array.isArray(doc.rows) || !doc.rows.length) return null;
+  const check = yotvataPaperCheck(doc, pageCount);
+  if (check.ok || check.missingSummary || !check.problems.every(p => p === YOTVATA_PAPER_MONEY_PROBLEM || p === YOTVATA_PAPER_UNITS_PROBLEM)) return null;
+  const cents = v => typeof v === 'number' && Number.isFinite(v) ? Math.round(v * 100) : null;
+  const rows = doc.rows, subtotal = cents(doc.subtotalExVat), discount = Math.max(0, cents(doc.documentDiscountExVat) || 0);
+  const rowCents = rows.reduce((n, r) => n + (cents(r.lineTotalExVat) || 0), 0);
+  const counted = i => !/פ.?קדון/.test(String(rows[i].description || '')); // כמו yotvataPaperCheck: פיקדון בכסף בלבד
+  const rowUnits = check.rowUnits, printedUnits = check.units;
+  // הנחת מסמך מודפסת: השורות נסגרות על הסכום, או על הסכום ועוד ההנחה כשהיא נפרדת.
+  const targets = discount > 0 ? [subtotal, subtotal + discount] : [subtotal];
+  const proofs = rows.map(r => r && r.modelVerification && r.modelVerification.version === 1 && Array.isArray(r.modelVerification.readings) ? r.modelVerification : null);
+  const selected = (proofs.find(Boolean) || {}).selectedRead;
+  const docProof = doc.modelVerification && doc.modelVerification.support && Array.isArray(doc.modelVerification.support.rowCount) ? doc.modelVerification.support.rowCount : [];
+  const reads = [...new Set(proofs.flatMap(p => p ? p.readings.map(x => x && x.read) : []))]
+    .filter(read => Number.isInteger(read) && read !== selected && read !== AI_SCAN_SECOND_STRONG_READ && docProof.includes(read)).sort((a, b) => a - b);
+  const readingOf = (i, read) => { const x = proofs[i] && proofs[i].readings.find(r => r && r.read === read && r.values && typeof r.values === 'object'); return x ? x.values : null; };
+  const pages = [...new Set(rows.map(r => r.sourcePage))].filter(Number.isInteger).sort((a, b) => a - b);
+  const onPage = p => rows.map((r, i) => i).filter(i => rows[i].sourcePage === p);
+  const selectedSum = p => onPage(p).reduce((n, i) => n + (cents(rows[i].lineTotalExVat) || 0), 0);
+  const selectedUnits = p => onPage(p).reduce((n, i) => n + (counted(i) && Number.isInteger(rows[i].quantity) ? rows[i].quantity : 0), 0);
+  // מה קריאה אחרת ראתה בעמוד — הכסף והיחידות, רק כשיש לה קריאה של כל שורות העמוד עם כמות ונטו.
+  const readPage = (p, read) => {
+    let money = 0, units = 0;
+    for (const i of onPage(p)) {
+      const v = readingOf(i, read), c = v && cents(v.lineTotalExVat);
+      if (c == null || !Number.isInteger(v.quantity)) return null;
+      money += c; if (counted(i)) units += v.quantity;
+    }
+    return { money, units };
+  };
+  const located = [];
+  for (const p of pages) {
+    const mine = { money: selectedSum(p), units: selectedUnits(p) };
+    const closers = reads.filter(read => {
+      const k = readPage(p, read);
+      return !!k && (k.money !== mine.money || k.units !== mine.units) && targets.includes(rowCents - mine.money + k.money) && rowUnits - mine.units + k.units === printedUnits;
+    });
+    if (closers.length) { const k = readPage(p, closers[0]); located.push({ page: p, closers, readPageSum: k.money, pageSum: mine.money, readPageUnits: k.units, pageUnits: mine.units }); }
+  }
+  const one = located.length === 1 ? located[0] : null;
+  // כמה קריאות מאזנות את העמוד, כל אחת בשורות אחרות (בשטח: אחת שינתה את שורה 4, השנייה את שורות 5–7). הנייר בלבד
+  // מכריע ביניהן, והכרטיס אומר זאת במפורש.
+  const changedBy = read => onPage(one.page).filter(i => { const v = readingOf(i, read); return v && ['quantity', 'unitPriceExVat', 'lineTotalExVat'].some(f => cents(v[f]) !== cents(rows[i][f])); }).join(',');
+  const alternatives = !!one && new Set(one.closers.map(changedBy)).size > 1;
+  const money = v => ({ quantity: v.quantity ?? null, unitPriceExVat: v.unitPriceExVat ?? null, lineTotalExVat: v.lineTotalExVat ?? null });
+  const differs = (a, b) => ['quantity', 'unitPriceExVat', 'lineTotalExVat'].some(f => cents(a[f]) !== cents(b[f]) || (a[f] == null) !== (b[f] == null));
+  // שורה שאפשר למלא ממנה את חלון התיקון — אותם תנאים כמו בשמירה שלו.
+  const usable = v => Number.isSafeInteger(v.quantity) && v.quantity > 0 && typeof v.unitPriceExVat === 'number' && v.unitPriceExVat > 0
+    && typeof v.lineTotalExVat === 'number' && v.lineTotalExVat >= 0 && v.lineTotalExVat <= r2(v.quantity * v.unitPriceExVat) + .02;
+  const candidates = one ? onPage(one.page) : rows.map((r, i) => i);
+  const fromReads = one ? one.closers : reads;
+  const listed = [];
+  for (const i of candidates) {
+    if (paperRowCorrectionValid(doc, i)) continue;
+    const seen = fromReads.map(read => readingOf(i, read)).filter(v => v && differs(v, rows[i]));
+    if (!seen.length) continue;
+    const suggestions = [];
+    for (const v of seen) if (usable(v) && !suggestions.some(s => !differs(s, v))) suggestions.push(money(v));
+    listed.push({ rowIndex: i, suggestions });
+  }
+  return { gapCents: targets.includes(rowCents) ? 0 : subtotal - rowCents, subtotal, rowCents, unitsGap: printedUnits - rowUnits, rowUnits,
+    page: one ? one.page : null, pageSum: one ? one.pageSum : null, readPageSum: one ? one.readPageSum : null,
+    pageUnits: one ? one.pageUnits : null, readPageUnits: one ? one.readPageUnits : null, alternatives,
+    rows: listed.slice(0, YOTVATA_GAP_ROW_LIMIT), more: Math.max(0, listed.length - YOTVATA_GAP_ROW_LIMIT),
+    lines: rows.length, linesPrinted: Number.isInteger(doc.printedLines), units: printedUnits };
+}
+// v399: התעודות שהבעיה היחידה שלהן בנייר היא הכסף, כל אחת עם המקום של ההפרש. [] — כל התעודות מתאזנות עכשיו.
+// null — יש בעיה אחרת (עמוד, יחידות, מונה שורות, זיכוי שצולם כתעודה, תעודה שלא נקראה), ואז נשארות ההודעות הקיימות.
+function yotvataPaperGaps() {
+  const docs = aiScanResponse && aiScanResponse.scan && Array.isArray(aiScanResponse.scan.documents) ? aiScanResponse.scan.documents : [];
+  if (!aiScanDocuments.length || docs.length !== aiScanDocuments.length) return null;
+  const out = [];
+  for (let index = 0; index < aiScanDocuments.length; index++) {
+    const input = aiScanDocuments[index], doc = docs.find(d => d.noteIndex === index);
+    if (!doc || yotvataCreditDocumentProblem(doc, index)) return null;
+    const pages = (input.pages || []).length || input.restoredPageCount || 0;
+    if (yotvataPaperCheck(doc, pages).ok) continue;
+    const gap = yotvataDocumentGap(doc, pages);
+    if (!gap) return null;
+    out.push({ index, label: String(doc.invoiceNumber || '').trim() || String(index + 1), gap });
+  }
+  return out;
+}
+// v399: הבאג (התגלה בהרצה של הטיוטה מהשטח) — תיקון לפי הנייר שמאזן את התעודה לא שחרר את הקליטה: המצב נשאר
+// 'failed', ההודעה הישנה נשארה, והסיום נחסם ("השלם צילום או הזן ידנית את נתוני התעודה"). עכשיו, אחרי תיקון ובלחיצה על "סיום", בודקים
+// שוב את כל התעודות בדיוק כמו בסוף הפענוח (yotvataAdoptPaperAnchors): כשכולן מתאזנות, הנייר מאומץ והקליטה
+// ממשיכה. כשלא — הכל נשאר כמו שהוא, עם ההודעה המעודכנת.
+function yotvataRecheckFailedPaper() {
+  if (receiptEntryMode !== 'photo' || receiptPaperScanState !== 'failed' || aiScanBusy || !aiScanResponse) return false;
+  return yotvataAdoptPaperAnchors() === true;
+}
+const yotvataGapMoney = c => '₪' + fmtMoney(Math.abs(Number(c) || 0) / 100);
+// v399: "12 × ₪9.10 = ₪109.20", ובשורה עם הנחה "12 × ₪7.80 · אחרי הנחה ₪79.56".
+function yotvataGapRowText(v) {
+  const qty = v.quantity == null ? '?' : String(v.quantity), unit = typeof v.unitPriceExVat === 'number' ? '₪' + fmtUnitPrice(v.unitPriceExVat, true) : '?';
+  const net = typeof v.lineTotalExVat === 'number' ? v.lineTotalExVat : null;
+  const gross = typeof v.quantity === 'number' && typeof v.unitPriceExVat === 'number' ? r2(v.quantity * v.unitPriceExVat) : null;
+  return qty + ' × ' + unit + (net == null ? '' : gross != null && Math.abs(gross - net) > .005 ? ' · אחרי הנחה ₪' + fmtMoney(net) : ' = ₪' + fmtMoney(net));
+}
+// "תעודה 9073907315: חסרים ₪56.40 מול הסיכום המודפס" / "... חסרים ₪16.56 וחסרות 12 יחידות ..." / "... יש 4 יחידות יותר ...".
+function yotvataGapHeadline(entry) {
+  const g = entry.gap, parts = [];
+  if (g.gapCents > 0) parts.push('חסרים ' + yotvataGapMoney(g.gapCents));
+  else if (g.gapCents < 0) parts.push('יש ' + yotvataGapMoney(g.gapCents) + ' יותר');
+  if (g.unitsGap > 0) parts.push((parts.length ? 'וחסרות ' : 'חסרות ') + g.unitsGap + ' יחידות');
+  else if (g.unitsGap < 0) parts.push((parts.length ? 'ויש ' : 'יש ') + (-g.unitsGap) + ' יחידות יותר');
+  return 'תעודה ' + entry.label + ': ' + parts.join(' ') + ' מול הסיכום המודפס';
+}
+// שלא חסר עמוד — רק כשזה מוכח: מונה השורות המודפס תואם (תמיד, כשהוא מודפס: אחרת זו בעיה אחרת), או סך היחידות תואם.
+function yotvataGapReadSentence(g, counts) {
+  if (g.linesPrinted) return 'כל ' + (counts ? g.lines + ' ' : '') + 'השורות' + (g.unitsGap === 0 ? ' ו' + (counts ? '-' + g.units + ' ' : '') + 'היחידות' : '') + ' נקראו, אז לא חסר עמוד.';
+  return g.unitsGap === 0 ? 'כל ' + (counts ? g.units + ' ' : '') + 'היחידות נקראו, אז לא חסר עמוד.' : '';
+}
+function yotvataPaperGapBannerHtml(gaps) {
+  const located = gaps.filter(e => e.gap.page);
+  const read = gaps.map(e => yotvataGapReadSentence(e.gap, false));
+  return '<div data-paper-gap-banner class="rounded-xl bg-amber-50 border border-amber-300 p-3 mb-3 text-sm font-bold text-amber-900">' +
+    gaps.map(e => '<div class="font-black">' + htmlEscape(yotvataGapHeadline(e)) + '</div>').join('') +
+    '<div class="mt-1">' + (read.every(Boolean) && new Set(read).size === 1 ? read[0] + ' ' : '') + 'כנראה מספר באחת השורות נקרא לא נכון.' +
+    (located.length ? ' ' + located.map(e => 'ההפרש בעמוד ' + e.gap.page + (gaps.length > 1 ? ' של תעודה ' + htmlEscape(e.label) : '')).join(', ') + '.' : '') + '</div>' +
+    '<div class="mt-1">בדוק מול הנייר את השורות המסומנות בבדיקת המחירים למטה, ותקן רק שורה שלא תואמת. אפשר להמשיך בספירה בינתיים.</div>' +
+    '<button data-role="rc-photo-repair" class="btn-tap w-full bg-white border border-amber-300 rounded-xl py-2 mt-2">או צלם את התעודה מחדש</button>' +
+    '<button data-role="rc-photo-manual" class="btn-tap w-full py-2 text-xs underline">או הקלד סכום ויחידות</button></div>';
+}
 function yotvataPaperStatusHtml() {
   if (receiptStorageWarning) return '<div class="rounded-xl bg-amber-50 border border-amber-300 p-3 mb-3 font-bold text-amber-900">' + htmlEscape(receiptStorageWarning) + '</div>';
   if (receiptEntryMode !== 'photo') return '';
   if (receiptPaperScanState === 'running') return '<div class="rounded-xl bg-blue-50 border border-blue-200 p-3 mb-3 text-sm font-bold text-blue-800"><i class="fa-solid fa-circle-notch fa-spin"></i> ' + htmlEscape(aiScanProgressText || 'קורא את התעודה ברקע…') + '<div class="mt-1">אפשר לסרוק מוצרים כרגיל.</div></div>';
   if (receiptPaperScanState === 'ok') return '<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-2 mb-2 text-[11px] font-black text-emerald-800"><i class="fa-solid fa-file-circle-check"></i> התעודה נקראה ואומתה · השוואת הכמויות בסיום הקליטה</div>';
+  // v399: תעודה שהבעיה היחידה שלה היא הכסף — מה חסר, שלא חסר עמוד, ואיפה ההפרש. תעודה שכבר מתאזנת (תוקנה בגרסה
+  // קודמת ונשארה חסומה) — אומרים זאת, וכפתור אחד בודק שוב ומשחרר.
+  const gaps = receiptPaperScanState === 'failed' ? yotvataPaperGaps() : null;
+  if (gaps && !gaps.length) return '<div data-paper-gap-banner class="rounded-xl bg-emerald-50 border border-emerald-300 p-3 mb-3 text-sm font-bold text-emerald-900">כל התעודות מתאזנות עכשיו מול הסיכום המודפס.' +
+    '<button data-role="rc-paper-recheck" class="btn-tap w-full bg-emerald-600 text-white rounded-xl py-2.5 mt-2 font-black">המשך</button></div>';
+  if (gaps) return yotvataPaperGapBannerHtml(gaps);
   if (receiptPaperScanState === 'failed' || receiptPaperScanState === 'interrupted') return '<div class="rounded-xl bg-amber-50 border border-amber-300 p-3 mb-3 text-sm font-bold text-amber-900">אפשר להמשיך בספירה. לפני הסיום צריך להשלים את נתוני התעודה.' +
     '<div class="mt-1 text-xs">' + receiptPaperScanProblems.map(htmlEscape).join('<br>') + '</div>' +
     '<button data-role="rc-photo-repair" class="btn-tap w-full bg-white border border-amber-300 rounded-xl py-2 mt-2">בדוק צילומים / הוסף עמוד חסר</button>' +
@@ -9026,6 +9181,8 @@ function finishReceipt() {
   if (receiptEntryMode === 'photo' && receiptPaperScanState === 'running') {
     showToast('הפענוח עדיין ברקע. אפשר להמשיך לסרוק; הבדיקה תיפתח כשהתוצאה תגיע.', null, null, 3500); return;
   }
+  // v399: תעודה שתוקנה לפי הנייר והתאזנה משתחררת כאן, גם אם המצב נשאר 'failed' מלפני התיקון.
+  if (receiptEntryMode === 'photo' && !receiptNoDoc && receiptPaperScanState === 'failed') yotvataRecheckFailedPaper();
   if (receiptEntryMode === 'photo' && !receiptNoDoc && receiptPaperScanState !== 'ok') {
     showToast('השלם צילום או הזן ידנית את נתוני התעודה לפני הסיום', null, null, 3500);
     refreshReceipt(); return;
@@ -12686,7 +12843,9 @@ function paperRowCorrectionHistoryHtml() {
         htmlEscape((p && p.name) || r.description) + ' · ' + htmlEscape(source.position) + ' · ערוך תיקון</button>';
     }).join('') + '</details>';
 }
-function openPaperRowCorrection(documentIndex, rowIndex) {
+// v399: prefill — מה שקריאה אחרת ראתה בשורה ({ quantity, unitPriceExVat, lineTotalExVat }), מהכרטיס של תעודה שלא
+// מתאזנת. רק ממלא את השדות ומציין זאת; האישור, הבדיקות והשמירה זהים לתיקון ידני.
+function openPaperRowCorrection(documentIndex, rowIndex, prefill = null) {
   const source = aiSourceRow(documentIndex, rowIndex);
   if (!source || aiScanBusy || receiptFinalizing) return false;
   const product = priceAuditIdentity(source.mapped, source.row);
@@ -12701,10 +12860,12 @@ function openPaperRowCorrection(documentIndex, rowIndex) {
   const previous = $('paperRowCorrectionModal'); if (previous) previous.remove();
   const wrap = document.createElement('div'); wrap.id = 'paperRowCorrectionModal';
   wrap.className = 'fixed inset-0 bg-slate-900/65 z-[120] flex items-center justify-center p-3';
-  const value = k => source.row[k] == null ? '' : htmlEscape(String(source.row[k]));
+  const filled = prefill && typeof prefill === 'object' && ['quantity', 'unitPriceExVat', 'lineTotalExVat'].every(k => Number.isFinite(prefill[k])) ? prefill : null;
+  const value = k => { const v = filled ? filled[k] : source.row[k]; return v == null ? '' : htmlEscape(String(v)); };
   wrap.innerHTML = '<div role="dialog" aria-modal="true" aria-labelledby="paperRowTitle" dir="rtl" class="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[90dvh] overflow-y-auto p-4">' +
     '<h3 id="paperRowTitle" class="font-black text-xl">תיקון פענוח לפי הנייר</h3><div class="font-black text-lg mt-2">' + htmlEscape(product.name) + '</div>' +
     '<p class="text-sm text-slate-600 mt-1">' + htmlEscape(source.title) + '<br>' + htmlEscape(source.position) + '</p>' +
+    (filled ? '<p data-paper-row-prefill class="mt-3 text-sm font-black text-rose-700">המספרים מולאו לפי קריאה אחרת של השורה. השווה אותם לנייר לפני האישור.</p>' : '') +
     '<p class="mt-3 text-sm font-bold">העתק את הנתונים מהשורה של המוצר הזה בנייר. כל הסכומים לפני מע״מ.</p>' +
     '<label class="block mt-3 font-bold">כמות יחידות בשורה<input id="paperRowQty" type="text" inputmode="numeric" value="' + value('quantity') + '" class="block w-full border-2 rounded-xl p-3 mt-1" dir="ltr"></label>' +
     '<label class="block mt-3 font-bold">מחיר יחידה מודפס<input id="paperRowUnit" type="text" inputmode="decimal" value="' + value('unitPriceExVat') + '" class="block w-full border-2 rounded-xl p-3 mt-1" dir="ltr"></label>' +
@@ -12746,9 +12907,16 @@ function openPaperRowCorrection(documentIndex, rowIndex) {
     pendingReceipt = null; reconcileData = null; reconcileAiAudit = null;
     aiAnalyzeResult = null; aiAnalyzeError = ''; receiptAnalysisCache = null;
     aiScanEvaluation = aiEvaluateInvoiceScan(aiScanResponse);
-    aiScanError = aiScanEvaluation.valid ? '' : 'התיקון נשמר. סכומי השורות והכמויות עדיין צריכים להתאים לסיכום התעודה.';
+    // v399: ההודעה על הסכומים רק כשהתעודה שתוקנה עדיין לא מתאזנת; אחרת ההודעה הרגילה של שורות שנשארו לבירור.
+    const unbalanced = paperRowCorrectionProblems().length > 0;
+    aiScanError = unbalanced ? 'התיקון נשמר. סכומי השורות והכמויות עדיין צריכים להתאים לסיכום התעודה.' : aiScanEvaluation.valid ? '' : 'הפענוח עדיין דורש בדיקה — נשארו שורות לבירור.';
+    // v399: תיקון שמאזן את התעודה משחרר קליטה שנעצרה על הסכום (yotvataRecheckFailedPaper).
+    const released = yotvataRecheckFailedPaper();
     saveReceiptDraft(); wrap.remove(); currentView = 'receiving'; renderReceiving(); refreshPriceAuditViews();
-    showToast(paperRowCorrectionProblems().length ? 'התיקון נשמר. השורות המתוקנות עדיין אינן תואמות לסיכום הנייר — בדוק את ההודעה בקליטה.' : 'השורה תוקנה לפי הנייר. בדיקת המחיר והחיוב עודכנה.', null, null, 4500);
+    const stillGap = !released && receiptPaperScanState === 'failed' && (yotvataPaperGaps() || []).some(e => e.index === documentIndex);
+    showToast(stillGap ? 'השורה תוקנה. התעודה עוד לא מתאזנת — המשך לשורות שנשארו בכרטיס.'
+      : unbalanced ? 'התיקון נשמר. השורות המתוקנות עדיין אינן תואמות לסיכום הנייר — בדוק את ההודעה בקליטה.'
+      : released ? 'השורה תוקנה והתעודה מתאזנת מול הסיכום המודפס ✓' : 'השורה תוקנה לפי הנייר. בדיקת המחיר והחיוב עודכנה.', null, null, 4500);
   });
   return true;
 }
@@ -13461,7 +13629,9 @@ function receiptPriceAudit() {
         if (aiRowArithmeticError(raw, row.quantity)) { row.capability = 'partial'; row.reason = 'מחיר, הנחה וסכום שורה אינם מתיישבים בפענוח'; }
         if (gross != null && total != null && total > gross + .02) { row.capability = 'partial'; row.reason = 'סכום הנטו גבוה מהברוטו בשורה'; }
       }
-      if (!allComplete) { row.capability = 'partial'; row.reason = 'הפענוח חלקי או חסר עמוד/מסמך; לא ניתן לאשר מחיר סופי או להסיק שמבצע חסר'; }
+      // v399: waitingForPaper — השורה עצמה תקינה ורק מחכה שהתעודה תהיה שלמה; כשהתעודה לא מתאזנת על הכסף בלבד, הפאנל
+      // מקפל שורות כאלה לשורה אחת במקום כרטיס לכל אחת (receiptPriceAuditHtml).
+      if (!allComplete) { row.capability = 'partial'; row.reason = 'הפענוח חלקי או חסר עמוד/מסמך; לא ניתן לאשר מחיר סופי או להסיק שמבצע חסר'; row.waitingForPaper = true; }
     });
     if (PRICE_AUDIT_SUPPLIER !== 'berman' && source) {
       const discount = Math.abs(priceAuditNumber(source.promoDiscountExVat ?? source.documentDiscountExVat) || 0);
@@ -13587,6 +13757,41 @@ function priceAuditPlainCheckTitle(issues) {
   if (qty && !money) return 'בדוק את הכמות מול הנייר';
   if (money && !qty) return 'בדוק את המחיר והסכום מול הנייר';
   return 'בדוק את הכמות והמחיר מול הנייר';
+}
+// v399: הכרטיס של תעודה שלא מתאזנת על הכסף בלבד (yotvataDocumentGap): כמה חסר או עודף, שלא חסר עמוד, איפה ההפרש,
+// ולכל שורה לבדיקה — מה נקרא, מה קריאה אחרת ראתה (כפתור שממלא את חלון התיקון) ותיקון ידני. בלי שינוי של ערך.
+function yotvataPaperGapCardHtml(entry) {
+  const g = entry.gap;
+  const rows = g.rows.map(item => {
+    const source = aiSourceRow(entry.index, item.rowIndex);
+    if (!source) return '';
+    const product = priceAuditIdentity(source.mapped, source.row);
+    const name = (product && product.name) || source.mapped.description || 'שורה ' + (item.rowIndex + 1);
+    const attrs = ' data-doc="' + entry.index + '" data-row="' + item.rowIndex + '"';
+    // מחיר המאגר — מידע לעובד בלבד, כמו בכרטיסי בדיקת המחירים; הוא לעולם אינו בוחר הצעה.
+    const catalog = product && Number(product.price) > 0 ? '<div class="text-xs text-slate-600">מחיר ליחידה במאגר: ₪' + fmtUnitPrice(Number(product.price), true) + '</div>' : '';
+    return '<div data-paper-gap-row="' + entry.index + ':' + item.rowIndex + '" class="bg-white border border-rose-200 rounded-lg p-2.5 mt-2">' +
+      '<div class="font-black">' + htmlEscape(name) + '</div><div class="text-xs text-slate-600">' + htmlEscape(source.position) + '</div>' + catalog +
+      '<div class="text-sm mt-1">נקרא: <b>' + htmlEscape(yotvataGapRowText(source.mapped)) + '</b></div>' +
+      item.suggestions.map(s => '<div class="text-sm mt-1">קריאה אחרת ראתה: <b>' + htmlEscape(yotvataGapRowText(s)) + '</b></div>' +
+        '<button data-role="paper-row-suggest"' + attrs + ' data-qty="' + s.quantity + '" data-unit="' + s.unitPriceExVat + '" data-total="' + s.lineTotalExVat +
+        '" class="btn-tap w-full rounded-lg bg-rose-600 text-white py-2.5 mt-1 font-black text-sm">בנייר כתוב ' + htmlEscape(yotvataGapRowText(s)) + '</button>').join('') +
+      '<button data-role="paper-row-edit"' + attrs + ' class="btn-tap w-full rounded-lg border border-rose-300 bg-white text-rose-700 py-2 mt-1 font-black text-sm">בנייר כתוב משהו אחר — תקן לפי הנייר</button></div>';
+  }).join('');
+  const read = (yotvataGapReadSentence(g, true) + ' כנראה מספר באחת השורות נקרא לא נכון.').trim();
+  const where = !g.page ? (g.rows.length ? 'בדוק מול הנייר את השורות שבהן הקריאות ראו מספרים שונים:'
+      : 'הקריאות לא מראות באיזו שורה ההפרש. בדוק את השורות מול הנייר, או צלם את התעודה מחדש.')
+    : 'ההפרש בעמוד ' + g.page + ': קריאה אחרת של העמוד ' + (g.readPageSum !== g.pageSum
+      ? 'מסתכמת ל-' + yotvataGapMoney(g.readPageSum) + ' במקום ' + yotvataGapMoney(g.pageSum)
+      : 'סופרת בו ' + g.readPageUnits + ' יחידות במקום ' + g.pageUnits) + '. בדוק מול הנייר את השורות האלה:';
+  const sums = 'בסיכום המודפס ' + yotvataGapMoney(g.subtotal) + ' ו-' + g.units + ' יחידות. השורות שנקראו: ' + yotvataGapMoney(g.rowCents) + ' ו-' + g.rowUnits + ' יחידות.';
+  return '<div data-paper-gap="' + entry.index + '" class="border-2 border-rose-300 bg-rose-50 rounded-xl p-3 mt-3">' +
+    '<div class="font-black text-base text-rose-900">' + htmlEscape(yotvataGapHeadline(entry)) + '</div>' +
+    '<p class="mt-1">' + htmlEscape(sums) + '</p>' +
+    '<p class="mt-1">' + htmlEscape(read) + '</p><p class="mt-2 font-black">' + htmlEscape(where) + '</p>' +
+    (g.alternatives ? '<p data-paper-gap-alternatives class="mt-1 font-bold">כמה קריאות מאזנות את העמוד, כל אחת בשורות אחרות. רק הנייר מכריע ביניהן: אל תאשר הצעה בלי להשוות לשורה בנייר.</p>' : '') + rows +
+    (g.more ? '<p class="text-xs mt-2">ועוד ' + g.more + ' שורות שבהן הקריאות ראו מספרים שונים.</p>' : '') +
+    '<p class="text-xs text-slate-700 mt-2">שורה שבנייר כתוב בה מה שנקרא — אין צורך לגעת בה. אחרי כל תיקון התעודה נבדקת שוב, וכשהיא מתאזנת הקליטה ממשיכה.</p></div>';
 }
 function priceAuditTechnicalFoldHtml(inner, attr) {
   return inner ? '<details class="mt-2" ' + attr + '><summary class="cursor-pointer text-xs font-bold text-slate-500">פרטים טכניים — מה כל קריאה ראתה</summary>' + inner + '</details>' : '';
@@ -13817,7 +14022,14 @@ function receiptPriceAuditHtml(report, { summary = false } = {}) {
   const correctionProblems = paperRowCorrectionProblems();
   const money = n => n == null ? 'לא זמין' : '₪' + fmtUnitPrice(n, true);
   const openPanel = pending.length > 0 || !a.complete || reviewed.length > 0;
-  const title = pending.length ? priceAuditPendingTitle(pending) : // v398: מה לעשות, לא רק כמה
+  // v399: תעודה שלא מתאזנת על הכסף בלבד — כרטיס אחד שאומר מה חסר ואיפה, והשורות שרק מחכות שהתעודה תתאזן
+  // מקופלות לשורה אחת (עד כאן: כרטיס "הפענוח חלקי או חסר עמוד" לכל שורה, גם בתעודה אחרת שנקראה מושלם).
+  const gaps = receiptPaperScanState === 'failed' ? (yotvataPaperGaps() || []) : [];
+  const tasks = gaps.length ? pending.filter(r => !r.waitingForPaper) : pending;
+  const waiting = pending.length - tasks.length;
+  const gapTitle = gaps.map(e => 'תעודה ' + htmlEscape(e.label) + ' לא מתאזנת' + (e.gap.page ? ' · ההפרש בעמוד ' + e.gap.page : '')).join(' · ');
+  const title = gaps.length ? gapTitle + (tasks.length ? ' · ' + priceAuditPendingTitle(tasks, true) : '') :
+    pending.length ? priceAuditPendingTitle(pending) : // v398: מה לעשות, לא רק כמה
     documentReviews.length ? 'צריך לאשר את סיכום התעודה' :
     reviewed.length && a.complete ? 'הבדיקה הושלמה · ' + reviewed.length + ' פערי מחיר נשמרו' :
     a.complete ? 'המחירים שנבדקו תואמים · ' + a.rows.length + ' שורות · אין מה לאשר' : 'צריך להשלים את צילום התעודה';
@@ -13832,8 +14044,10 @@ function receiptPriceAuditHtml(report, { summary = false } = {}) {
     (openPanel ? 'text-amber-900' : 'text-emerald-800') + '">' +
     '<span role="status" aria-live="polite">' + title + '</span><i class="fa-solid fa-chevron-down hist-chevron shrink-0"></i></summary>' +
     (pending.length ? '<p class="mt-2 text-slate-600">מוצגות רק השורות שנותרו לטיפול. לאחר זיהוי המוצר המחיר נבדק אוטומטית, ושורה תקינה יוצאת מהרשימה.</p>' : '') +
-    (correctionProblems.length ? '<div role="alert" class="rounded-xl bg-amber-50 border-2 border-amber-300 p-3 mt-3"><b>התיקון נשמר, אבל השורות עדיין אינן תואמות לסיכום החשבונית.</b><p class="mt-1">בדוק את התיקון האחרון או תקן שורות נוספות לפי הנייר.</p>' + correctionProblems.map(d => '<p class="mt-1 text-xs">תעודה ' + htmlEscape(d.number || String(d.index + 1)) + ': ' + htmlEscape(d.problems.join(' · ')) + '</p>').join('') + '</div>' : '') +
-    pending.map(priceAuditActionCardHtml).join('') +
+    (correctionProblems.length && !gaps.length ? '<div role="alert" class="rounded-xl bg-amber-50 border-2 border-amber-300 p-3 mt-3"><b>התיקון נשמר, אבל השורות עדיין אינן תואמות לסיכום החשבונית.</b><p class="mt-1">בדוק את התיקון האחרון או תקן שורות נוספות לפי הנייר.</p>' + correctionProblems.map(d => '<p class="mt-1 text-xs">תעודה ' + htmlEscape(d.number || String(d.index + 1)) + ': ' + htmlEscape(d.problems.join(' · ')) + '</p>').join('') + '</div>' : '') +
+    gaps.map(yotvataPaperGapCardHtml).join('') +
+    tasks.map(priceAuditActionCardHtml).join('') +
+    (waiting ? '<p data-paper-gap-waiting class="mt-3 text-sm text-slate-600">' + (waiting === 1 ? 'עוד שורה אחת תיבדק' : 'עוד ' + waiting + ' שורות ייבדקו') + ' אחרי שהתעודה תתאזן. אין בהן מה לעשות עכשיו.</p>' : '') +
     documentReviews.map(info => {
       const doc = aiScanResponse.scan.documents.find(d => d.noteIndex === info.index), paper = priceAuditSource(doc), input = aiScanDocuments[info.index];
       const balanced = yotvataPaperCheck(paper, input.pages.length || input.restoredPageCount || 0).ok;
@@ -13878,7 +14092,9 @@ function refreshPriceScannerNotice() {
   const relevant = scanPurpose === 'receiving' && a.state === 'ready' && (pending.length > 0 || !a.complete);
   if (relevant) button.classList.remove('hidden'); else button.classList.add('hidden');
   if (!relevant) return;
-  button.textContent = pending.length ? priceAuditPendingTitle(pending, true) + ' — פתח את הרשימה' : a.documents.some(d => d.reviewRequired) ? 'צריך לאשר את סיכום התעודה' : 'צריך להשלים את צילום התעודה';
+  const unbalanced = receiptPaperScanState === 'failed' && (yotvataPaperGaps() || []).length > 0; // v399
+  button.textContent = unbalanced ? 'התעודה לא מתאזנת — פתח את הרשימה'
+    : pending.length ? priceAuditPendingTitle(pending, true) + ' — פתח את הרשימה' : a.documents.some(d => d.reviewRequired) ? 'צריך לאשר את סיכום התעודה' : 'צריך להשלים את צילום התעודה';
 }
 
 function refreshPriceAuditViews() {
@@ -19999,8 +20215,8 @@ function receiptFilterBucket(rc) {
 }
 // ===== v398: משפט אחד לכל קליטה שמורה — מה המצב ומה צריך לעשות =====
 // מהשטח (גיבוי החנות, 22.10.2026, אפליקציה v397): כל 18 הקליטות שנסרקו מאז 8.9 נקראו במלואן
-// (סכום השורות וסך היחידות תאמו לנייר בכל 25 התעודות) וכל החוסרים נסגרו — בקיזוז, בהשלמת
-// סחורה או בזיכוי. אבל מי שפתח את הקובץ ראה רק דגלים טכניים: needs_review על 10 מתוך 25
+// (סכום השורות וסך היחידות תאמו לנייר בכל 28 התעודות) וכל החוסרים נסגרו — בקיזוז, בהשלמת
+// סחורה או בזיכוי. אבל מי שפתח את הקובץ ראה רק דגלים טכניים: needs_review על 10 מתוך 28
 // תעודות (שורה אחת שבה הברקוד לא הצביע על מוצר יחיד), hasDiscrepancy: true ו-status: "open"
 // על 10 קליטות שהמסך כבר הציג מאוזנות — ובעל העסק שאל אם משהו בכלל נקלט. המסך ידע
 // (receiptDiscrepancyInfo), אבל לא אמר זאת במשפט. מכאן: לכל קליטה שמורה מצב אחד, משפט אחד
@@ -24832,6 +25048,17 @@ app.addEventListener('click', (e) => {
   if (t.dataset.role.startsWith('delivery-credit-')) return deliveryCreditAction(t.dataset.role, t.dataset.id, t.dataset.page, t.dataset.row);
   const role = t.dataset.role, id = t.dataset.id;
   if (role === 'paper-row-edit') { openPaperRowCorrection(Number(t.dataset.doc), Number(t.dataset.row)); return; }
+  // v399: "בנייר כתוב 12 × ₪9.10" — חלון התיקון הקיים, ממולא במה שקריאה אחרת ראתה; העובד משווה לנייר ומאשר.
+  if (role === 'paper-row-suggest') {
+    openPaperRowCorrection(Number(t.dataset.doc), Number(t.dataset.row), { quantity: Number(t.dataset.qty), unitPriceExVat: Number(t.dataset.unit), lineTotalExVat: Number(t.dataset.total) });
+    return;
+  }
+  // v399: תעודה שכבר מתאזנת אבל נשארה חסומה מגרסה קודמת — בדיקה חוזרת אחת משחררת אותה.
+  if (role === 'rc-paper-recheck') {
+    if (yotvataRecheckFailedPaper()) { renderReceiving(); showToast('התעודה מתאזנת מול הסיכום המודפס ✓', null, null, 2600); }
+    else renderReceiving();
+    return;
+  }
   if (role === 'rc-count-by-scan') { receiptCountingMode = 'scan'; closeReceiptQuantityReview(); saveReceiptDraft(); renderReceiving(); return; }
   if (role === 'rc-quantity-all' || role === 'rc-quantity-differences') { startReceiptQuantityReview(role === 'rc-quantity-all'); return; }
   // The browser folds the element itself; this only remembers it for the next render.
