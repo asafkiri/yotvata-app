@@ -124,7 +124,7 @@ function assertClosedSettled(c) {
   assert.deepEqual([audit.rows[MILKY].capability, audit.rows[MILKY].result, audit.rows[MILKY].modelReviewIssues], ['checkable', 'match', undefined]);
   const html = auditHtml(c);
   assert.match(html, /המחירים שנבדקו תואמים · 22 שורות · אין מה לאשר/);
-  assert.doesNotMatch(html, /צריך להשלים את הבדיקה|price-confirm-values|data-price-row=|קריאה 4|פעם שנייה|המודל החזק/, 'nothing new for the worker');
+  assert.doesNotMatch(html, /צריך להשלים את הבדיקה|בדוק את המחיר|price-confirm-values|data-price-row=|קריאה 4|פעם שנייה|המודל החזק/, 'nothing new for the worker');
   assert.equal(c.run('aiEvaluateInvoiceScan(aiScanResponse).valid'), true, JSON.stringify(json(c, 'aiEvaluateInvoiceScan(aiScanResponse).errors')));
   const diag = diagnostics(c);
   assert.match(diag, /קריאה 4 \(המודל החזק, פעם שנייה\) · תעודה 1: closed · נסגרו 1 מתוך 1 שדות/);
@@ -139,8 +139,10 @@ async function assertFourReadCard(c, fourth, tail) {
   assert.equal(c.run('priceAuditConsensusConfirmed(' + R + ')'), false);
   assert.deepEqual(pending(c).map(r => r.rowIndex), [MILKY]);
   const html = auditHtml(c);
-  assert.match(html, /נשארה שורה אחת לטיפול/);
-  assert.match(html, /צריך להשלים את הבדיקה/);
+  // v398: the panel and the card say what to do; the four reads stay, folded under "פרטים טכניים".
+  assert.match(html, /נשארה שורה אחת לבדיקה מול הנייר/);
+  assert.match(html, /בדוק את המחיר והסכום מול הנייר/);
+  assert.match(html, /<details class="mt-2" data-row-dispute-fold>/);
   const shown = fourth.toFixed(2).replace('.', '\\.');
   assert.match(html, new RegExp('<p data-row-dispute-field="unitPriceExVat">הקריאות לא הסכימו על מחיר היחידה: קריאה 1 – 16\\.13 · קריאה 2 – 16\\.30 · ' +
     'קריאה 3 \\(המודל החזק\\) – 16\\.03 · קריאה 4 \\(המודל החזק, פעם שנייה\\) – ' + shown + '\\. ' + tail + '</p>'));
@@ -361,7 +363,7 @@ test('read 3 proves no quantity: a unit price Terra#2 closed in a row whose quan
   assert.deepEqual(json(c, 'aiModelReviewIssues(' + R + ')'), ['quantity']);
   assert.equal(c.run('priceAuditConsensusConfirmed(' + R + ')'), false);
   assert.deepEqual(pending(c).map(r => r.rowIndex), [MILKY]);
-  assert.match(auditHtml(c), /צריך להשלים את הבדיקה/);
+  assert.match(auditHtml(c), /בדוק את הכמות מול הנייר/); // v398
   assert.equal(c.run('aiEvaluateInvoiceScan(aiScanResponse).valid'), false, 'the receipt waits for the worker');
   // The arithmetic is v395's: a cheap read that supports the price proves the quantity, as before
   c.run(`${R}.modelVerification.fieldSupport.unitPriceExVat = [1]`);

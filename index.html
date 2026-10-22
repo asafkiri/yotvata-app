@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v397 תיקון כמות ממסך החוסרים</title>
+    <title>הזמנות יטבתה - v398 מצב התעודה במילים</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -125,7 +125,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v397 תיקון כמות ממסך החוסרים</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v398 מצב התעודה במילים</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -669,7 +669,9 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '397'; // תיקון הכמות שהתקבלה ישירות ממסך החוסרים והעודפים — החוסר מתעדכן מיד
+const APP_VERSION = '398'; // מצב התעודה במילים: משפט אחד ופעולה אחת לכל קליטה, פרטים טכניים מקופלים, סטטוס שמור שמתעדכן, סיכום בראש הגיבוי
+// v398: תווית הגרסה ביומן הפעולות ובקובץ הגיבוי (עד כאן מחרוזת קבועה שנשארה 'v396_second_strong_read')
+const APP_VERSION_LABEL = 'v' + APP_VERSION + '_plain_receipt_status';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -3794,7 +3796,7 @@ async function logAction(type, title, details, meta) {
     await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'actionLog', id), {
       timestamp: Date.now(), type: type || 'system', title: title || 'פעולה', details: details || '',
       deviceName: actionDeviceLabel(), uid: (auth && auth.currentUser && auth.currentUser.uid) || '',
-      appVersion: 'v396_second_strong_read', meta: cloneSafe(meta || {})
+      appVersion: APP_VERSION_LABEL, meta: cloneSafe(meta || {})
     });
   } catch (e) { console.warn('action log failed', e); }
 }
@@ -3827,6 +3829,38 @@ function backupDocCount(payload, name) {
 function backupTotalCount(payload) {
   if (!payload || !payload.collections) return 0;
   return Object.keys(payload.collections).reduce((a, name) => a + backupDocCount(payload, name), 0);
+}
+// ===== v398: סיכום במילים בראש קובץ הגיבוי =====
+// בעל העסק פתח את קובץ הגיבוי (22.10.2026) ושאל אם בכלל נקלטה תעודה: הוא ראה needs_review,
+// hasDiscrepancy: true ו-status: "open" — ולא משפט אחד שאומר מה המצב. מכאן: הקובץ נפתח בסיכום
+// במילים — שורה לכל קליטה (אותו משפט שמסך ההיסטוריה מציג, receiptPlainStatus), ספירה, ומילון
+// קצר לדגלים הטכניים. מידע בלבד: הייבוא קורא רק את collections ומתעלם מהסיכום.
+function backupPlainSummary(payload) {
+  const col = payload && payload.collections && payload.collections.receipts || {};
+  const list = Object.keys(col).filter(id => col[id] && typeof col[id] === 'object').map(id => ({ ...col[id], id }))
+    .sort((a, b) => (Number(b.timestamp) || 0) - (Number(a.timestamp) || 0));
+  const counts = { receipts: list.length, balanced: 0, open: 0 };
+  const receipts = list.map(rc => {
+    let plain;
+    try { plain = receiptPlainStatus(rc); }
+    catch (e) { plain = { state: 'unknown', text: 'לא הצלחתי לחשב את המצב מהרשומה', action: '', open: true }; }
+    counts[plain.open ? 'open' : 'balanced']++;
+    const docs = (rc.priceAudit && Array.isArray(rc.priceAudit.documents) ? rc.priceAudit.documents : (rc.aiAudit && Array.isArray(rc.aiAudit.documents) ? rc.aiAudit.documents : []))
+      .map(d => String(d && (d.number || d.invoiceNumber) || '')).filter(Boolean);
+    return { id: rc.id, date: rc.date || '', documents: docs, items: Number(rc.count) || (Array.isArray(rc.items) ? rc.items.length : 0),
+      totalExVat: r2(rc.totalExVat), state: plain.state, status: plain.text, action: plain.action || '' };
+  });
+  return {
+    about: 'סיכום במילים של תעודות הקליטה שבקובץ, לפי אותם חישובים של מסך "היסטוריית תעודות". המצב כאן הוא הקובע; הדגלים הטכניים ברשומות מוסברים במילון. מידע בלבד — הייבוא מתעלם מהסיכום.',
+    counts,
+    receipts,
+    glossary: {
+      'status': 'הסטטוס השמור של הקליטה. מגרסה 398 הוא מתעדכן גם כשחוסר נסגר (קיזוז, השלמת סחורה או זיכוי); ברשומות שנסגרו לפני כן הוא עשוי להישאר "open" גם כשהתעודה מאוזנת.',
+      'aiAudit.hasDiscrepancy': 'הסריקה מצאה חוסר, עודף או פער מחיר ברגע הקליטה. הממצאים (aiAudit.findings) נשמרים להיסטוריה גם אחרי שנסגרו.',
+      'scanAudit.perDocument[].verification.status = "needs_review"': 'בשורה אחת לפחות הקריאות לא הסכימו (בדרך כלל ברקוד שלא הצביע על מוצר יחיד) והעובד בחר בעצמו בזמן הקליטה. זה לא כישלון סריקה: סכום השורות וסך היחידות נבדקו מול הנייר.',
+      'priceAudit.rows[].result': '"match" — מחיר השורה תואם למחירון; "difference" — פער מחיר שאושר לפי הנייר.'
+    }
+  };
 }
 function validBackupPayload(payload) {
   return !!(payload && payload.collections && typeof payload.collections === 'object' && (payload.backupType === 'yotvata-firestore-full' || payload.appId === appId));
@@ -3878,9 +3912,10 @@ async function exportFullBackup() {
       backupType: 'yotvata-firestore-full',
       backupVersion: 1,
       appId,
-      appVersion: 'v396_second_strong_read',
+      appVersion: APP_VERSION_LABEL,
       exportedAt: Date.now(),
       exportedAtIso: new Date().toISOString(),
+      summary: null, // v398: ממולא אחרי האיסוף — נשאר לפני collections כדי שייקרא ראשון
       collections: {},
       localDrafts: {
         order: readLocalJson(ORDER_DRAFT_KEY, null),
@@ -3899,6 +3934,7 @@ async function exportFullBackup() {
         payload.collections[c.name][dd.id] = data;
       });
     }
+    payload.summary = backupPlainSummary(payload); // v398: הקובץ נפתח במילים — מה המצב של כל קליטה ומה נשאר לטיפול
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -13007,8 +13043,11 @@ function priceAuditDocumentDisputeHtml(doc, paper) {
         (failed ? ' הקריאה השלישית (המודל החזק) נכשלה, לכן נשארו שתי קריאות שלא הסכימו.' : disagreed ? ' גם הקריאה השלישית (המודל החזק) קראה את הנייר, ועדיין אין שתי קריאות שמסכימות.' : '')) +
     '</p>' + (lone ? '' : perField) +
     // הסיבה הטכנית לכישלון — רק בשורה קטנה, משמאל לימין, כמו שאר הטקסט הטכני באפליקציה.
-    (failed && verifier.error ? '<p class="mt-1 text-[11px] text-slate-400" dir="ltr">' + htmlEscape(String(verifier.error)).slice(0, 80) + '</p>' : '') +
-    '<p class="mt-2">בדוק מול הנייר: ₪' + fmtMoney(paper.subtotalExVat) + ' לפני מע״מ · ' + paper.printedUnits + ' יחידות · ' + paper.rows.length + ' שורות שנקראו.</p>';
+    (failed && verifier.error ? '<p class="mt-1 text-[11px] text-slate-400" dir="ltr">' + htmlEscape(String(verifier.error)).slice(0, 80) + '</p>' : '');
+}
+// v398: השורה שהעובד באמת צריך — מה לבדוק מול הנייר — מחוץ לקיפול הטכני (עד כאן נסגרה בתוך ההסבר).
+function priceAuditDocumentCheckLineHtml(paper) {
+  return '<p class="mt-2">בדוק מול הנייר: ₪' + fmtMoney(paper.subtotalExVat) + ' לפני מע״מ · ' + paper.printedUnits + ' יחידות · ' + paper.rows.length + ' שורות שנקראו.</p>';
 }
 function priceAuditDocumentReviewNeeded(doc) {
   if (!doc || !doc.modelVerification || !priceAuditDocumentDisputes(doc).length) return false;
@@ -13519,6 +13558,39 @@ function priceAuditChoiceHtml(r) {
 function priceAuditPendingRows(a) {
   return a.rows.filter(r => r.capability !== 'checkable' || (r.result === 'difference' && !r.paperConfirmed));
 }
+// ===== v398: הפאנל והכרטיסים אומרים מה לעשות, במילים של העובד =====
+// מהשטח (22.10.2026): בעל העסק ראה "נשארו 2 שורות לטיפול" ו"צריך להשלים את הבדיקה" עם פירוט
+// של ארבע קריאות ומודל חזק, ולא הבין מה הבעיה ומה צריך לעשות. הכותרת אומרת עכשיו את הפעולה
+// (בחירת מוצר, בדיקה מול הנייר, פער מחיר, השלמת מחיר במאגר), וההסבר הטכני — מה כל קריאה
+// ראתה ולמה החשבון לא מכריע — נשאר במלואו, אבל מקופל תחת "פרטים טכניים". שום כלל לא משתנה.
+function priceAuditPendingKind(r) {
+  if (r.choice || r.capability === 'unidentified') return 'choose';
+  if (r.modelReviewIssues) return 'check';
+  if (r.result === 'difference') return 'price';
+  if (r.capability === 'missing_catalog_price') return 'catalog';
+  return 'other';
+}
+const PRICE_AUDIT_PENDING_LABELS = { choose: 'לבחירת מוצר', check: 'לבדיקה מול הנייר', price: 'עם פער מחיר', catalog: 'להשלמת מחיר במאגר', other: 'לטיפול' };
+// short — לכפתור הקטן במסך הסריקה ("שורה אחת לבחירת מוצר"); אחרת למשפט המלא ("נשארה שורה אחת לבחירת מוצר").
+function priceAuditPendingTitle(pending, short) {
+  const n = pending.length, counts = {};
+  pending.forEach(r => { const k = priceAuditPendingKind(r); counts[k] = (counts[k] || 0) + 1; });
+  const kinds = Object.keys(counts);
+  const label = kinds.length === 1 ? PRICE_AUDIT_PENDING_LABELS[kinds[0]] : 'לטיפול';
+  const head = n === 1 ? (short ? 'שורה אחת ' : 'נשארה שורה אחת ') + label : (short ? n + ' שורות ' : 'נשארו ' + n + ' שורות ') + label;
+  return kinds.length === 1 ? head : head + ': ' + kinds.map(k => counts[k] + ' ' + PRICE_AUDIT_PENDING_LABELS[k]).join(' · ');
+}
+// כותרת הכרטיס של שורה שהקריאות לא הסכימו עליה: מה לבדוק מול הנייר.
+function priceAuditPlainCheckTitle(issues) {
+  const fields = (issues || []).filter(f => f !== 'identity');
+  const qty = fields.includes('quantity'), money = fields.some(f => f !== 'quantity');
+  if (qty && !money) return 'בדוק את הכמות מול הנייר';
+  if (money && !qty) return 'בדוק את המחיר והסכום מול הנייר';
+  return 'בדוק את הכמות והמחיר מול הנייר';
+}
+function priceAuditTechnicalFoldHtml(inner, attr) {
+  return inner ? '<details class="mt-2" ' + attr + '><summary class="cursor-pointer text-xs font-bold text-slate-500">פרטים טכניים — מה כל קריאה ראתה</summary>' + inner + '</details>' : '';
+}
 // Acknowledging the paper finishes a review task, never a financial discrepancy.
 // Bind it to the current source, identity, date and calculation, so any edit
 // reopens the task automatically (including edits arriving from another device).
@@ -13727,10 +13799,12 @@ function priceAuditActionCardHtml(r) {
     '<div>מחיר מאגר לפני הנחה: ' + money(r.catalogBasePrice) + (r.regularDiscountPct ? ' · הנחה קבועה ' + r.regularDiscountPct + '%' : '') + '</div>' +
     (r.promo ? '<div>מבצע: ' + htmlEscape(r.promo.name) + ' · ' + htmlEscape(r.promo.start) + ' עד ' + htmlEscape(r.promo.end) + ' · מינימום ' + r.promo.minUnits + '</div>' : '') +
     (r.monthlyStatus ? '<div>' + htmlEscape(r.monthlyStatus) + '</div>' : '') + '</details>' : '';
+  // v398: הכותרת אומרת מה לבדוק; "מה כל קריאה ראתה" נשאר, מקופל, אחרי הכפתור.
+  const plainTitle = r.modelReviewIssues ? priceAuditPlainCheckTitle(r.modelReviewIssues) : 'צריך להשלים את הבדיקה';
   return shell + '<div class="font-black text-base ' + (difference ? 'text-rose-800' : 'text-amber-900') + '">' +
-    (difference ? gapTitle : r.capability === 'missing_catalog_price' ? 'צריך להשלים מחיר למוצר' : 'צריך להשלים את הבדיקה') +
-    '</div><div class="font-black text-lg mt-2">' + htmlEscape(r.name) + '</div>' + comparison + dispute +
-    aiSourceRowHtml(r.documentIndex, r.rowIndex, { uncertain: !r.productId }) + action + calculation + '</article>';
+    (difference ? gapTitle : r.capability === 'missing_catalog_price' ? 'צריך להשלים מחיר למוצר' : plainTitle) +
+    '</div><div class="font-black text-lg mt-2">' + htmlEscape(r.name) + '</div>' + comparison +
+    aiSourceRowHtml(r.documentIndex, r.rowIndex, { uncertain: !r.productId }) + action + priceAuditTechnicalFoldHtml(dispute, 'data-row-dispute-fold') + calculation + '</article>';
 }
 function receiptPriceAuditHtml(report, { summary = false } = {}) {
   const a = report || receiptPriceAudit();
@@ -13743,7 +13817,7 @@ function receiptPriceAuditHtml(report, { summary = false } = {}) {
   const correctionProblems = paperRowCorrectionProblems();
   const money = n => n == null ? 'לא זמין' : '₪' + fmtUnitPrice(n, true);
   const openPanel = pending.length > 0 || !a.complete || reviewed.length > 0;
-  const title = pending.length ? (pending.length === 1 ? 'נשארה שורה אחת לטיפול' : 'נשארו ' + pending.length + ' שורות לטיפול') :
+  const title = pending.length ? priceAuditPendingTitle(pending) : // v398: מה לעשות, לא רק כמה
     documentReviews.length ? 'צריך לאשר את סיכום התעודה' :
     reviewed.length && a.complete ? 'הבדיקה הושלמה · ' + reviewed.length + ' פערי מחיר נשמרו' :
     a.complete ? 'המחירים שנבדקו תואמים · ' + a.rows.length + ' שורות · אין מה לאשר' : 'צריך להשלים את צילום התעודה';
@@ -13764,9 +13838,11 @@ function receiptPriceAuditHtml(report, { summary = false } = {}) {
       const doc = aiScanResponse.scan.documents.find(d => d.noteIndex === info.index), paper = priceAuditSource(doc), input = aiScanDocuments[info.index];
       const balanced = yotvataPaperCheck(paper, input.pages.length || input.restoredPageCount || 0).ok;
       // v365: ההסבר נוקב בשדה שבמחלוקת, במה שכל קריאה ראתה, ובכישלון של הקריאה השלישית.
+      // v398: קודם מה לבדוק והכפתור; ההסבר (מה כל קריאה ראתה) מקופל אחריהם.
       return '<div class="border-2 border-amber-300 rounded-xl p-3 mt-3"><b>אימות סיכום תעודה ' + htmlEscape(info.number || String(info.index + 1)) + '</b>' +
-        priceAuditDocumentDisputeHtml(doc, paper) +
-        (balanced ? '<button data-role="price-confirm-document" data-doc="' + info.index + '" data-review-token="' + htmlEscape(priceAuditDocumentReviewToken(doc)) + '" class="btn-tap w-full rounded-xl bg-blue-600 text-white py-3 mt-3 font-black">כן, הסיכום תואם לנייר</button>' : '') + receiptBackToPhotosHtml() + '</div>';
+        priceAuditDocumentCheckLineHtml(paper) +
+        (balanced ? '<button data-role="price-confirm-document" data-doc="' + info.index + '" data-review-token="' + htmlEscape(priceAuditDocumentReviewToken(doc)) + '" class="btn-tap w-full rounded-xl bg-blue-600 text-white py-3 mt-3 font-black">כן, הסיכום תואם לנייר</button>' : '') +
+        priceAuditTechnicalFoldHtml(priceAuditDocumentDisputeHtml(doc, paper), 'data-document-dispute-fold') + receiptBackToPhotosHtml() + '</div>';
     }).join('') +
     priceAuditReviewedHtml(a.rows) +
     priceAuditAutomaticChoicesHtml(a.rows) +
@@ -13802,7 +13878,7 @@ function refreshPriceScannerNotice() {
   const relevant = scanPurpose === 'receiving' && a.state === 'ready' && (pending.length > 0 || !a.complete);
   if (relevant) button.classList.remove('hidden'); else button.classList.add('hidden');
   if (!relevant) return;
-  button.textContent = pending.length ? (pending.length === 1 ? 'שורה אחת לטיפול' : pending.length + ' שורות לטיפול') + ' — פתח את הרשימה' : a.documents.some(d => d.reviewRequired) ? 'צריך לאשר את סיכום התעודה' : 'צריך להשלים את צילום התעודה';
+  button.textContent = pending.length ? priceAuditPendingTitle(pending, true) + ' — פתח את הרשימה' : a.documents.some(d => d.reviewRequired) ? 'צריך לאשר את סיכום התעודה' : 'צריך להשלים את צילום התעודה';
 }
 
 function refreshPriceAuditViews() {
@@ -18061,6 +18137,37 @@ function receiptAuditAfterCredit(rc, nextClaim) {
   }
   return { aiAudit, status: baseOpen ? 'open' : 'ok' };
 }
+// v398: הסטטוס השמור של קליטה (status, aiAudit.hasDiscrepancy / resolvedAt) עוקב אחרי המצב
+// האמיתי שלה. עד כאן הוא נכתב רק בשמירה ובסגירת דרישת זיכוי (receiptAuditAfterCredit): קיזוז,
+// השלמת סחורה או זיכוי על חוסר השאירו status: "open" ו-hasDiscrepancy: true לנצח, והגיבוי (וכל
+// מי שקרא אותו) הראה "פתוח" על תעודות שהמסך כבר הציג מאוזנות — המסך תמיד חישב מחדש
+// (receiptDiscrepancyInfo) ולא הסתכל על השדה. מחזירה את השדות לכתיבה יחד עם השינוי (changes),
+// לפי אותו כלל כמו סגירת זיכוי: ממצאי כמות מיוצגים בשורות ובקיזוזים ולכן הדגל הישן אינו נועל
+// את התעודה; ממצא מחיר או מבצע אמיתי (בלי מבצע תואם) משאיר אותה פתוחה. aiAudit נכתב רק
+// כשהדגל באמת משתנה. המסך לא משתנה — הוא ממשיך לחשב מחדש.
+function receiptStoredStatusPatch(rc, changes) {
+  const probe = { ...(rc || {}), ...(changes || {}) };
+  const base = receiptDiscrepancyInfo({ ...probe, aiAudit: null });
+  const audit = probe.aiAudit && typeof probe.aiAudit === 'object' ? probe.aiAudit : null;
+  const findings = audit && Array.isArray(audit.findings) ? audit.findings : [];
+  const day = probe.date || todayStr();
+  const priceFindingOpen = !!(audit && audit.hasDiscrepancy) && findings.some(f => f && (f.type === 'price' || f.type === 'promo_missing') && !aiPriceFindingPromoMatch(f, day));
+  const open = !!(base.open || priceFindingOpen);
+  const patch = { status: open ? 'open' : 'ok' };
+  if (audit && (!!audit.hasDiscrepancy !== open || !!audit.resolvedAt === open)) {
+    const next = cloneSafe(audit);
+    next.hasDiscrepancy = open;
+    if (open) delete next.resolvedAt; else next.resolvedAt = Date.now();
+    patch.aiAudit = next;
+  }
+  return patch;
+}
+// v398: אותו עדכון על העותק המקומי אחרי שהכתיבה הצליחה (עד שהסנכרון מהענן יחזיר אותו).
+function applyReceiptStoredStatus(rc, patch) {
+  if (!rc || !patch) return;
+  rc.status = patch.status;
+  if (patch.aiAudit) rc.aiAudit = patch.aiAudit;
+}
 async function setReceiptSupplierCreditStatus(id, status, opts) {
   const rc = receipts.find(x => x.id === id); if (!rc || !rc.supplierCreditClaim) return;
   opts = opts || {};
@@ -19185,9 +19292,10 @@ async function saveShortGoods(rcId, items) {
   const rc = receipts.find(x => x.id === rcId); if (!rc) return;
   const at = Date.now();
   const notes = (Array.isArray(rc.shortGoodsNotes) ? rc.shortGoodsNotes : []).concat(items.map(x => ({ productId: x.productId || '', name: x.name || '', qty: Number(x.n) || 0, price: Number(x.price) || 0, at })));
-  const saved = await runCloudTask('close shortage by goods', { op: 'update', path: dataPath('receipts', rc.id), data: { shortGoodsNotes: cloneSafe(notes) }, operationId: makeOperationId('short_goods') });
+  const patch = receiptStoredStatusPatch(rc, { shortGoodsNotes: notes }); // v398
+  const saved = await runCloudTask('close shortage by goods', { op: 'update', path: dataPath('receipts', rc.id), data: { shortGoodsNotes: cloneSafe(notes), ...patch }, operationId: makeOperationId('short_goods') });
   if (!saved) return;
-  rc.shortGoodsNotes = notes;
+  rc.shortGoodsNotes = notes; applyReceiptStoredStatus(rc, patch);
   buzz(18);
   showToast((rc.shortCreditNotes || []).some(n => n.source === 'delivery_credit_scan') ? 'השלמת הסחורה נרשמה. התשלום והחוסר שנותר עודכנו.' : 'החוסר הושלם בסחורה ✓ התעודה משולמת במלואה', null, null, 3000);
   if (currentView === 'receiptsHistory') renderReceiptsHistory();
@@ -19584,18 +19692,20 @@ async function applyAutoOffsetPair(p) {
   const theirs = { id: p.oid, otherId: p.rc.id, productId: p.productId, name: p.otherName || p.name, qty: p.qty, dir: p.myDir === 'short' ? 'over' : 'short', at: stamp, source: 'auto' };
   const rcOffsets = mergeReceiptExternalOffsets(p.rc.externalOffsets, [mine]);
   const otherOffsets = mergeReceiptExternalOffsets(p.other.externalOffsets, [theirs]);
+  // v398: הסטטוס השמור נסגר (או נשאר פתוח) יחד עם הקיזוז
+  const rcPatch = receiptStoredStatusPatch(p.rc, { externalOffsets: rcOffsets }), otherPatch = receiptStoredStatusPatch(p.other, { externalOffsets: otherOffsets });
   if (db) {
     const saved = await runCloudTaskSilent('apply automatic receipt offset', {
       op: 'batch', operationId: makeOperationId('offset_auto'),
       writes: [
-        { op: 'update', path: dataPath('receipts', p.rc.id), data: { externalOffsets: rcOffsets, offsetClosed: false, offsetWith: p.other.id, offsetAt: stamp, offsetSchemaVersion: 2 } },
-        { op: 'update', path: dataPath('receipts', p.other.id), data: { externalOffsets: otherOffsets, offsetClosed: false, offsetWith: p.rc.id, offsetAt: stamp, offsetSchemaVersion: 2 } }
+        { op: 'update', path: dataPath('receipts', p.rc.id), data: { externalOffsets: rcOffsets, offsetClosed: false, offsetWith: p.other.id, offsetAt: stamp, offsetSchemaVersion: 2, ...rcPatch } },
+        { op: 'update', path: dataPath('receipts', p.other.id), data: { externalOffsets: otherOffsets, offsetClosed: false, offsetWith: p.rc.id, offsetAt: stamp, offsetSchemaVersion: 2, ...otherPatch } }
       ]
     });
     if (!saved) return false;
   }
-  p.rc.externalOffsets = rcOffsets; p.rc.offsetClosed = false; p.rc.offsetSchemaVersion = 2;
-  p.other.externalOffsets = otherOffsets; p.other.offsetClosed = false; p.other.offsetSchemaVersion = 2;
+  p.rc.externalOffsets = rcOffsets; p.rc.offsetClosed = false; p.rc.offsetSchemaVersion = 2; applyReceiptStoredStatus(p.rc, rcPatch);
+  p.other.externalOffsets = otherOffsets; p.other.offsetClosed = false; p.other.offsetSchemaVersion = 2; applyReceiptStoredStatus(p.other, otherPatch);
   return true;
 }
 async function autoApplyExactOffsets() {
@@ -19678,11 +19788,14 @@ async function migrateLegacyReceiptOffsets() {
       const aOffsets = mergeReceiptExternalOffsets(rc.externalOffsets, aAdds);
       const bOffsets = mergeReceiptExternalOffsets(other.externalOffsets, bAdds);
       const review = matches.length === 0;
+      // v398: הסטטוס השמור עוקב אחרי הקיזוז המשוחזר (offsetClosed: false — הדגל הישן כבר אינו סוגר)
+      const aPatch = receiptStoredStatusPatch(rc, { externalOffsets: aOffsets, offsetClosed: false, offsetSchemaVersion: 2 });
+      const bPatch = receiptStoredStatusPatch(other, { externalOffsets: bOffsets, offsetClosed: false, offsetSchemaVersion: 2 });
       await runCloudTaskSilent('migrate legacy receipt offset', {
         op: 'batch', operationId: 'offset_migration_v2_' + pairKey,
         writes: [
-          { op: 'update', path: dataPath('receipts', rc.id), data: { externalOffsets: aOffsets, offsetClosed: false, offsetSchemaVersion: 2, legacyOffsetMigratedAt: stamp, offsetNeedsReview: review } },
-          { op: 'update', path: dataPath('receipts', other.id), data: { externalOffsets: bOffsets, offsetClosed: false, offsetSchemaVersion: 2, legacyOffsetMigratedAt: stamp, offsetNeedsReview: review } }
+          { op: 'update', path: dataPath('receipts', rc.id), data: { externalOffsets: aOffsets, offsetClosed: false, offsetSchemaVersion: 2, legacyOffsetMigratedAt: stamp, offsetNeedsReview: review, ...aPatch } },
+          { op: 'update', path: dataPath('receipts', other.id), data: { externalOffsets: bOffsets, offsetClosed: false, offsetSchemaVersion: 2, legacyOffsetMigratedAt: stamp, offsetNeedsReview: review, ...bPatch } }
         ]
       });
     } finally { legacyOffsetMigrationBusy.delete(pairKey); }
@@ -19710,9 +19823,10 @@ async function confirmShortCredit() {
   if (!(amount > 0)) { showToast('הזן סכום זיכוי גדול מאפס', null, null, 2600); return; }
   if (amount > r2(remaining + 0.01)) { showToast('הזיכוי (₪' + fmtMoney(amount) + ') גדול מהחוב הפתוח (₪' + fmtMoney(remaining) + ')', null, null, 3200); return; }
   const notes = (Array.isArray(rc.shortCreditNotes) ? rc.shortCreditNotes : []).concat([{ amount: amount, at: Date.now() }]);
-  const saved = await runCloudTask('close shortage by supplier credit', { op: 'update', path: dataPath('receipts', rc.id), data: { shortCreditNotes: cloneSafe(notes) }, operationId: makeOperationId('short_credit') });
+  const patch = receiptStoredStatusPatch(rc, { shortCreditNotes: notes }); // v398
+  const saved = await runCloudTask('close shortage by supplier credit', { op: 'update', path: dataPath('receipts', rc.id), data: { shortCreditNotes: cloneSafe(notes), ...patch }, operationId: makeOperationId('short_credit') });
   if (!saved) return;
-  rc.shortCreditNotes = notes;
+  rc.shortCreditNotes = notes; applyReceiptStoredStatus(rc, patch);
   hideShortCreditPrompt();
   buzz(18);
   const after = receiptDiscrepancyInfo(rc);
@@ -19738,14 +19852,15 @@ async function applyOffset(rcId, otherId, productId, otherProductId) {
     const shortEntry = { id: oid + '|short', groupId: gid, otherId: rcId, productId: m.myDir === 'short' ? m.productId : (m.otherProductId || m.productId), name: m.myDir === 'short' ? m.name : (m.otherName || m.name), qty: m.qty, dir: 'short', at: stamp, source: 'manual' };
     const overEntry = { id: oid + '|over', groupId: gid, otherId: rcId, productId: m.myDir === 'over' ? m.productId : (m.otherProductId || m.productId), name: m.myDir === 'over' ? m.name : (m.otherName || m.name), qty: m.qty, dir: 'over', at: stamp, source: 'manual' };
     const merged = mergeReceiptExternalOffsets(rc.externalOffsets, [shortEntry, overEntry]);
+    const patch = receiptStoredStatusPatch(rc, { externalOffsets: merged }); // v398
     if (db) {
       const saved = await runCloudTask('apply receipt offset', {
         op: 'batch', operationId: makeOperationId('offset'),
-        writes: [{ op: 'update', path: dataPath('receipts', rcId), data: { externalOffsets: merged, offsetClosed: false, offsetWith: rcId, offsetAt: stamp, offsetSchemaVersion: 3 } }]
+        writes: [{ op: 'update', path: dataPath('receipts', rcId), data: { externalOffsets: merged, offsetClosed: false, offsetWith: rcId, offsetAt: stamp, offsetSchemaVersion: 3, ...patch } }]
       });
       if (!saved) { if (currentView === 'receiptsHistory') renderReceiptsHistory(); return; }
     }
-    rc.externalOffsets = merged; rc.offsetClosed = false; rc.offsetSchemaVersion = 3;
+    rc.externalOffsets = merged; rc.offsetClosed = false; rc.offsetSchemaVersion = 3; applyReceiptStoredStatus(rc, patch);
     buzz(18);
     showToast(receiptDiscrepancyInfo(rc).open ? 'הקיזוז לפריט אושר — נשאר הפרש פתוח לטיפול' : 'הקיזוז לפריט אושר — התעודה מאוזנת', null, null, 3200);
     if (currentView === 'receiptsHistory') renderReceiptsHistory();
@@ -19753,18 +19868,19 @@ async function applyOffset(rcId, otherId, productId, otherProductId) {
   }
   const rcOffsets = mergeReceiptExternalOffsets(rc.externalOffsets, [mine]);
   const otherOffsets = mergeReceiptExternalOffsets(other.externalOffsets, [theirs]);
+  const rcPatch = receiptStoredStatusPatch(rc, { externalOffsets: rcOffsets }), otherPatch = receiptStoredStatusPatch(other, { externalOffsets: otherOffsets }); // v398
   if (db) {
     const saved = await runCloudTask('apply receipt offset', {
       op: 'batch', operationId: makeOperationId('offset'),
       writes: [
-        { op: 'update', path: dataPath('receipts', rcId), data: { externalOffsets: rcOffsets, offsetClosed: false, offsetWith: otherId, offsetAt: stamp, offsetSchemaVersion: 2 } },
-        { op: 'update', path: dataPath('receipts', otherId), data: { externalOffsets: otherOffsets, offsetClosed: false, offsetWith: rcId, offsetAt: stamp, offsetSchemaVersion: 2 } }
+        { op: 'update', path: dataPath('receipts', rcId), data: { externalOffsets: rcOffsets, offsetClosed: false, offsetWith: otherId, offsetAt: stamp, offsetSchemaVersion: 2, ...rcPatch } },
+        { op: 'update', path: dataPath('receipts', otherId), data: { externalOffsets: otherOffsets, offsetClosed: false, offsetWith: rcId, offsetAt: stamp, offsetSchemaVersion: 2, ...otherPatch } }
       ]
     });
     if (!saved) { if (currentView === 'receiptsHistory') renderReceiptsHistory(); return; }
   }
-  rc.externalOffsets = rcOffsets; rc.offsetClosed = false; rc.offsetSchemaVersion = 2;
-  other.externalOffsets = otherOffsets; other.offsetClosed = false; other.offsetSchemaVersion = 2;
+  rc.externalOffsets = rcOffsets; rc.offsetClosed = false; rc.offsetSchemaVersion = 2; applyReceiptStoredStatus(rc, rcPatch);
+  other.externalOffsets = otherOffsets; other.offsetClosed = false; other.offsetSchemaVersion = 2; applyReceiptStoredStatus(other, otherPatch);
   buzz(18);
   const stillOpen = receiptDiscrepancyInfo(rc).open || receiptDiscrepancyInfo(other).open;
   showToast(stillOpen ? 'הקיזוז לפריט אושר — נשאר הפרש פתוח לטיפול' : 'הקיזוז לפריט אושר — שתי התעודות מאוזנות', null, null, 3200);
@@ -19846,12 +19962,15 @@ async function applyManualValueOffset(shortSide, overSide, requestedAmount) {
   const sameReceipt = shortRc.id === overRc.id;
   const shortOffsets = mergeReceiptExternalOffsets(shortRc.externalOffsets, [shortEntry].concat(sameReceipt ? [overEntry] : []));
   const overOffsets = sameReceipt ? shortOffsets : mergeReceiptExternalOffsets(overRc.externalOffsets, [overEntry]);
+  const shortPatch = receiptStoredStatusPatch(shortRc, { externalOffsets: shortOffsets }); // v398
+  const overPatch = sameReceipt ? shortPatch : receiptStoredStatusPatch(overRc, { externalOffsets: overOffsets });
   const writes = sameReceipt
-    ? [{ op: 'update', path: dataPath('receipts', shortRc.id), data: { externalOffsets: shortOffsets, offsetClosed: false, offsetSchemaVersion: 3, offsetAt: Date.now() } }]
-    : [{ op: 'update', path: dataPath('receipts', shortRc.id), data: { externalOffsets: shortOffsets, offsetClosed: false, offsetSchemaVersion: 3, offsetAt: Date.now() } }, { op: 'update', path: dataPath('receipts', overRc.id), data: { externalOffsets: overOffsets, offsetClosed: false, offsetSchemaVersion: 3, offsetAt: Date.now() } }];
+    ? [{ op: 'update', path: dataPath('receipts', shortRc.id), data: { externalOffsets: shortOffsets, offsetClosed: false, offsetSchemaVersion: 3, offsetAt: Date.now(), ...shortPatch } }]
+    : [{ op: 'update', path: dataPath('receipts', shortRc.id), data: { externalOffsets: shortOffsets, offsetClosed: false, offsetSchemaVersion: 3, offsetAt: Date.now(), ...shortPatch } }, { op: 'update', path: dataPath('receipts', overRc.id), data: { externalOffsets: overOffsets, offsetClosed: false, offsetSchemaVersion: 3, offsetAt: Date.now(), ...overPatch } }];
   const saved = await runCloudTask('apply manual value offset', { op: 'batch', writes, operationId: groupId });
   if (!saved) return;
   shortRc.externalOffsets = shortOffsets; overRc.externalOffsets = overOffsets;
+  applyReceiptStoredStatus(shortRc, shortPatch); applyReceiptStoredStatus(overRc, overPatch);
   closeManualOffsetPicker(); buzz(24);
   showToast('הקיזוז אושר — ₪' + fmtMoney(amount) + ' נוספו לתשלום במודע', null, null, 3400);
   if (currentView === 'receiptsHistory') renderReceiptsHistory();
@@ -19861,9 +19980,10 @@ async function cancelReceiptOffset(receiptId, groupId) {
   if (!affected.length) { showToast('הקיזוז כבר בוטל', null, null, 2200); return; }
   // v249: הביטול נרשם על התעודה — קיזוז אוטומטי לא יחיל שוב זוג שבוטל במודע.
   const updates = affected.map(rc => ({ rc, offsets: (rc.externalOffsets || []).filter(x => (x.groupId || x.id) !== groupId), canceled: Array.from(new Set((Array.isArray(rc.canceledOffsetIds) ? rc.canceledOffsetIds : []).concat([groupId]))) }));
-  const saved = await runCloudTask('cancel receipt offset', { op: 'batch', writes: updates.map(x => ({ op: 'update', path: dataPath('receipts', x.rc.id), data: { externalOffsets: x.offsets, canceledOffsetIds: x.canceled, offsetClosed: false, offsetSchemaVersion: 3 } })), operationId: makeOperationId('offset_cancel') });
+  updates.forEach(x => { x.patch = receiptStoredStatusPatch(x.rc, { externalOffsets: x.offsets }); }); // v398: הביטול פותח מחדש גם את הסטטוס השמור
+  const saved = await runCloudTask('cancel receipt offset', { op: 'batch', writes: updates.map(x => ({ op: 'update', path: dataPath('receipts', x.rc.id), data: { externalOffsets: x.offsets, canceledOffsetIds: x.canceled, offsetClosed: false, offsetSchemaVersion: 3, ...x.patch } })), operationId: makeOperationId('offset_cancel') });
   if (!saved) return;
-  updates.forEach(x => { x.rc.externalOffsets = x.offsets; x.rc.canceledOffsetIds = x.canceled; });
+  updates.forEach(x => { x.rc.externalOffsets = x.offsets; x.rc.canceledOffsetIds = x.canceled; applyReceiptStoredStatus(x.rc, x.patch); });
   buzz(16); showToast('הקיזוז בוטל — חוק החוסר והעודף הרגיל חזר לפעול', null, null, 3200);
   if (currentView === 'receiptsHistory') renderReceiptsHistory();
 }
@@ -19876,6 +19996,58 @@ function receiptFilterBucket(rc) {
   const recovering = !!(rc.offsetClosed && Number(rc.offsetSchemaVersion || 0) < 2);
   if (di.open || recovering || supplierCreditClaimOpen(rc)) return 'attention';
   return 'done';
+}
+// ===== v398: משפט אחד לכל קליטה שמורה — מה המצב ומה צריך לעשות =====
+// מהשטח (גיבוי החנות, 22.10.2026, אפליקציה v397): כל 18 הקליטות שנסרקו מאז 8.9 נקראו במלואן
+// (סכום השורות וסך היחידות תאמו לנייר בכל 25 התעודות) וכל החוסרים נסגרו — בקיזוז, בהשלמת
+// סחורה או בזיכוי. אבל מי שפתח את הקובץ ראה רק דגלים טכניים: needs_review על 10 מתוך 25
+// תעודות (שורה אחת שבה הברקוד לא הצביע על מוצר יחיד), hasDiscrepancy: true ו-status: "open"
+// על 10 קליטות שהמסך כבר הציג מאוזנות — ובעל העסק שאל אם משהו בכלל נקלט. המסך ידע
+// (receiptDiscrepancyInfo), אבל לא אמר זאת במשפט. מכאן: לכל קליטה שמורה מצב אחד, משפט אחד
+// ופעולה אחת, מאותם חישובים שמסך ההיסטוריה כבר משתמש בהם. תצוגה בלבד — שום סכום, קיזוז או
+// זיכוי לא משתנה; הסיכום בראש קובץ הגיבוי (backupPlainSummary) נבנה מאותו משפט.
+// state: awaiting_paper · credit_mismatch · short · over · units_gap · amount_gap ·
+// price_finding · claim · open · balanced. role — הכפתור הקיים בכרטיס שמבצע את הפעולה.
+function receiptPlainStatus(rc, info) {
+  const di = info || receiptDiscrepancyInfo(rc);
+  const money = v => '₪' + fmtMoney(Math.abs(Number(v) || 0));
+  const out = (state, text, action, role) => ({ state, text, action: action || '', role: role || '', open: state !== 'balanced' });
+  if (di.awaitingDoc) return out('awaiting_paper', 'נקלטה לפי ספירה בלי תעודה · ממתינה לנייר', 'התעודה הגיעה — הזן את נתוניה', 'rc-attach-doc');
+  if (di.deliveryCreditMismatch) return out('credit_mismatch', 'הזיכוי מהנהג לא תואם לחוסר שנשאר · בדוק את הזיכוי', 'תקן הפרשים', 'rc-fix-open');
+  const shortItems = (di.shortItems || []).filter(x => (Number(x.n) || 0) > 0);
+  const overItems = (di.overItems || []).filter(x => (Number(x.n) || 0) > 0);
+  const owed = Math.max(0, r2((Number(di.shortValRaw) || 0) - (Number(di.shortCreditEx) || 0)));
+  if (shortItems.length && !di.shortFullyCredited) {
+    // זיכוי מהנהג מכסה מוצרים וכמויות; מה שהוא כבר כיסה אינו "חסר" במשפט.
+    const open = receiptShortAfterCredits(di).open.filter(x => (Number(x.n) || 0) > 0);
+    const credited = (Number(di.shortCreditEx) || 0) > 0;
+    const what = open.length ? 'חסר ' + receiptSideText(open) : 'זיכוי חלקי על החוסר';
+    return out('short', what + ' · ' + (credited ? 'נותר ' : '') + money(owed) + ' · ממתין לזיכוי מהספק', 'התקבל זיכוי מהספק', 'rc-short-credit');
+  }
+  if (overItems.length) return out('over', 'עודף ' + receiptSideText(overItems) + ' (' + money(di.overVal) + ') · לא בתעודה — לקזז מול חוסר או לתקן', 'תקן הפרשים', 'rc-fix-open');
+  if (di.unresolvedUnitsGap) return out('units_gap', 'פער של ' + Math.abs(Number(di.unresolvedUnitsGap) || 0) + ' יחידות ' + (di.unresolvedUnitsGap > 0 ? 'חסרות' : 'עודפות') + ' שטרם שויך למוצר', 'תקן הפרשים', 'rc-fix-open');
+  if (di.amountGapOpen) return out('amount_gap', 'פער סכום של ' + money(di.unresolvedAmountGap) + ' מול התעודה' + (Number(di.unresolvedAmountGap) > 0 ? ' · ממתין לזיכוי מהספק' : ''), 'תקן הפרשים', 'rc-fix-open');
+  if (supplierCreditClaimOpen(rc) || supplierCreditClaimDeferred(rc)) return out('claim', 'ממתין לזיכוי ספק של ' + money(supplierCreditClaimRemaining(rc)) + ' על מחיר או מבצע', 'הגיע זיכוי', 'rc-credit-verify');
+  if (di.aiAuditOpen) return out('price_finding', 'ממצא מחיר או מבצע מהסריקה ממתין לטיפול מול הספק', 'תקן הפרשים', 'rc-fix-open');
+  if (di.open) return out('open', 'נשאר הפרש פתוח מול התעודה', 'תקן הפרשים', 'rc-fix-open');
+  const how = [];
+  if ((di.externalOffsets || []).length) how.push('קיזוז');
+  else if ((di.priceOffsets || []).length) how.push('קיזוז פנימי');
+  if (di.shortFullyCredited) how.push('החוסר נסגר בזיכוי');
+  if ((di.shortGoodsNotes || []).length) how.push('החוסר הושלם בסחורה');
+  return out('balanced', 'נקלטה ומאוזנת ✓' + (how.length ? ' · ' + how.join(' · ') : ''), '', '');
+}
+// v398: השורה בכרטיס המקופל (מתחת לתאריך) והקופסה "מה לעשות עכשיו" בראש הכרטיס הפתוח.
+// הקופסה מופיעה רק כשיש מה לעשות ואין כבר קופסה ייעודית (קליטה בלי נייר).
+function receiptPlainStatusLineHtml(plain) {
+  return '<div class="mt-1 text-xs font-black ' + (plain.open ? 'text-rose-700' : 'text-emerald-700') + '" data-plain-status="' + htmlEscape(plain.state) + '">' + htmlEscape(plain.text) + '</div>';
+}
+function receiptPlainActionHtml(rc, plain) {
+  if (!plain.open || plain.state === 'awaiting_paper' || !plain.role) return '';
+  return '<div class="mt-2 bg-rose-50 border-2 border-rose-300 rounded-xl p-3" data-plain-action="' + htmlEscape(plain.state) + '">' +
+    '<div class="text-[11px] font-black text-rose-600">מה לעשות עכשיו</div>' +
+    '<div class="font-black text-slate-900 text-sm mt-0.5">' + htmlEscape(plain.text) + '</div>' +
+    '<button data-role="' + htmlEscape(plain.role) + '" data-id="' + htmlEscape(rc.id) + '" class="btn-tap w-full mt-2 bg-rose-600 text-white rounded-xl py-2.5 font-black text-sm">' + htmlEscape(plain.action) + '</button></div>';
 }
 // ===== v267: שינוי תאריך תעודה =====
 // תעודת קליטה נשמרת עם timestamp (למיון ולדוח התשלום לספק) ועם date
@@ -19982,6 +20154,7 @@ function renderReceiptsHistory() {
     const d = new Date(rc.timestamp);
     const dateStr = d.toLocaleDateString('he-IL') + ' · ' + d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
     const di = receiptDiscrepancyInfo(rc);
+    const plain = receiptPlainStatus(rc, di); // v398: משפט אחד — מה המצב ומה לעשות
     const payableEx = receiptPayableBaseEx(rc);
     const effectiveOpen = di.open;
     // v306: תעודה שממתינה לנייר פתוחה — אבל לא בגלל הפרש. אין לה הפרשים
@@ -20053,11 +20226,12 @@ function renderReceiptsHistory() {
           '<span><i class="fa-solid fa-file-invoice"></i> תעודת קליטה</span><span class="shrink-0">' + statusTxt + '</span>' +
         '</div>' +
         '<div class="p-4 flex items-center justify-between gap-2">' +
-        '<div class="min-w-0"><div class="font-black text-slate-800 text-sm">' + dateStr + '</div><div class="text-xs text-slate-400 mt-0.5">' + (rc.count || (rc.items || []).length) + ' פריטים' + (rc.noteParts && rc.noteParts.length > 1 ? ' · <span class="text-blue-600 font-black">' + rc.noteParts.length + ' תעודות ספק</span>' : '') + metaStatus + (rc.quantityCheck && rc.quantityCheck.method === 'manual' ? ' · <span class="text-slate-600 font-bold">הכמויות אושרו ידנית</span>' : '') + '</div></div>' +
+        '<div class="min-w-0"><div class="font-black text-slate-800 text-sm">' + dateStr + '</div><div class="text-xs text-slate-400 mt-0.5">' + (rc.count || (rc.items || []).length) + ' פריטים' + (rc.noteParts && rc.noteParts.length > 1 ? ' · <span class="text-blue-600 font-black">' + rc.noteParts.length + ' תעודות ספק</span>' : '') + metaStatus + (rc.quantityCheck && rc.quantityCheck.method === 'manual' ? ' · <span class="text-slate-600 font-bold">הכמויות אושרו ידנית</span>' : '') + '</div>' + receiptPlainStatusLineHtml(plain) + '</div>' +
         '<div class="flex items-center gap-2 shrink-0"><div class="text-left"><div class="text-[11px] text-slate-400">לתשלום ללא מע"מ</div><div class="font-black text-slate-800">₪' + fmtMoney(payableEx) + '</div></div><i class="fa-solid fa-chevron-down hist-chevron text-slate-400 transition-transform"></i></div>' +
         '</div>' +
       '</summary>' +
       '<div class="px-4 pb-4">' +
+        receiptPlainActionHtml(rc, plain) + // v398: מה לעשות עכשיו — משפט אחד וכפתור אחד
         '<div class="bg-slate-50 rounded-xl p-3 border border-slate-100">' + rows + '</div>' +
         '<div class="flex items-center justify-end mt-2 text-xs text-slate-500 font-bold px-1"><span>שווי שנסרק: ₪' + fmtMoney(rc.totalExVat) + ' · לתשלום: ₪' + fmtMoney(payableEx) + '</span></div>' +
         (rc.noteTotalInc != null ? '<div class="text-[11px] text-slate-500 font-bold mt-1 px-1"><i class="fa-solid fa-file-invoice"></i> ' + (rc.noteParts && rc.noteParts.length > 1 ? rc.noteParts.length + ' תעודות ספק: ' + rc.noteParts.map(x => '₪' + fmtMoney(normNote(x).amount)).join(' + ') + ' = ₪' + fmtMoney(rc.noteTotalInc) : 'תעודת ספק: ₪' + fmtMoney(rc.noteTotalInc)) + '</div>' : '') +
