@@ -150,7 +150,8 @@ test('the full backup opens with a plain summary: a line per receipt, counts and
   c.context.summaryFixture = summary;
   assert.equal(c.run('validBackupPayload({ ...payloadFixture, summary: summaryFixture })'), true);
   assert.deepEqual(json(c, 'backupPlainSummary({ collections: {} }).counts'), { receipts: 0, balanced: 0, open: 0 });
-  assert.equal(c.run('APP_VERSION'), '398'); assert.equal(c.run('APP_VERSION_LABEL'), 'v398_plain_receipt_status');
+  // The log and the backup carry the running version (until v398 a fixed 'v396_second_strong_read').
+  assert.match(c.run('APP_VERSION_LABEL'), new RegExp('^v' + c.run('APP_VERSION') + '_[a-z_]+$'));
 });
 
 test('the receiving panel says what to do: a product choice, a check against the paper, a price gap — one kind, or each kind counted', () => {
