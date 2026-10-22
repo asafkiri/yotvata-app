@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v396 קריאה רביעית במודל החזק</title>
+    <title>הזמנות יטבתה - v397 תיקון כמות ממסך החוסרים</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -125,7 +125,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v396 קריאה רביעית במודל החזק</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v397 תיקון כמות ממסך החוסרים</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -669,7 +669,7 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '396';
+const APP_VERSION = '397'; // תיקון הכמות שהתקבלה ישירות ממסך החוסרים והעודפים — החוסר מתעדכן מיד
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -16369,9 +16369,19 @@ function aiAnalyzeClaimCardHtml(claim, siblings) {
     '<div class="flex items-start justify-between gap-3">' +
       '<div class="min-w-0"><div class="text-[10px] font-black ' + style.head + '"><i class="fa-solid ' + style.icon + ' ml-1"></i>' + style.title + '</div>' +
       '<div class="text-sm font-black text-slate-800">' + htmlEscape(tidyAiMoneyText(aiAnalyzeClaimText(claim))) + '</div></div>' + moneyHtml +
-    '</div>' + detail +
+    '</div>' + detail + aiAnalyzeClaimEditorHtml(claim, detail) +
     (claim.evidence ? '<div class="text-[10px] font-bold text-slate-500 mt-1">' + htmlEscape(claim.evidence) + '</div>' : '') +
   '</div>';
+}
+// v397: עורך הכמות גם בכרטיס המנתח — רק כשהמנתח באמת מוביל (אז הכרטיס שלו
+// הוא מה שרואים במקום שורות המנוע), ורק מתחת לשלושת המספרים: טענה שכמותה
+// אינה ההפרש בין הנייר לסריקה (חלק מהחלפה, או טענה שסוגרת רק בכסף) נשארת
+// כרטיס פשוט בלי עורך. כרטיס ישן שנשאר מצויר אחרי חישוב מחדש אינו מקבל
+// עורך, כדי שאותו מוצר לא ייערך משני מקומות בעמוד.
+function aiAnalyzeClaimEditorHtml(claim, detail) {
+  if (!detail || !claim || (claim.kind !== 'shortage' && claim.kind !== 'surplus') || !claim.productId) return '';
+  if (!aiScanEvaluation || aiScanEvaluation.analyzerLed !== true) return '';
+  try { return aiQuantityFindingEditorHtml(claim.productId, claim.kind === 'shortage'); } catch (editorError) { return ''; }
 }
 function aiAnalyzeHtml(ev) {
   if (!ev || !ev.findingsReady) return '';
@@ -16441,7 +16451,89 @@ function aiQuantityFindingRowHtml(finding, type, headClass) {
   '</div>';
   let detail = '';
   try { detail = aiQuantityFindingDetailHtml(finding, shortage, label, headClass); } catch (detailError) { detail = ''; }
-  return '<div class="py-2 border-t border-black/5 first:border-t-0">' + head + detail + '</div>';
+  let editor = '';
+  try { editor = aiQuantityFindingEditorHtml(finding && finding.productId, shortage); } catch (editorError) { editor = ''; }
+  return '<div class="py-2 border-t border-black/5 first:border-t-0">' + head + detail + editor + '</div>';
+}
+// v397: תיקון הכמות שהתקבלה ישירות מהשורה של החוסר/העודף. "חסר 80" ואז
+// נזכרים שבעצם 64 הגיעו — מקלידים 64 בשורה עצמה, והחוסר נהיה 16; מקלידים
+// 80 (או "הגיע הכול") והחוסר נעלם. עד כאן היה צריך לחזור לסריקה, לתקן שם
+// ולחזור. העריכה כאן היא אותה ספירה: הכמות נכתבת גם לשורת ההשוואה (received)
+// וגם לרשימת הסריקה (qty), ואז הממצאים מחושבים מחדש מקומית — בלי קריאה
+// לשרת ובלי לגעת בנייר שנקרא. תצוגה בלבד; כל תקלה בבנייה מחזירה שורה בלי עורך.
+function aiQuantityFindingEditorHtml(productId, shortage) {
+  const pid = String(productId == null ? '' : productId).trim();
+  if (!pid || pid.indexOf('deposit-') === 0) return '';
+  if (!aiScanResponse || !Array.isArray(reconcileData)) return '';
+  if (!canEditDraft('receiving', true)) return '';
+  const ev = aiScanEvaluation;
+  const agg = ev && ev.aggregates instanceof Map ? (ev.aggregates.get(productId) || ev.aggregates.get(pid)) : null;
+  const billed = agg ? Math.max(0, Math.round(Number(agg.qty) || 0)) : 0;
+  const line = reconcileData.find(l => l && String(l.productId) === pid);
+  if (line && line.isDeposit) return '';
+  const scanned = line ? Math.max(0, Math.round(Number(line.received) || 0)) : 0;
+  const id = htmlEscape(pid);
+  const quick = billed !== scanned
+    ? '<button type="button" data-role="ai-recv-set" data-id="' + id + '" data-qty="' + billed + '" class="btn-tap flex-1 min-w-0 h-10 rounded-lg bg-white border border-emerald-300 text-emerald-800 text-xs font-black">' +
+        (shortage ? 'הגיע הכול (' + billed + ')' : (agg ? 'כמו בתעודה (' + billed + ')' : 'לא הגיע (0)')) + '</button>'
+    : '';
+  return '<div class="mt-2 rounded-lg bg-white/70 border border-black/10 p-2">' +
+    '<div class="text-[11px] font-black text-slate-600 mb-1">קיבלתי בפועל — תקן כאן והחוסר יתעדכן מיד</div>' +
+    '<div class="flex items-center gap-1.5">' +
+      '<button type="button" data-role="ai-recv-step" data-id="' + id + '" data-delta="-1" class="btn-tap w-10 h-10 shrink-0 rounded-lg bg-slate-100 text-slate-700 font-black text-lg disabled:opacity-40" aria-label="פחות יחידה אחת"' + (scanned <= 0 ? ' disabled' : '') + '>−</button>' +
+      '<input data-role="ai-recv-input" data-id="' + id + '" type="text" inputmode="numeric" pattern="[0-9]*" value="' + scanned + '" class="w-16 h-10 shrink-0 text-center text-base font-black border-2 border-slate-200 rounded-lg outline-none focus:border-blue-500 bg-white" aria-label="כמה יחידות התקבלו בפועל">' +
+      '<button type="button" data-role="ai-recv-step" data-id="' + id + '" data-delta="1" class="btn-tap w-10 h-10 shrink-0 rounded-lg bg-slate-100 text-slate-700 font-black text-lg" aria-label="עוד יחידה אחת">+</button>' +
+      quick +
+    '</div></div>';
+}
+function aiStepFindingReceived(productId, delta) {
+  const pid = String(productId == null ? '' : productId).trim();
+  const line = (reconcileData || []).find(l => l && String(l.productId) === pid);
+  const scanned = line ? Math.max(0, Math.round(Number(line.received) || 0)) : 0;
+  return aiSetFindingReceived(pid, Math.max(0, scanned + (Number(delta) || 0)));
+}
+// הכמות החדשה נכנסת לשני המקומות שהספירה חיה בהם — שורת ההשוואה ורשימת
+// הסריקה — ובסיס ההשוואה (receiptReconcileSource) מתקדם איתן, כדי שחזרה
+// לסריקה וחזרה משם לא "תגלה" שינוי ותדרוס את התיקון. הממצאים מחושבים מחדש
+// מקומית מהפענוח השמור; המנתח (קריאה בתשלום) אינו רץ מעצמו — תשובה ישנה
+// שלו תיפסל ממילא, כי ההערכה שהוא נשלח עליה כבר אינה ההערכה הנוכחית.
+function aiSetFindingReceived(productId, value) {
+  if (!canEditDraft('receiving')) return false;
+  const pid = String(productId == null ? '' : productId).trim();
+  if (!pid || pid.indexOf('deposit-') === 0 || !Array.isArray(reconcileData) || !aiScanResponse) return false;
+  // רק מספר שלם לא שלילי; "-1" או "12 יח׳" אינם מתפרשים כמספר אחר.
+  const text = String(value == null ? '' : value).trim();
+  const qty = /^\d{1,6}$/.test(text) ? parseInt(text, 10) : NaN;
+  if (!Number.isFinite(qty) || qty < 0) { showToast('הקלד מספר יחידות שהתקבלו', null, null, 2600); if (currentView === 'reconcile') renderReconcile(); return false; }
+  let line = reconcileData.find(l => l && String(l.productId) === pid);
+  if (line && line.isDeposit) return false;
+  if (!line) {
+    const p = products.find(x => String(x.id) === pid);
+    if (!p) { showToast('המוצר לא נמצא במאגר', null, null, 2600); return false; }
+    const day = activeReceiptDate(), base = r2(Number(p.price) || 0);
+    const promo = promoForProduct(p.id, day), on = promoTriggered(promo, day), pct = on ? (Number(promo.pct) || 0) : 0;
+    line = { productId: p.id, name: p.name || '', barcode: p.barcode || '', received: 0, noteQty: 0, price: on ? discountedUnitPrice(base, pct) : base, basePrice: base, promoPct: pct, promoOn: on, checked: false };
+    reconcileData.unshift(line);
+  }
+  const before = Math.max(0, Math.round(Number(line.received) || 0));
+  if (before === qty) return true;
+  line.received = qty;
+  const itemIndex = receiptList.findIndex(it => it && String(it.productId) === pid);
+  if (itemIndex >= 0) { if (qty > 0) receiptList[itemIndex].qty = qty; else receiptList.splice(itemIndex, 1); }
+  else if (qty > 0) receiptList.unshift({ productId: line.productId, name: line.name || '', barcode: line.barcode || '', qty });
+  receiptReconcileSource = receiptList.map(l => ({ productId: l.productId, qty: l.qty }));
+  aiAnalyzeBusy = false; aiAnalyzeResult = null; aiAnalyzeError = '';
+  reconcileAiAudit = null;
+  try { aiScanEvaluation = aiEvaluateInvoiceScan(aiScanResponse); aiScanError = ''; }
+  catch (e) { aiScanError = 'לא הצלחתי להשוות כרגע. הפענוח נשמר; חזור לספירה ונסה שוב.'; }
+  saveReceiptDraft();
+  try { updateCart(); } catch (cartError) {}
+  if (currentView === 'reconcile') renderReconcile();
+  const open = (aiScanEvaluation && Array.isArray(aiScanEvaluation.findings) ? aiScanEvaluation.findings : [])
+    .find(f => f && (f.type === 'shortage' || f.type === 'surplus') && String(f.productId) === pid);
+  const name = line.name ? ' ' + line.name : '';
+  showToast('עודכן: התקבלו ' + qty + ' יח׳' + name + (open ? ' · ' + (open.type === 'shortage' ? 'עדיין חסר ' : 'עדיין עודף ') + (Number(open.qty) || 0) + ' יח׳' : ' · אין חוסר או עודף'), null, null, 3200);
+  return true;
 }
 // v372: המספרים עצמם, בלי HTML — שורת המנוע וכרטיס המנתח שואלים כאן ומקבלים
 // אותה תשובה. null = אין פירוט, והשורה נשארת פשוטה: החשבון לא סוגר, חסר
@@ -24432,6 +24524,8 @@ $('rsBody').addEventListener('click', e => {
 $('scanPriceNotice').addEventListener('click', () => { closeScanner(); renderReceiving(); const panel = app.querySelector('[data-price-panel]'); if (panel) { panel.open = true; panel.scrollIntoView({ block: 'start' }); } });
 app.addEventListener('change', (e) => {
   try {
+  // v397: "קיבלתי בפועל" במסך החוסרים — בסיום ההקלדה (יציאה מהשדה / Enter) הכמות נכתבת והממצאים מחושבים מחדש
+  if (e.target.dataset.role === 'ai-recv-input') { aiSetFindingReceived(e.target.dataset.id, e.target.value); return; }
   if (e.target.dataset.role === 'delivery-credit-file') { const input = e.target; deliveryCreditAddFiles(input.dataset.id, Array.from(input.files || []), input.dataset.replace === '1'); input.value = ''; return; }
   if (['delivery-credit-number', 'delivery-credit-barcode'].includes(e.target.dataset.role)) {
     const input = e.target, c = deliveryCreditFind(input.dataset.id);
@@ -24475,6 +24569,13 @@ app.addEventListener('change', (e) => {
 app.addEventListener('keydown', (e) => {
   const t = e.target;
   if (t.id === 'newNote' && e.key === 'Enter') { e.preventDefault(); addNote(); return; }
+  // v397: Enter בשדה "קיבלתי בפועל" של מסך החוסרים — כמו יציאה מהשדה: הכמות נכתבת מיד.
+  if (e.key === 'Enter' && t.getAttribute && t.getAttribute('data-role') === 'ai-recv-input') {
+    e.preventDefault();
+    try { aiSetFindingReceived(t.dataset.id, t.value); } catch (error) {}
+    try { t.blur(); } catch (blurError) {}
+    return;
+  }
   if (t.getAttribute && t.getAttribute('data-role') === 'nc-price' && e.key === 'Enter') {
     e.preventDefault();
     const gi = parseInt(t.dataset.g, 10) || 0;
@@ -24633,6 +24734,8 @@ app.addEventListener('click', (e) => {
   if (role === 'ai-add-unknown-product') { aiOpenUnknownProduct(parseInt(t.dataset.doc, 10), parseInt(t.dataset.row, 10)); return; }
   if (role === 'ai-confirm-findings') { if (aiScanEvaluation) { aiScanEvaluation.userConfirmedFindings = true; renderReconcile(); } return; }
   if (role === 'ai-apply') { aiApplyInvoiceResult(); return; }
+  if (role === 'ai-recv-step') { aiStepFindingReceived(id, parseInt(t.dataset.delta, 10) || 0); return; } // v397
+  if (role === 'ai-recv-set') { aiSetFindingReceived(id, t.dataset.qty); return; } // v397
   if (role === 'clear-order') showConfirm('ניקוי הזמנה', 'לנקות את כל הכמויות שהוזנו?', 'נקה', clearOrder);
   else if (role === 'go-app-orders') setView('appOrders'); // v318
   else if (role === 'go-contacts') setView('contacts');
