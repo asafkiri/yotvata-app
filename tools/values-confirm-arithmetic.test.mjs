@@ -45,7 +45,7 @@ function setup(values, { description = null, deposit = false, catalogPrice = val
   c.run(`receiptOpened=true;receiptDupConfirmed=true;restoreDraftScan(savedReview);receiptPaperScanState='ok';priceAuditSetDate(0,'2026-09-20');
     receiptDocDate='2026-09-20';receiptNotes=[{amount:${d.subtotalExVat},units:${units}}];recomputeNoteTotal();receiptList=structuredClone(testData.items);
     saveReceiptDraft();renderReceiving()`);
-  if (card) assert.deepEqual(json(c, 'receiptPriceAudit().rows[0].modelReviewIssues'), ['quantity'], 'the row is on the "צריך להשלים את הבדיקה" card');
+  if (card) assert.deepEqual(json(c, 'receiptPriceAudit().rows[0].modelReviewIssues'), ['quantity'], 'the row is on the "בדוק את הכמות מול הנייר" card');
   return { c, data };
 }
 const row = (quantity, unitPriceExVat, grossLineTotalExVat, lineDiscountExVat, lineTotalExVat) =>
@@ -61,7 +61,7 @@ test('the field case: 6 × 16.13 = 96.78 against a gross of 96.18 — no one-tap
   assert.equal(canConfirm(c), false);
   assert.deepEqual(json(c, 'priceAuditValuesConfirmation(aiSourceRow(0,0))'), { ok: false, hold: 'מחיר × כמות אינו תואם לסכום הברוטו בשורה' });
   const h = html(c);
-  assert.match(h, /צריך להשלים את הבדיקה/);
+  assert.match(h, /בדוק את הכמות מול הנייר/); // v398: the card title says what to check
   assert.doesNotMatch(h, /data-role="price-confirm-values"|כן, הכמות והמחיר נכונים לפי הנייר/);
   assert.equal(h.split(GROSS_HOLD).length - 1, 1, 'exactly one reason line');
   assert.match(h, /data-role="paper-row-edit"[^>]*>הפענוח שגוי — תקן לפי הנייר<\/button>/);

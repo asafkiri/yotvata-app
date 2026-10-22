@@ -36,7 +36,7 @@ for(const [name,unit,expected] of [['matching price',5,'match'],['price differen
  assert.match(html,expected==='match'?/המחירים שנבדקו תואמים/:/המחיר בתעודה שונה מהמחיר שבמאגר/);
  if(expected==='difference')assert.match(html,/מחיר יחידה מודפס: <b>₪6\.00/);
  else assert.doesNotMatch(html,/data-price-row=/);
- if(expected==='difference'){assert.match(html,/הפרש ליחידה: <b>₪1\.00/);assert.match(html,/הפרש לשורה: <b>₪10\.00/);assert.match(c.node('scanPriceNotice').textContent,/לטיפול/);}
+ if(expected==='difference'){assert.match(html,/הפרש ליחידה: <b>₪1\.00/);assert.match(html,/הפרש לשורה: <b>₪10\.00/);assert.match(c.node('scanPriceNotice').textContent,/שורה אחת עם פער מחיר — פתח את הרשימה/);} // v398: the notice says what to do
  assert.equal(report(c).rows.some(r=>['shortage','surplus'].includes(r.result)),false);record(name,c,html);
 });
 test(supplier+': source overwrite cannot compare catalog to itself',async()=>{

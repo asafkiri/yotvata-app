@@ -75,7 +75,7 @@ test('the field case (service v149 answer): the two quantities without a support
   assert.deepEqual(json(c, 'priceAuditQuantityArithmetic(' + row(c, 17) + ', true)'), { proven: true, server: false, reasons: [], unit: 12.53, gross: 250.6, net: 250.6, printedUnitsBalanced: true });
   const h = html(c);
   assert.match(h, /המחירים שנבדקו תואמים · 22 שורות · אין מה לאשר/);
-  assert.doesNotMatch(h, /צריך להשלים את הבדיקה|price-confirm-values|data-price-row=|נשארו/);
+  assert.doesNotMatch(h, /צריך להשלים את הבדיקה|בדוק את הכמות|price-confirm-values|data-price-row=|נשארו/);
   assert.equal(c.run('aiEvaluateInvoiceScan(aiScanResponse).valid'), true);
   assert.equal(finishErrors(c).some(e => /לא אומתו|לא הסכימו/.test(e)), false, finishErrors(c).join(' | '));
   // Nothing was filled or altered: the OCR values and the service's own record are as received.
@@ -116,8 +116,10 @@ test('a quantity the arithmetic does not prove stays pending, and the card names
   assert.deepEqual(a.rows[5].modelReviewIssues, ['quantity']);
   assert.equal(a.complete, false);
   const h = html(c);
-  assert.match(h, /נשארה שורה אחת לטיפול/);
-  assert.match(h, /צריך להשלים את הבדיקה/);
+  // v398: the panel and the card say what to do; the readings stay, folded under "פרטים טכניים".
+  assert.match(h, /נשארה שורה אחת לבדיקה מול הנייר/);
+  assert.match(h, /בדוק את הכמות מול הנייר/);
+  assert.match(h, /<details class="mt-2" data-row-dispute-fold><summary[^>]*>פרטים טכניים — מה כל קריאה ראתה<\/summary>/);
   assert.match(h, new RegExp('<p data-row-dispute-field="quantity">הקריאות לא הסכימו על הכמות: ' + READINGS + '\\. גם הקריאה השלישית \\(המודל החזק\\) קראה את הנייר, ועדיין אין שתי קריאות שמסכימות\\.</p>'));
   assert.match(h, /<p class="mt-1">החשבון לא מכריע: מחיר היחידה × הכמות לא יוצא סכום השורה באף אחת מהקריאות\.<\/p>/);
   // v395 (replaces the v367 expectation of a one-tap approval here): 6 × 16.04 = 96.24 against the gross
@@ -190,8 +192,8 @@ test('a deposit row is never proven by the arithmetic (service v150 rule): the p
   assert.deepEqual(a.rows[DEPOSIT_ROW].modelReviewIssues, ['quantity']);
   assert.equal(a.complete, false);
   const h = html(c);
-  assert.match(h, /נשארה שורה אחת לטיפול/);
-  assert.match(h, /צריך להשלים את הבדיקה/);
+  assert.match(h, /נשארה שורה אחת לבדיקה מול הנייר/); // v398
+  assert.match(h, /בדוק את הכמות מול הנייר/);
   assert.match(h, /<p data-row-dispute-field="quantity">הקריאות לא הסכימו על הכמות: קריאה 1 – 12 · קריאה 2 – 24 · קריאה 3 \(המודל החזק\) – 2\. גם הקריאה השלישית \(המודל החזק\) קראה את הנייר, ועדיין אין שתי קריאות שמסכימות\.<\/p>/);
   assert.match(h, /<p class="mt-1">החשבון לא מכריע: שורת פיקדון לא נספרת בסך היחידות המודפס, ולכן הנייר לא מאשש את הכמות שלה\.<\/p>/);
   assert.match(h, /data-role="price-confirm-values"/);

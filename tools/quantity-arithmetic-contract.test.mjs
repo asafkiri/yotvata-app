@@ -141,7 +141,7 @@ test('the field case against the real service: the selected read balances, rows 
   }
   const html = c.run('receiptPriceAuditHtml()');
   assert.match(html, /המחירים שנבדקו תואמים · 22 שורות · אין מה לאשר/);
-  assert.doesNotMatch(html, /צריך להשלים את הבדיקה|price-confirm-values|data-price-row=/);
+  assert.doesNotMatch(html, /צריך להשלים את הבדיקה|בדוק את הכמות|price-confirm-values|data-price-row=/);
   assert.equal(c.run('aiEvaluateInvoiceScan(aiScanResponse).valid'), true, JSON.stringify(json(c, 'aiEvaluateInvoiceScan(aiScanResponse).errors')));
   // The paper is as the service returned it: nothing filled or altered on the way.
   assert.deepEqual(json(c, 'aiScanResponse.scan.documents[0].rows.map(r => paperRowValues(r))'), doc.rows.map(r => ({ quantity: r.quantity, unitPriceExVat: r.unitPriceExVat,
@@ -169,7 +169,7 @@ test('against the real service, a quantity the arithmetic does not prove still r
   const c = await scanInApp(structuredClone(output));
   assert.deepEqual(json(c, 'priceAuditPendingRows(receiptPriceAudit())').map(r => r.rowIndex), [5]);
   const html = c.run('receiptPriceAuditHtml()');
-  assert.match(html, /צריך להשלים את הבדיקה/);
+  assert.match(html, /בדוק את הכמות מול הנייר/); // v398: the card title says what to check; the readings sit under "פרטים טכניים"
   assert.match(html, /הקריאות לא הסכימו על הכמות: קריאה 1 – 3 · קריאה 2 – 6 · קריאה 3 \(המודל החזק\) – 2\./);
   assert.match(html, /החשבון לא מכריע: מחיר היחידה × הכמות לא יוצא סכום השורה באף אחת מהקריאות\./);
   // v395 (replaces the v367 expectation of a one-tap approval): 6 × 16.04 = 96.24 against the gross 96.18 the
@@ -266,7 +266,7 @@ test('against the real service, a deposit row on an invoice: the service leaves 
   assert.deepEqual(json(c, 'priceAuditPendingRows(receiptPriceAudit())').map(r => r.rowIndex), [1]);
   assert.equal(audit.complete, false);
   const html = c.run('receiptPriceAuditHtml()');
-  assert.match(html, /צריך להשלים את הבדיקה/);
+  assert.match(html, /בדוק את הכמות מול הנייר/); // v398
   assert.match(html, /הקריאות לא הסכימו על הכמות: קריאה 1 – 4 · קריאה 2 – 9 · קריאה 3 \(המודל החזק\) – 9\./);
   assert.match(html, /החשבון לא מכריע: שורת פיקדון לא נספרת בסך היחידות המודפס, ולכן הנייר לא מאשש את הכמות שלה\./);
   assert.match(html, /data-role="price-confirm-values"/);
