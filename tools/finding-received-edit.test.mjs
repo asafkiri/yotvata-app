@@ -3,6 +3,10 @@
 // shortage is gone. The edit is the same count: it reaches the comparison row,
 // the scan list and the saved draft, and the findings are rebuilt locally
 // without a paid call. Going back to the count and returning keeps the edit.
+// v400: a row corrected here does not vanish when it closes — it stays in its
+// place, green ("הגיע הכול · 10 יח׳"), with its editor, so a mistake is undone
+// by lowering the number again. The memory lives in the draft with the
+// comparison state.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as harness from './receipt-scan-harness.mjs';
@@ -10,19 +14,22 @@ import * as harness from './receipt-scan-harness.mjs';
 const strip = s => s.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 const cells = h => Object.fromEntries([...h.matchAll(/<div class="text-\[10px\] font-bold text-slate-500">([^<]*)<\/div><div class="text-base font-black [^"]*">([^<]*)<\/div>/g)].map(m => [m[1], m[2]]));
 const ROW = '<div class="py-2 border-t border-black/5 first:border-t-0">';
+const HEADINGS = ['אלה הבעיות שנמצאו', 'מה שתיקנת כאן'];
 function rowHtml(html, name) {
-  const head = html.indexOf('אלה הבעיות שנמצאו');
-  if (head < 0) return '';
+  const head = Math.min(...HEADINGS.map(h => html.indexOf(h)).filter(i => i >= 0));
+  if (!Number.isFinite(head)) return '';
   const start = html.indexOf(name, head);
   if (start < 0) return '';
   const end = html.indexOf(ROW, start);
   return html.slice(start, end < 0 ? undefined : end);
 }
 const editors = html => (html.match(/data-role="ai-recv-input"/g) || []).length;
+const greenRows = html => (html.match(/rounded-lg bg-emerald-50 border border-emerald-200 p-2/g) || []).length;
 const inputValue = (html, pid) => { const m = html.match(new RegExp('data-role="ai-recv-input" data-id="' + pid + '"[^>]*value="(\\d+)"')); return m ? Number(m[1]) : null; };
 const quickButton = (html, pid) => { const m = html.match(new RegExp('<button type="button" data-role="ai-recv-set" data-id="' + pid + '" data-qty="(\\d+)"[^>]*>([^<]*)<')); return m ? { qty: Number(m[1]), text: m[2] } : null; };
 const findings = r => JSON.parse(r.run('JSON.stringify((aiScanEvaluation.findings || []).filter(f => f.type === "shortage" || f.type === "surplus").map(f => [f.type, f.productId, f.qty]))'));
 const counts = r => JSON.parse(r.run('JSON.stringify({ list: receiptList.map(l => [l.productId, l.qty]), rows: reconcileData.map(l => [l.productId, l.received]), source: receiptReconcileSource })'));
+const edits = r => JSON.parse(r.run('JSON.stringify(aiReceivedEdits)'));
 
 // Paper: milk ×10 at ₪5 (the harness fixture). Scanned: 2 of it (an empty count
 // cannot be closed), so the engine says "חסר 8".
@@ -55,19 +62,59 @@ test('typing a received quantity on the shortage row updates the shortage at onc
   assert.deepEqual(cells(rowHtml(html, 'חלב בדיקה')), { 'חויב בתעודה': '10', 'נסרק בפועל': '6', 'חסר': '4' });
   assert.ok(strip(rowHtml(html, 'חלב בדיקה')).startsWith('חלב בדיקה חסר 4 יח׳'));
   assert.equal(inputValue(html, 'milk'), 6);
+  assert.equal(greenRows(html), 0, 'still short — the row stays red');
   assert.deepEqual(counts(r), { list: [['milk', 6]], rows: [['milk', 6]], source: [{ productId: 'milk', qty: 6 }] });
+  assert.deepEqual(edits(r), { milk: { kind: 'shortage', name: 'חלב בדיקה' } });
   assert.ok(r.toasts.at(-1).includes('התקבלו 6 יח׳') && r.toasts.at(-1).includes('עדיין חסר 4'), r.toasts.at(-1));
 });
 
-test('"הגיע הכול" clears the shortage; the row disappears', async () => {
+test('v400 "הגיע הכול" closes the shortage: the row stays in place, green, with its editor; lowering the number brings the shortage back', async () => {
   const r = await shortageScreen();
   r.click('ai-recv-set', 'milk', { qty: '10' });
-  const html = r.node('app').innerHTML;
+  let html = r.node('app').innerHTML;
   assert.deepEqual(findings(r), []);
-  assert.equal(rowHtml(html, 'חלב בדיקה'), '', 'no shortage row any more');
-  assert.equal(editors(html), 0);
+  assert.ok(html.includes('מה שתיקנת כאן:'), 'the group is still drawn, under its own heading');
+  const row = rowHtml(html, 'חלב בדיקה');
+  assert.ok(row, 'the row is still there');
+  assert.equal(greenRows(html), 1);
+  assert.ok(strip(row).startsWith('חלב בדיקה הגיע הכול · 10 יח׳'), strip(row));
+  assert.deepEqual(cells(row), { 'חויב בתעודה': '10', 'נסרק בפועל': '10', 'חסר': '0' });
+  assert.ok(strip(row).includes('תוקן כאן. טעית? שנה את הכמות והחוסר יחזור.'));
+  assert.equal(editors(html), 1, 'the editor is on the green row');
+  assert.equal(inputValue(html, 'milk'), 10);
+  assert.equal(quickButton(html, 'milk'), null, 'nothing to fill in');
+  assert.ok(html.includes('תוקן 1'), 'the group badge says one was corrected');
+  assert.ok(!html.includes('<span class="rounded-full px-2 py-0.5 text-[10px] font-black bg-rose-100 text-rose-800">'), 'no open-count badge');
   assert.deepEqual(counts(r).list, [['milk', 10]]);
   assert.ok(r.toasts.at(-1).includes('אין חוסר או עודף'), r.toasts.at(-1));
+
+  // A mistake: only 7 came after all. The red row is back, in the same group.
+  change(r, 'milk', '7');
+  html = r.node('app').innerHTML;
+  assert.deepEqual(findings(r), [['shortage', 'milk', 3]]);
+  assert.equal(greenRows(html), 0);
+  assert.ok(html.includes('אלה הבעיות שנמצאו:'));
+  assert.deepEqual(cells(rowHtml(html, 'חלב בדיקה')), { 'חויב בתעודה': '10', 'נסרק בפועל': '7', 'חסר': '3' });
+  assert.equal(editors(html), 1);
+});
+
+test('v400 when the fix balances the receipt (manual anchors), the scan step stays with its green row until "המשך"', async () => {
+  const r = await shortageScreen();
+  r.run("receiptAnchorSource = 'manual'; renderReconcile();");
+  assert.equal(r.run('rcStep'), 'ai');
+  r.click('ai-recv-set', 'milk', { qty: '10' });
+  assert.equal(r.run('rcStep'), 'ai');
+  // The paper side of the row still carries the count it was opened with (2); with the
+  // paper quantity typed as 10 the receipt balances against the note total.
+  r.run("reconcileData.find(l => l.productId === 'milk').noteQty = 10; renderReconcile();");
+  assert.equal(r.run('reconcileIsBalanced()'), true);
+  assert.equal(r.run('rcStep'), 'ai', 'balanced, but the scan step stays');
+  assert.ok(strip(rowHtml(r.node('app').innerHTML, 'חלב בדיקה')).startsWith('חלב בדיקה הגיע הכול · 10 יח׳'));
+  // The memory is the only thing holding the screen: without it the comparison moves on to "מאוזן".
+  assert.equal(r.run("const keep = aiReceivedEdits; aiReceivedEdits = {}; renderReconcile(); const step = rcStep; aiReceivedEdits = keep; rcStep = 'ai'; renderReconcile(); step"), 'balanced');
+  assert.equal(r.run('rcStep'), 'ai');
+  r.click('ai-apply');
+  assert.equal(r.run('rcStep'), 'balanced', '"המשך" leads on as before');
 });
 
 test('plus and minus step the received quantity by one unit, never below zero', async () => {
@@ -81,9 +128,9 @@ test('plus and minus step the received quantity by one unit, never below zero', 
   assert.ok(/data-role="ai-recv-step" data-id="milk" data-delta="-1"[^>]* disabled>/.test(r.node('app').innerHTML));
 });
 
-test('a surplus of a product not on the paper: typing 0 removes it from the count', async () => {
+test('a surplus of a product not on the paper: typing 0 removes it from the count, the row stays green and can bring it back', async () => {
   const r = await shortageScreen([{ productId: 'milk', name: 'חלב בדיקה', barcode: '7290000000008', qty: 10 }, { productId: 'coffee', name: 'קפה בדיקה', barcode: '7290000000015', qty: 4 }]);
-  const html = r.node('app').innerHTML;
+  let html = r.node('app').innerHTML;
   assert.deepEqual(findings(r), [['surplus', 'coffee', 4]]);
   assert.deepEqual(quickButton(html, 'coffee'), { qty: 0, text: 'לא הגיע (0)' });
   change(r, 'coffee', '1');
@@ -91,10 +138,18 @@ test('a surplus of a product not on the paper: typing 0 removes it from the coun
   r.click('ai-recv-set', 'coffee', { qty: '0' });
   assert.deepEqual(findings(r), []);
   assert.deepEqual(counts(r).list, [['milk', 10]], 'the product left the scan list');
-  assert.equal(editors(r.node('app').innerHTML), 0);
+  html = r.node('app').innerHTML;
+  const row = rowHtml(html, 'קפה בדיקה');
+  assert.ok(strip(row).startsWith('קפה בדיקה לא הגיע · הוסר מהספירה'), strip(row));
+  assert.deepEqual(cells(row), { 'חויב בתעודה': '0', 'נסרק בפועל': '0', 'עודף': '0' });
+  assert.equal(editors(html), 1);
+  change(r, 'coffee', '2');
+  assert.deepEqual(findings(r), [['surplus', 'coffee', 2]]);
+  assert.deepEqual(counts(r).list, [['coffee', 2], ['milk', 10]]);
+  assert.equal(greenRows(r.node('app').innerHTML), 0);
 });
 
-test('the edit survives going back to the count and returning to the comparison', async () => {
+test('the edit — and the green row — survive going back to the count and returning to the comparison', async () => {
   const r = await shortageScreen();
   change(r, 'milk', '7');
   assert.deepEqual(findings(r), [['shortage', 'milk', 3]]);
@@ -104,15 +159,27 @@ test('the edit survives going back to the count and returning to the comparison'
   assert.equal(r.run('rcStep'), 'ai');
   assert.deepEqual(findings(r), [['shortage', 'milk', 3]]);
   assert.deepEqual(counts(r).rows, [['milk', 7]]);
+  r.click('ai-recv-set', 'milk', { qty: '10' });
+  r.click('rc-recon-cancel');
+  assert.equal(r.run('currentView'), 'receiving');
+  r.run('openReconcile()');
+  const row = rowHtml(r.node('app').innerHTML, 'חלב בדיקה');
+  assert.ok(strip(row).startsWith('חלב בדיקה הגיע הכול · 10 יח׳'), 'the green row is restored with the comparison: ' + strip(row));
 });
 
-test('the edit is in the saved draft: a restart restores the corrected count and findings', async () => {
+test('the edit is in the saved draft: a restart restores the corrected count, the findings and the green row', async () => {
   const r = await shortageScreen();
   change(r, 'milk', '8');
   const again = harness.runtime('yotvata', { storage: r.storage, data: harness.fixture('yotvata') });
   assert.deepEqual(JSON.parse(again.run('JSON.stringify(receiptList.map(l => [l.productId, l.qty]))')), [['milk', 8]]);
   again.run('openReconcile()');
   assert.deepEqual(findings(again), [['shortage', 'milk', 2]]);
+  again.click('ai-recv-set', 'milk', { qty: '10' });
+  const third = harness.runtime('yotvata', { storage: again.storage, data: harness.fixture('yotvata') });
+  third.run('openReconcile()');
+  assert.deepEqual(findings(third), []);
+  assert.deepEqual(edits(third), { milk: { kind: 'shortage', name: 'חלב בדיקה' } });
+  assert.ok(strip(rowHtml(third.node('app').innerHTML, 'חלב בדיקה')).startsWith('חלב בדיקה הגיע הכול · 10 יח׳'));
 });
 
 test('bad input is refused without touching the count; a stale analyzer answer is dropped', async () => {
@@ -120,6 +187,7 @@ test('bad input is refused without touching the count; a stale analyzer answer i
   change(r, 'milk', 'abc');
   assert.deepEqual(findings(r), [['shortage', 'milk', 8]]);
   assert.ok(r.toasts.at(-1).includes('הקלד מספר'), r.toasts.at(-1));
+  assert.deepEqual(edits(r), {}, 'a refused edit is not remembered');
   assert.equal(r.run("aiSetFindingReceived('deposit-recv-x', 3)"), false);
   assert.equal(r.run("aiSetFindingReceived('', 3)"), false);
   r.run("aiAnalyzeResult = { accepted: true, claims: [], findings: [], closure: { ok: true } }; aiScanEvaluation.analyzerLed = true;");
@@ -186,11 +254,32 @@ test('analyzer-led card: a claim without the numbers (not paper − scan) gets n
   assert.equal(editors(html), 0);
 });
 
-test('no editor when the draft is read-only or there is no saved read', () => {
+test('v400 two shortages, one corrected: the green row keeps its place above the open one, and the badges say 1 open · 1 corrected', async () => {
+  const r = harness.runtime('yotvata', { data: twoProductScan({ scanA: 4, scanB: 2 }) });
+  await r.scan();
+  r.run("receiptDupConfirmed=true; showConfirm=(title,text,label,fn)=>fn(); finishReceipt();");
+  assert.equal(r.run('rcStep'), 'ai');
+  assert.deepEqual(findings(r), [['shortage', 'A', 8], ['shortage', 'B', 8]]);
+  r.click('ai-recv-set', 'A', { qty: '12' });
+  const html = r.node('app').innerHTML;
+  assert.deepEqual(findings(r), [['shortage', 'B', 8]]);
+  const group = html.slice(html.indexOf('אלה הבעיות שנמצאו:'));
+  assert.ok(group.indexOf('מוצר א בדיקה') < group.indexOf('מוצר ב בדיקה'), 'A (green) still comes before B (red)');
+  assert.equal(greenRows(html), 1);
+  assert.equal(editors(html), 2);
+  assert.ok(group.includes('תוקן 1'));
+  assert.ok(group.includes('<span class="rounded-full px-2 py-0.5 text-[10px] font-black bg-rose-100 text-rose-800">1</span>'), 'one open shortage');
+  assert.ok(strip(rowHtml(html, 'מוצר א בדיקה')).startsWith('מוצר א בדיקה הגיע הכול · 12 יח׳'));
+  assert.deepEqual(cells(rowHtml(html, 'מוצר ב בדיקה')), { 'חויב בתעודה': '10', 'נסרק בפועל': '2', 'חסר': '8' });
+});
+
+test('no editor when the draft is read-only or there is no saved read; junk in the memory never draws a row', () => {
   const r = harness.runtime('yotvata');
   r.run("aiScanEvaluation = { aggregates: new Map([['p1', { qty: 10 }]]), basketComplete: true }; reconcileData = [{ productId: 'p1', received: 2 }];");
   assert.equal(r.run("aiScanResponse = null; aiQuantityFindingEditorHtml('p1', true)"), '');
   assert.ok(r.run("aiScanResponse = { scan: { documents: [] } }; aiQuantityFindingEditorHtml('p1', true)").includes('ai-recv-input'));
   assert.equal(r.run("canEditDraft = () => false; aiQuantityFindingEditorHtml('p1', true)"), '');
   assert.equal(r.run("aiQuantityFindingEditorHtml('deposit-recv-p1', true)"), '');
+  assert.deepEqual(JSON.parse(r.run("aiReceivedEdits = [1, 2]; JSON.stringify(aiResolvedEditRows([]))")), []);
+  assert.deepEqual(JSON.parse(r.run("aiReceivedEdits = { p1: 'x', '': { kind: 'shortage' }, p2: { kind: 'weird', name: 7 } }; JSON.stringify(aiReceivedEditsSanitize(aiReceivedEdits))")), { p2: { kind: 'shortage', name: '7' } });
 });
