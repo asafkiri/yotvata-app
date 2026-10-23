@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v399 תעודה שלא מתאזנת</title>
+    <title>הזמנות יטבתה - v400 השורה שתוקנה נשארת ירוקה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -125,7 +125,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v399 תעודה שלא מתאזנת</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v400 השורה שתוקנה נשארת ירוקה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -648,6 +648,7 @@ let receiptAttachTarget = null;  // צירוף נייר לקליטה שכבר נ
 let receiptDepositWaived = false; // v232: התעודה לא חייבה פיקדון — שורות הפיקדון הנגזרות הוסרו לתעודה זו
 let receiptReconcileDraft = null, receiptReconcileSession = null, receiptReconcileSource = null;
 let reconcileData = null;        // נתוני מסך השוואת תעודה
+let aiReceivedEdits = {};        // v400: מוצרים שכמותם תוקנה ממסך החוסרים — { [productId]: { kind, name } }; השורה נשארת ירוקה אחרי שהחוסר נסגר
 // v178: האם באמת הוזנו נתוני נייר (הקלדה ידנית / החלת סריקת AI) על noteQty.
 // עד שזה קורה, noteQty הוא עותק של מה שנסרק — והכותרת חייבת לומר את זה.
 let reconcilePaperEntered = false;
@@ -669,9 +670,9 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '399'; // תעודה שלא מתאזנת: מה חסר, איפה ההפרש ואילו שורות לבדוק; תיקון שמאזן את התעודה משחרר את הקליטה
+const APP_VERSION = '400'; // השורה שתוקנה ממסך החוסרים נשארת ירוקה במקומה — טעית? מורידים את המספר והחוסר חוזר
 // v398: תווית הגרסה ביומן הפעולות ובקובץ הגיבוי (עד כאן מחרוזת קבועה שנשארה 'v396_second_strong_read')
-const APP_VERSION_LABEL = 'v' + APP_VERSION + '_paper_gap';
+const APP_VERSION_LABEL = 'v' + APP_VERSION + '_green_rows';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -2548,7 +2549,7 @@ function restoreReceiptDraft(incoming) {
     const o = incoming || JSON.parse(s);
     receiptReconcileDraft = o && o.reconciliation && o.reconciliation.version === 1
       && o.reconciliation.draftId === o.draftId && Array.isArray(o.reconciliation.rows) ? o.reconciliation : null;
-    receiptReconcileSession = null; receiptReconcileSource = null; reconcileData = null;
+    receiptReconcileSession = null; receiptReconcileSource = null; reconcileData = null; aiReceivedEdits = {};
     receiptDeliveryCredits = (Array.isArray(o && o.deliveryCredits) ? o.deliveryCredits : []).filter(c => c && typeof c.id === 'string' && /^[a-zA-Z0-9_-]{1,160}$/.test(c.id)).slice(0, 4)
       // v365: זיכוי שאושר (גם לבד — autoConfirmed) חוזר מאושר כמו שנשמר; השחזור לעולם לא מאשר ולא קורא.
       .map(({ waiting, waitingFor, progress, resume, editBarcode, ...c }) => ({ ...c, pages: [], status: deliveryCreditBusy(c) ? 'interrupted' : c.status,
@@ -2719,7 +2720,7 @@ function completeLocalReceiptSave(finalSession) {
   hideReceiptSummary();
   aiCloseOrientationReview();
   yotvataResetPhotoReceipt();
-  receiptDraftId = null; receiptList = []; receiptQuantityReview = null; receiptCountingMode = 'scan'; pendingReceipt = null; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; reconcileData = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; reconcileAiAudit = null; aiScanDocuments = []; aiScanBusy = false; aiScanProgressText = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanReused = false; aiScanFromDraft = false; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; receiptDupConfirmed = false; receiptDepositWaived = false; receiptUnitsWaived = false; receiptNoDoc = false; receiptAttachTarget = null;
+  receiptDraftId = null; aiReceivedEdits = {}; receiptList = []; receiptQuantityReview = null; receiptCountingMode = 'scan'; pendingReceipt = null; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; reconcileData = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; reconcileAiAudit = null; aiScanDocuments = []; aiScanBusy = false; aiScanProgressText = ''; aiScanResponse = null; aiScanEvaluation = null; aiScanReused = false; aiScanFromDraft = false; aiScanError = ''; aiScanAutoRotationNote = ''; aiScanAttemptCount = 0; receiptDupConfirmed = false; receiptDepositWaived = false; receiptUnitsWaived = false; receiptNoDoc = false; receiptAttachTarget = null;
   localReceivingFinalizer?.forget(finalSession);refreshReceiptDraftNotice();
   handoffFinishPlans.receiving=null;return true;
 }
@@ -9309,7 +9310,7 @@ function receiptReconcileSnapshot() {
       // The baseline belongs to these comparison rows, not to later scans.
       // Advancing it during autosave made new/changed counts look already applied.
       source: receiptReconcileSource || [],
-      state: { reconcilePaperEntered, reconcileAiAudit, reconcileSupplierDiscount, reconcileSupplierPromoItems, reconcilePromoMismatchItems, reconcileSupplierCreditClaim, noteCheckRows, noteCheckQtyMode, reconcileCheckMode, noteCheckForceQty, manualAssigned, manualPromoMarks, detectiveQuestionState } };
+      state: { reconcilePaperEntered, reconcileAiAudit, reconcileSupplierDiscount, reconcileSupplierPromoItems, reconcilePromoMismatchItems, reconcileSupplierCreditClaim, noteCheckRows, noteCheckQtyMode, reconcileCheckMode, noteCheckForceQty, manualAssigned, manualPromoMarks, detectiveQuestionState, aiReceivedEdits } };
   }
   return receiptReconcileDraft && receiptReconcileDraft.draftId === receiptDraftId ? receiptReconcileDraft : null;
 }
@@ -9357,6 +9358,7 @@ function restoreReceiptReconcile() {
   if (Object.prototype.hasOwnProperty.call(state, 'manualAssigned')) manualAssigned = state.manualAssigned;
   if (Object.prototype.hasOwnProperty.call(state, 'manualPromoMarks')) manualPromoMarks = state.manualPromoMarks;
   if (Object.prototype.hasOwnProperty.call(state, 'detectiveQuestionState')) detectiveQuestionState = state.detectiveQuestionState;
+  aiReceivedEdits = aiReceivedEditsSanitize(state.aiReceivedEdits); // v400
   const oldCounts = new Map((d.source || []).map(l => [String(l.productId), Number(l.qty) || 0]));
   // v393: השוואה שאיש לא נגע בה נבנית מחדש מהספירה הנוכחית, כאילו נפתחה עכשיו.
   // בלי זה עמודת "בנייר" (שלפני הזנת נייר היא רק עותק של הספירה, v178) נשארה עם
@@ -9406,7 +9408,7 @@ function openReconcile() {
   receiptReconcileSession = receiptDraftId;
   reconcileData = receiptReconcileRows();
   receiptReconcileSource = receiptList.map(l => ({ productId: l.productId, qty: l.qty }));
-  detectiveOpen = false; noteCheckOpen = false; noteCheckAuto = false; noteCheckRows = []; noteCheckRes = null; reconcileCheckMode = false; noteCheckQtyMode = false; rcStep = null; noteCheckForceQty = false; ncPromoResult = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; manualSearchTerm = ''; manualAssigned = []; manualSearchOpen = false; manualPromoMarks = {}; reconcilePaperEntered = false;
+  detectiveOpen = false; noteCheckOpen = false; noteCheckAuto = false; noteCheckRows = []; noteCheckRes = null; reconcileCheckMode = false; noteCheckQtyMode = false; rcStep = null; noteCheckForceQty = false; ncPromoResult = null; reconcileSupplierDiscount = 0; reconcileSupplierPromoItems = []; reconcilePromoMismatchItems = []; reconcileSupplierCreditClaim = null; manualSearchTerm = ''; manualAssigned = []; manualSearchOpen = false; manualPromoMarks = {}; reconcilePaperEntered = false; aiReceivedEdits = {};
   resetAiInvoiceScan();
   resetDetectiveQuestions();
   setView('reconcile');
@@ -16804,11 +16806,21 @@ function aiSetFindingReceived(productId, value) {
     if (!p) { showToast('המוצר לא נמצא במאגר', null, null, 2600); return false; }
     const day = activeReceiptDate(), base = r2(Number(p.price) || 0);
     const promo = promoForProduct(p.id, day), on = promoTriggered(promo, day), pct = on ? (Number(promo.pct) || 0) : 0;
-    line = { productId: p.id, name: p.name || '', barcode: p.barcode || '', received: 0, noteQty: 0, price: on ? discountedUnitPrice(base, pct) : base, basePrice: base, promoPct: pct, promoOn: on, checked: false };
+    line = { productId: p.id, name: p.name || '', barcode: p.barcode || '', received: 0, noteQty: reconcilePaperEntered ? 0 : qty, price: on ? discountedUnitPrice(base, pct) : base, basePrice: base, promoPct: pct, promoOn: on, checked: false }; // v400: "בנייר" משקף את הספירה עד שהנייר מוזן — כמו בשחזור ההשוואה
     reconcileData.unshift(line);
   }
   const before = Math.max(0, Math.round(Number(line.received) || 0));
   if (before === qty) return true;
+  // v400: זוכרים שהמוצר תוקן כאן, לפי הממצא שהיה פתוח ברגע התיקון (חוסר/עודף).
+  // כשהחוסר ייסגר, השורה תישאר ירוקה עם העורך במקום להיעלם.
+  const openBefore = (aiScanEvaluation && Array.isArray(aiScanEvaluation.findings) ? aiScanEvaluation.findings : [])
+    .find(f => f && (f.type === 'shortage' || f.type === 'surplus') && String(f.productId) === pid);
+  const remembered = aiReceivedEditsSanitize(aiReceivedEdits)[pid];
+  aiReceivedEdits = aiReceivedEditsSanitize(aiReceivedEdits);
+  aiReceivedEdits[pid] = {
+    kind: openBefore ? openBefore.type : (remembered ? remembered.kind : (aiBilledQuantity(pid) >= before ? 'shortage' : 'surplus')),
+    name: line.name || (openBefore && openBefore.name) || (remembered && remembered.name) || ''
+  };
   line.received = qty;
   const itemIndex = receiptList.findIndex(it => it && String(it.productId) === pid);
   if (itemIndex >= 0) { if (qty > 0) receiptList[itemIndex].qty = qty; else receiptList.splice(itemIndex, 1); }
@@ -16826,6 +16838,72 @@ function aiSetFindingReceived(productId, value) {
   const name = line.name ? ' ' + line.name : '';
   showToast('עודכן: התקבלו ' + qty + ' יח׳' + name + (open ? ' · ' + (open.type === 'shortage' ? 'עדיין חסר ' : 'עדיין עודף ') + (Number(open.qty) || 0) + ' יח׳' : ' · אין חוסר או עודף'), null, null, 3200);
   return true;
+}
+// v400: שורה שתוקנה כאן ואין בה עוד חוסר או עודף אינה נעלמת — היא נשארת
+// במקומה, ירוקה ("הגיע הכול · 80 יח׳"), עם אותם שלושה מספרים ועם העורך, כדי
+// שטעות תתוקן באותה קלות: מורידים את המספר והחוסר חוזר. הזיכרון הוא לפי
+// מוצר (aiReceivedEdits), נשמר בטיוטה יחד עם מצב ההשוואה, ונמחק כשהתעודה
+// נסגרת או מתבטלת. מוצר שיש עליו ממצא כמות פתוח מוצג כממצא רגיל, לא כירוק.
+function aiReceivedEditsSanitize(value) {
+  const out = {};
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return out;
+  Object.keys(value).forEach(pid => {
+    const entry = value[pid];
+    if (!pid || !entry || typeof entry !== 'object') return;
+    out[pid] = { kind: entry.kind === 'surplus' ? 'surplus' : 'shortage', name: String(entry.name || '') };
+  });
+  return out;
+}
+function aiBilledQuantity(productId) {
+  const ev = aiScanEvaluation, pid = String(productId == null ? '' : productId);
+  const agg = ev && ev.aggregates instanceof Map ? (ev.aggregates.get(productId) || ev.aggregates.get(pid)) : null;
+  return agg ? Math.max(0, Math.round(Number(agg.qty) || 0)) : 0;
+}
+// סדר הנייר — כדי שהשורה הירוקה תישאר במקום שבו הייתה כשהייתה אדומה.
+function aiPaperOrderIndex() {
+  const order = new Map();
+  const ev = aiScanEvaluation;
+  if (ev && ev.aggregates instanceof Map) { let i = 0; ev.aggregates.forEach((agg, key) => { order.set(String(key), i++); }); }
+  return order;
+}
+function aiResolvedEditRows(findings) {
+  const ev = aiScanEvaluation;
+  if (!aiScanResponse || !ev || !(ev.aggregates instanceof Map) || !Array.isArray(reconcileData)) return [];
+  const open = new Set((Array.isArray(findings) ? findings : []).filter(f => f && (f.type === 'shortage' || f.type === 'surplus')).map(f => String(f.productId)));
+  const edits = aiReceivedEditsSanitize(aiReceivedEdits);
+  const rows = [];
+  Object.keys(edits).forEach(pid => {
+    if (open.has(pid)) return;
+    const line = reconcileData.find(l => l && String(l.productId) === pid);
+    if (line && line.isDeposit) return;
+    const agg = ev.aggregates.get(pid) || Array.from(ev.aggregates.entries()).map(([key, value]) => String(key) === pid ? value : null).find(Boolean);
+    const p = products.find(x => String(x.id) === pid);
+    rows.push({ productId: pid, kind: edits[pid].kind,
+      name: (line && line.name) || (agg && agg.product && agg.product.name) || edits[pid].name || (p && p.name) || '',
+      billed: aiBilledQuantity(pid), scanned: line ? Math.max(0, Math.round(Number(line.received) || 0)) : 0 });
+  });
+  return rows;
+}
+function aiResolvedEditRowHtml(entry) {
+  const shortage = entry.kind !== 'surplus';
+  const label = entry.billed > 0 && entry.scanned === entry.billed
+    ? (shortage ? 'הגיע הכול' : 'כמו בתעודה') + ' · ' + entry.scanned + ' יח׳'
+    : (entry.scanned === 0 ? 'לא הגיע · הוסר מהספירה' : 'אין חוסר או עודף · ' + entry.scanned + ' יח׳');
+  const cell = (title, value, cls) => '<div class="rounded-lg bg-white border border-emerald-100 py-1.5"><div class="text-[10px] font-bold text-slate-500">' + title + '</div><div class="text-base font-black ' + cls + '">' + value + '</div></div>';
+  let editor = '';
+  try { editor = aiQuantityFindingEditorHtml(entry.productId, shortage); } catch (editorError) { editor = ''; }
+  return '<div class="py-2 border-t border-black/5 first:border-t-0"><div class="rounded-lg bg-emerald-50 border border-emerald-200 p-2">' +
+    '<div class="flex items-start justify-between gap-3">' +
+      '<div class="min-w-0 text-sm font-black text-slate-800">' + htmlEscape(entry.name) + '</div>' +
+      '<div class="shrink-0 max-w-[60%] text-sm font-black text-emerald-700"><i class="fa-solid fa-circle-check ml-1"></i>' + label + '</div>' +
+    '</div>' +
+    '<div class="mt-1.5 grid grid-cols-3 gap-1.5 text-center">' +
+      cell(aiScanEvaluation && aiScanEvaluation.basketComplete === false ? 'חויב (שורות שזוהו)' : 'חויב בתעודה', entry.billed, 'text-slate-800') +
+      cell('נסרק בפועל', entry.scanned, 'text-slate-800') +
+      cell(shortage ? 'חסר' : 'עודף', Math.max(0, shortage ? entry.billed - entry.scanned : entry.scanned - entry.billed), 'text-emerald-700') +
+    '</div>' +
+    '<div class="mt-1 text-xs font-bold text-emerald-800"><i class="fa-solid fa-pen ml-1"></i>תוקן כאן. טעית? שנה את הכמות והחוסר יחזור.</div>' +
+    editor + '</div></div>';
 }
 // v372: המספרים עצמם, בלי HTML — שורת המנוע וכרטיס המנתח שואלים כאן ומקבלים
 // אותה תשובה. null = אין פירוט, והשורה נשארת פשוטה: החשבון לא סוגר, חסר
@@ -16879,26 +16957,37 @@ function aiQuantityFindingDetailHtml(finding, shortage, label, headClass, siblin
     '<div class="mt-1 text-xs font-bold text-slate-600">' + summary + '</div>' +
     partialLine + creditLine;
 }
-function aiCompactFindingGroupHtml(type, title, findings, extraRowsHtml, extraCount) {
+function aiCompactFindingGroupHtml(type, title, findings, extraRowsHtml, extraCount, resolvedRows) {
   const rows = (findings || []).filter(finding => String(finding && finding.type || '') === type);
   const extraHtml = String(extraRowsHtml || '');
   const extras = Math.max(0, Number(extraCount) || 0);
-  if (!rows.length && !extraHtml) return '';
-  const style = type === 'shortage'
+  // v400: שורות שתוקנו כאן ונסגרו — נשארות בקבוצה שלהן, ירוקות ובמקומן
+  const resolved = (type === 'shortage' || type === 'surplus') && Array.isArray(resolvedRows) ? resolvedRows.filter(entry => entry && entry.kind === type) : [];
+  if (!rows.length && !extraHtml && !resolved.length) return '';
+  const allResolved = !rows.length && !extras && resolved.length > 0;
+  const style = allResolved
+    ? { box: 'bg-emerald-50 border-emerald-200', head: 'text-emerald-800', badge: 'bg-emerald-100 text-emerald-800', icon: 'fa-circle-check' }
+    : type === 'shortage'
     ? { box: 'bg-rose-50 border-rose-200', head: 'text-rose-800', badge: 'bg-rose-100 text-rose-800', icon: 'fa-circle-minus' }
     : (type === 'surplus'
       ? { box: 'bg-amber-50 border-amber-200', head: 'text-amber-800', badge: 'bg-amber-100 text-amber-800', icon: 'fa-circle-plus' }
       : (type === 'promo_missing'
         ? { box: 'bg-orange-50 border-orange-200', head: 'text-orange-900', badge: 'bg-orange-100 text-orange-900', icon: 'fa-tags' }
         : { box: 'bg-blue-50 border-blue-200', head: 'text-blue-900', badge: 'bg-blue-100 text-blue-900', icon: 'fa-shekel-sign' }));
-  const compactRows = rows.map(finding => {
-    if (type === 'shortage' || type === 'surplus') {
-      return aiQuantityFindingRowHtml(finding, type, style.head);
-    }
-    return '<div class="py-2 border-t border-black/5 first:border-t-0 text-sm font-black text-slate-800">' + htmlEscape(tidyAiMoneyText(finding.text || '')) + '</div>';
-  }).join('');
+  let items = rows.map(finding => ({ key: String(finding && finding.productId), html: (type === 'shortage' || type === 'surplus')
+    ? aiQuantityFindingRowHtml(finding, type, style.head)
+    : '<div class="py-2 border-t border-black/5 first:border-t-0 text-sm font-black text-slate-800">' + htmlEscape(tidyAiMoneyText(finding.text || '')) + '</div>' }));
+  if (resolved.length) {
+    items = items.concat(resolved.map(entry => { let html = ''; try { html = aiResolvedEditRowHtml(entry); } catch (rowError) { html = ''; } return { key: String(entry.productId), html }; }));
+    const order = aiPaperOrderIndex();
+    const at = key => order.has(key) ? order.get(key) : Infinity;
+    items = items.map((item, index) => ({ ...item, index })).sort((a, b) => (at(a.key) - at(b.key)) || (a.index - b.index));
+  }
+  const compactRows = items.map(item => item.html).join('');
+  const openBadge = rows.length + extras > 0 ? '<span class="rounded-full px-2 py-0.5 text-[10px] font-black ' + style.badge + '">' + (rows.length + extras) + '</span>' : '';
+  const resolvedBadge = resolved.length ? '<span class="rounded-full px-2 py-0.5 text-[10px] font-black bg-emerald-100 text-emerald-800"><i class="fa-solid fa-check"></i> ' + (resolved.length === 1 ? 'תוקן 1' : 'תוקנו ' + resolved.length) + '</span>' : '';
   return '<div class="rounded-xl border p-3 ' + style.box + '">' +
-    '<div class="flex items-center justify-between gap-2 mb-1 ' + style.head + '"><div class="font-black"><i class="fa-solid ' + style.icon + ' ml-1"></i>' + title + '</div><span class="rounded-full px-2 py-0.5 text-[10px] font-black ' + style.badge + '">' + (rows.length + extras) + '</span></div>' +
+    '<div class="flex items-center justify-between gap-2 mb-1 ' + style.head + '"><div class="font-black"><i class="fa-solid ' + style.icon + ' ml-1"></i>' + title + '</div><span class="flex items-center gap-1">' + resolvedBadge + openBadge + '</span></div>' +
     '<div>' + compactRows + extraHtml + '</div></div>';
 }
 // v177: נתוני אבחון — מוצגים מקופלים במסך התוצאות כשיש בעיות, כדי
@@ -16962,14 +17051,20 @@ function aiScanDiagnosticsHtml(ev) {
     return '<details class="mt-3 bg-slate-50 border border-slate-200 rounded-xl"><summary class="p-2.5 text-[11px] font-black text-slate-500"><i class="fa-solid fa-microscope"></i> נתוני אבחון — צלם מסך כשמשהו נראה מוזר</summary><div class="px-3 pb-3 text-[10px] text-slate-600 leading-relaxed" style="font-family: monospace">' + lines.map(htmlEscape).join('<br>') + '</div></details>';
   } catch (diagError) { return ''; }
 }
-function aiActionableFindingsHtml(findings) {
+// v400: options.openRows === false — רק השורות הירוקות (כשהמנתח מוביל, הכרטיסים
+// שלו מחליפים את שורות המנוע, אבל מה שתוקן כאן עדיין מוצג). הממצאים הפתוחים
+// נמסרים תמיד, כדי שמוצר שעדיין חסר לא יוצג כירוק.
+function aiActionableFindingsHtml(findings, options) {
   const actionable = (Array.isArray(findings) ? findings : []).filter(aiIsActionableFinding).filter(priceAuditLegacyVisible);
-  if (!actionable.length) return '';
-  return '<div class="mt-3"><div class="font-black text-base text-slate-800 mb-2">אלה הבעיות שנמצאו:</div><div class="space-y-2">' +
-    aiCompactFindingGroupHtml('shortage', 'חוסרים', actionable) +
-    aiCompactFindingGroupHtml('surplus', 'עודפים', actionable) +
-    aiCompactFindingGroupHtml('price', 'בעיות מחיר', actionable) +
-    aiCompactFindingGroupHtml('promo_missing', 'מבצע קיים במערכת אך לא בתעודה', actionable) +
+  const open = options && options.openRows === false ? [] : actionable;
+  let resolved = [];
+  try { resolved = aiResolvedEditRows(actionable); } catch (resolvedError) { resolved = []; }
+  if (!open.length && !resolved.length) return '';
+  return '<div class="mt-3"><div class="font-black text-base text-slate-800 mb-2">' + (open.length ? 'אלה הבעיות שנמצאו:' : 'מה שתיקנת כאן:') + '</div><div class="space-y-2">' +
+    aiCompactFindingGroupHtml('shortage', 'חוסרים', open, '', 0, resolved) +
+    aiCompactFindingGroupHtml('surplus', 'עודפים', open, '', 0, resolved) +
+    aiCompactFindingGroupHtml('price', 'בעיות מחיר', open) +
+    aiCompactFindingGroupHtml('promo_missing', 'מבצע קיים במערכת אך לא בתעודה', open) +
   '</div></div>';
 }
 function aiInformationalFindingsHtml(findings) {
@@ -17383,7 +17478,7 @@ function aiInvoiceCaptureHtml() {
     // An old analysis describes the physical shortage before the credit. Show
     // the remaining findings, without offering to claim that credit again.
     const analyzerLed = !(credit && credit.amount) && ev.analyzerLed === true && aiAnalyzeResult && aiAnalyzeResult.accepted === true;
-    const findingsHtml = (!analyzerLed && actionableFindings.length ? aiActionableFindingsHtml(actionableFindings) : '') + residualLines + unknownCards + (credit && credit.amount ? '' : aiAnalyzeHtml(ev)) + aiScanDiagnosticsHtml(ev);
+    const findingsHtml = aiActionableFindingsHtml(actionableFindings, { openRows: !analyzerLed }) + residualLines + unknownCards + (credit && credit.amount ? '' : aiAnalyzeHtml(ev)) + aiScanDiagnosticsHtml(ev);
     const allGood = aiScanAllGood(ev) && !(credit && (credit.pending || credit.invalid.length));
     const statusHtml = deliveryCreditStatusHtml(credit) + (allGood
       ? '<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-3 font-black text-emerald-800"><i class="fa-solid fa-circle-check ml-1"></i>הכול תואם — לא נמצאו חוסר, עודף או בעיית מחיר/מבצע.</div>'
@@ -17679,7 +17774,11 @@ function renderReconcile() {
     }
   }
   // אם התאזן בכל שלב — עוברים ל"מאוזן"
-  if (balanced && !needsPaperReview) rcStep = 'balanced';
+  // v400: חוץ מכשמסך הסריקה פתוח ויש בו שורות שתוקנו ממנו (ירוקות) — אז ההשוואה
+  // לא קופצת ל"מאוזן" מעצמה ברגע שהחוסר האחרון נסגר, כדי שהשורה הירוקה תישאר
+  // על המסך ותאפשר חזרה מטעות; "הכול תואם — המשך" הוא שמוביל הלאה.
+  const keepAiStep = rcStep === 'ai' && !!aiScanEvaluation && Object.keys(aiReceivedEditsSanitize(aiReceivedEdits)).length > 0;
+  if (balanced && !needsPaperReview && !keepAiStep) rcStep = 'balanced';
   else if (!balanced && rcStep === 'balanced') rcStep = 'choose';
 
   const header = receiptPriceAuditHtml() + '<div class="px-1 py-1 mb-3"><h2 class="font-black text-2xl text-slate-800">בדיקת תעודה</h2></div>';
@@ -25258,7 +25357,7 @@ app.addEventListener('click', (e) => {
   // v272: ביטול תעודה חייב למחוק גם את הצילומים ואת קריאת הנייר. כל עוד כל
   // כניסה למסך ההשוואה איפסה אותם ממילא, הדילוג כאן לא הזיק; מרגע שהם שורדים
   // בין המסכים, תעודה שבוטלה הייתה יכולה להוריש את הנייר שלה לתעודה הבאה.
-  else if (role === 'rc-cancel') { showConfirm('ביטול תעודה', 'לבטל את התעודה הנוכחית? כל הפריטים שנסרקו יימחקו.', 'בטל תעודה', () => { if(!cancelLocalDraft('receiving'))return; yotvataResetPhotoReceipt(); receiptDraftId = null; receiptList = []; receiptQuantityReview = null; receiptCountingMode = 'scan'; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; anchorFixHint = ''; reconcileData = null; receiptDupConfirmed = false; receiptDepositWaived = false; receiptUnitsWaived = false; receiptNoDoc = false; receiptAttachTarget = null; resetAiInvoiceScan(true); aiScanDocuments = []; saveReceiptDraft(); setView('receiving'); }); }
+  else if (role === 'rc-cancel') { showConfirm('ביטול תעודה', 'לבטל את התעודה הנוכחית? כל הפריטים שנסרקו יימחקו.', 'בטל תעודה', () => { if(!cancelLocalDraft('receiving'))return; yotvataResetPhotoReceipt(); receiptDraftId = null; aiReceivedEdits = {}; receiptList = []; receiptQuantityReview = null; receiptCountingMode = 'scan'; receiptNotes = []; recomputeNoteTotal(); receiptOpened = false; editingNotes = false; anchorFixHint = ''; reconcileData = null; receiptDupConfirmed = false; receiptDepositWaived = false; receiptUnitsWaived = false; receiptNoDoc = false; receiptAttachTarget = null; resetAiInvoiceScan(true); aiScanDocuments = []; saveReceiptDraft(); setView('receiving'); }); }
   else if (role === 'rc-note-add') {
     // v274: הפעולה עוטפת את עצמה, כדי שאישור ההצהרה על חוסר סך יחידות
     // יוסיף את התעודה במקום להשאיר את העובד מול שדות מלאים שלא נקלטו.
