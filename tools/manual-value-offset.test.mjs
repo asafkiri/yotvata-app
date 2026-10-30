@@ -53,6 +53,10 @@ async function valueOffset(c, amount) {
   await c.run(`applyManualValueOffset(findOpenOffsetSide('rc-1', 'prod_61', 'short'), findOpenOffsetSide('rc-1', 'prod_62', 'over'), ${amount})`);
   return json(c, 'receipts[0].externalOffsets.map(x => [x.dir, x.productId, x.qty, x.amountEx])');
 }
+// v401: שוקו בננה (₪3.161667) ופונצ בננה (₪3.162) הם אותו מחיר ליחידה עד האגורה (316), ולכן
+// מתקזזים לבד בקיזוז הפנימי. הקיזוז לפי שווי ("מצא קיזוז") נשאר למי שביטל את הקיזוז
+// האוטומטי בכרטיס — ולכן הבדיקות של המנגנון הידני מבטלות אותו קודם.
+const cancelAuto = (c, cents) => c.run(`cancelReceiptOffset('rc-1', 'xin|${cents}')`);
 
 test('התעודה מהשטח: הקיזוז שכבר נשמר סוגר את פונצ בננה עד הסוף, ורק האקטימל נשאר פתוח', () => {
   const rc = receipt([ACTIMEL, BANANA, PUNCH, SHOKO], { externalOffsets: structuredClone(FIELD_OFFSETS) });
@@ -81,6 +85,10 @@ test('בלי האקטימל — אותה תעודה נסגרת ומסומנת "�
 
 test('קיזוז חדש לפי מלוא השווי נשמר כ-12 מול 12 ולא כ-11.998735', async () => {
   const c = load(receipt([BANANA, PUNCH, SHOKO]));
+  // v401: קודם כול הזוג מתקזז לבד (אותו מחיר ליחידה עד האגורה) — והתעודה סגורה בלי שום פעולה
+  assert.deepEqual(state(c), { open: false, short: [], over: [], shortValRaw: 0, overVal: 0, payable: 75.88, bucket: 'done' });
+  assert.deepEqual(json(c, 'receiptDiscrepancyInfo(receipts[0]).priceOffsets.map(g => [g.id, g.qty])'), [['xin|316', 12]]);
+  await cancelAuto(c, 316);
   assert.deepEqual(state(c), { open: true, short: ['prod_61:12'], over: ['prod_62:12'], shortValRaw: 37.94, overVal: 37.94, payable: 37.94, bucket: 'attention' });
   assert.deepEqual(await valueOffset(c, 37.94), [['short', 'prod_61', 12, 37.94], ['over', 'prod_62', 12, 37.94]]);
   assert.match(c.toasts.at(-1), /הקיזוז אושר — ₪37\.94 נוספו לתשלום במודע/);
@@ -96,6 +104,7 @@ test('כשהעודף הוא הצד עם המחיר המדויק יותר — ה�
   const punchShort = { ...PUNCH, qty: 0, noteQty: 12, lineTotal: 0 };
   const bananaOver = { ...BANANA, qty: 12, noteQty: 0, lineTotal: 37.94 };
   const c = load(receipt([punchShort, bananaOver, SHOKO]));
+  await cancelAuto(c, 316);
   await c.run(`applyManualValueOffset(findOpenOffsetSide('rc-1', 'prod_62', 'short'), findOpenOffsetSide('rc-1', 'prod_61', 'over'), 37.94)`);
   assert.deepEqual(json(c, 'receipts[0].externalOffsets.map(x => [x.dir, x.productId, x.qty])'), [['short', 'prod_62', 12], ['over', 'prod_61', 12]]);
   assert.deepEqual(state(c), { open: false, short: [], over: [], shortValRaw: 0, overVal: 0, payable: 75.88, bucket: 'done' });
@@ -108,6 +117,7 @@ test('כשהעודף הוא הצד עם המחיר המדויק יותר — ה�
 
 test('קיזוז חלקי לפי שווי משאיר את היתרה האמיתית פתוחה', async () => {
   const c = load(receipt([BANANA, PUNCH, SHOKO]));
+  await cancelAuto(c, 316);
   assert.deepEqual(await valueOffset(c, 20), [['short', 'prod_61', 6.325778, 20], ['over', 'prod_62', 6.325111, 20]]);
   const s = state(c);
   assert.equal(s.open, true);
@@ -117,6 +127,7 @@ test('קיזוז חלקי לפי שווי משאיר את היתרה האמית�
 
 test('יתרה של אגורה אחת אינה שארית — רק פחות מחצי אגורה נסגר', async () => {
   const c = load(receipt([BANANA, PUNCH, SHOKO]));
+  await cancelAuto(c, 316);
   await valueOffset(c, 37.93);
   const s = state(c);
   assert.equal(s.open, true);
@@ -138,6 +149,9 @@ test('שורה במחיר 0 של אותו מוצר אינה נבלעת בכלל 
   const paid = { productId: 'x', name: 'מוצר במתנה', qty: 0, noteQty: 5, unitPrice: 3, lineTotal: 0 };
   const extra = { productId: 'y', name: 'מוצר אחר', qty: 3, noteQty: 0, unitPrice: 3, lineTotal: 9 };
   const c = load(receipt([free, paid, extra]));
+  // v401: הקיזוז הפנימי האוטומטי (₪3) נצרך קודם — 3 יח׳ משורת ה-₪3 של x מול 3 של y; יחידות המתנה (₪0) לא נכנסות אליו
+  assert.deepEqual(state(c).short, ['x:5', 'x:2']);
+  await cancelAuto(c, 300);
   await c.run(`applyManualValueOffset(findOpenOffsetSide('rc-1', 'x', 'short'), findOpenOffsetSide('rc-1', 'y', 'over'), 9)`);
   assert.deepEqual(json(c, "receiptDiscrepancyInfo(receipts[0]).externalOffsets.map(x => [x.dir, x.productId, x.qty])"), [['short', 'x', 3], ['over', 'y', 3]]);
   assert.deepEqual(state(c).short, ['x:2', 'x:5']);

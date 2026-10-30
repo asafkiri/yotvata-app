@@ -73,6 +73,7 @@ node --test tools/sign-small-layout.test.mjs       # שלטים "2 בדף (קט�
 node --test tools/manual-value-offset.test.mjs     # קיזוז לפי שווי בין מחירים שנבדלים בשבר אגורה אינו משאיר שארית של ₪0.00 שמחזיקה את התעודה פתוחה (v375)
 node --test tools/promo-xlsx-import.test.mjs       # דף המבצעים החודשי כקובץ אקסל — נקרא במכשיר מהתאים, בלי שרת, ומשם אותו מסלול כמו PDF (v376)
 node --test tools/return-swap.test.mjs             # חילוף מוצר במסך אימות הזיכוי; המקור נשמר, ביטול, והכרטיס אומר מה היה (v380) · פריט החזרות הכללי במחיר מהנייר והוספת מוצר שלא נרשם (v381)
+node --test tools/price-offset.test.mjs            # קיזוז אוטומטי לפי מחיר ליחידה זהה — בתוך התעודה ובין תעודות, הכמות המשותפת, "בטל" על כל קיזוז אוטומטי, והקליטה מקצה לקצה (v401)
 ```
 
 `sign-small-layout` מריצה את האפליקציה בדפדפן אמיתי (Playwright + Chromium) ומשווה

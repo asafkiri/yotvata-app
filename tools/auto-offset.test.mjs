@@ -1,6 +1,8 @@
-// קיזוז אוטומטי בין תעודות: חוסר בתעודה אחת ועודף בתעודה אחרת של אותו מוצר,
-// באותו מחיר ובאותה כמות, מתקזזים לבד — אבל רק בתוך 9 התעודות האחרונות.
-// כמויות משקל נחשבות שוות גם כשהחיסור משאיר רעש נקודה צפה.
+// קיזוז אוטומטי בין תעודות: חוסר בתעודה אחת ועודף בתעודה אחרת באותו מחיר ליחידה
+// מתקזזים לבד — אבל רק בתוך 9 התעודות האחרונות. עד גרסה 400 נדרש אותו מוצר
+// בדיוק ואותה כמות; מגרסה 401 הכלל הוא מחיר (גם מוצר אחר, גם כמות שונה —
+// הכמות המשותפת), ואותו מוצר עדיין נבדק ראשון. כמויות משקל נחשבות שוות גם
+// כשהחיסור משאיר רעש נקודה צפה.
 // הרצה: node --test tools/auto-offset.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -36,11 +38,15 @@ test('כמויות משקל עם רעש נקודה צפה נחשבות שוות'
   assert.ok(Math.abs(applied[0][3] - 0.2) < 1e-9);
 });
 
-test('כמות שונה, או מוצר אחר באותו מחיר — לא מתקזזים לבד', async () => {
+test('v401: כמות שונה, או מוצר אחר באותו מחיר — מתקזזים לבד גם הם, בכמות המשותפת', async () => {
   const r = create();
+  // היום: p1 עודף 1 (₪10), p2 עודף 2 (₪7). אתמול: p1 חסר 2 (₪10), p3 חסר 2 (₪7).
   r.run(`receipts = [mkRc('today', '28', [['p1', 4, 3, 10], ['p2', 2, 0, 7]]), mkRc('yday', '27', [['p1', 3, 5, 10], ['p3', 0, 2, 7]])];`);
-  assert.deepEqual(await sweep(r), []);
-  assert.equal(r.run(`!!findOffsetMatch(receipts[0])`), true, 'מוצר אחר באותו מחיר נשאר הצעה לאישור ידני');
+  assert.deepEqual(await sweep(r), [['today', 'yday', 'p1', 1], ['today', 'yday', 'p2', 2]]);
+  const yday = JSON.parse(r.run(`JSON.stringify((d => ({ open: d.open, short: d.shortItems.map(x => x.productId + ':' + x.n) }))(receiptDiscrepancyInfo(receipts[1])))`));
+  assert.deepEqual(yday, { open: true, short: ['p1:1'] }, 'היתרה של p1 (חסר 2 מול עודף 1) נשארת חוסר פתוח');
+  assert.equal(r.run(`receiptDiscrepancyInfo(receipts[0]).open`), false, 'התעודה של היום מאוזנת');
+  assert.equal(r.run(`findOffsetMatch(receipts[0])`), null, 'לא נשארה הצעה לאישור ידני');
 });
 
 test('זוג שאחד מצדדיו מחוץ ל-9 התעודות האחרונות נשאר הצעה בלבד', async () => {
