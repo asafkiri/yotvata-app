@@ -52,12 +52,16 @@ test('shortages from two receiving records are kept separate and add up', () => 
 });
 
 test('unapproved surplus does not silently cancel a genuine shortage in the reminder', () => {
-  const c = setup([receipt({ items: [MILK, { productId: 'surplus', name: 'עודף שאינו קיזוז', qty: 10, noteQty: 0, unitPrice: 5, lineTotal: 50 }], totalExVat: 50 })]);
-  assert.equal(c.run('receiptsBalance().bal'), -10, 'the existing account banner has a net balance');
+  // v401: a surplus at the SAME unit price offsets automatically (same money); a surplus at
+  // another price is still a note only and never hides the shortage.
+  const c = setup([receipt({ items: [MILK, { productId: 'surplus', name: 'עודף שאינו קיזוז', qty: 10, noteQty: 0, unitPrice: 7, lineTotal: 70 }], totalExVat: 70 })]);
+  assert.equal(c.run('receiptsBalance().bal'), -30, 'the existing account banner has a net balance');
   const text = note(c);
   assert.match(text, /חלב חסר לבדיקה/);
   assert.match(text, /40\.00/);
   assert.doesNotMatch(text, /עודף שאינו קיזוז/);
+  const samePrice = setup([receipt({ items: [MILK, { productId: 'surplus', name: 'עודף באותו מחיר', qty: 8, noteQty: 0, unitPrice: 5, lineTotal: 40 }], totalExVat: 40 })]);
+  assert.equal(note(samePrice), '', 'offset automatically at the same price — nothing left to claim');
 });
 
 test('fully credited, delivered, approved-offset, balanced and undocumented receipts do not reappear', () => {

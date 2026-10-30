@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v400 השורה שתוקנה נשארת ירוקה</title>
+    <title>הזמנות יטבתה - v401 קיזוז אוטומטי לפי מחיר</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -125,7 +125,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v400 השורה שתוקנה נשארת ירוקה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v401 קיזוז אוטומטי לפי מחיר</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -632,9 +632,9 @@ let receiptList = [];            // שורות התעודה הנוכחית: {pro
 let receipts = [];               // היסטוריית תעודות
 const legacyOffsetMigrationBusy = new Set(); // זוגות קיזוז ישנים שנמצאים כעת בשחזור
 let manualOffsetOrigin = null;    // צד החוסר/עודף שנבחר בבורר הקיזוז המכוון
-// תעודות ישנות שומרות את הקיזוז הפנימי האוטומטי שהיה קיים במשך חודשים.
-// מתעודות חדשות והלאה כל קיזוז דורש אישור מפורש של המשתמש.
-const MANUAL_OFFSET_APPROVAL_FROM = Date.parse('2026-08-06T10:10:00+03:00');
+// v401: הקיזוז הפנימי לפי מחיר חזר להיות אוטומטי לכל התעודות (הכרעת בעל העסק:
+// אותו מחיר ליחידה = אותו כסף), עם "בטל" בכרטיס התעודה. עד כאן תעודות מ-6.8.2026
+// ואילך (MANUAL_OFFSET_APPROVAL_FROM) דרשו אישור מפורש לכל קיזוז.
 let pendingReceipt = null;       // תעודה הממתינה לאישור בסיכום
 let receiptNoteTotal = null;     // סכום התעודה מהספק (ללא מע"מ) — סכום כל התעודות
 let receiptNotes = [];           // פירוט סכומי תעודות הספק (למקרה שהמשלוח מחולק)
@@ -670,9 +670,9 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '400'; // השורה שתוקנה ממסך החוסרים נשארת ירוקה במקומה — טעית? מורידים את המספר והחוסר חוזר
+const APP_VERSION = '401'; // קיזוז אוטומטי לפי מחיר ליחידה זהה — בתוך התעודה ובין תעודות, עם "בטל"
 // v398: תווית הגרסה ביומן הפעולות ובקובץ הגיבוי (עד כאן מחרוזת קבועה שנשארה 'v396_second_strong_read')
-const APP_VERSION_LABEL = 'v' + APP_VERSION + '_green_rows';
+const APP_VERSION_LABEL = 'v' + APP_VERSION + '_price_offsets';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -16708,6 +16708,28 @@ function aiFindingHtml(f) {
   const icon = f.type === 'shortage' ? '🔴' : (f.type === 'surplus' ? '🟠' : (f.type === 'promo_missing' ? '🏷️' : 'ℹ️'));
   return '<div class="rounded-xl border p-2.5 text-sm font-black ' + cls + '">' + icon + ' ' + htmlEscape(f.text || '') + '</div>';
 }
+// v401: במסך תוצאות הסריקה — חוסר ועודף באותו מחיר ליחידה יתקזזו לבד בסיום, ואומרים
+// זאת מראש: אותו חישוב כמו בשמירה (receiptDiscrepancyInfo על הממצאים, לפי המחיר
+// שהשורה תישמר בו), תצוגה בלבד. מוצר עם ממצא מחיר/מבצע לא נכלל בתצוגה המקדימה,
+// כי המחיר שלו עוד יוכרע מול הנייר; שורת פיקדון אינה חלק מהממצאים.
+function aiPriceOffsetPreview(findings) {
+  const list = Array.isArray(findings) ? findings.filter(Boolean) : [];
+  const priceIssue = new Set(list.filter(f => f.type === 'price' || f.type === 'promo_missing').map(f => String(f.productId)));
+  const items = list
+    .filter(f => (f.type === 'shortage' || f.type === 'surplus') && f.productId && Number(f.qty) > 0 && !receiptIsDepositLine(f.productId) && !priceIssue.has(String(f.productId)))
+    .map(f => ({ productId: f.productId, name: f.name || '', qty: f.type === 'surplus' ? Number(f.qty) : 0, noteQty: f.type === 'shortage' ? Number(f.qty) : 0, unitPrice: Number(f.expectedPrice) || 0 }));
+  if (!items.length) return [];
+  try { return receiptDiscrepancyInfo({ items }).priceOffsets || []; } catch (previewError) { return []; }
+}
+function aiPriceOffsetPreviewHtml(ev) {
+  if (!ev || ev.valid !== true) return '';
+  const groups = aiPriceOffsetPreview(ev.findings);
+  if (!groups.length) return '';
+  return '<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-3 text-xs text-emerald-900" data-price-offset-preview>' +
+    '<div class="font-black text-sm"><i class="fa-solid fa-scale-balanced ml-1"></i>יתקזז לבד בסיום — חוסר ועודף באותו מחיר ליחידה</div>' +
+    groups.map(o => '<div class="font-bold mt-1">' + htmlEscape(receiptSideText(o.shortItems)) + ' ⇄ ' + htmlEscape(receiptSideText(o.overItems)) + ' · ₪' + fmtMoney(o.price) + ' ליח׳</div>').join('') +
+    '<div class="mt-1 text-[11px] font-bold text-emerald-800">הכסף זהה, ולכן הכמות המשותפת לא תופחת מהתשלום; יתרה, אם יש, נשארת חוסר או עודף. אפשר לבטל אחר כך בכרטיס התעודה.</div></div>';
+}
 function aiScanAllGood(ev) {
   if (!ev || ev.valid !== true) return false;
   const findings = (Array.isArray(ev.findings) ? ev.findings : []).filter(aiIsActionableFinding);
@@ -17520,7 +17542,7 @@ function aiInvoiceCaptureHtml() {
       '<div class="font-black text-xl text-slate-800 mb-1"><i class="fa-solid fa-wand-magic-sparkles text-violet-600"></i> תוצאות הסריקה החכמה</div>' +
       '<div class="text-xs text-slate-500 font-bold mb-3">מוצגות רק הבעיות שנמצאו. ההתאמות הוכרעו מאחורי הקלעים.</div>' +
       reusedNote +
-      '<div class="space-y-2">' + statusHtml + findingsHtml + autoNote + '</div>' + actionsHtml + '</div>';
+      '<div class="space-y-2">' + statusHtml + aiPriceOffsetPreviewHtml(ev) + findingsHtml + autoNote + '</div>' + actionsHtml + '</div>';
   }
   const docCards = aiScanDocuments.map((doc, i) => {
     const noteText = 'סכום צפוי: ₪' + fmtMoney(doc.amount || 0) + (doc.units != null ? ' · ' + doc.units + ' יחידות' : '');
@@ -18804,9 +18826,11 @@ function presentReconcileSummary(lines, ex, open, extra) {
   const supplierCreditSummary = (extra.supplierCreditClaim && Number(extra.supplierCreditClaim.amount) > 0)
     ? '<div class="mt-2 rounded-xl bg-orange-50 border-2 border-orange-300 p-3 text-xs font-bold text-orange-900"><div class="font-black text-sm"><i class="fa-solid fa-triangle-exclamation"></i> נפתחה דרישת זיכוי פתוחה מול הספק</div><div class="mt-1">סכום מוערך לזיכוי: ₪' + fmtMoney(extra.supplierCreditClaim.amount) + '</div><div class="text-[11px] mt-1">ייכנס לחישוב הספק כזיכוי שמגיע, אך יישאר מסומן כלא מאומת עד בדיקה מול מרכזת/תעודת זיכוי.</div></div>'
     : '';
+  // v401: הקיזוז הפנימי הוא אוטומטי לפי מחיר — הסיכום אומר זאת, ומה המשמעות לתשלום
   const internalOffsetSummary = (Array.isArray(extra.internalOffsets) && extra.internalOffsets.length)
-    ? '<div class="mt-2 rounded-xl bg-emerald-50 border-2 border-emerald-200 p-3 text-xs text-emerald-900"><div class="font-black text-sm"><i class="fa-solid fa-scale-balanced"></i> קיזוז פנימי לפי מחיר יחידה זהה</div>' +
-      extra.internalOffsets.map(o => '<div class="font-bold mt-1">' + receiptSideText(o.shortItems) + ' ⇄ ' + receiptSideText(o.overItems) + ' · ₪' + fmtMoney(o.price) + '</div>').join('') + '</div>'
+    ? '<div class="mt-2 rounded-xl bg-emerald-50 border-2 border-emerald-200 p-3 text-xs text-emerald-900"><div class="font-black text-sm"><i class="fa-solid fa-scale-balanced"></i> קיזוז פנימי אוטומטי — חוסר ועודף באותו מחיר ליחידה</div>' +
+      extra.internalOffsets.map(o => '<div class="font-bold mt-1">' + htmlEscape(receiptSideText(o.shortItems)) + ' ⇄ ' + htmlEscape(receiptSideText(o.overItems)) + ' · ₪' + fmtMoney(o.price) + ' ליח׳ · ₪' + fmtMoney(lineTotalFromUnit(o.price, o.qty)) + '</div>').join('') +
+      '<div class="mt-1 text-[11px] font-bold text-emerald-800">הכסף זהה, ולכן הכמות הזאת אינה מופחתת מהתשלום. אפשר לבטל אחר כך בכרטיס התעודה.</div></div>'
     : '';
   const aiSummary = (extra.aiAudit && Array.isArray(extra.aiAudit.findings))
     ? '<div class="mt-2 rounded-xl bg-violet-50 border-2 border-violet-200 p-3"><div class="font-black text-sm text-violet-900"><i class="fa-solid fa-shield-halved"></i> תוצאות AI שאישרת</div>' +
@@ -18835,6 +18859,7 @@ function openReceiptFix(id) {
     unresolvedAmountGap: r2(Number(rc.unresolvedAmountGap) || 0),
     unresolvedUnitsGap: Number(rc.unresolvedUnitsGap) || 0,
     externalOffsets: cloneSafe(Array.isArray(rc.externalOffsets) ? rc.externalOffsets : []),
+    canceledOffsetIds: cloneSafe(Array.isArray(rc.canceledOffsetIds) ? rc.canceledOffsetIds : []), // v401: קיזוז פנימי שבוטל נשאר מבוטל גם במסך העריכה
     items: (rc.items || []).map(l => {
       const up = Number(l.unitPrice) || 0;
       const pct = Number(l.promoPct) || 0;
@@ -18875,7 +18900,7 @@ function receiptFixEffectiveInfo(items) {
   const targetGross = receiptFix.noteTotalInc != null ? r2((Number(receiptFix.noteTotalInc) || 0) + (Number(receiptFix.supplierDiscount) || 0)) : null;
   const rawAmountGap = targetGross != null ? r2(targetGross - paperValue) : r2(Number(receiptFix.unresolvedAmountGap) || 0);
   const amountGap = targetGross != null && receiptMoneyMatches(paperValue, targetGross, unitAnchor.allowsRounding) ? 0 : rawAmountGap;
-  return receiptDiscrepancyInfo({ items: useItems, externalOffsets: receiptFix.externalOffsets || [], noteParts: receiptFix.noteParts || [], unresolvedAmountGap: amountGap, unresolvedUnitsGap: unitAnchor.complete ? 0 : (Number(receiptFix.unresolvedUnitsGap) || 0) });
+  return receiptDiscrepancyInfo({ items: useItems, externalOffsets: receiptFix.externalOffsets || [], canceledOffsetIds: receiptFix.canceledOffsetIds || [], noteParts: receiptFix.noteParts || [], unresolvedAmountGap: amountGap, unresolvedUnitsGap: unitAnchor.complete ? 0 : (Number(receiptFix.unresolvedUnitsGap) || 0) });
 }
 function receiptFixOpenLines() {
   const di = receiptFixEffectiveInfo();
@@ -19486,17 +19511,28 @@ function receiptDiscrepancyInfo(rc, opts) {
     else if (d < 0) rawOver.push({ productId: l.productId || '', name: l.name || '', n: -d, price });
   });
 
+  const shortItems = rawShort.map(cloneReceiptDiffItem);
+  const overItems = rawOver.map(cloneReceiptDiffItem);
+  // קיזוז שנשמר בתעודה (אושר ביד, או נרשם אוטומטית מול תעודה אחרת) נצרך ברמת
+  // מוצר וכמות, ורק את ההפרש שנרשם — הוא לעולם אינו מסתיר חוסר/עודף אחר.
+  // v401: הקיזוזים השמורים נצרכים לפני הקיזוז הפנימי לפי מחיר, כדי שקיזוז
+  // שכבר נרשם על מוצר (למשל זוג שאושר ביד בתוך התעודה) לא ייבלע בקיזוז
+  // הפנימי שנבנה מחדש בכל חישוב ולא יוצג פעמיים.
+  const externalOffsets = opts.skipExternal ? [] : consumeStoredReceiptOffsets(rc, shortItems, overItems);
+
   // קיזוז פנימי באותה תעודה: חוסר ועודף של מוצרים במחיר יחידה זהה מצביעים
   // על סריקת וריאנט לא נכון. הקיזוז חלקי: נצרכת רק הכמות המשותפת, וכל יתרה
   // נשארת פתוחה. ההתאמה נעשית לפי מחיר האגורות המוצג, בלי לעגל את חישוב השורה.
-  const shortItems = rawShort.map(cloneReceiptDiffItem);
-  const overItems = rawOver.map(cloneReceiptDiffItem);
+  // v401: אוטומטי לכל התעודות (אותו מחיר ליחידה = אותו כסף), ולכן גם ניתן לביטול:
+  // קבוצת מחיר שבוטלה בכרטיס התעודה (canceledOffsetIds) אינה מתקזזת שוב.
   const priceOffsets = [];
-  const allowLegacyAutomaticPriceOffset = Number(rc && rc.timestamp) > 0 && Number(rc.timestamp) < MANUAL_OFFSET_APPROVAL_FROM;
+  const canceledIds = Array.isArray(rc && rc.canceledOffsetIds) ? rc.canceledOffsetIds : [];
   const priceKeys = Array.from(new Set(shortItems.concat(overItems)
     .map(x => Math.round((Number(x.price) || 0) * 100))
     .filter(cents => cents > 0)));
-  if (allowLegacyAutomaticPriceOffset) priceKeys.forEach(priceCents => {
+  priceKeys.forEach(priceCents => {
+    const groupId = internalOffsetId(priceCents);
+    if (canceledIds.includes(groupId)) return;
     const sList = shortItems.filter(x => Math.round((Number(x.price) || 0) * 100) === priceCents && (Number(x.n) || 0) > 0);
     const oList = overItems.filter(x => Math.round((Number(x.price) || 0) * 100) === priceCents && (Number(x.n) || 0) > 0);
     const sQty = sList.reduce((a, x) => a + (Number(x.n) || 0), 0);
@@ -19505,13 +19541,9 @@ function receiptDiscrepancyInfo(rc, opts) {
     if (qty > 0) {
       const usedShort = consumeReceiptDiffQty(sList, qty);
       const usedOver = consumeReceiptDiffQty(oList, qty);
-      priceOffsets.push({ price: priceCents / 100, qty: r2(qty), shortItems: usedShort, overItems: usedOver });
+      priceOffsets.push({ id: groupId, price: priceCents / 100, qty: r2(qty), shortItems: usedShort, overItems: usedOver });
     }
   });
-
-  // קיזוז בין תעודות נשמר ברמת מוצר וכמות. הוא צורך רק את ההפרש שאושר,
-  // ולעולם אינו מסתיר חוסר/עודף אחר שנשאר באותה תעודה.
-  const externalOffsets = opts.skipExternal ? [] : consumeStoredReceiptOffsets(rc, shortItems, overItems);
   // v268: חוסר שהספק השלים בסחורה (בלי חיוב נוסף) נצרך משורות החוסר כמו
   // קיזוז — התעודה משולמת במלואה לפי הנייר, ולא נדרש זיכוי כספי.
   const shortGoodsNotes = consumeShortGoodsNotes(rc, shortItems);
@@ -19714,6 +19746,37 @@ function manualValueOffsetQty(side, amount) {
 }
 function manualOffsetSummary(entry) {
   return 'קיזוז ידני: ' + htmlEscape(entry.shortName || '') + ' ⇄ ' + htmlEscape(entry.overName || '') + ' · ₪' + fmtMoney(entry.amountEx || 0);
+}
+// v401: שורת קיזוז שמור בכרטיס התעודה — מה קוזז, מול איזו תעודה, ולמה (אוטומטי
+// לפי מחיר, או באישור העובד). רשומה ישנה בלי שם המוצר השני מוצגת כמו קודם.
+function offsetOtherReceiptText(rc, o) {
+  if (!o || !o.otherId || o.otherId === rc.id) return 'בתוך התעודה';
+  const other = receipts.find(x => x.id === o.otherId);
+  return other ? 'מול תעודה מ-' + dDisp(offsetSideDate({ receipt: other })) : 'מול תעודה אחרת';
+}
+function receiptOffsetEntryText(rc, o) {
+  if (o.source === 'manual-value') return manualOffsetSummary(o);
+  const qty = Number(o.qty) || 0;
+  const crossProduct = !!(o.otherProductId && o.otherProductId !== o.productId);
+  const pair = qty + ' × ' + htmlEscape(o.name || '') + (crossProduct ? ' ⇄ ' + qty + ' × ' + htmlEscape(o.otherName || '') : '');
+  if (o.source === 'auto') {
+    return pair + ' — קוזז אוטומטית ' + offsetOtherReceiptText(rc, o) +
+      (crossProduct ? ' (אותו מחיר ליחידה' + (Number(o.price) > 0 ? ' ₪' + fmtMoney(o.price) : '') + ')' : ' (אותו מוצר ואותו מחיר)');
+  }
+  return pair + ' — קוזז ' + offsetOtherReceiptText(rc, o) + (o.source === 'manual' ? ' באישורך' : '');
+}
+// v401: הקיזוז הפנימי האוטומטי בכרטיס התעודה — כל קבוצת מחיר בשורה משלה, עם "בטל".
+function receiptInternalOffsetsHtml(rc, di) {
+  const groups = di && Array.isArray(di.priceOffsets) ? di.priceOffsets : [];
+  if (!groups.length) return '';
+  return '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800">' +
+    '<div class="font-black mb-1"><i class="fa-solid fa-scale-balanced"></i> קיזוז פנימי אוטומטי — חוסר ועודף באותו מחיר ליחידה</div>' +
+    groups.map(o => '<div class="flex items-center justify-between gap-2 py-1 border-b border-emerald-100 last:border-0"><div class="font-bold min-w-0">' +
+      htmlEscape(receiptSideText(o.shortItems)) + ' ⇄ ' + htmlEscape(receiptSideText(o.overItems)) + ' · ₪' + fmtMoney(o.price) + ' ליח׳ · ₪' + fmtMoney(lineTotalFromUnit(o.price, o.qty)) + '</div>' +
+      (o.id ? '<button data-role="rc-offset-cancel" data-id="' + htmlEscape(rc.id) + '" data-group="' + htmlEscape(o.id) + '" class="btn-tap shrink-0 bg-white border border-emerald-300 text-rose-600 rounded-lg px-2 py-1 text-[10px] font-black">בטל</button>' : '') +
+    '</div>').join('') +
+    '<div class="mt-1 pt-1 border-t border-emerald-200 text-emerald-700/90">הכסף זהה, ולכן השורות התקזזו לבד ואינן מופחתות מהתשלום. לא נכון? בטל — החוסר והעודף יחזרו להיות פתוחים ולא יקוזזו שוב לבד.</div>' +
+  '</div>';
 }
 // ===== פירוט לפי תעודת ספק (יטבתה) =====
 // הנייר יודע איזו שורה שייכת לאיזו תעודה. הספירה הפיזית אינה יודעת — סורקים
@@ -19960,16 +20023,32 @@ function crossOffsetId(aId, bId, productId, otherProductId) {
 // v373: החלון של 9 התעודות האחרונות חזר, כמו בתנובה — קיזוז שקט מול תעודה
 // ישנה קשה לזהות ולבקר, ולכן זוג מדויק שאחד מצדדיו מחוץ לחלון נשאר הצעה
 // לאישור ידני בכרטיס התעודה. ההשוואה הסובלנית לכמויות משקל נשארת.
+// v401 (הכרעת בעל העסק): הכלל הוא מחיר, לא שם. חוסר ועודף באותו מחיר ליחידה —
+// גם במוצרים שונים, גם בכמויות שונות — הם אותו כסף, ולכן מתקזזים לבד: בתוך
+// התעודה (הקיזוז הפנימי) ובין תעודות (כאן). הכמות שמתקזזת היא המשותפת, והיתרה
+// נשארת חוסר או עודף פתוח. אותו מוצר עדיין נבדק ראשון; רק אחריו אותו מחיר במוצר
+// אחר. שורת פיקדון אינה מתקזזת לפי מחיר מול מוצר בתעודה אחרת. מה שנשאר הצעה
+// לאישור ידני: זוג שאחד מצדדיו מחוץ לחלון 9 התעודות, וזוג שבוטל במודע.
 const AUTO_OFFSET_RECENT_DOCS = 9;
 let autoOffsetBusy = false;
 function autoOffsetDismissed(rc, other, oid) {
   return (Array.isArray(rc.canceledOffsetIds) && rc.canceledOffsetIds.includes(oid)) ||
          (Array.isArray(other.canceledOffsetIds) && other.canceledOffsetIds.includes(oid));
 }
+// v401: מזהה הביטול של קבוצת מחיר בקיזוז הפנימי של תעודה — נשמר ב-canceledOffsetIds
+// של אותה תעודה, ומבדיל אותה ממזהי הקיזוז בין תעודות (xo2|...).
+function internalOffsetId(priceCents) { return 'xin|' + Math.round(Number(priceCents) || 0); }
+function isInternalOffsetId(id) { return typeof id === 'string' && id.indexOf('xin|') === 0; }
+function receiptIsDepositLine(productId) { return String(productId || '').indexOf('deposit-') === 0; }
 // v269: כמויות משוקללות (1.25 ק"ג) עלולות לצבור רעש נקודה צפה בחיסור
 // noteQty - qty; השוואה במיליוניות במקום שוויון מדויק.
 function sameOffsetQty(a, b) {
   return Math.abs((Number(a) || 0) - (Number(b) || 0)) < 0.000001;
+}
+// v401: הכמות המשותפת לחוסר ולעודף — כשהן שוות עד רעש נקודה צפה, הכמות של הצד הראשון.
+function autoOffsetQty(a, b) {
+  const qa = Math.abs(Number(a) || 0), qb = Math.abs(Number(b) || 0);
+  return sameOffsetQty(qa, qb) ? qa : Math.min(qa, qb);
 }
 function findAutoOffsetPair() {
   // receipts כבר ממוין מהחדשה לישנה — 9 הראשונות הן "ההזמנות האחרונות",
@@ -19977,36 +20056,54 @@ function findAutoOffsetPair() {
   const recent = receipts.slice(0, AUTO_OFFSET_RECENT_DOCS)
     .filter(rc => !(rc.offsetClosed && Number(rc.offsetSchemaVersion || 0) < 2));
   const sides = recent.map(rc => receiptOffsets(rc));
-  for (let i = 0; i < recent.length; i++) {
-    const rc = recent[i];
-    const mine = sides[i];
-    if (!mine.length) continue;
-    for (let j = i + 1; j < recent.length; j++) {
-      const other = recent[j];
-      const theirs = sides[j];
-      if (!theirs.length) continue;
-      for (const a of mine) {
-        const aCents = Math.round((Number(a.price) || 0) * 100);
-        if (aCents <= 0 || !a.productId || !a.d) continue;
-        for (const b of theirs) {
-          if (b.productId !== a.productId || !sameOffsetQty(b.d, -a.d)) continue;
-          if (Math.round((Number(b.price) || 0) * 100) !== aCents) continue;
-          const oid = crossOffsetId(rc.id, other.id, a.productId);
-          if (autoOffsetDismissed(rc, other, oid)) continue;
-          return { rc, other, oid, productId: a.productId, name: a.name, otherName: b.name,
-                   qty: Math.abs(a.d), myDir: a.d > 0 ? 'short' : 'over', price: Number(a.price) || 0 };
+  // v401: שני מעברים — קודם אותו מוצר (ההתאמה החזקה), ואז אותו מחיר במוצר אחר.
+  // בכל מעבר כל תעודה נבדקת מול התעודות שאחריה בחלון, הקרובה בזמן קודם.
+  for (const sameProduct of [true, false]) {
+    for (let i = 0; i < recent.length; i++) {
+      const rc = recent[i];
+      const mine = sides[i];
+      if (!mine.length) continue;
+      for (let j = i + 1; j < recent.length; j++) {
+        const other = recent[j];
+        const theirs = sides[j];
+        if (!theirs.length) continue;
+        for (const a of mine) {
+          const aCents = Math.round((Number(a.price) || 0) * 100);
+          if (aCents <= 0 || !a.productId || !a.d) continue;
+          for (const b of theirs) {
+            if (!b.productId || !b.d || (a.d > 0) === (b.d > 0)) continue;
+            if ((b.productId === a.productId) !== sameProduct) continue;
+            if (!sameProduct && (receiptIsDepositLine(a.productId) || receiptIsDepositLine(b.productId))) continue;
+            if (Math.round((Number(b.price) || 0) * 100) !== aCents) continue;
+            const qty = autoOffsetQty(a.d, b.d);
+            if (!(qty > 0)) continue;
+            const oid = crossOffsetId(rc.id, other.id, a.productId, b.productId);
+            if (autoOffsetDismissed(rc, other, oid)) continue;
+            return { rc, other, oid, productId: a.productId, name: a.name, otherProductId: b.productId, otherName: b.name,
+                     byPrice: !sameProduct, qty, myDir: a.d > 0 ? 'short' : 'over', price: Number(a.price) || 0 };
+          }
         }
       }
     }
   }
   return null;
 }
+// v401: קיזוז אוטומטי חלקי יכול לחזור על אותו זוג (אותן שתי תעודות, אותם שני
+// מוצרים) כשאחד הצדדים גדל אחרי עריכה. הרשומה היא אחת לזוג, והכמות שלה גדלה —
+// אותו מזהה, אותו "בטל", ואותה שורה בכרטיס.
+function growAutoOffsetEntry(list, entry) {
+  const existing = (Array.isArray(list) ? list : []).filter(Boolean);
+  const current = existing.find(x => x.id === entry.id);
+  if (!current) return existing.concat([entry]);
+  return existing.map(x => x === current ? { ...current, ...entry, qty: r2((Number(current.qty) || 0) + (Number(entry.qty) || 0)) } : x);
+}
 async function applyAutoOffsetPair(p) {
   const stamp = Date.now();
-  const mine = { id: p.oid, otherId: p.other.id, productId: p.productId, name: p.name, qty: p.qty, dir: p.myDir, at: stamp, source: 'auto' };
-  const theirs = { id: p.oid, otherId: p.rc.id, productId: p.productId, name: p.otherName || p.name, qty: p.qty, dir: p.myDir === 'short' ? 'over' : 'short', at: stamp, source: 'auto' };
-  const rcOffsets = mergeReceiptExternalOffsets(p.rc.externalOffsets, [mine]);
-  const otherOffsets = mergeReceiptExternalOffsets(p.other.externalOffsets, [theirs]);
+  const otherProductId = p.otherProductId || p.productId, otherName = p.otherName || p.name;
+  const mine = { id: p.oid, otherId: p.other.id, productId: p.productId, name: p.name, qty: p.qty, dir: p.myDir, at: stamp, source: 'auto', price: p.price, otherProductId, otherName };
+  const theirs = { id: p.oid, otherId: p.rc.id, productId: otherProductId, name: otherName, qty: p.qty, dir: p.myDir === 'short' ? 'over' : 'short', at: stamp, source: 'auto', price: p.price, otherProductId: p.productId, otherName: p.name };
+  const rcOffsets = mergeReceiptExternalOffsets(growAutoOffsetEntry(p.rc.externalOffsets, mine), []);
+  const otherOffsets = mergeReceiptExternalOffsets(growAutoOffsetEntry(p.other.externalOffsets, theirs), []);
   // v398: הסטטוס השמור נסגר (או נשאר פתוח) יחד עם הקיזוז
   const rcPatch = receiptStoredStatusPatch(p.rc, { externalOffsets: rcOffsets }), otherPatch = receiptStoredStatusPatch(p.other, { externalOffsets: otherOffsets });
   if (db) {
@@ -20048,10 +20145,25 @@ async function autoApplyExactOffsets() {
 }
 function autoOffsetToastText(applied) {
   const total = r2(applied.reduce((a, p) => a + p.qty * p.price, 0));
-  const what = applied.length === 1
-    ? applied[0].qty + ' × ' + applied[0].name + ' קוזזו מול תעודה אחרת'
-    : applied.length + ' פריטים קוזזו בין תעודות';
-  return '⚖️ קיזוז אוטומטי: ' + what + ' — מוצר, מחיר וכמות זהים (₪' + fmtMoney(total) + '). ניתן לבטל בכרטיס התעודה.';
+  const one = applied.length === 1 ? applied[0] : null;
+  const what = !one
+    ? applied.length + ' פריטים קוזזו בין תעודות לפי מחיר ליחידה זהה'
+    : one.byPrice
+      ? one.qty + ' × ' + one.name + ' (' + (one.myDir === 'short' ? 'חסר' : 'עודף') + ') מול ' + one.qty + ' × ' + one.otherName + ' (' + (one.myDir === 'short' ? 'עודף' : 'חסר') + ') בתעודה אחרת — אותו מחיר ליחידה ₪' + fmtMoney(one.price)
+      : one.qty + ' × ' + one.name + ' קוזזו מול תעודה אחרת — אותו מוצר ואותו מחיר';
+  return '⚖️ קיזוז אוטומטי: ' + what + ' (₪' + fmtMoney(total) + '). אפשר לבטל בכרטיס התעודה.';
+}
+// v401: למה זוג שמוצע לאישור בכרטיס לא קוזז לבד — כדי שהעובד יבין מה מבקשים ממנו.
+function autoOffsetSkipReason(rc, m) {
+  if (!rc || !m || !m.other) return '';
+  if (m.other.id === rc.id) {
+    const ids = Array.isArray(rc.canceledOffsetIds) ? rc.canceledOffsetIds : [];
+    return ids.includes(internalOffsetId(Math.round((Number(m.price) || 0) * 100))) ? 'הקיזוז הפנימי במחיר הזה בוטל בכרטיס, ולכן הוא לא מתבצע לבד.' : '';
+  }
+  if (autoOffsetDismissed(rc, m.other, crossOffsetId(rc.id, m.other.id, m.productId, m.otherProductId))) return 'קיזוז כזה בוטל בעבר, ולכן הוא לא מתבצע לבד.';
+  const recent = receipts.slice(0, AUTO_OFFSET_RECENT_DOCS).map(x => x.id);
+  if (!recent.includes(rc.id) || !recent.includes(m.other.id)) return 'אחת התעודות אינה בין ' + AUTO_OFFSET_RECENT_DOCS + ' התעודות האחרונות, ולכן הקיזוז לא מתבצע לבד — אפשר לאשר אותו כאן.';
+  return '';
 }
 async function autoOffsetSweep() {
   const applied = await autoApplyExactOffsets();
@@ -20290,16 +20402,37 @@ async function applyManualValueOffset(shortSide, overSide, requestedAmount) {
   showToast('הקיזוז אושר — ₪' + fmtMoney(amount) + ' נוספו לתשלום במודע', null, null, 3400);
   if (currentView === 'receiptsHistory') renderReceiptsHistory();
 }
+// v401: ביטול של זוג בתוך אותה תעודה משחרר את שני המוצרים — והקיזוז הפנימי האוטומטי
+// היה חוזר ומקזז אותם מיד באותו מחיר. לכן הביטול מסמן גם את קבוצת המחיר שהייתה
+// בולעת אותם, כדי ש"בטל" באמת יחזיר את החוסר והעודף להיות פתוחים.
+function internalOffsetIdsReleasedBy(rc, offsets, removed, canceled) {
+  const released = (removed || []).filter(x => x && x.productId && (!x.otherId || x.otherId === rc.id));
+  if (!released.length) return [];
+  const pids = new Set(released.map(x => String(x.productId)));
+  let probe = null;
+  try { probe = receiptDiscrepancyInfo({ ...rc, externalOffsets: offsets, canceledOffsetIds: Array.from(canceled) }); } catch (e) { return []; }
+  return (probe.priceOffsets || []).filter(g => (g.shortItems || []).concat(g.overItems || []).some(it => pids.has(String(it.productId)))).map(g => g.id);
+}
 async function cancelReceiptOffset(receiptId, groupId) {
-  const affected = receipts.filter(rc => (rc.externalOffsets || []).some(x => (x.groupId || x.id) === groupId));
+  const internal = isInternalOffsetId(groupId);
+  const affected = internal
+    ? receipts.filter(rc => rc.id === receiptId && (receiptDiscrepancyInfo(rc).priceOffsets || []).some(g => g.id === groupId))
+    : receipts.filter(rc => (rc.externalOffsets || []).some(x => (x.groupId || x.id) === groupId));
   if (!affected.length) { showToast('הקיזוז כבר בוטל', null, null, 2200); return; }
   // v249: הביטול נרשם על התעודה — קיזוז אוטומטי לא יחיל שוב זוג שבוטל במודע.
-  const updates = affected.map(rc => ({ rc, offsets: (rc.externalOffsets || []).filter(x => (x.groupId || x.id) !== groupId), canceled: Array.from(new Set((Array.isArray(rc.canceledOffsetIds) ? rc.canceledOffsetIds : []).concat([groupId]))) }));
-  updates.forEach(x => { x.patch = receiptStoredStatusPatch(x.rc, { externalOffsets: x.offsets }); }); // v398: הביטול פותח מחדש גם את הסטטוס השמור
-  const saved = await runCloudTask('cancel receipt offset', { op: 'batch', writes: updates.map(x => ({ op: 'update', path: dataPath('receipts', x.rc.id), data: { externalOffsets: x.offsets, canceledOffsetIds: x.canceled, offsetClosed: false, offsetSchemaVersion: 3, ...x.patch } })), operationId: makeOperationId('offset_cancel') });
+  // v401: גם קבוצת מחיר של הקיזוז הפנימי מבוטלת כך — אין רשומה להסיר, רק הסימון.
+  const updates = affected.map(rc => {
+    const removed = internal ? [] : (rc.externalOffsets || []).filter(x => (x.groupId || x.id) === groupId);
+    const offsets = internal ? (rc.externalOffsets || []) : (rc.externalOffsets || []).filter(x => (x.groupId || x.id) !== groupId);
+    const canceledSet = new Set((Array.isArray(rc.canceledOffsetIds) ? rc.canceledOffsetIds : []).concat([groupId]));
+    internalOffsetIdsReleasedBy(rc, offsets, removed, canceledSet).forEach(id => canceledSet.add(id));
+    const canceled = Array.from(canceledSet);
+    return { rc, offsets, canceled, patch: receiptStoredStatusPatch(rc, { externalOffsets: offsets, canceledOffsetIds: canceled }) }; // v398: הביטול פותח מחדש גם את הסטטוס השמור
+  });
+  const saved = await runCloudTask('cancel receipt offset', { op: 'batch', writes: updates.map(x => ({ op: 'update', path: dataPath('receipts', x.rc.id), data: internal ? { canceledOffsetIds: x.canceled, ...x.patch } : { externalOffsets: x.offsets, canceledOffsetIds: x.canceled, offsetClosed: false, offsetSchemaVersion: 3, ...x.patch } })), operationId: makeOperationId('offset_cancel') });
   if (!saved) return;
   updates.forEach(x => { x.rc.externalOffsets = x.offsets; x.rc.canceledOffsetIds = x.canceled; applyReceiptStoredStatus(x.rc, x.patch); });
-  buzz(16); showToast('הקיזוז בוטל — חוק החוסר והעודף הרגיל חזר לפעול', null, null, 3200);
+  buzz(16); showToast('הקיזוז בוטל — החוסר והעודף חזרו להיות פתוחים, ולא יקוזזו שוב לבד', null, null, 3200);
   if (currentView === 'receiptsHistory') renderReceiptsHistory();
 }
 
@@ -20571,7 +20704,7 @@ function renderReceiptsHistory() {
         '</div>' : '') +
         ((!di.amountGapOpen && Math.round(Math.abs(di.unresolvedAmountGap || 0) * 100) > 0) ? '<div class="mt-2 bg-blue-50 border border-blue-200 rounded-xl p-2.5 text-xs text-blue-800"><div class="font-black"><i class="fa-solid fa-calculator"></i> פער עיגול נסבל: ₪' + fmtMoney(Math.abs(di.unresolvedAmountGap)) + ' · סך היחידות תואם</div></div>' : '') +
         aiHistoryHtml + yotvataScanHistoryHtml(rc.scanAudit, rc.aiAudit ? { verified: !aiHistoryHtml, quantityFindings: aiQuantityFindings } : null) +
-        ((di.priceOffsets && di.priceOffsets.length) ? '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800"><div class="font-black mb-1"><i class="fa-solid fa-scale-balanced"></i> קיזוז פנימי לפי מחיר זהה</div>' + di.priceOffsets.map(o => '<div class="font-bold">' + receiptSideText(o.shortItems) + ' ⇄ ' + receiptSideText(o.overItems) + ' · ₪' + fmtMoney(o.price) + '</div>').join('') + '</div>' : '') +
+        receiptInternalOffsetsHtml(rc, di) + // v401: קיזוז פנימי אוטומטי לפי מחיר, עם "בטל"
         ((Number(rc.supplierDiscount) || 0) > 0 ? '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800"><div class="font-black mb-1"><i class="fa-solid fa-percent"></i> אומתה עם מבצע / הנחת ספק</div><div class="font-bold">הנחה: −₪' + fmtMoney(rc.supplierDiscount) + ((rc.grossExVat != null) ? ' · לפני מבצע: ₪' + fmtMoney(rc.grossExVat) : '') + '</div>' + ((rc.supplierPromoItems || []).length ? '<div class="text-[11px] mt-1">כוכבית: ' + (rc.supplierPromoItems || []).map(x => x.name).join(' · ') + '</div>' : '') + '</div>' : '') +
         ((Number(rc.roundingAdjustment) || 0) !== 0 ? '<div class="mt-2 bg-blue-50 border border-blue-200 rounded-xl p-2.5 text-xs text-blue-800"><div class="font-black"><i class="fa-solid fa-calculator"></i> התאמת עיגול תעודה: ' + (Number(rc.roundingAdjustment) > 0 ? '+' : '−') + '₪' + fmtMoney(Math.abs(Number(rc.roundingAdjustment))) + '</div></div>' : '') +
         ((di.shortCreditNotes || []).length ? (function () {
@@ -20609,15 +20742,16 @@ function renderReceiptsHistory() {
           const groups = [], seen = new Set();
           (rc.externalOffsets || []).forEach(o => { const key = o.groupId || o.id; if (!key || seen.has(key)) return; seen.add(key); groups.push(o); });
           const hasAuto = groups.some(o => o.source === 'auto');
-          return '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800"><div class="font-black mb-1"><i class="fa-solid fa-scale-balanced"></i> ' + (hasAuto ? 'קיזוזים פעילים — כולל קיזוז אוטומטי' : 'קיזוזים שאושרו במודע') + '</div>' + groups.map(o => '<div class="flex items-center justify-between gap-2 py-1 border-b border-emerald-100 last:border-0"><div class="font-bold min-w-0">' + (o.source === 'manual-value' ? manualOffsetSummary(o) : ((Number(o.qty) || 0) + ' × ' + htmlEscape(o.name || '') + (o.source === 'auto' ? ' — קוזז אוטומטית (מוצר, מחיר וכמות זהים)' : ' — קוזז'))) + '</div><button data-role="rc-offset-cancel" data-id="' + htmlEscape(rc.id) + '" data-group="' + htmlEscape(o.groupId || o.id) + '" class="btn-tap shrink-0 bg-white border border-emerald-300 text-rose-600 rounded-lg px-2 py-1 text-[10px] font-black">בטל</button></div>').join('') + (effectiveOpen ? '<div class="mt-1 pt-1 border-t border-emerald-200 text-rose-700 font-black"><i class="fa-solid fa-triangle-exclamation"></i> נשארו הפרשים נוספים — התעודה עדיין פתוחה</div>' : '<div class="mt-1 font-black">כל ההפרשים בתעודה הזאת טופלו ✓</div>') + '</div>';
+          return '<div class="mt-2 bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-xs text-emerald-800"><div class="font-black mb-1"><i class="fa-solid fa-scale-balanced"></i> ' + (hasAuto ? 'קיזוזים פעילים — כולל קיזוז אוטומטי' : 'קיזוזים שאושרו במודע') + '</div>' + groups.map(o => '<div class="flex items-center justify-between gap-2 py-1 border-b border-emerald-100 last:border-0"><div class="font-bold min-w-0">' + receiptOffsetEntryText(rc, o) + '</div><button data-role="rc-offset-cancel" data-id="' + htmlEscape(rc.id) + '" data-group="' + htmlEscape(o.groupId || o.id) + '" class="btn-tap shrink-0 bg-white border border-emerald-300 text-rose-600 rounded-lg px-2 py-1 text-[10px] font-black">בטל</button></div>').join('') + (effectiveOpen ? '<div class="mt-1 pt-1 border-t border-emerald-200 text-rose-700 font-black"><i class="fa-solid fa-triangle-exclamation"></i> נשארו הפרשים נוספים — התעודה עדיין פתוחה</div>' : '<div class="mt-1 font-black">כל ההפרשים בתעודה הזאת טופלו ✓</div>') + '</div>';
         })() : '') +
         (legacyRecovering ? '<div class="mt-2 bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-xs font-black text-amber-800"><i class="fa-solid fa-rotate"></i> משחזר קיזוז ישן ובודק מחדש את שאר החוסרים…</div>' : '') +
-        (legacyRecovering ? '' : (function () { const m = findOffsetMatch(rc); if (!m) return ''; const od = new Date(m.other.timestamp).toLocaleDateString('he-IL');
+        (legacyRecovering ? '' : (function () { const m = findOffsetMatch(rc); if (!m) return ''; const od = new Date(m.other.timestamp).toLocaleDateString('he-IL'); const why = autoOffsetSkipReason(rc, m);
             return '<div class="mt-2 bg-indigo-50 border-2 border-indigo-200 rounded-xl p-3">' +
-              '<div class="text-xs font-black text-indigo-900 mb-1.5"><i class="fa-solid fa-lightbulb"></i> קיזוז מזוהה</div>' +
+              '<div class="text-xs font-black text-indigo-900 mb-1.5"><i class="fa-solid fa-lightbulb"></i> קיזוז מזוהה — ממתין לאישורך</div>' +
               (m.byPrice
                 ? '<div class="text-xs font-bold text-slate-700 mb-2">' + m.qty + ' × ' + m.name + ' ' + (m.myDir === 'over' ? 'שבעודף' : 'שחסרו') + ' כאן מתקזזים מול ' + m.qty + ' × ' + m.otherName + (m.other.id === rc.id ? ' באותה תעודה' : ' בתעודת ' + od) + ' — אותו מחיר ₪' + fmtMoney(m.price) + ' (החלפת וריאנט)</div>'
                 : '<div class="text-xs font-bold text-slate-700 mb-2">' + m.qty + ' × ' + m.name + ' ' + (m.myDir === 'over' ? 'שקיבלת בעודף' : 'שחסרו') + ' כאן מתקזזים בדיוק מול תעודת ' + od + '</div>') +
+              (why ? '<div class="text-[11px] font-bold text-indigo-800/80 mb-2">' + htmlEscape(why) + '</div>' : '') +
               '<button data-role="rc-offset" data-id="' + rc.id + '" data-other="' + m.other.id + '" data-product="' + m.productId + '" data-other-product="' + (m.otherProductId || m.productId) + '" class="btn-tap w-full bg-indigo-600 text-white rounded-xl py-2 font-black text-sm"><i class="fa-solid fa-check"></i> אשר קיזוז לפריט הזה</button>' +
             '</div>'; })()) +
         docDateEditorHtml('receipt', rc) + // v267
@@ -25649,7 +25783,7 @@ app.addEventListener('click', (e) => {
   else if (role === 'rc-date-cancel') { const kind = t.dataset.kind === 'return' ? 'return' : 'receipt'; receiptDateEdit = null; refreshDocDateBox(kind, id); }
   else if (role === 'rc-date-save') saveDocDate(t.dataset.kind === 'return' ? 'return' : 'receipt', id);
   else if (role === 'rc-offset-choose') openManualOffsetPicker(id, t.dataset.product, t.dataset.dir);
-  else if (role === 'rc-offset-cancel') { const groupId = t.dataset.group; showConfirm('ביטול קיזוז', 'לבטל את הקיזוז המאושר? הסכום יוסר מהתשלום והחוסר והעודף יחזרו להיות פתוחים לפי החוק הרגיל.', 'בטל קיזוז', () => cancelReceiptOffset(id, groupId)); }
+  else if (role === 'rc-offset-cancel') { const groupId = t.dataset.group; showConfirm('ביטול קיזוז', 'לבטל את הקיזוז? החוסר יחזור להיות מופחת מהתשלום והעודף יישאר הערה בלבד — והזוג הזה לא יקוזז שוב לבד.', 'בטל קיזוז', () => cancelReceiptOffset(id, groupId)); }
   else if (role === 'rc-offset') { const otherId = t.dataset.other, productId = t.dataset.product, otherProductId = t.dataset.otherProduct || productId; const rc = receipts.find(x => x.id === id); const other = receipts.find(x => x.id === otherId); const m = rc ? findOffsetMatch(rc, otherId, productId, otherProductId) : null; if (m && other) showConfirm('אישור קיזוז לפריט', (m.byPrice ? m.qty + ' × ' + m.name + ' מתקזזים מול ' + m.qty + ' × ' + m.otherName + ' (אותו מחיר ₪' + fmtMoney(m.price) + ')' + (otherId === id ? ' באותה תעודה' : ' בתעודת ' + new Date(other.timestamp).toLocaleDateString('he-IL')) : m.qty + ' × ' + m.name + ' מתקזזים מול תעודת ' + new Date(other.timestamp).toLocaleDateString('he-IL')) + '. הקיזוז יחול רק על הפריט הזה; כל חוסר או עודף אחר יישאר פתוח לטיפול.', 'אשר קיזוז לפריט', () => applyOffset(id, otherId, productId, otherProductId)); }
   else if (role === 'rc-credit-verify') setReceiptSupplierCreditStatus(id, 'verified');
   else if (role === 'rc-credit-defer') showConfirm('העברת זיכוי לחודש הבא', 'הספק אמר שהזיכוי לא יופיע החודש אלא בחודש הבא? הדרישה לא תיעלם — היא תופיע באימות מרכזת של חודש היעד.', 'העבר לחודש הבא', () => setReceiptSupplierCreditStatus(id, 'deferred'));

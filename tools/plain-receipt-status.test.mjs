@@ -42,12 +42,13 @@ function renderHistory(c, list) {
 
 test('one sentence per saved receipt: what is open and what to do, or balanced and how it closed', () => {
   const c = runtime();
-  assert.deepEqual(plain(c, receipt()), { state: 'short', text: 'חסר 8 × מוצר א בדיקה · ₪40.00 · ממתין לזיכוי מהספק', action: 'התקבל זיכוי מהספק', role: 'rc-short-credit', open: true });
+  // v401: 2 of the 8 missing A offset automatically against the 2 surplus B at the same price — the sentence says what is really still open.
+  assert.deepEqual(plain(c, receipt()), { state: 'short', text: 'חסר 6 × מוצר א בדיקה · ₪30.00 · ממתין לזיכוי מהספק', action: 'התקבל זיכוי מהספק', role: 'rc-short-credit', open: true });
   assert.deepEqual(plain(c, receipt({ items: [{ ...structuredClone(LINE_A), qty: 12, lineTotal: 60 }, structuredClone(LINE_B)] })),
     { state: 'over', text: 'עודף 2 × מוצר ב בדיקה (₪10.00) · לא בתעודה — לקזז מול חוסר או לתקן', action: 'תקן הפרשים', role: 'rc-fix-open', open: true });
   assert.deepEqual(plain(c, receipt({ items: balancedLines() })), { state: 'balanced', text: 'נקלטה ומאוזנת ✓', action: '', role: '', open: false });
   // a partial credit names what is still owed
-  assert.equal(plain(c, receipt({ shortCreditNotes: [{ amount: 30, at: 1 }] })).text, 'חסר 8 × מוצר א בדיקה · נותר ₪10.00 · ממתין לזיכוי מהספק');
+  assert.equal(plain(c, receipt({ items: shortOnly(), shortCreditNotes: [{ amount: 30, at: 1 }] })).text, 'חסר 8 × מוצר א בדיקה · נותר ₪10.00 · ממתין לזיכוי מהספק');
   // closed by a full credit, by goods or by an offset — the sentence says how
   assert.equal(plain(c, receipt({ items: shortOnly(), shortCreditNotes: [{ amount: 40, at: 1 }] })).text, 'נקלטה ומאוזנת ✓ · החוסר נסגר בזיכוי');
   assert.equal(plain(c, receipt({ items: shortOnly(), shortGoodsNotes: [{ productId: 'A', name: 'מוצר א בדיקה', qty: 8, price: 5, at: 1 }] })).text, 'נקלטה ומאוזנת ✓ · החוסר הושלם בסחורה');
@@ -63,12 +64,12 @@ test('one sentence per saved receipt: what is open and what to do, or balanced a
 test('the history card: the sentence on the collapsed card, and "מה לעשות עכשיו" with one button only when something is open', () => {
   const c = runtime();
   const html = renderHistory(c, [receipt(), { ...receipt({ items: balancedLines() }), id: 'rc-2', timestamp: Date.parse('2026-10-18T09:00:00') }]);
-  assert.match(html, /<div class="mt-1 text-xs font-black text-rose-700" data-plain-status="short">חסר 8 × מוצר א בדיקה · ₪40\.00 · ממתין לזיכוי מהספק<\/div>/);
+  assert.match(html, /<div class="mt-1 text-xs font-black text-rose-700" data-plain-status="short">חסר 6 × מוצר א בדיקה · ₪30\.00 · ממתין לזיכוי מהספק<\/div>/);
   assert.match(html, /<div class="mt-1 text-xs font-black text-emerald-700" data-plain-status="balanced">נקלטה ומאוזנת ✓<\/div>/);
   const box = (html.match(/<div class="mt-2 bg-rose-50 border-2 border-rose-300 rounded-xl p-3" data-plain-action="short">[\s\S]*?<\/button><\/div>/) || [''])[0];
   assert.ok(box, 'the open receipt has the box');
   assert.match(box, /מה לעשות עכשיו/);
-  assert.match(box, /חסר 8 × מוצר א בדיקה · ₪40\.00 · ממתין לזיכוי מהספק/);
+  assert.match(box, /חסר 6 × מוצר א בדיקה · ₪30\.00 · ממתין לזיכוי מהספק/);
   assert.match(box, /<button data-role="rc-short-credit" data-id="rc-1"[^>]*>התקבל זיכוי מהספק<\/button>/);
   assert.equal((html.match(/data-plain-action=/g) || []).length, 1, 'the balanced receipt has no box');
   // the existing state bar is untouched
@@ -143,7 +144,7 @@ test('the full backup opens with a plain summary: a line per receipt, counts and
   const summary = json(c, 'backupPlainSummary(payloadFixture)');
   assert.deepEqual(summary.counts, { receipts: 2, balanced: 1, open: 1 });
   assert.deepEqual(summary.receipts.map(r => [r.id, r.date, r.state, r.status, r.action, r.documents, r.items, r.totalExVat]), [
-    ['rc-1', '2026-10-20', 'short', 'חסר 8 × מוצר א בדיקה · ₪40.00 · ממתין לזיכוי מהספק', 'התקבל זיכוי מהספק', [], 2, 80],
+    ['rc-1', '2026-10-20', 'short', 'חסר 6 × מוצר א בדיקה · ₪30.00 · ממתין לזיכוי מהספק', 'התקבל זיכוי מהספק', [], 2, 80],
     ['rc-2', '2026-10-18', 'balanced', 'נקלטה ומאוזנת ✓', '', ['407300217689'], 2, 80]]);
   assert.ok(summary.about.includes('הייבוא מתעלם'));
   assert.ok('status' in summary.glossary && Object.keys(summary.glossary).some(k => k.includes('needs_review')));
