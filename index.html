@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v401 קיזוז אוטומטי לפי מחיר</title>
+    <title>הזמנות יטבתה - v402 כפתור + ארגז בקליטה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -125,7 +125,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v401 קיזוז אוטומטי לפי מחיר</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v402 כפתור + ארגז בקליטה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -349,6 +349,11 @@
             <input id="qtyVal" type="text" inputmode="numeric" value="1" class="w-24 h-16 text-center text-3xl font-black border-2 border-slate-200 rounded-2xl outline-none focus:border-blue-500">
             <button id="qty_plus" class="btn-tap w-14 h-14 rounded-2xl bg-slate-100 text-slate-700 flex items-center justify-center text-2xl"><i class="fa-solid fa-plus"></i></button>
           </div>
+          <div id="qtyBoxRow" class="hidden flex gap-2 mt-3"><!-- v402: כפתורי ארגז כמו בתנובה — מינוס מימין, מתחת למינוס היחידות; מוצג רק למוצר עם גודל ארגז -->
+            <button id="qty_minus_box" class="btn-tap flex-1 py-3 rounded-xl font-black bg-white border-2 border-slate-200 text-slate-600"><i class="fa-solid fa-minus"></i> ארגז</button>
+            <button id="qty_plus_box" class="btn-tap flex-1 py-3 rounded-xl font-black bg-emerald-50 border-2 border-emerald-300 text-emerald-800"><i class="fa-solid fa-boxes-stacked"></i> <span id="qtyBoxLabel">+ ארגז</span></button>
+          </div>
+          <p id="qtyBoxBreak" class="hidden text-xs font-black mt-1.5"></p>
         </div>
         <div class="flex gap-2 p-4 pt-2">
           <button id="qty_cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-500">ביטול</button>
@@ -474,17 +479,21 @@
             </div>
             <label id="prod_averageLabel" class="text-[11px] text-slate-400 font-bold block mb-1">כמות מומלצת להזמנה</label>
             <input id="prod_average" type="text" inputmode="numeric" class="w-full p-3 rounded-xl border-2 border-slate-200 outline-none text-center font-black focus:border-blue-500 mb-3" placeholder="לדוגמה 1">
-            <label class="flex items-start gap-2 p-3 rounded-xl bg-amber-50 border border-amber-100 cursor-pointer">
-              <input id="prod_wholeCarton" type="checkbox" class="mt-1 w-4 h-4 accent-amber-600">
-              <span><span class="block text-sm font-black text-amber-900">המוצר מתקבל רק בארגזים שלמים</span><span class="block text-[10px] text-amber-700 font-bold mt-0.5">משמש את הבלש כדי לבדוק רק כפולות של ארגז שלם.</span></span>
-            </label>
-            <div id="prod_boxSizeWrap" class="hidden mt-2.5">
-              <label class="text-[11px] text-slate-500 font-bold block mb-1">כמה יחידות יש בארגז?</label>
-              <input id="prod_boxSize" type="text" inputmode="numeric" class="w-full p-3 rounded-xl border-2 border-amber-200 bg-amber-50 outline-none text-center font-black focus:border-amber-500" placeholder="לדוגמה 12">
-            </div>
-            <label class="flex items-center justify-between gap-3 mt-3 p-3 rounded-xl bg-slate-50 border border-slate-100 cursor-pointer">
+            <label class="flex items-center justify-between gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100 cursor-pointer">
               <span><span class="block text-sm font-black text-slate-700">הצג במסך ההזמנה</span><span class="block text-[10px] text-slate-400 font-bold">כיבוי מסתיר רק מההזמנה; המוצר נשאר בקליטה ובחזרות.</span></span>
               <input id="prod_visible" type="checkbox" class="w-5 h-5 accent-blue-600" checked>
+            </label>
+          </section>
+
+          <section class="bg-white border border-slate-200 rounded-2xl p-3"><!-- v402: כמו בתנובה — "יש ארגז" (כפתור "+ ארגז" בקליטה) נפרד מ"רק ארגזים שלמים" (אכיפת הבלש) -->
+            <div class="font-black text-sm text-slate-700 mb-3"><i class="fa-solid fa-boxes-stacked text-amber-600 ml-1"></i> הגדרות ארגז — לבלש ולכפתור "+ ארגז"</div>
+            <div id="prod_boxSizeWrap">
+              <label class="text-[11px] text-slate-500 font-bold block mb-1">כמה יחידות יש בארגז? <span class="text-slate-400">(מפעיל את כפתור "+ ארגז" בקליטה)</span></label>
+              <input id="prod_boxSize" type="text" inputmode="numeric" class="w-full p-3 rounded-xl border-2 border-amber-200 bg-amber-50 outline-none text-center font-black focus:border-amber-500" placeholder="לדוגמה 12">
+            </div>
+            <label class="flex items-start gap-2 mt-2.5 p-3 rounded-xl bg-amber-50 border border-amber-100 cursor-pointer">
+              <input id="prod_wholeCarton" type="checkbox" class="mt-1 w-4 h-4 accent-amber-600">
+              <span><span class="block text-sm font-black text-amber-900">המוצר מתקבל רק בארגזים שלמים</span><span class="block text-[10px] text-amber-700 font-bold mt-0.5">הבלש יבדוק רק כפולות של ארגז שלם. אל תסמן אם לפעמים מגיעות גם יחידות בודדות.</span></span>
             </label>
           </section>
 
@@ -670,9 +679,9 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '401'; // קיזוז אוטומטי לפי מחיר ליחידה זהה — בתוך התעודה ובין תעודות, עם "בטל"
+const APP_VERSION = '402'; // כפתור "+ ארגז" בקליטה כמו בתנובה — גודל ארגז במוצר נפרד מאכיפת "רק ארגזים שלמים" לבלש
 // v398: תווית הגרסה ביומן הפעולות ובקובץ הגיבוי (עד כאן מחרוזת קבועה שנשארה 'v396_second_strong_read')
-const APP_VERSION_LABEL = 'v' + APP_VERSION + '_price_offsets';
+const APP_VERSION_LABEL = 'v' + APP_VERSION + '_crate_button';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -3573,7 +3582,7 @@ function settingsRowHtml(p) {
       '<button data-role="move" data-id="' + p.id + '" class="btn-tap shrink-0 w-9 h-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center" title="העבר מוצר"><i class="fa-solid fa-up-down text-sm"></i></button>' +
       '<button data-role="edit-prod" data-id="' + p.id + '" class="btn-tap flex-1 min-w-0 text-right font-bold text-sm ' + (p.hidden ? 'text-slate-400 line-through' : 'text-slate-800') + ' leading-tight">' + p.name + (p.hidden ? ' <span class="text-[10px] text-amber-500 font-black no-underline">(אזל)</span>' : '') + ' <i class="fa-solid fa-pen text-[9px] text-slate-300"></i></button>' +
       '<input data-role="avg-set" data-id="' + p.id + '" type="text" inputmode="numeric" value="' + (p.average || '') + '" placeholder="0" class="w-14 bg-slate-100 rounded-lg p-1.5 text-center font-bold text-sm outline-none">' +
-      '<input data-role="box-set" data-id="' + p.id + '" type="text" inputmode="numeric" value="' + (p.boxSize || '') + '" placeholder="📦" title="יח׳ בארגז — רק למוצרים שמגיעים אך ורק בארגזים" class="w-12 bg-amber-50 border border-amber-100 rounded-lg p-1.5 text-center font-bold text-sm outline-none">' +
+      '<input data-role="box-set" data-id="' + p.id + '" type="text" inputmode="numeric" value="' + (p.boxSize || '') + '" placeholder="📦" title="יח׳ בארגז — מפעיל את כפתור ״+ ארגז״ בקליטה" class="w-12 bg-amber-50 border border-amber-100 rounded-lg p-1.5 text-center font-bold text-sm outline-none">' +
       '<button data-role="toggle-hidden" data-id="' + p.id + '" class="btn-tap shrink-0 p-2 ' + (p.hidden ? 'text-amber-500' : 'text-slate-300') + '" title="' + (p.hidden ? 'הצג מוצר' : 'הסתר (אזל במלאי)') + '"><i class="fa-solid ' + (p.hidden ? 'fa-eye-slash' : 'fa-eye') + '"></i></button>' +
       '<button data-role="del-product" data-id="' + p.id + '" class="btn-tap shrink-0 p-2 text-red-500"><i class="fa-solid fa-trash-can"></i></button>' +
     '</div>';
@@ -3670,7 +3679,7 @@ function renderSettings() {
     '</div>' +
     '<div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">' +
       '<div class="bg-slate-100 p-4 border-b border-slate-200 flex items-center justify-between gap-2"><h2 class="font-black text-lg text-slate-800">עריכת מוצרים</h2><span class="text-[11px] text-slate-500 font-medium flex items-center gap-1"><i class="fa-solid fa-up-down"></i> לחץ ⬍ להעברה</span></div>' +
-      '<div class="px-4 py-2 bg-amber-50/60 border-b border-slate-200 text-[11px] font-bold text-slate-500">העמודה האפורה: כמות מומלצת להזמנה · עמודת 📦: יח׳ בארגז — מלא <b>רק</b> למוצרים שמגיעים אך ורק בארגזים שלמים (משמש את הבלש בהשוואת תעודה)</div>' +
+      '<div class="px-4 py-2 bg-amber-50/60 border-b border-slate-200 text-[11px] font-bold text-slate-500">העמודה האפורה: כמות מומלצת להזמנה · עמודת 📦: יח׳ בארגז — מפעיל את כפתור ״+ ארגז״ בקליטה. אכיפת ״רק ארגזים שלמים״ לבלש מסומנת בכרטיס המוצר</div>' +
       '<div class="p-4 bg-blue-50 border-b border-slate-200">' +
         '<div class="text-xs text-blue-800 font-bold mb-2">מוצר חדש מוסיפים בכרטיס מלא אחד: ברקוד, מחיר, קבוצה, מומלץ, ארגז ויחידה.</div>' +
         '<button data-role="add-product" class="btn-tap w-full bg-blue-600 text-white py-3 rounded-xl font-black flex items-center justify-center gap-2"><i class="fa-solid fa-plus"></i> הוסף מוצר חדש</button>' +
@@ -7014,14 +7023,22 @@ function saveAvg(id, val) {
   clearTimeout(avgTimers[id]);
   avgTimers[id] = setTimeout(() => { runCloudTaskSilent('save average', { op: 'update', path: dataPath('products', id), data: { average: avg }, operationId: makeOperationId('avg') }); }, 700);
 }
-const boxTimers = {};
+const boxTimers = {}, boxStrictBase = {};
+// v402: עמודת 📦 במסך העריכה קובעת רק את גודל הארגז (כפתור "+ ארגז" בקליטה).
+// אכיפת "רק ארגזים שלמים" לבלש נשארת כפי שהייתה לפני ההקלדה: מוצר שכבר נאכף (דגל
+// דלוק, או מוצר ותיק עם ארגז בלי דגל) נשאר נאכף גם בגודל החדש; מוצר בלי ארגז
+// שמקבל כאן גודל לראשונה אינו הופך לקפדני — את זה מסמנים רק בכרטיס המוצר. המצב
+// נלכד בהקשה הראשונה ונשמר עד הכתיבה לענן, כדי שהקלדת "12" לא תאבד אותו דרך "1".
 function saveBoxSize(id, val) {
   const n = parseInt(String(val).replace(/[^0-9]/g, ''), 10);
   const box = (isNaN(n) || n < 2) ? 0 : n; // 0 = ללא הגדרת ארגז
-  const p = products.find(x => x.id === id); if (p) p.boxSize = box;
+  const p = products.find(x => x.id === id);
+  if (!(id in boxStrictBase)) boxStrictBase[id] = productBoxStrict(p);
+  const strict = boxStrictBase[id] && box >= 2;
+  if (p) { p.boxSize = box; p.boxStrict = strict; }
   if (!db) return;
   clearTimeout(boxTimers[id]);
-  boxTimers[id] = setTimeout(() => { runCloudTaskSilent('save box size', { op: 'update', path: dataPath('products', id), data: { boxSize: box }, operationId: makeOperationId('box') }); }, 700);
+  boxTimers[id] = setTimeout(() => { delete boxStrictBase[id]; runCloudTaskSilent('save box size', { op: 'update', path: dataPath('products', id), data: { boxSize: box, boxStrict: strict }, operationId: makeOperationId('box') }); }, 700);
 }
 function addProduct() { openProdModal(null, false, ''); }
 async function delProduct(id) {
@@ -8589,7 +8606,9 @@ function promptQty(p, target) {
       buzz([45, 70, 45]);
     } else { exEl.innerHTML = ''; exEl.classList.add('hidden'); }
   }
-  $('qtyVal').value = 1;
+  $('qtyVal').value = '1';
+  qtyPristine = true;
+  updateQtyBoxUi();
   updateQtyPackOffer();
   const m = $('qtyModal'); m.classList.remove('hidden'); m.classList.add('flex');
   setTimeout(() => { const i = $('qtyVal'); if (i) { i.focus(); i.select(); } }, 80);
@@ -8655,8 +8674,44 @@ function convertQtyToPack() {
   renderReceiving();
   openReceivingScanner();
 }
-function hideQty() { const m = $('qtyModal'); m.classList.add('hidden'); m.classList.remove('flex'); qtyProduct = null; const po = $('qtyPackOffer'); if (po) { po.innerHTML = ''; po.classList.add('hidden'); } }
-function qtyStep(d) { const i = $('qtyVal'); if (!i) return; let v = parseInt((i.value || '').replace(/[^0-9]/g, ''), 10) || 0; v = Math.max(1, v + d); i.value = v; updateQtyPackOffer(); }
+function hideQty() { const m = $('qtyModal'); m.classList.add('hidden'); m.classList.remove('flex'); qtyProduct = null; const po = $('qtyPackOffer'); if (po) { po.innerHTML = ''; po.classList.add('hidden'); } const bb = $('qtyBoxRow'); if (bb) bb.classList.add('hidden'); const bk = $('qtyBoxBreak'); if (bk) bk.classList.add('hidden'); }
+function qtyStep(d) { const i = $('qtyVal'); if (!i) return; qtyPristine = false; let v = parseInt(String(i.value || '').replace(/[^0-9]/g, ''), 10) || 0; v = Math.max(1, v + d); i.value = String(v); updateQtyPackOffer(); updateQtyBoxBreak(); }
+// v402: מוצר-ארגז (גודל ארגז מוגדר במוצר), כמו בתנובה — כפתור "+ ארגז" מוסיף
+// ארגז שלם בלחיצה, ופירוק חי "= X ארגזים + Y" מתחת לכמות. שקית שנפלה עדיין
+// ניתנת להקלדה חופשית — הארגז הוא קיצור ורמז, לא אזיקים. הכפתור תלוי רק
+// ב-boxSize; הבלש אוכף כפולות ארגז רק כשסומן "רק ארגזים שלמים" (boxStrict).
+let qtyPristine = false; // "1" ההתחלתי שטרם נגעו בו — הארגז הראשון מחליף אותו, לא מתווסף אליו
+function qtyBoxSize() { return Math.max(0, parseInt(qtyProduct && qtyProduct.boxSize, 10) || 0); }
+function updateQtyBoxUi() {
+  const row = $('qtyBoxRow'); if (!row) return;
+  const bs = qtyBoxSize();
+  if (bs > 1) {
+    const label = $('qtyBoxLabel'); if (label) label.textContent = '+ ארגז (' + bs + ')';
+    row.classList.remove('hidden');
+  } else row.classList.add('hidden');
+  updateQtyBoxBreak();
+}
+function updateQtyBoxBreak() {
+  const el = $('qtyBoxBreak'); if (!el) return;
+  const bs = qtyBoxSize();
+  const q = parseInt(String(($('qtyVal') || {}).value || '').replace(/[^0-9]/g, ''), 10) || 0;
+  if (bs > 1 && q >= bs) {
+    const full = Math.floor(q / bs), rem = q % bs;
+    const boxes = full === 1 ? 'ארגז אחד' : full + ' ארגזים';
+    el.textContent = rem === 0 ? ('= ' + boxes + (full === 1 ? ' מלא' : ' מלאים')) : ('= ' + boxes + ' + ' + rem + ' יח׳');
+    el.className = 'text-xs font-black mt-1.5 ' + (rem === 0 ? 'text-emerald-700' : 'text-amber-600');
+    el.classList.remove('hidden');
+  } else el.classList.add('hidden');
+}
+function qtyStepBox(dir) {
+  const bs = qtyBoxSize(); if (!bs) return;
+  const i = $('qtyVal'); if (!i) return;
+  let v = parseInt(String(i.value || '').replace(/[^0-9]/g, ''), 10) || 0;
+  if (qtyPristine) v = 0; // הארגז הראשון מחליף את ה-"1" ההתחלתי, לא מתווסף אליו
+  qtyPristine = false;
+  i.value = String(Math.max(0, v + dir * bs));
+  updateQtyPackOffer(); updateQtyBoxBreak(); buzz(12);
+}
 function addQtyToTarget(p, q, target) {
   if (target === 'returns') {
     const ex = returnsList.find(it => it.productId === p.id);
@@ -9442,6 +9497,18 @@ function reconcileAssignedHtml() {
   return parts.join(' <span class="text-amber-900/40">·</span> ');
 }
 // ===== "הבלש" — מציע מי אחראי להפרש שלא שויך =====
+
+// v402: הפרדת "יש ארגז" מ"רק ארגזים שלמים" (כמו בתנובה). boxSize משרת תמיד
+// את כפתור "+ ארגז" והפירוק החי בקליטה; הבלש אוכף כפולות ארגז רק כשהדגל
+// boxStrict דלוק. מוצר ותיק בלי הדגל קיבל את גודל הארגז בעבר דרך הצ'קבוקס
+// הקפדני (או דרך עמודת 📦 שנועדה אז רק לארגזים שלמים), ולכן נחשב קפדני
+// (undefined ≠ false) — התנהגות הבלש לא משתנה לאף מוצר קיים.
+function productBoxStrict(p) {
+  return !!p && p.boxStrict !== false && (parseInt(p.boxSize, 10) || 0) >= 2;
+}
+function detectiveBoxSize(p) {
+  return productBoxStrict(p) ? (parseInt(p.boxSize, 10) || 0) : 0;
+}
 let detectiveOpen = false;
 let detectiveScope = null; // בשלב שאחרי הברקודים: מגביל את החיפוש רק למה שאומת על הנייר
 let detectiveQuestionState = { fingerprint: '', asked: 0, constraints: [] };
@@ -9622,7 +9689,7 @@ function detectiveBuildPriceGroups(priceOverride) {
     const linePrice = (priceOverride && priceOverride[l.productId] != null) ? priceOverride[l.productId] : (Number(l.price) || 0);
     add({ productId: l.productId, name: l.name || (p && p.name) || '', price: linePrice + (Number(p && p.deposit) || 0), inRec: true, ext: false,
       dep: Number(p && p.deposit) || 0,
-      noteQty: Number(l.noteQty) || 0, received: Number(l.received) || 0, hidden: !!(p && p.hidden), bs: Math.max(0, parseInt(p && p.boxSize, 10) || 0),
+      noteQty: Number(l.noteQty) || 0, received: Number(l.received) || 0, hidden: !!(p && p.hidden), bs: detectiveBoxSize(p),
       average: Math.max(0, parseInt(p && p.average, 10) || 0), promoOn: !!l.promoOn, history: history[l.productId] || 0,
       paperKnown: !!(detectiveScope && detectiveScope.paperIds.has(l.productId)), wholeExtra: !!(detectiveScope && detectiveScope.extraIds.has(l.productId)) });
   });
@@ -9637,7 +9704,7 @@ function detectiveBuildPriceGroups(priceOverride) {
     // מעדיף מוצר גלוי (+3).
     const ep = detectiveEffectiveProductPrice(p);
     add({ productId: p.id, name: p.name || '', price: ep.price + (Number(p.deposit) || 0), dep: Number(p.deposit) || 0, inRec: false, ext: true, noteQty: 0, received: 0, hidden: !!p.hidden,
-      bs: Math.max(0, parseInt(p.boxSize, 10) || 0), average: Math.max(0, parseInt(p.average, 10) || 0), promoOn: ep.promoOn, promoMin: Number(ep.promoMin) || 0, history: history[p.id] || 0,
+      bs: detectiveBoxSize(p), average: Math.max(0, parseInt(p.average, 10) || 0), promoOn: ep.promoOn, promoMin: Number(ep.promoMin) || 0, history: history[p.id] || 0,
       paperKnown: !!detectiveScope, wholeExtra: false });
   });
   return Array.from(byPrice.values()).sort((a, b) => a.priceCents - b.priceCents);
@@ -10314,7 +10381,7 @@ function detectiveApplyResolvedResult(result, i, selectPrefix) {
   for (const [pid, delta] of totals.entries()) {
     const existing = (reconcileData || []).find(x => x.productId === pid);
     const cur = Number(existing && existing.noteQty) || 0;
-    const p = products.find(x => x.id === pid), bs = Math.max(0, parseInt(p && p.boxSize, 10) || 0);
+    const p = products.find(x => x.id === pid), bs = detectiveBoxSize(p);
     // v218: כלל הארגז החכם (v213) גם באישור — שורת הנייר המשוחזרת נבדקת,
     // לא הדלתא: 11 נסרקו + 1 חסרה = 12 = ארגז שלם ✓ (הכלל הישן דחה את זה)
     if (cur + delta < 0) { showToast('הפתרון השתנה — הבלש מחשב מחדש', null, null, 2400); refreshReconcile(); return; }
@@ -10384,10 +10451,10 @@ function manualPickRowsHtml() {
     if (l.isDeposit || String(l.productId || '').indexOf('deposit-') === 0) return;
     const p = products.find(x => x.id === l.productId);
     const dep = Number(p && p.deposit) || 0;
-    cands.push({ pid: l.productId, name: l.name, price: (Number(l.price) || 0) + dep, dep: dep, inRec: true, bs: Math.max(0, parseInt(p && p.boxSize, 10) || 0) });
+    cands.push({ pid: l.productId, name: l.name, price: (Number(l.price) || 0) + dep, dep: dep, inRec: true, bs: detectiveBoxSize(p) });
   });
   // בעודף — המוצר חייב להיות בין השורות שנסרקו; בחוסר — גם מוצר מהמאגר שלא נסרק כלל
-  if (dirSign > 0) products.forEach(p => { if (!inRec[p.id] && !p.hidden) { const ep = detectiveEffectiveProductPrice(p); const dep = Number(p.deposit) || 0; cands.push({ pid: p.id, name: p.name, price: ep.price + dep, dep: dep, inRec: false, bs: Math.max(0, parseInt(p.boxSize, 10) || 0) }); } });
+  if (dirSign > 0) products.forEach(p => { if (!inRec[p.id] && !p.hidden) { const ep = detectiveEffectiveProductPrice(p); const dep = Number(p.deposit) || 0; cands.push({ pid: p.id, name: p.name, price: ep.price + dep, dep: dep, inRec: false, bs: detectiveBoxSize(p) }); } });
   if (term) cands = cands.filter(c => (c.name || '').includes(term));
   const fits = c => {
     if (c.price <= 0) return 0;
@@ -10413,7 +10480,7 @@ async function manualApplyProduct(pid) {
   const unitGap = reconcileUnitsGap();
   const dirSign = absGap > 1 ? (gap > 0 ? 1 : -1) : (unitGap > 0 ? 1 : -1);
   const l = ensureReconcileLine(pid); if (!l) return;
-  const p = products.find(x => x.id === pid), bs = Math.max(0, parseInt(p && p.boxSize, 10) || 0);
+  const p = products.find(x => x.id === pid), bs = detectiveBoxSize(p);
   const price = (Number(l.price) || 0) + (Number(p && p.deposit) || 0); // v216: התאמה כוללת פיקדון
   let qty = 0;
   if (price > 0) {
@@ -18028,7 +18095,7 @@ function solveMissingCertain() {
   const targetUnits = (reconcileUnitsGap() || 0) + extras.reduce((a, x) => a + x.qty, 0);
   const targetMoney = Math.round(reconcileGap() * 10000) + extras.reduce((a, x) => a + Math.round(x.price * 10000) * x.qty, 0);
   if (!(targetUnits >= r.missing.length)) return null;
-  const rows = r.missing.map(p => { const ep = detectiveEffectiveProductPrice(p); return { p, price: ep.price, cents: Math.round(ep.price * 10000), step: Math.max(1, parseInt(p.boxSize, 10) || 1) }; });
+  const rows = r.missing.map(p => { const ep = detectiveEffectiveProductPrice(p); return { p, price: ep.price, cents: Math.round(ep.price * 10000), step: Math.max(1, detectiveBoxSize(p)) }; });
   if (rows.some(x => x.cents <= 0)) return null;
   const found = [], cur = {};
   function dfs(i, unitsLeft, money) {
@@ -21441,8 +21508,9 @@ function setProdDefaultUnit(unit) {
   if (label) label.textContent = 'כמות מומלצת להזמנה (' + (unit === 'unit' ? 'יחידות' : 'ארגזים') + ')';
 }
 function refreshProdWholeCartonUi() {
+  // v402: שדה יחידות-בארגז גלוי תמיד — הוא משרת את כפתור "+ ארגז" גם בלי
+  // אכיפת הבלש. סימון "רק ארגזים שלמים" רק משלים אותו מהמחשבון אם ריק.
   const on = !!($('prod_wholeCarton') && $('prod_wholeCarton').checked);
-  const wrap = $('prod_boxSizeWrap'); if (wrap) wrap.classList.toggle('hidden', !on);
   if (on) {
     const box = $('prod_boxSize'), calcUnits = $('prod_cartonUnits');
     if (box && !box.value && calcUnits) {
@@ -21514,7 +21582,7 @@ function openProdModal(p, fromScan, presetCode, afterSaveTarget) {
   $('prod_average').value = p ? (p.average != null ? p.average : '') : '1';
   setProdDefaultUnit(p ? p.defaultUnit : 'carton');
   const boxSize = p ? (parseInt(p.boxSize, 10) || 0) : 0;
-  $('prod_wholeCarton').checked = boxSize >= 2;
+  $('prod_wholeCarton').checked = productBoxStrict(p); // v402: מוצר ותיק עם ארגז ובלי דגל נשאר קפדני
   $('prod_boxSize').value = boxSize >= 2 ? String(boxSize) : '';
   $('prod_visible').checked = !(p && p.hidden);
   $('prod_cartonPrice').value = '';
@@ -21659,7 +21727,8 @@ async function saveProd(again) {
   const wholeCarton = !!$('prod_wholeCarton').checked;
   const parsedBoxSize = parseInt(($('prod_boxSize').value || '').replace(/[^0-9]/g, ''), 10) || 0;
   if (wholeCarton && parsedBoxSize < 2) { showToast('הזן כמה יחידות יש בארגז', null, null, 2800); $('prod_boxSize').focus(); return; }
-  const boxSize = wholeCarton ? parsedBoxSize : 0;
+  const boxSize = parsedBoxSize >= 2 ? parsedBoxSize : 0; // v402: גודל ארגז נשמר גם בלי אכיפה — לכפתור "+ ארגז" בקליטה
+  const boxStrict = wholeCarton && boxSize >= 2;         // הבלש אוכף כפולות ארגז רק עם הדגל
   const hidden = !$('prod_visible').checked;
   const unitUpdatedAt = Date.now();
   // מחיר קופה: חותמת הזמן מתעדכנת רק כשהערך באמת השתנה — כך דוח ישן שיועלה
@@ -21667,7 +21736,7 @@ async function saveProd(again) {
   const existingForPos = id ? products.find(x => x.id === id) : null;
   const posChanged = !existingForPos || (existingForPos.posPrice != null ? existingForPos.posPrice : null) !== posPrice;
   const posPriceAt = posChanged ? Date.now() : (Number(existingForPos && existingForPos.posPriceAt) || null);
-  const data = { name, barcode, sku, price, posPrice, posPriceAt, creditPrice, deposit, billingPackId, billingPackSize, category, average, defaultUnit, defaultUnitUpdatedAt: unitUpdatedAt, boxSize, hidden };
+  const data = { name, barcode, sku, price, posPrice, posPriceAt, creditPrice, deposit, billingPackId, billingPackSize, category, average, defaultUnit, defaultUnitUpdatedAt: unitUpdatedAt, boxSize, boxStrict, hidden };
   clearTimeout(priceTimers[docId]); clearTimeout(avgTimers[docId]); clearTimeout(boxTimers[docId]);
   let savedProduct = null;
   if (id) {
@@ -24924,6 +24993,8 @@ $('receiptQuantityExtras').addEventListener('click', e => {
 
 $('qty_minus').addEventListener('click', () => qtyStep(-1));
 $('qty_plus').addEventListener('click', () => qtyStep(1));
+$('qty_plus_box').addEventListener('click', () => qtyStepBox(1));   // v402: ארגז שלם בלחיצה
+$('qty_minus_box').addEventListener('click', () => qtyStepBox(-1));
 $('qty_done').addEventListener('click', () => commitQty(false));
 $('qty_cancel').addEventListener('click', hideQty);
 // v305: "הזמנת באפליקציה של הספק?"
@@ -24936,7 +25007,7 @@ $('mr_add').addEventListener('click', addManualReturn);
 $('mr_price').addEventListener('input', updateManualReturnTotal);
 $('mr_qty').addEventListener('input', updateManualReturnTotal);
 $('qtyVal').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commitQty(false); } });
-$('qtyVal').addEventListener('input', updateQtyPackOffer);
+$('qtyVal').addEventListener('input', () => { qtyPristine = false; updateQtyPackOffer(); updateQtyBoxBreak(); });
 $('qtyPackOffer').addEventListener('click', (e) => { if (e.target.closest('[data-role="qty-pack-convert"]')) convertQtyToPack(); });
 // v272: השלמת מחיר הקופה מתוך חלון הכמות. עובר דרך savePosPrice — אותה כתיבה
 // מושהית לענן שמסך המחירים משתמש בה, כולל posPriceAt שמגן מפני דריסה בייבוא
