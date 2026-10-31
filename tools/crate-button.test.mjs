@@ -156,20 +156,24 @@ test('the product card saves the crate size on its own, and the whole-crate rule
 test('the 📦 column sets the crate size for the button and leaves the detective rule as it was', () => {
   const r = app(d => { d.products[0].boxSize = 12; });
   r.run('runCloudTaskSilent = async (name, task) => { testWrites.push(structuredClone(task)); return true; }');
-  let n = r.callbacks.length;
-  r.run("saveBoxSize('milk', '6')"); flushSince(r, n);
-  assert.deepEqual(r.writes.at(-1).data, {boxSize: 6, boxStrict: true}, 'a product that was already strict stays strict with the new size');
+  // כל הקשה היא אירוע input משלה, כמו בטלפון: "12" עובר דרך "1"
+  const type = (id, keys) => { const n = r.callbacks.length; keys.forEach(v => r.run(`saveBoxSize('${id}', '${v}')`)); flushSince(r, n); return r.writes.at(-1).data; };
+  assert.deepEqual(type('milk', ['6']), {boxSize: 6, boxStrict: true}, 'a product that was already strict stays strict with the new size');
   assert.equal(r.run('detectiveBoxSize(products[0])'), 6);
-  n = r.callbacks.length;
-  r.run("saveBoxSize('coffee', '12')"); flushSince(r, n);
-  assert.deepEqual(r.writes.at(-1).data, {boxSize: 12, boxStrict: false}, 'a product without a crate gets a size for the button only');
+  assert.deepEqual(type('milk', ['1', '12']), {boxSize: 12, boxStrict: true}, 'the pass through "1" does not drop the rule');
+  assert.equal(r.run('detectiveBoxSize(products[0])'), 12);
+  assert.deepEqual(type('coffee', ['1', '12']), {boxSize: 12, boxStrict: false}, 'a product without a crate gets a size for the button only');
   assert.equal(r.run('detectiveBoxSize(products[1])'), 0);
   r.run('qtyProduct = products[1]');
   assert.equal(r.run('qtyBoxSize()'), 12);
-  n = r.callbacks.length;
-  r.run("saveBoxSize('milk', '')"); flushSince(r, n);
-  assert.deepEqual(r.writes.at(-1).data, {boxSize: 0, boxStrict: false});
+  assert.deepEqual(type('milk', ['']), {boxSize: 0, boxStrict: false}, 'clearing the size removes the crate');
   assert.equal(r.run('detectiveBoxSize(products[0])'), 0);
+  assert.deepEqual(type('milk', ['6']), {boxSize: 6, boxStrict: false}, 'a size typed later, after the save, is for the button only');
+  const strictProduct = app(d => { d.products[0].boxSize = 6; d.products[0].boxStrict = true; });
+  strictProduct.run('runCloudTaskSilent = async (name, task) => { testWrites.push(structuredClone(task)); return true; }');
+  const n = strictProduct.callbacks.length;
+  ['', '1', '12'].forEach(v => strictProduct.run(`saveBoxSize('milk', '${v}')`)); flushSince(strictProduct, n);
+  assert.deepEqual(strictProduct.writes.at(-1).data, {boxSize: 12, boxStrict: true}, 'an explicit rule survives clearing and retyping in one go');
 });
 
 test('the detective enforces crate multiples only for a product marked "whole crates only"', () => {

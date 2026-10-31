@@ -7023,20 +7023,22 @@ function saveAvg(id, val) {
   clearTimeout(avgTimers[id]);
   avgTimers[id] = setTimeout(() => { runCloudTaskSilent('save average', { op: 'update', path: dataPath('products', id), data: { average: avg }, operationId: makeOperationId('avg') }); }, 700);
 }
-const boxTimers = {};
+const boxTimers = {}, boxStrictBase = {};
 // v402: עמודת 📦 במסך העריכה קובעת רק את גודל הארגז (כפתור "+ ארגז" בקליטה).
-// אכיפת "רק ארגזים שלמים" לבלש נשארת כפי שהייתה: מוצר שכבר נאכף (דגל דלוק,
-// או מוצר ותיק עם ארגז בלי דגל) נשאר נאכף גם בגודל החדש; מוצר בלי ארגז
-// שמקבל כאן גודל לראשונה אינו הופך לקפדני — את זה מסמנים רק בכרטיס המוצר.
+// אכיפת "רק ארגזים שלמים" לבלש נשארת כפי שהייתה לפני ההקלדה: מוצר שכבר נאכף (דגל
+// דלוק, או מוצר ותיק עם ארגז בלי דגל) נשאר נאכף גם בגודל החדש; מוצר בלי ארגז
+// שמקבל כאן גודל לראשונה אינו הופך לקפדני — את זה מסמנים רק בכרטיס המוצר. המצב
+// נלכד בהקשה הראשונה ונשמר עד הכתיבה לענן, כדי שהקלדת "12" לא תאבד אותו דרך "1".
 function saveBoxSize(id, val) {
   const n = parseInt(String(val).replace(/[^0-9]/g, ''), 10);
   const box = (isNaN(n) || n < 2) ? 0 : n; // 0 = ללא הגדרת ארגז
   const p = products.find(x => x.id === id);
-  const strict = !!(p && productBoxStrict(p) && box >= 2);
+  if (!(id in boxStrictBase)) boxStrictBase[id] = productBoxStrict(p);
+  const strict = boxStrictBase[id] && box >= 2;
   if (p) { p.boxSize = box; p.boxStrict = strict; }
   if (!db) return;
   clearTimeout(boxTimers[id]);
-  boxTimers[id] = setTimeout(() => { runCloudTaskSilent('save box size', { op: 'update', path: dataPath('products', id), data: { boxSize: box, boxStrict: strict }, operationId: makeOperationId('box') }); }, 700);
+  boxTimers[id] = setTimeout(() => { delete boxStrictBase[id]; runCloudTaskSilent('save box size', { op: 'update', path: dataPath('products', id), data: { boxSize: box, boxStrict: strict }, operationId: makeOperationId('box') }); }, 700);
 }
 function addProduct() { openProdModal(null, false, ''); }
 async function delProduct(id) {
