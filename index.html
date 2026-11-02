@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v405 בחירה אחת במסך הצילום והרשימה שורה-שורה</title>
+    <title>הזמנות יטבתה - v406 חזרות לפי יום הזיכוי</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -125,7 +125,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v405 בחירה אחת במסך הצילום והרשימה שורה-שורה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v406 חזרות לפי יום הזיכוי</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -684,9 +684,9 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '405'; // בחירה אחת במסך הצילום (סריקה / שורה-שורה / הכל הגיע / חוסרים) שנפתחת לבד אחרי הפענוח; הרשימה שורה-שורה כמו בסריקה, עם מחיר קופה
+const APP_VERSION = '406'; // תעודת חזרה בדוח התשלום לפי יום אימות הזיכוי, לא לפי יום השליחה
 // v398: תווית הגרסה ביומן הפעולות ובקובץ הגיבוי (עד כאן מחרוזת קבועה שנשארה 'v396_second_strong_read')
-const APP_VERSION_LABEL = 'v' + APP_VERSION + '_line_check';
+const APP_VERSION_LABEL = 'v' + APP_VERSION + '_return_credit_date';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -6053,6 +6053,23 @@ function returnsDiscrepancyInfo(r) {
   return { open, shortItems, overItems, shortVal, overVal, carried, carriedVal, owed };
 }
 function returnCarriedVal(r) { return returnsDiscrepancyInfo(r).carriedVal; }
+// v406: תעודת חזרה נכנסת לדוח התשלום לפי יום אימות הזיכוי — היום שבו הספק הוציא
+// את תעודת הזיכוי ושבו היא מופיעה בחשבונית שלו — ולא לפי יום השליחה לנהג. חזרה
+// שנשלחה ב-31.10 ואומתה ב-1.11 שייכת לנובמבר, כמו אצל הספק (דוח אוקטובר יצא נמוך
+// מהחשבונית ב-₪104.61 בדיוק בגללה). חזרה שטרם אומתה נשארת לפי יום השליחה — אין
+// לה עדיין יום זיכוי. "שנה תאריך" ממשיך לקבוע באיזה דוח התעודה נכללת: תאריך
+// שנשמר ביד אחרי האימות גובר על יום הזיכוי.
+function returnReportTs(r) {
+  const sent = Number(r && r.timestamp) || 0;
+  const credited = r && r.credited ? (Number(r.creditedAt) || 0) : 0;
+  if (!(credited > 0)) return sent;
+  return (Number(r.dateChangedAt) || 0) > credited ? sent : credited;
+}
+// יום הדוח של תעודת חזרה כמחרוזת YYYY-MM-DD (כמו docDateStr) — לתצוגה ברשימת התעודות ובכרטיס
+function returnReportDateStr(r) {
+  const ts = returnReportTs(r);
+  return ts > 0 ? new Date(ts).toLocaleDateString('en-CA') : docDateStr(r);
+}
 function returnsBalance() {
   let bal = 0, n = 0;
   returns.forEach(r => {
@@ -21176,9 +21193,12 @@ function docDateEditorInnerHtml(kind, r) {
   const cur = docDateStr(r);
   const moved = r.originalTimestamp != null && Number(r.originalTimestamp) !== Number(r.timestamp)
     ? ' <span class="text-[10px] text-slate-400">(במקור ' + new Date(Number(r.originalTimestamp)).toLocaleDateString('he-IL') + ')</span>' : '';
+  // v406: חזרה שאומתה נכנסת לדוח לפי יום הזיכוי — כשהוא שונה מתאריך התעודה, אומרים זאת כאן
+  const reportNote = kind === 'return' && returnReportDateStr(r) !== cur
+    ? ' <span class="text-[10px] text-emerald-700">(בדוח: ' + dDisp(returnReportDateStr(r)) + ' — יום הזיכוי)</span>' : '';
   if (!editing) {
     return '<div class="flex items-center justify-between gap-2 mt-2 px-1 text-xs font-bold text-slate-500">' +
-      '<span class="min-w-0"><i class="fa-solid fa-calendar-days"></i> תאריך התעודה: <b class="text-slate-700">' + dDisp(cur) + '</b>' + moved + '</span>' +
+      '<span class="min-w-0"><i class="fa-solid fa-calendar-days"></i> תאריך התעודה: <b class="text-slate-700">' + dDisp(cur) + '</b>' + moved + reportNote + '</span>' +
       '<button data-role="rc-date-edit" data-kind="' + kind + '" data-id="' + htmlEscape(r.id) + '" class="btn-tap shrink-0 text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg font-black"><i class="fa-solid fa-pen"></i> שנה תאריך</button>' +
     '</div>';
   }
@@ -21189,7 +21209,9 @@ function docDateEditorInnerHtml(kind, r) {
       '<button data-role="rc-date-save" data-kind="' + kind + '" data-id="' + htmlEscape(r.id) + '" class="btn-tap px-3 rounded-lg bg-blue-600 text-white font-black text-sm">שמור</button>' +
       '<button data-role="rc-date-cancel" data-kind="' + kind + '" data-id="' + htmlEscape(r.id) + '" class="btn-tap px-3 rounded-lg bg-white border border-slate-200 text-slate-600 font-black text-sm">ביטול</button>' +
     '</div>' +
-    '<div class="text-[10px] text-blue-800/80 font-bold mt-1.5">התאריך קובע באיזה דוח תשלום התעודה נכללת' + (kind === 'receipt' ? ' ולפי איזה יום נבדקים המבצעים' : '') + '. השעה המקורית נשמרת.</div>' +
+    '<div class="text-[10px] text-blue-800/80 font-bold mt-1.5">' + (kind === 'receipt'
+      ? 'התאריך קובע באיזה דוח תשלום התעודה נכללת ולפי איזה יום נבדקים המבצעים. השעה המקורית נשמרת.'
+      : 'חזרה שאומתה נכללת בדוח התשלום לפי יום אימות הזיכוי, כמו בחשבונית הספק; תאריך שנשמר כאן אחרי האימות גובר עליו. חזרה שטרם אומתה נכללת לפי התאריך הזה. השעה המקורית נשמרת.') + '</div>' +
   '</div>';
 }
 function docDateEditorHtml(kind, r) {
@@ -21460,7 +21482,8 @@ function receiptRangeData(from, to) {
   const fromT = from ? new Date(from + 'T00:00:00').getTime() : -Infinity;
   const toT = to ? new Date(to + 'T23:59:59').getTime() : Infinity;
   const recs = receipts.filter(r => r.timestamp >= fromT && r.timestamp <= toT);
-  const rets = returns.filter(r => r.timestamp >= fromT && r.timestamp <= toT);
+  // v406: חזרות לפי יום אימות הזיכוי (returnReportTs), לא לפי יום השליחה
+  const rets = returns.filter(r => { const t = returnReportTs(r); return t >= fromT && t <= toT; });
   const recEx = r2(recs.reduce((a, r) => a + receiptPayableBaseEx(r), 0));
   const recInc = r2(recEx * (1 + VAT));
   let retEx = 0, retInc = 0;
@@ -21659,11 +21682,15 @@ function receiptStatementDocAmountsHtml(rc) {
 function receiptRangeDocsListHtml(d) {
   const rows = []
     .concat((d.recs || []).map(r => ({ ts: Number(r.timestamp) || 0, kind: 'receipt', r })))
-    .concat((d.rets || []).map(r => ({ ts: Number(r.timestamp) || 0, kind: 'return', r })))
+    .concat((d.rets || []).map(r => ({ ts: returnReportTs(r), kind: 'return', r })))
     .sort((a, b) => b.ts - a.ts);
   if (!rows.length) return '';
   const body = rows.map(x => {
-    const day = dDisp(docDateStr(x.r));
+    // v406: חזרה מוצגת ביום הזיכוי (היום שלפיו נכנסה לדוח); יום השליחה בשורה השנייה כשהוא שונה
+    const sentDay = docDateStr(x.r);
+    const reportDay = x.kind === 'return' ? returnReportDateStr(x.r) : sentDay;
+    const day = dDisp(reportDay);
+    const sentNote = x.kind === 'return' && sentDay !== reportDay ? ' · נשלחה ' + dDisp(sentDay) : '';
     if (x.kind === 'receipt') {
       const di = receiptDiscrepancyInfo(x.r);
       const pay = receiptPayableBaseEx(x.r);
@@ -21689,7 +21716,7 @@ function receiptRangeDocsListHtml(d) {
     const netEx = Math.max(0, r2(rt.ex - rdi.carriedVal));
     const st = !credited ? ' · <span class="text-amber-700 font-black">לא אומתה</span>' : (gap ? ' · <span class="text-rose-600 font-black">נותר פער</span>' : ' · <span class="text-emerald-700 font-black">אומתה</span>' + (rdi.carriedVal > 0.5 ? ' · <span class="text-slate-400">פער ₪' + fmtMoney(rdi.carriedVal) + ' הועבר לחזרות</span>' : ''));
     return '<div class="flex items-center justify-between gap-2 py-1.5 border-b border-slate-100 last:border-0">' +
-      '<div class="min-w-0"><div class="text-sm font-bold text-slate-800 truncate"><i class="fa-solid fa-rotate-left text-emerald-600"></i> חזרה · ' + day + '</div><div class="text-[11px] text-slate-500">' + ((x.r.items || []).length) + ' פריטים' + (x.r.sentTo ? ' · ' + htmlEscape(x.r.sentTo) : '') + st + '</div></div>' +
+      '<div class="min-w-0"><div class="text-sm font-bold text-slate-800 truncate"><i class="fa-solid fa-rotate-left text-emerald-600"></i> חזרה · ' + day + '</div><div class="text-[11px] text-slate-500">' + ((x.r.items || []).length) + ' פריטים' + sentNote + (x.r.sentTo ? ' · ' + htmlEscape(x.r.sentTo) : '') + st + '</div></div>' +
       '<div class="text-sm font-black text-emerald-700 shrink-0">−₪' + fmtMoney(netEx) + '</div>' +
     '</div>';
   }).join('');
@@ -21718,7 +21745,7 @@ function calcReceiptRange(retryHistory = true) {
   const supplierCreditHtml = d.openSupplierCredits.length ? supplierCreditWarningHtml(d.openSupplierCredits, false) : '';
   const deferredHtml = d.deferredDueCredits.length ? '<div class="bg-blue-600 text-white rounded-2xl p-4 mb-3 shadow-lg border-2 border-blue-300"><div class="font-black text-lg flex items-center gap-2"><i class="fa-solid fa-calendar-days fa-beat"></i> זיכויים מחודש קודם שממתינים לאימות</div><div class="font-black text-2xl mt-1">₪' + fmtMoney(d.deferredSupplierCreditEx) + '</div><div class="text-xs text-white/95 mt-1 font-bold">הספק התחייב להוציא אותם בחודש הזה. ודא מול המרכזת לפני סגירת חשבון.</div>' + supplierCreditMiniList(d.deferredDueCredits) + '</div>' : '';
   out.innerHTML = supplierCreditHtml + deferredHtml +
-    '<div class="text-[11px] font-bold text-slate-500 mb-2">' + d.recs.length + ' תעודות קליטה · ' + d.rets.length + ' תעודות חזרה</div>' +
+    '<div class="text-[11px] font-bold text-slate-500 mb-2">' + d.recs.length + ' תעודות קליטה · ' + d.rets.length + ' תעודות חזרה <span class="text-slate-400">(לפי יום אימות הזיכוי)</span></div>' +
     supplierPaymentModeCardsHtml(d) +
     supplierCalculationStepsHtml(d) +
     receiptRangeDocsListHtml(d) + // v267: פירוט סכום לכל תעודה
