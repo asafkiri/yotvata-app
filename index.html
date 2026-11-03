@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v403 בדיקה שורה-שורה בטלפון</title>
+    <title>הזמנות יטבתה - v404 מוצר חדש בתעודה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -125,7 +125,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v403 בדיקה שורה-שורה בטלפון</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v404 מוצר חדש בתעודה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -680,9 +680,9 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '403'; // בדיקה שורה-שורה בטלפון, לכל תעודה בנפרד; "התעודה הזאת לא שלנו"; פירוט הקליטה לפי תעודה — לפי מה שסומן
+const APP_VERSION = '404'; // מוצר חדש בתעודה: "הוסף את המוצר למאגר" במקום מבוי סתום; ברקוד שהוקלד ואינו במאגר — מוצר חדש
 // v398: תווית הגרסה ביומן הפעולות ובקובץ הגיבוי (עד כאן מחרוזת קבועה שנשארה 'v396_second_strong_read')
-const APP_VERSION_LABEL = 'v' + APP_VERSION + '_crate_button';
+const APP_VERSION_LABEL = 'v' + APP_VERSION + '_new_product';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -789,6 +789,7 @@ let qtyProduct = null, qtyTarget = 'receipt'; // חלון כמות בסריקה
 let priceEditId = null, priceFromScan = false, priceQuery = ''; // מוצרים ומחירים
 let productCreateId = null, prodAfterSaveTarget = null, productEditorScanReturn = false;
 let aiUnknownProductCreateContext = null; // שורת AI בטוחה שממתינה ליצירת מוצר, ללא קריאה נוספת
+let aiManualNewProductContext = null; // v404: שורה שהעובד הקליד לה ברקוד מהנייר שאינו במאגר — ממתינה ליצירת המוצר
 let promoUnitMode = 'unit'; // יחידת סף המבצע: 'unit' | 'carton'
 let promos = [], promoEdit = null, promoSearch = ''; // מבצעי סל
 let promoArchive = [], promoHistoryReady = false, promoHistoryError = '';
@@ -13809,6 +13810,14 @@ function priceAuditChoice(mapped, docIndex, rowIndex) {
     }))
   };
 }
+// v404: מוצר חדש בתעודה — אותו ברקוד EAN-13 מלא ותקין נקרא בשתי קריאות, ואין במאגר מוצר כזה. הנתונים
+// (ברקוד, שם מהנייר, כמות ומחיר) הם אלה שחלון "מוצר חדש" ממלא מראש; ההחלטה עצמה נשארת של aiVerifiedUnknownProductData.
+function priceAuditNewProduct(row) {
+  const resolution = row ? aiResolveInvoiceBarcode(row) : null;
+  const suggestion = resolution && !resolution.product && resolution.suggestion;
+  if (!suggestion || suggestion.unknownProduct !== true || !aiIsValidEan13(suggestion.barcode)) return null;
+  return { barcode: suggestion.barcode, name: String(suggestion.productName || '').trim(), quantity: suggestion.quantity, unitPrice: suggestion.safeUnitPrice };
+}
 function priceAuditIdentityCandidate(row) {
   if (!row || row.barcodeMatchMethod === 'user_confirmed') return null;
   const resolution = aiResolveInvoiceBarcode(row);
@@ -13888,8 +13897,21 @@ function aiSourceRowHtml(documentIndex, rowIndex, options) {
     '<div>מחיר ליחידה<b class="block text-sm text-slate-900">' + money(row.unitPriceExVat) + '</b></div><div>סכום שורה<b class="block text-sm text-slate-900">' + money(row.lineTotalExVat) + '</b></div></div>' +
     '<div class="text-[10px] text-slate-500 mt-1">' + (corrected ? 'כמות ומחירים שתיקנת ואישרת לפי הנייר, לפני מע״מ' : 'המחירים שנקראו מהתעודה, לפני מע״מ') + '</div>' + preview + '</div>';
 }
-function aiManualPaperBarcodeButton(documentIndex, rowIndex) {
-  return '<button data-role="ai-manual-paper-barcode" data-doc="' + documentIndex + '" data-row="' + rowIndex + '" class="btn-tap w-full rounded-lg border border-slate-300 bg-white text-blue-700 font-black text-sm py-3 mt-2">המוצר לא ברשימה / הזיהוי שגוי — הקלד ברקוד</button>';
+function aiManualPaperBarcodeButton(documentIndex, rowIndex, label) {
+  return '<button data-role="ai-manual-paper-barcode" data-doc="' + documentIndex + '" data-row="' + rowIndex + '" class="btn-tap w-full rounded-lg border border-slate-300 bg-white text-blue-700 font-black text-sm py-3 mt-2">' + htmlEscape(label || 'המוצר לא ברשימה / הזיהוי שגוי — הקלד ברקוד') + '</button>';
+}
+// ===== v404: מוצר חדש בתעודה — כרטיס עם פעולה, לא מבוי סתום =====
+// מהשטח (3.11.2026, תעודה 200, שורות 1–3): הברקודים נקראו נכון בכל הקריאות, אבל המוצרים עוד לא במאגר. הכרטיס
+// אמר "איזה מוצר מופיע בשורה? הקלד את הברקוד", והקלדת אותו ברקוד נעצרה ב"הברקוד לא נמצא במאגר". עכשיו הכרטיס
+// אומר שזה מוצר חדש ומציע להוסיף אותו: חלון "מוצר חדש" עם הברקוד (נעול), השם והמחיר מהתעודה, והשורה משויכת לבד.
+function priceAuditNewProductHtml(r) {
+  const p = r.newProduct;
+  return '<div class="font-black text-base text-violet-900"><i class="fa-solid fa-circle-plus ml-1"></i>מוצר חדש — עוד לא קיים במאגר</div>' +
+    '<div class="font-black text-lg mt-2">' + htmlEscape(p.name || r.name) + '</div><div class="text-xs text-slate-600" dir="ltr">' + htmlEscape(p.barcode) + '</div>' +
+    '<p class="mt-2">הברקוד נקרא בבירור מהשורה, אבל אין במאגר מוצר עם הברקוד הזה. הוסף אותו פעם אחת — השם והמחיר ממולאים מהתעודה ואפשר לתקן — והשורה תשויך אליו לבד.</p>' +
+    aiSourceRowHtml(r.documentIndex, r.rowIndex) +
+    '<button data-role="ai-add-unknown-product" data-doc="' + r.documentIndex + '" data-row="' + r.rowIndex + '" class="btn-tap w-full rounded-xl bg-violet-600 text-white py-3 mt-3 font-black"><i class="fa-solid fa-plus ml-1"></i>הוסף את המוצר למאגר</button>' +
+    aiManualPaperBarcodeButton(r.documentIndex, r.rowIndex, 'בנייר מודפס ברקוד אחר — הקלד אותו');
 }
 function aiToggleSourcePhoto(details) {
   if (!details || !details.dataset || details.dataset.sourcePhoto == null) return;
@@ -14005,15 +14027,18 @@ function receiptPriceAudit() {
         catalogBasePrice: product ? priceAuditNumber(PRICE_AUDIT_SUPPLIER === 'berman' ? product.listPrice : product.price) : null,
         regularDiscountPct: PRICE_AUDIT_SUPPLIER === 'berman' && product ? priceAuditNumber(product.discountPct) : 0,
         promo: null, expectedOptions: [], comparisonPrice: null, comparisonBasis: 'ללא מע״מ; פיקדון נבדק בשורה נפרדת',
-        capability: 'checkable', result: null, reason: '', monthlyStatus: null, choice: null, identityConfirmation: null };
+        capability: 'checkable', result: null, reason: '', monthlyStatus: null, choice: null, identityConfirmation: null, newProduct: null };
       if (!source) { row.capability = 'partial'; row.reason = 'חסר מקור שמור למחיר מהנייר; המחיר המותאם אינו ראיה למחיר המקורי'; }
       else if (!product) {
         row.capability = 'unidentified';
         row.choice = priceAuditChoice(mapped, doc.noteIndex, sourceIndex);
         if (!row.choice) row.identityConfirmation = priceAuditIdentityCandidate(mapped);
+        // v404: הברקוד נקרא בבירור ואין מוצר כזה במאגר — הפעולה היא להוסיף אותו, לא לבחור או להקליד.
+        if (!row.choice && !row.identityConfirmation) row.newProduct = priceAuditNewProduct(mapped);
         // שורה שההכרעה בה נכשלה בין שתי קריאות ברקוד אינה "זיהוי לא ודאי"
         // סתמי: יש בדיוק מועמדים ידועים, והמשתמש יכול להכריע מול הנייר.
-        row.reason = priceAuditPriceAssistedIdentity(mapped)
+        row.reason = row.newProduct ? 'הברקוד נקרא בבירור, אבל אין עדיין מוצר כזה במאגר — יש להוסיף אותו'
+          : priceAuditPriceAssistedIdentity(mapped)
           ? 'המוצר הוכרע לפי השם והמחיר, ולכן אי אפשר לאשר בעזרתו את המחיר עצמו'
           : row.choice
             ? (row.choice.kind === 'barcode'
@@ -14181,13 +14206,14 @@ function priceAuditPendingRows(a) {
 // (בחירת מוצר, בדיקה מול הנייר, פער מחיר, השלמת מחיר במאגר), וההסבר הטכני — מה כל קריאה
 // ראתה ולמה החשבון לא מכריע — נשאר במלואו, אבל מקופל תחת "פרטים טכניים". שום כלל לא משתנה.
 function priceAuditPendingKind(r) {
+  if (r.newProduct) return 'new'; // v404: מוצר שעוד לא במאגר — אין מה "לבחור"
   if (r.choice || r.capability === 'unidentified') return 'choose';
   if (r.modelReviewIssues) return 'check';
   if (r.result === 'difference') return 'price';
   if (r.capability === 'missing_catalog_price') return 'catalog';
   return 'other';
 }
-const PRICE_AUDIT_PENDING_LABELS = { choose: 'לבחירת מוצר', check: 'לבדיקה מול הנייר', price: 'עם פער מחיר', catalog: 'להשלמת מחיר במאגר', other: 'לטיפול' };
+const PRICE_AUDIT_PENDING_LABELS = { new: 'להוספת מוצר חדש', choose: 'לבחירת מוצר', check: 'לבדיקה מול הנייר', price: 'עם פער מחיר', catalog: 'להשלמת מחיר במאגר', other: 'לטיפול' };
 // short — לכפתור הקטן במסך הסריקה ("שורה אחת לבחירת מוצר"); אחרת למשפט המלא ("נשארה שורה אחת לבחירת מוצר").
 function priceAuditPendingTitle(pending, short) {
   const n = pending.length, counts = {};
@@ -14395,6 +14421,7 @@ function priceAuditActionCardHtml(r) {
   const shell = '<article data-price-row="' + htmlEscape(r.id) + '" data-price-result="' + htmlEscape(r.result || r.capability) +
     '" class="rounded-xl border-2 ' + (r.result === 'difference' ? 'border-rose-200' : 'border-amber-200') + ' p-3 mt-3 bg-white">';
   if (r.choice) return shell + priceAuditChoiceHtml(r) + '</article>';
+  if (r.capability === 'unidentified' && r.newProduct) return shell + priceAuditNewProductHtml(r) + '</article>';
   if (r.capability === 'unidentified') {
     const candidate = r.identityConfirmation, source = aiSourceRow(r.documentIndex, r.rowIndex);
     const confirm = candidate && source ? '<div class="font-black text-base text-amber-900">זה המוצר שמופיע בשורה?</div>' +
@@ -15049,7 +15076,10 @@ function aiVerifiedUnknownProductData(row, options) {
   const resolved = normalizeBarcode(row.barcode || '');
   const initial = normalizeBarcode(row.barcodeInitialObserved || '');
   const retry = normalizeBarcode(row.barcodeRetryObserved || '');
-  if (String(row.barcodeReadType || '') !== 'full' || !aiIsValidEan13(observed) || resolved) return { ok: false, error: 'הברקוד החדש אינו קריאה מלאה ותקינה' };
+  // v404: שירות הסריקה בהסכמה (מאז שירות 146) מחזיר למוצר חדש את אותן ספרות גם בשדה barcode — הברקוד שנקרא, לא מוצר
+  // שנמצא. עד כאן נדרש כאן שדה ריק, ולכן כל מוצר חדש בתעודה נפסל ("הברקוד החדש אינו קריאה מלאה ותקינה"), "הוסף והמשך"
+  // לא הופיע, והשורה נשארה "איזה מוצר מופיע בשורה?" בלי דרך הלאה. ברקוד שנפתר לספרות אחרות — עדיין נפסל.
+  if (String(row.barcodeReadType || '') !== 'full' || !aiIsValidEan13(observed) || (resolved && resolved !== observed)) return { ok: false, error: 'הברקוד החדש אינו קריאה מלאה ותקינה' };
   if (row.barcodeRetryApplied !== true || row.barcodeRetryConflict === true || String(row.barcodeInitialReadType || '') !== 'full' || String(row.barcodeRetryReadType || '') !== 'full' || initial !== observed || retry !== observed) {
     return { ok: false, error: 'הברקוד החדש לא אומת בשתי קריאות מלאות וזהות' };
   }
@@ -17721,33 +17751,85 @@ async function aiEnterPrintedBarcode(documentIndex, rowIndex) {
   if (!aiIsValidRetailBarcode(barcode)) { showToast('הקלד ברקוד תקין בן 8 או 13 ספרות מהשורה בתעודה', null, null, 3800); return false; }
   if (!isCurrent()) { showToast('התעודה השתנתה. פתח שוב את השורה שברצונך לתקן.', null, null, 3800); return false; }
   const matches = aiCatalogBarcodeMatches(barcode, false);
-  if (matches.length !== 1) { showToast(matches.length ? 'הברקוד שייך ליותר ממוצר אחד במאגר. יש לתקן את הכפילות.' : 'הברקוד לא נמצא במאגר. בדוק שהקלדת את כל הספרות נכון.', null, null, 4200); return false; }
+  if (matches.length > 1) { showToast('הברקוד שייך ליותר ממוצר אחד במאגר. יש לתקן את הכפילות.', null, null, 4200); return false; }
+  // v404: ברקוד שאינו במאגר — זה מוצר חדש. עד כאן ההקלדה נעצרה כאן ב"הברקוד לא נמצא במאגר", בלי דרך הלאה.
+  if (!matches.length) return aiOfferNewProductForRow(source, barcode, isCurrent);
   const productId = String(matches[0].product.id);
   showConfirm('זה המוצר שמופיע בשורה?', source.title + '\n' + source.position + '\n\n' + matches[0].product.name + '\nברקוד: ' + barcode, 'כן, שייך לשורה', () => {
     const fresh = aiCatalogBarcodeMatches(barcode, false);
     if (!isCurrent() || fresh.length !== 1 || String(fresh[0].product.id) !== productId) {
       showToast('השורה או המוצר השתנו. פתח שוב את השורה כדי לאשר.', null, null, 3800); return;
     }
-    const row = source.mapped;
-    row.barcodeUserConfirmedFromObserved = row.barcodeObserved;
-    row.barcodeUserConfirmedFromReadType = row.barcodeReadType;
-    row.barcodeUserConfirmedFromMethod = 'manual_paper_barcode';
-    row.barcodeUserConfirmedFromCatalogHintId = productId;
-    row.barcodeUserEntered = barcode;
-    row.barcode = barcode;
-    row.barcodeMatchMethod = 'user_confirmed';
-    row.barcodeSuggested = null; row.barcodeSuggestedProductId = null; row.barcodeSuggestedProductName = null;
-    row.userConfirmedAt = Date.now();
-    receiptInvalidateReviewCalculation();
-    aiScanEvaluation = aiEvaluateInvoiceScan(aiScanResponse);
-    aiScanError = aiScanEvaluation.valid ? '' : 'הפענוח עדיין דורש בדיקה — נשארו שורות לבירור.';
-    saveReceiptDraft();
-    if (currentView === 'reconcile') renderReconcile();
-    else if (currentView === 'receiving') renderReceiving();
-    refreshPriceAuditViews();
+    aiApplyManualPaperBarcode(source.mapped, barcode, productId);
     showToast('המוצר שויך לפי הברקוד שהקלדת. בדיקת המחיר עודכנה.', null, null, 2800);
   });
   $('confirmMsg').classList.add('whitespace-pre-line');
+  return true;
+}
+// הברקוד שהעובד הקליד מהנייר משייך את השורה למוצר היחיד שלו במאגר. הקריאות של הסריקה נשמרות כמו שהן (…FromObserved),
+// וההכרעה נבדקת מחדש בכל שחזור (aiResolveInvoiceBarcode, ענף manual_paper_barcode).
+function aiApplyManualPaperBarcode(row, barcode, productId) {
+  row.barcodeUserConfirmedFromObserved = row.barcodeObserved;
+  row.barcodeUserConfirmedFromReadType = row.barcodeReadType;
+  row.barcodeUserConfirmedFromMethod = 'manual_paper_barcode';
+  row.barcodeUserConfirmedFromCatalogHintId = String(productId);
+  row.barcodeUserEntered = barcode;
+  row.barcode = barcode;
+  row.barcodeMatchMethod = 'user_confirmed';
+  row.barcodeSuggested = null; row.barcodeSuggestedProductId = null; row.barcodeSuggestedProductName = null;
+  row.userConfirmedAt = Date.now();
+  receiptInvalidateReviewCalculation();
+  aiScanEvaluation = aiEvaluateInvoiceScan(aiScanResponse);
+  aiScanError = aiScanEvaluation.valid ? '' : 'הפענוח עדיין דורש בדיקה — נשארו שורות לבירור.';
+  saveReceiptDraft();
+  if (currentView === 'reconcile') renderReconcile();
+  else if (currentView === 'receiving') renderReceiving();
+  refreshPriceAuditViews();
+}
+// v404: הברקוד שהוקלד מהנייר אינו במאגר. שואלים פעם אחת (אולי הוקלדה ספרה לא נכונה), ואז חלון "מוצר חדש":
+// כשזה בדיוק הברקוד שהסריקה אימתה — המסלול הקיים (aiOpenUnknownProduct: נעילה, בדיקה בענן, כל השורות עם אותו ברקוד);
+// אחרת — מוצר חדש עם הברקוד שהוקלד, והשורה משויכת אליו כמו ברקוד שהוקלד למוצר קיים (aiCompleteManualNewProduct).
+// השורה אינה משתנה עד שהמוצר נשמר.
+function aiOfferNewProductForRow(source, barcode, isCurrent) {
+  const documentIndex = source.documentIndex, rowIndex = source.rowIndex;
+  const scanned = aiVerifiedUnknownProductData(source.mapped, { allowCatalogExisting: true });
+  const sameAsScan = scanned.ok && scanned.barcode === barcode;
+  const printed = String(source.row.description || '').trim() || 'תיאור לא קריא';
+  showConfirm('הברקוד הזה עוד לא קיים במאגר', source.title + '\n' + source.position + '\n\nברקוד: ' + barcode + '\nבשורה: ' + printed +
+    '\n\nאם הקלדת נכון — זה מוצר חדש. מוסיפים אותו פעם אחת, והשורה תשויך אליו.' + (sameAsScan ? '' : '\nאם טעית בספרה — בטל והקלד שוב.'), 'הוסף מוצר חדש', () => {
+    if (!isCurrent()) { showToast('התעודה השתנתה. פתח שוב את השורה שברצונך לתקן.', null, null, 3800); return; }
+    if (aiCatalogBarcodeMatches(barcode, false).length) { showToast('בינתיים נוסף למאגר מוצר עם הברקוד הזה. הקלד את הברקוד שוב כדי לשייך אותו.', null, null, 4200); return; }
+    if (sameAsScan) aiOpenUnknownProduct(documentIndex, rowIndex);
+    else aiOpenManualNewProduct(documentIndex, rowIndex, barcode);
+  });
+  $('confirmMsg').classList.add('whitespace-pre-line');
+  return true;
+}
+function aiOpenManualNewProduct(documentIndex, rowIndex, barcode) {
+  const source = aiSourceRow(documentIndex, rowIndex);
+  if (!source || aiScanBusy || !aiIsValidRetailBarcode(barcode) || aiCatalogBarcodeMatches(barcode, false).length) return false;
+  const row = source.mapped, unit = priceAuditNumber(row.unitPriceExVat);
+  openProdModal(null, false, barcode, 'ai_manual_new');
+  aiManualNewProductContext = { response: aiScanResponse, documentIndex, rowIndex, doc: source.doc, mapped: row, signature: JSON.stringify(row), barcode };
+  setAiUnknownProductBarcodeLock(true, barcode); // הברקוד הוא מה שהוקלד מהנייר ואושר; משנים אותו רק בהקלדה מחדש
+  $('prod_name').value = String(row.description || '').trim().slice(0, 160);
+  if (unit > 0) $('prod_price').value = r2(unit);
+  updateProdRecHint();
+  const nameInput = $('prod_name'); if (nameInput) { nameInput.focus(); if (nameInput.select) nameInput.select(); }
+  return true;
+}
+function aiCompleteManualNewProduct(savedProduct, ctx) {
+  aiManualNewProductContext = null;
+  const now = ctx && aiSourceRow(ctx.documentIndex, ctx.rowIndex);
+  const barcode = normalizeBarcode(savedProduct && savedProduct.barcode || '');
+  const matches = aiCatalogBarcodeMatches(barcode, false);
+  if (!ctx || !now || aiScanBusy || aiScanResponse !== ctx.response || now.doc !== ctx.doc || now.mapped !== ctx.mapped || JSON.stringify(now.mapped) !== ctx.signature
+      || barcode !== ctx.barcode || matches.length !== 1 || String(matches[0].product.id) !== String(savedProduct.id)) {
+    showToast('המוצר נוסף למאגר, אבל השורה השתנתה ולכן לא שויכה. פתח אותה שוב והקלד את הברקוד.', null, null, 4300);
+    return false;
+  }
+  aiApplyManualPaperBarcode(now.mapped, barcode, savedProduct.id);
+  showToast('המוצר נוסף למאגר ושויך לשורה. בדיקת המחיר עודכנה.', null, null, 3200);
   return true;
 }
 function aiConfirmNameCandidate(documentIndex, rowIndex, candidateProductId) {
@@ -17882,10 +17964,14 @@ function aiCompleteUnknownProduct(savedProduct, createContext) {
     row.userConfirmedAt = confirmedAt;
   });
   aiUnknownProductCreateContext = null;
+  receiptInvalidateReviewCalculation(); // v404: זהות השורה השתנתה — סיכום שחושב קודם אינו תקף, כמו בכל אישור מוצר
   aiScanEvaluation = aiEvaluateInvoiceScan(aiScanResponse);
   saveReceiptDraft();
   aiScanError = aiScanEvaluation.valid ? '' : 'הפענוח עדיין דורש בדיקה — התעודה לא שונתה.';
   if (currentView === 'reconcile') renderReconcile();
+  // v404: המוצר נוסף גם מכרטיס "מוצר חדש" שבבדיקת המחירים במסך הקליטה — שם השורה צריכה לצאת מהרשימה מיד.
+  else if (currentView === 'receiving') renderReceiving();
+  refreshPriceAuditViews();
   const rowCountText = verifiedRows.length > 1 ? (' · שויכו ' + verifiedRows.length + ' שורות') : '';
   showToast((aiScanEvaluation.valid ? 'המוצר נוסף והתוצאות חושבו מחדש' : 'המוצר נוסף. נשארו עוד שורות שדורשות טיפול') + rowCountText + '.', null, null, 3200);
   return true;
@@ -21970,6 +22056,7 @@ function fillProdCategoryOptions(selectedCategory) {
 function openProdModal(p, fromScan, presetCode, afterSaveTarget) {
   setAiUnknownProductBarcodeLock(false);
   if (afterSaveTarget !== 'ai_unknown') aiUnknownProductCreateContext = null;
+  if (afterSaveTarget !== 'ai_manual_new') aiManualNewProductContext = null; // v404
   priceEditId = p ? p.id : null;
   priceFromScan = !!fromScan;
   productCreateId = p ? null : makeOperationId('prod');
@@ -22041,7 +22128,7 @@ function hideProdModal() {
   barcodeDuplicateNotice.product = '';
   setAiUnknownProductBarcodeLock(false);
   setProductBarcodeBlocked(false);
-  priceEditId = null; priceFromScan = false; productCreateId = null; prodAfterSaveTarget = null; productEditorScanReturn = false; aiUnknownProductCreateContext = null;
+  priceEditId = null; priceFromScan = false; productCreateId = null; prodAfterSaveTarget = null; productEditorScanReturn = false; aiUnknownProductCreateContext = null; aiManualNewProductContext = null;
 }
 function calcCartonPrice() {
   const cp = parseFloat(($('prod_cartonPrice').value || '').toString().replace(',', '.'));
@@ -22056,7 +22143,7 @@ function calcCartonPrice() {
   updateProdRecHint();
 }
 function scanProdBarcode() {
-  if (prodAfterSaveTarget === 'ai_unknown' || aiUnknownProductCreateContext) {
+  if (prodAfterSaveTarget === 'ai_unknown' || aiUnknownProductCreateContext || prodAfterSaveTarget === 'ai_manual_new') {
     showToast('הברקוד אומת מהתעודה ונעול בזמן הוספת המוצר', null, null, 2800);
     return;
   }
@@ -22099,6 +22186,7 @@ async function saveProd(again) {
   const id = priceEditId;
   const aiUnknownMode = prodAfterSaveTarget === 'ai_unknown';
   const unknownCreateContext = aiUnknownMode ? aiUnknownProductCreateContext : null;
+  const manualNewContext = prodAfterSaveTarget === 'ai_manual_new' ? aiManualNewProductContext : null; // v404: hideProdModal מנקה אותו
   if (aiUnknownMode) {
     const contextStatus = aiUnknownProductCreateContextStatus(unknownCreateContext, barcode, true);
     if (!contextStatus.ok) { showToast(contextStatus.error, null, null, 4300); return; }
@@ -22200,8 +22288,9 @@ async function saveProd(again) {
   if (currentView === 'prices') renderPrices();
   else if (currentView === 'settings') renderSettings();
   else if (currentView === 'order') renderOrder();
-  if (afterTarget !== 'ai_unknown') showToast(id ? 'המוצר עודכן' : 'המוצר נוסף', null, null, 1600);
+  if (afterTarget !== 'ai_unknown' && afterTarget !== 'ai_manual_new') showToast(id ? 'המוצר עודכן' : 'המוצר נוסף', null, null, 1600);
   if (afterTarget === 'ai_unknown' && savedProduct) { aiCompleteUnknownProduct(savedProduct, unknownCreateContext); return; }
+  if (afterTarget === 'ai_manual_new' && savedProduct) { aiCompleteManualNewProduct(savedProduct, manualNewContext); return; } // v404
   if (afterTarget === 'promo_import' && savedProduct) { promoImportProductSaved(savedProduct); return; }
   if (afterTarget === 'launch_import' && savedProduct) { launchImportProductSaved(savedProduct); return; } // v278
   if (afterTarget && savedProduct) { promptQty(savedProduct, afterTarget); return; }

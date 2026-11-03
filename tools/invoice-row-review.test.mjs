@@ -106,7 +106,15 @@ test('cancelled, invalid, absent and duplicate barcodes never change the row', a
     const before = c.run('JSON.stringify(aiScanResponse)');
     c.context.testEntered = entered;
     c.run('showInputModal=async()=>testEntered');
-    assert.equal(await c.run('aiEnterPrintedBarcode(1,2)'), false);
+    // v404: a valid barcode that is not in the catalog is a new product — one question offers to add it
+    // (tools/new-product-row.test.mjs); cancelling it opens nothing and the row stays exactly as it was.
+    const absent = entered === '7290000000039';
+    assert.equal(await c.run('aiEnterPrintedBarcode(1,2)'), absent);
+    if (absent) {
+      assert.equal(c.node('confirmTitle').textContent, 'הברקוד הזה עוד לא קיים במאגר');
+      c.run('hideConfirm()');
+      assert.equal(c.run('prodAfterSaveTarget'), null);
+    }
     assert.equal(c.run('JSON.stringify(aiScanResponse)'), before);
   }
 });
