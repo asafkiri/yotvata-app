@@ -24,7 +24,9 @@ const names = ['receiptReconcileSnapshot','receiptUsesManualQuantities','priceAu
   'aiScanWithUploadLock', 'aiScanDropCancelled', 'aiScanCancelledError', 'aiScanInvoiceProgress', 'deliveryCreditBusy',
   'deliveryCreditLocalDraft', 'deliveryCreditValidResume',
   // v394: the credit-photographed-as-document guard that yotvataAdoptPaperAnchors calls.
-  'yotvataCreditLikeDocument', 'yotvataCreditDocumentProblem'];
+  'yotvataCreditLikeDocument', 'yotvataCreditDocumentProblem',
+  // v405: the gate choice that yotvataAdoptPaperAnchors runs once the paper is adopted (a no-op without a choice).
+  'receiptQuantityIntentRun'];
 function context(extra = {}) {
   const storage = new Map();
   const c = vm.createContext({ console, setTimeout, clearTimeout, AbortController, Date, JSON, Math, Number,
@@ -32,6 +34,7 @@ function context(extra = {}) {
     receiptReconcileDraft:null,receiptReconcileSession:null,promoArchive:[],db:null, receiptStorageWarning:'',receiptDraftId:null,makeOperationId:()=> 'test-' + Math.random(),receiptAnalysisCache:null,aiScanEditingImages:false,
     draftHandoffs:{},handoffFinalizing:{},receiptFinalizing:false,
     receiptCountingMode: 'scan', receiptQuantityReview: null, receiptManualInput: null, $: () => null, htmlEscape: String, fmtMoney: String,
+    receiptQuantityIntent: null, RECEIPT_QUANTITY_INTENTS: ['lines', 'all', 'differences'], // v405
     receiptEntryMode: 'photo', receiptAnchorSource: null, receiptPaperScanState: '', receiptPaperScanProblems: [],
     receiptPhotoCaptureOpen: false, receiptScanHistory: [], aiScanRunId: 0, receiptOpened: false,
     receiptNotes: [], receiptDeliveryCredits: [], receiptNoteTotal: null, receiptNoteUnits: null, receiptList: [], receiptDepositWaived: false,
