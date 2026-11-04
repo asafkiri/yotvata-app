@@ -133,7 +133,7 @@ test('2. השורות של כל תעודה בנפרד; בלי "סמן הכל"; "
   assert.equal(r.run(`$('receiptQuantityProgress').textContent`), 'סומנו 1 מתוך 5 שורות');
   type(r, { lineGot: '0:1' }, '4');
   assert.equal(r.run(`$('lineCheckSum_0_1').textContent`), 'התקבלו 4 · חוסר 2');
-  assert.equal(r.run(`$('receiptQuantityProgress').textContent`), 'סומנו 2 מתוך 5 שורות');
+  assert.equal(r.run(`$('receiptQuantityProgress').textContent`), 'סומנו 2 מתוך 5 שורות · חוסר 2 יח׳', 'v405: המונה אומר גם מה סומן');
   type(r, { lineGot: '0:1' }, 'x'); assert.equal(r.run(`receiptLineGot(receiptQuantityReview.docs[0].lines[1])`), null, 'לא מספר — לא סומנה');
   type(r, { lineGot: '0:1' }, '6'); assert.equal(r.run(`$('lineCheckSum_0_1').textContent`), 'כמו בתעודה');
   type(r, { lineGot: '0:1' }, '8'); assert.equal(r.run(`$('lineCheckSum_0_1').textContent`), 'התקבלו 8 · עודף 2');
@@ -153,7 +153,7 @@ test('3. "סיום" עובר בדיוק כמו "יש חוסרים או עודפ�
   a.run('startReceiptLineCheck()');
   click(a, { lineMark: '0:0:qty' }); type(a, { lineGot: '0:0' }, '10'); click(a, { lineMark: '1:0:none' }); markRestOk(a);
   assert.equal(a.run(`$('receiptQuantityConfirm').textContent`), 'סיום — שמור את הבדיקה');
-  assert.equal(a.run(`$('receiptQuantityProgress').textContent`), 'כל 5 שורות סומנו — אפשר לסיים');
+  assert.equal(a.run(`$('receiptQuantityProgress').textContent`), 'כל 5 שורות סומנו — אפשר לסיים · חוסר 7 יח׳');
   assert.equal(a.run('finishReceiptLineCheck()'), true);
   assert.equal(a.run(`$('receiptQuantityModal').classList.contains('hidden')`), true, 'החלון נסגר');
   const listA = json(a, 'receiptList');
@@ -256,7 +256,7 @@ test('5. נשמר בטיוטה וממשיך מאותו מקום; החלון חו
   assert.equal(again.run('testConfirms.length'), 0, 'בלי שאלה');
   assert.equal(again.requests.length, 0, 'בלי קריאה נוספת לשירות');
   assert.deepEqual(marks(again), ['ok,,', 'none,'], 'מה שסומן — נשאר');
-  assert.equal(again.run(`$('receiptQuantityProgress').textContent`), 'סומנו 2 מתוך 5 שורות');
+  assert.equal(again.run(`$('receiptQuantityProgress').textContent`), 'סומנו 2 מתוך 5 שורות · חוסר 5 יח׳');
   // "חזרה" ו"יש חוסרים או עודפים" — החלון כמו שהיה תמיד
   again.run('closeReceiptQuantityReview(); startReceiptQuantityReview(false)');
   assert.equal(again.run(`$('receiptQuantityTitle').textContent`), 'חוסרים ועודפים');
