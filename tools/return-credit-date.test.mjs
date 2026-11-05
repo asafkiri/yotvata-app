@@ -92,9 +92,9 @@ test('כותרת הדוח אומרת שהחזרות לפי יום אימות ה�
   assert.match(same.run("docDateEditorInnerHtml('receipt', { id: 'rc', timestamp: " + at('2026-10-31T10:00:00') + " })"), /התאריך קובע באיזה דוח תשלום התעודה נכללת ולפי איזה יום נבדקים המבצעים/);
 });
 
-test('הגרסה עלתה ל-406, כולל ה-service worker', () => {
+test('הגרסה עלתה (406 ומעלה), כולל ה-service worker', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /const APP_VERSION = '406'/);
-  assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_return_credit_date'/);
-  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v406/);
+  assert.match(html, /const APP_VERSION = '407'/); // גרסה 407: חיפוש בבדיקה שורה-שורה — מוצר שכבר בבדיקה אומר איפה הוא
+  assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_already_in_check'/);
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v407/);
 });
