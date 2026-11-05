@@ -9283,11 +9283,39 @@ function receiptLineReveal(id) {
   el.classList.add('ring-4', 'ring-blue-300');
   try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (err) {}
 }
+// v407 (בעל העסק, 5.11.2026: "בשורה הצהובה לא רשום ברקוד, לא מחיר קופה, לא כלום — שורה בודדת מסכנה בצבע צהוב"): הכרטיס
+// של "הגיע משהו נוסף" כמו שורת תעודה (receiptLineRowHtml) — "לא בתעודה" במקום מספר השורה, השם גדול, מחיר הקופה
+// (posPriceLineHtml), ברקוד ומחיר ליחידה; במקום הכמות בתעודה — שדה הכמות גדול בצד, ומתחתיו "יח׳ הגיעו" והארגזים לפי מה
+// שהוקלד; למטה הסיכום (lineExtraSum, מתעדכן תוך כדי הקלדה) ו"הסר". המפתחות (lineExtra_k, data-extra-got, data-extra-remove)
+// ומה שנשמר בטיוטה — כמו ב-v403
+function receiptLineExtraSumText(x) {
+  const n = receiptLineExtraGot(x);
+  return n == null ? 'הקלד כמה יחידות הגיעו' : 'התקבלו ' + n + ' · עודף ' + n;
+}
+function receiptLineExtraBoxText(x) {
+  const n = receiptLineExtraGot(x);
+  return n == null ? '' : receiptLineBoxText(products.find(q => q.id === x.productId) || null, n);
+}
+function receiptLineExtraHtml(k, x) {
+  const p = products.find(q => q.id === x.productId) || null, got = receiptLineExtraGot(x);
+  const unit = p ? effectivePrice(p, got || 1, activeReceiptDate()) : 0;
+  return '<div id="lineExtra_' + k + '" class="rounded-2xl border-2 border-amber-300 bg-amber-50 p-3 mb-2.5 shadow-sm">' +
+    '<div class="flex items-start gap-3"><div class="flex-1 min-w-0">' +
+      '<div class="text-[11px] font-black text-amber-700">לא בתעודה — הגיע בנוסף</div>' +
+      '<div class="font-black text-lg text-slate-800 leading-tight">' + htmlEscape(x.name) + '</div>' +
+      posPriceLineHtml(p) +
+      '<div class="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1.5 flex-wrap"><span><i class="fa-solid fa-barcode"></i> ' + htmlEscape(x.barcode || 'ללא ברקוד') + '</span>' +
+        (p ? '<span>· ₪' + fmtUnitPrice(unit, false) + ' ליח׳</span>' : '') + '</div></div>' +
+      '<div class="shrink-0 text-center"><input data-extra-got="' + k + '" type="text" inputmode="numeric" autocomplete="off" value="' + htmlEscape(x.got) + '" aria-label="כמה הגיע: ' + htmlEscape(x.name) + '" class="w-20 border-2 border-amber-400 rounded-xl p-2 text-2xl text-center font-black bg-white tabular-nums">' +
+        '<div class="text-[11px] font-bold text-slate-500">יח׳ הגיעו</div>' +
+        '<div id="lineExtraBox_' + k + '" class="text-[11px] font-bold text-slate-400">' + receiptLineExtraBoxText(x) + '</div></div></div>' +
+    '<div class="flex items-center justify-between gap-2 mt-2">' +
+      '<div id="lineExtraSum_' + k + '" class="text-sm font-bold text-amber-800" aria-live="polite">' + receiptLineExtraSumText(x) + '</div>' +
+      '<button type="button" data-extra-remove="' + k + '" class="btn-tap shrink-0 min-h-[44px] px-3 rounded-lg bg-white border border-rose-300 text-rose-700 text-xs font-black" aria-label="הסר: ' + htmlEscape(x.name) + '">הסר</button></div>' +
+  '</div>';
+}
 function receiptLineExtrasHtml(r) {
-  const rows = (r.extras || []).map((x, k) => '<div id="lineExtra_' + k + '" class="rounded-xl border-2 border-amber-300 bg-amber-50 p-3 mb-2">' +
-    '<div class="flex items-center justify-between gap-2"><div class="font-black text-base text-slate-800 min-w-0">' + htmlEscape(x.name) + '</div>' +
-      '<button type="button" data-extra-remove="' + k + '" class="btn-tap shrink-0 min-h-[44px] px-3 text-rose-700 font-black text-sm" aria-label="הסר: ' + htmlEscape(x.name) + '">הסר</button></div>' +
-    '<label class="flex items-center gap-2 mt-1 text-sm font-bold text-slate-700">כמה הגיע?<input data-extra-got="' + k + '" type="text" inputmode="numeric" autocomplete="off" value="' + htmlEscape(x.got) + '" aria-label="כמה הגיע: ' + htmlEscape(x.name) + '" class="w-24 border-2 border-amber-300 rounded-lg p-2 text-base text-center font-black bg-white"></label></div>').join('');
+  const rows = (r.extras || []).map((x, k) => receiptLineExtraHtml(k, x)).join('');
   return '<section class="mt-4 pt-3 border-t-2 border-slate-200" aria-label="הגיע משהו נוסף">' +
     '<div class="font-black text-base text-slate-800">הגיע משהו נוסף?</div>' +
     '<div class="text-sm font-bold text-slate-600 mb-2">מוצר שאינו באף תעודה — חפש אותו והקלד כמה הגיע.</div>' + rows +
@@ -9399,8 +9427,12 @@ function receiptLineCheckInput(e) {
     const sum = $('lineCheckSum_' + di + '_' + li); if (sum) sum.textContent = receiptLineSumText(l);
     refreshReceiptLineProgress();
   } else if (el.dataset.extraGot != null) {
-    const x = r.extras && r.extras[+el.dataset.extraGot]; if (!x) return;
-    x.got = el.value; receiptLineNotice = null; receiptLineCheckChanged(); refreshReceiptLineProgress();
+    const k = +el.dataset.extraGot, x = r.extras && r.extras[k]; if (!x) return;
+    x.got = el.value; receiptLineNotice = null; receiptLineCheckChanged();
+    // v407: הסיכום והארגזים מתעדכנים תוך כדי הקלדה, כמו lineCheckSum בשורת תעודה
+    const sum = $('lineExtraSum_' + k); if (sum) sum.textContent = receiptLineExtraSumText(x);
+    const box = $('lineExtraBox_' + k); if (box) box.textContent = receiptLineExtraBoxText(x);
+    refreshReceiptLineProgress();
   } else if (el.dataset.lineSearch != null) {
     receiptLineSearchTerm = el.value;
     const box = $('receiptLineSearchResults'); if (box) box.innerHTML = receiptLineSearchResultsHtml(el.value);

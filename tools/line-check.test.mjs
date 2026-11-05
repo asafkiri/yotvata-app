@@ -277,7 +277,8 @@ test('5. נשמר בטיוטה וממשיך מאותו מקום; החלון חו
   assert.equal(x.run('receiptQuantityReview'), null, 'לפני האישור — כלום');
   x.run('testConfirms[testConfirms.length - 1].cb()');
   assert.deepEqual(review(x).extras.map(e => [e.productId, e.got]), [['pudding', '2']], 'רק מה שאינו בתעודות');
-  assert.match(strip(x.run(`$('receiptQuantityRows').innerHTML`)), /הגיע משהו נוסף\? .* מעדן שוקולד 125 גרם הסר/);
+  // 407: הכרטיס כמו שורת תעודה — "לא בתעודה", מחיר קופה, ברקוד ומחיר ליחידה, הכמות, הסיכום ו"הסר"
+  assert.match(strip(x.run(`$('receiptQuantityRows').innerHTML`)), /הגיע משהו נוסף\? .* לא בתעודה — הגיע בנוסף מעדן שוקולד 125 גרם אין מחיר קופה — בדוק בקופה ועדכן 7290000000046 · ₪4\.00 ליח׳ יח׳ הגיעו התקבלו 2 · עודף 2 הסר/);
   type(x, { lineSearch: '' }, 'חמאה');
   assert.match(x.run(`$('receiptLineSearchResults').innerHTML`), /data-extra-add="butter"/);
   click(x, { extraAdd: 'butter' }); type(x, { extraGot: '1' }, '3');
@@ -429,6 +430,51 @@ test('10. חיפוש של מוצר שכבר בבדיקה: "כבר ברשימה" 
   one.run('startReceiptLineCheck()');
   type(one, { lineSearch: '' }, 'קוטג');
   assert.equal(strip(one.run(`$('receiptLineSearchResults').innerHTML`)), 'כבר בתעודה, שורה 2 קוטג׳ 5% 250 גרם 6 יח׳ בתעודה · עוד לא סומנה · 7290000000015 · הצג');
+});
+
+// 407, בעל העסק: "בשורה הצהובה לא רשום ברקוד, לא מחיר קופה, לא כלום — שורה בודדת מסכנה בצבע צהוב"
+test('11. הכרטיס של "הגיע משהו נוסף" כמו שורת תעודה: מחיר קופה, ברקוד ומחיר ליחידה, הכמות גדולה, ארגזים, הסיכום ו"הסר"', async () => {
+  const r = await twoPapers();
+  r.run(`products.find(p => p.id === 'butter').posPrice = 9.9; products.find(p => p.id === 'butter').boxSize = 4;`);
+  r.run('startReceiptLineCheck()');
+  click(r, { extraAdd: 'butter' });
+  const card = k => (r.run(`$('receiptQuantityRows').innerHTML`).match(new RegExp('<div id="lineExtra_' + k + '"[\\s\\S]*?הסר</button></div></div>')) || [''])[0];
+  const a = card(0);
+  assert.equal(strip(a), 'לא בתעודה — הגיע בנוסף חמאה 100 גרם בקופה: ₪9.90 7290000000053 · ₪6.00 ליח׳ יח׳ הגיעו התקבלו 1 · עודף 1 הסר');
+  assert.match(a, /rounded-2xl border-2 border-amber-300 bg-amber-50 p-3 mb-2\.5 shadow-sm/, 'כרטיס כמו שורת "אחרת"');
+  assert.match(a, /data-extra-got="0"[^>]*value="1"[^>]*text-2xl/, 'שדה הכמות גדול, עם מה שהוקלד');
+  assert.match(a, /fa-barcode/); assert.match(a, /data-extra-remove="0"/);
+  const pos = r.run(`posPriceLineHtml(products.find(p => p.id === 'butter'))`);
+  assert.match(pos, /fa-cash-register.*בקופה: ₪9\.90/);
+  assert.ok(a.includes(pos), 'מחיר הקופה — אותה שורה כמו בשורת תעודה ובסריקה');
+  // הקלדה: הסיכום והארגזים מתעדכנים במקום, בלי ציור מחדש; המונה למעלה כמו קודם
+  type(r, { extraGot: '0' }, '8');
+  assert.equal(r.run(`$('lineExtraSum_0').textContent`), 'התקבלו 8 · עודף 8');
+  assert.equal(r.run(`$('lineExtraBox_0').textContent`), '2 ארגזים × 4');
+  assert.equal(r.run(`$('receiptQuantityProgress').textContent`), 'סומנו 0 מתוך 5 שורות · עודף 8 יח׳');
+  type(r, { extraGot: '0' }, '4');
+  assert.equal(r.run(`$('lineExtraBox_0').textContent`), 'ארגז אחד של 4');
+  type(r, { extraGot: '0' }, 'x');
+  assert.equal(r.run(`$('lineExtraSum_0').textContent`), 'הקלד כמה יחידות הגיעו');
+  assert.equal(r.run(`$('lineExtraBox_0').textContent`), '');
+  assert.equal(r.run(`$('receiptQuantityProgress').textContent`), 'סומנו 0 מתוך 5 שורות', 'כמות לא תקינה — לא נספרת');
+  type(r, { extraGot: '0' }, '4');
+  // ציור מחדש — הכמות, הסיכום והארגזים בכרטיס
+  r.run('renderReceiptLineRows()');
+  assert.equal(strip(card(0)), 'לא בתעודה — הגיע בנוסף חמאה 100 גרם בקופה: ₪9.90 7290000000053 · ₪6.00 ליח׳ יח׳ הגיעו ארגז אחד של 4 התקבלו 4 · עודף 4 הסר');
+  assert.match(card(0), /value="4"/);
+  // בלי מחיר קופה ובלי ארגז — "אין מחיר קופה", כמו בשורת תעודה
+  click(r, { extraAdd: 'pudding' });
+  const b = card(1);
+  assert.equal(strip(b), 'לא בתעודה — הגיע בנוסף מעדן שוקולד 125 גרם אין מחיר קופה — בדוק בקופה ועדכן 7290000000046 · ₪4.00 ליח׳ יח׳ הגיעו התקבלו 1 · עודף 1 הסר');
+  assert.match(b, /fa-triangle-exclamation/);
+  // "הסר" ו"סיום" — כמו קודם
+  click(r, { extraRemove: '1' });
+  assert.deepEqual(review(r).extras.map(e => [e.productId, e.got]), [['butter', '4']]);
+  assert.equal(card(1), '');
+  markRestOk(r);
+  assert.equal(r.run('finishReceiptLineCheck()'), true);
+  assert.deepEqual(json(r, 'receiptList.map(l => l.productId + " " + l.qty).sort()'), ['butter 4', 'cottage 6', 'cream 2', 'milk 17', 'yogurt 4']);
 });
 
 test('הגרסה עלתה ל-407, כולל ה-service worker', () => {
