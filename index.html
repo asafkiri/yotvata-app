@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v406 חזרות לפי יום הזיכוי</title>
+    <title>הזמנות יטבתה - v407 מוצר שכבר בבדיקה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -125,7 +125,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v406 חזרות לפי יום הזיכוי</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v407 מוצר שכבר בבדיקה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -684,9 +684,9 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '406'; // תעודת חזרה בדוח התשלום לפי יום אימות הזיכוי, לא לפי יום השליחה
+const APP_VERSION = '407'; // חיפוש בבדיקה שורה-שורה: מוצר שכבר בבדיקה אומר איפה הוא ("הצג"), לא "לא נמצא מוצר כזה"
 // v398: תווית הגרסה ביומן הפעולות ובקובץ הגיבוי (עד כאן מחרוזת קבועה שנשארה 'v396_second_strong_read')
-const APP_VERSION_LABEL = 'v' + APP_VERSION + '_return_credit_date';
+const APP_VERSION_LABEL = 'v' + APP_VERSION + '_already_in_check';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -9241,13 +9241,47 @@ function receiptLineRowHtml(di, li, l) {
       '<div id="lineCheckSum_' + di + '_' + li + '" class="text-sm font-bold mt-1 text-amber-800" aria-live="polite">' + receiptLineSumText(l) + '</div>' : '') +
   '</div>';
 }
+// v407: מוצר שכבר בבדיקה — בשורת תעודה או ב"הגיע משהו נוסף" — אינו מוצע להוספה שוב (כמו קודם), אבל גם לא "לא נמצא
+// מוצר כזה": מהשטח (5.11.2026) — "משקה פרו ויגן" 7290119390519 כבר היה ברשימה עם 8 יח׳, והסריקה שלו לשדה החיפוש ענתה
+// "לא נמצא מוצר כזה". מעכשיו אומרים איפה הוא כבר נמצא, ו"הצג" מביא אליו. "לא נמצא מוצר כזה" — רק כשבאמת אין במאגר מוצר
+// שמתאים. לכל מוצר שמתאים: free — אפשר להוסיף; taken — כל המקומות שבהם הוא כבר בבדיקה (מוצר בשתי תעודות — שתי שורות)
+function receiptLineSearchMatches(r, q) {
+  const hit = p => p && [p.name, p.barcode, p.code, p.sku, p.supplierItemCode].some(v => String(v || '').toLowerCase().includes(q));
+  const where = new Map();
+  const put = (pid, w) => { if (!where.has(pid)) where.set(pid, []); where.get(pid).push(w); };
+  (r.docs || []).forEach((d, di) => (d.lines || []).forEach((l, li) => put(l.productId, { kind: 'line', di, li, l })));
+  (r.extras || []).forEach((x, k) => put(x.productId, { kind: 'extra', k, x }));
+  const free = [], taken = [];
+  products.forEach(p => { if (!hit(p)) return; const w = where.get(p.id); if (w) w.forEach(e => taken.push({ p, ...e })); else free.push(p); });
+  return { free, taken };
+}
 function receiptLineSearchResultsHtml(term) {
   const r = receiptQuantityReview, q = String(term || '').trim().toLowerCase();
   if (!r || !q) return '';
-  const taken = new Set((r.docs || []).flatMap(d => (d.lines || []).map(l => l.productId)).concat((r.extras || []).map(x => x.productId)));
-  const list = products.filter(p => p && !taken.has(p.id) && [p.name, p.barcode, p.code, p.sku, p.supplierItemCode].some(v => String(v || '').toLowerCase().includes(q))).slice(0, 8);
-  return list.length ? list.map(p => '<button type="button" data-extra-add="' + htmlEscape(p.id) + '" class="btn-tap block w-full border border-amber-300 text-amber-900 bg-white rounded-xl p-3 mb-2 text-right text-base font-bold">+ ' + htmlEscape(p.name) + '</button>').join('')
-    : '<div class="text-sm font-bold text-slate-500 py-2">לא נמצא מוצר כזה</div>';
+  const { free, taken } = receiptLineSearchMatches(r, q), multi = (r.docs || []).length > 1;
+  // קודם מה שכבר בבדיקה (שלא יתווסף פעמיים), ואחריו מה שאפשר להוסיף — עם הברקוד, כי שני מוצרים באותו שם נבדלים רק בו
+  const already = taken.slice(0, 5).map(t => {
+    const extra = t.kind === 'extra', id = extra ? 'lineExtra_' + t.k : 'lineCheck_' + t.di + '_' + t.li;
+    const where = extra ? 'כבר ברשימה ״הגיע משהו נוסף״' : 'כבר ' + (multi ? 'בתעודה ' + (t.di + 1) + ' מתוך ' + r.docs.length : 'בתעודה') + ', שורה ' + t.l.line;
+    const got = extra ? receiptLineExtraGot(t.x) : receiptLineGot(t.l);
+    const state = extra ? (got == null ? 'עוד לא הוקלד כמה הגיע' : got + ' יח׳')
+      : t.l.paperQty + ' יח׳ בתעודה · ' + (got == null ? 'עוד לא סומנה' : got === t.l.paperQty ? 'סומנה: הגיע' : got === 0 ? 'סומנה: לא הגיע' : 'סומנה: הגיעו ' + got);
+    return '<button type="button" data-line-show="' + id + '" class="btn-tap block w-full border-2 border-blue-300 bg-blue-50 rounded-xl p-3 mb-2 text-right" aria-label="הצג: ' + htmlEscape(t.p.name) + '">' +
+      '<div class="text-sm font-black text-blue-900"><i class="fa-solid fa-circle-check" aria-hidden="true"></i> ' + where + '</div>' +
+      '<div class="text-base font-bold text-slate-800">' + htmlEscape(t.p.name) + '</div>' +
+      '<div class="text-xs font-bold text-slate-600">' + state + (t.p.barcode ? ' · <span dir="ltr">' + htmlEscape(t.p.barcode) + '</span>' : '') + ' · <span class="text-blue-700 underline">הצג</span></div></button>';
+  }).join('');
+  const add = free.slice(0, 8).map(p => '<button type="button" data-extra-add="' + htmlEscape(p.id) + '" class="btn-tap block w-full border border-amber-300 text-amber-900 bg-white rounded-xl p-3 mb-2 text-right text-base font-bold">+ ' + htmlEscape(p.name) +
+    (p.barcode ? ' <span class="text-xs font-bold text-slate-400" dir="ltr">' + htmlEscape(p.barcode) + '</span>' : '') + '</button>').join('');
+  return already || add ? already + add : '<div class="text-sm font-bold text-slate-500 py-2">לא נמצא מוצר כזה</div>';
+}
+// v407: "הצג" בתוצאות החיפוש — גלילה לשורה שכבר בבדיקה והדגשה שלה (כמו "סיום" שמביא לשורה שנשארה). בלי ציור מחדש,
+// כדי שהחיפוש והתוצאות יישארו כמו שהם; ההדגשה נעלמת בציור הבא
+function receiptLineReveal(id) {
+  const el = $(id); if (!el) return;
+  $('receiptQuantityRows').querySelectorAll('.ring-4').forEach(x => x.classList.remove('ring-4', 'ring-rose-300', 'ring-blue-300'));
+  el.classList.add('ring-4', 'ring-blue-300');
+  try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (err) {}
 }
 function receiptLineExtrasHtml(r) {
   const rows = (r.extras || []).map((x, k) => '<div id="lineExtra_' + k + '" class="rounded-xl border-2 border-amber-300 bg-amber-50 p-3 mb-2">' +
@@ -9326,7 +9360,7 @@ function startReceiptLineCheck() {
 }
 function receiptLineCheckClick(e) {
   const r = receiptQuantityReview; if (!r || r.mode !== 'lines') return;
-  const t = e.target.closest('[data-line-mark], [data-line-open], [data-line-drop], [data-line-drop-yes], [data-line-drop-no], [data-extra-add], [data-extra-remove]');
+  const t = e.target.closest('[data-line-mark], [data-line-open], [data-line-drop], [data-line-drop-yes], [data-line-drop-no], [data-extra-add], [data-extra-remove], [data-line-show]');
   if (!t) return;
   if (t.dataset.lineMark) {
     const [di, li, mark] = t.dataset.lineMark.split(':'); const l = r.docs[+di] && r.docs[+di].lines[+li];
@@ -9339,6 +9373,8 @@ function receiptLineCheckClick(e) {
   }
   // v405: "שנה" על שורה מקופלת — נפתחת שוב עם שלושת הכפתורים, והפוקוס על "הגיע"
   if (t.dataset.lineOpen) { receiptLineOpen.add(t.dataset.lineOpen); receiptLineNotice = null; renderReceiptLineRows('[data-line-mark="' + t.dataset.lineOpen + ':ok"]'); return; }
+  // v407: "הצג" בתוצאות החיפוש — אל השורה שכבר בבדיקה; שום דבר בבדיקה לא משתנה
+  if (t.dataset.lineShow) { receiptLineReveal(t.dataset.lineShow); return; }
   if (t.dataset.lineDrop != null) { receiptLineDropAsk = +t.dataset.lineDrop; receiptLineNotice = null; renderReceiptLineRows('[data-line-drop-no="' + t.dataset.lineDrop + '"]'); return; }
   if (t.dataset.lineDropNo != null) { const di = t.dataset.lineDropNo; receiptLineDropAsk = null; renderReceiptLineRows('[data-line-drop="' + di + '"]'); return; }
   if (t.dataset.lineDropYes != null) { receiptLineCheckDrop(+t.dataset.lineDropYes); return; }

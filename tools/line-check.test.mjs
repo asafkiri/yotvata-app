@@ -9,7 +9,9 @@
 // 5. הבדיקה נשמרת בטיוטה וממשיכה מאותו מקום; החלון חוזר בדיוק לבדיקה הקיימת; "הגיע משהו נוסף".
 // 6. "פירוט לפי תעודת ספק" בהיסטוריה: מה שסומן בכל תעודה במקום ההקצאה לפי הסדר; בלעדיו — כמו קודם.
 // 7. טלפון בגרסה 402 שממשיך את הקליטה רואה את הבדיקה הרגילה עם מה שכבר סומן.
+// 10. (407) חיפוש של מוצר שכבר בבדיקה: "כבר ברשימה" / "כבר בתעודה, שורה N" עם "הצג" — לא "לא נמצא מוצר כזה".
 // הרצה: node --test tools/line-check.test.mjs
+import fs from 'node:fs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runtime, fakeCloud } from './receipt-scan-harness.mjs';
@@ -369,4 +371,69 @@ test('9. שורת פיקדון אינה שורה לסימון — כמו בהש�
   markRestOk(c);
   assert.equal(c.run('finishReceiptLineCheck()'), true);
   assert.deepEqual(json(c, 'receiptList.map(l => l.productId + " " + l.qty)'), ['cream 2', 'milk 3']);
+});
+
+// 407, מהשטח (5.11.2026): "משקה פרו ויגן" 7290119390519 כבר היה ב"הגיע משהו נוסף" עם 8 יח׳, וסריקת הברקוד שלו לשדה
+// החיפוש ענתה "לא נמצא מוצר כזה" — כי מי שכבר בבדיקה מסונן מהתוצאות, ורשימה ריקה הציגה את ההודעה של "אין מוצר כזה"
+test('10. חיפוש של מוצר שכבר בבדיקה: "כבר ברשימה" / "כבר בתעודה, שורה N" עם "הצג" — לא "לא נמצא מוצר כזה"', async () => {
+  const r = await twoPapers();
+  r.run('startReceiptLineCheck()');
+  click(r, { extraAdd: 'butter' }); type(r, { extraGot: '0' }, '8');
+  const results = () => r.run(`$('receiptLineSearchResults').innerHTML`);
+  // הברקוד של מוצר שכבר ב"הגיע משהו נוסף" — איפה הוא וכמה, לא "לא נמצא מוצר כזה", ולא מוצע להוסיף שוב
+  type(r, { lineSearch: '' }, '7290000000053');
+  assert.doesNotMatch(results(), /לא נמצא מוצר כזה|data-extra-add=/);
+  assert.equal(strip(results()), 'כבר ברשימה ״הגיע משהו נוסף״ חמאה 100 גרם 8 יח׳ · 7290000000053 · הצג');
+  assert.match(results(), /data-line-show="lineExtra_0"/);
+  // "הצג" — השורה מודגשת; החיפוש והבדיקה כמו שהיו
+  click(r, { lineShow: 'lineExtra_0' });
+  assert.equal(r.run(`$('lineExtra_0').classList.contains('ring-4')`), true);
+  assert.equal(r.run('receiptLineSearchTerm'), '7290000000053');
+  assert.deepEqual(review(r).extras.map(e => [e.productId, e.got]), [['butter', '8']]);
+  assert.equal(r.run('receiptQuantityReview.rows.length'), 5);
+  // בלי כמות ב"נוסף" — אומרים גם את זה
+  type(r, { extraGot: '0' }, '');
+  type(r, { lineSearch: '' }, 'חמאה');
+  assert.equal(strip(results()), 'כבר ברשימה ״הגיע משהו נוסף״ חמאה 100 גרם עוד לא הוקלד כמה הגיע · 7290000000053 · הצג');
+  // מוצר בשורת תעודה — חלב בשתי התעודות: שורה לכל תעודה, עם מספר השורה בנייר ומה שסומן בה
+  click(r, { lineMark: '0:0:ok' });
+  type(r, { lineSearch: '' }, 'חלב');
+  assert.equal(strip(results()), 'כבר בתעודה 1 מתוך 2, שורה 1 חלב 3% בקרטון 1 ליטר 12 יח׳ בתעודה · סומנה: הגיע · 7290000000008 · הצג ' +
+    'כבר בתעודה 2 מתוך 2, שורה 1 חלב 3% בקרטון 1 ליטר 5 יח׳ בתעודה · עוד לא סומנה · 7290000000008 · הצג');
+  assert.match(results(), /data-line-show="lineCheck_0_0"[\s\S]*data-line-show="lineCheck_1_0"/);
+  click(r, { lineShow: 'lineCheck_1_0' });
+  assert.equal(r.run(`$('lineCheck_1_0').classList.contains('ring-4')`), true);
+  assert.deepEqual(marks(r), ['ok,,', ','], 'שום דבר לא סומן בגלל "הצג"');
+  // "לא הגיע" ו"אחרת" עם כמות
+  click(r, { lineMark: '1:1:none' });
+  type(r, { lineSearch: '' }, 'שמנת');
+  assert.equal(strip(results()), 'כבר בתעודה 2 מתוך 2, שורה 2 שמנת חמוצה 15% 200 מ״ל 2 יח׳ בתעודה · סומנה: לא הגיע · 7290000000039 · הצג');
+  click(r, { lineMark: '0:1:qty' }); type(r, { lineGot: '0:1' }, '4');
+  type(r, { lineSearch: '' }, 'קוטג');
+  assert.equal(strip(results()), 'כבר בתעודה 1 מתוך 2, שורה 2 קוטג׳ 5% 250 גרם 6 יח׳ בתעודה · סומנה: הגיעו 4 · 7290000000015 · הצג');
+  // מונח שמתאים גם למוצר שכבר בבדיקה וגם למוצר שאפשר להוסיף: קודם איפה שכבר נמצא, ואחריו "+ להוספה" — עם הברקוד
+  type(r, { lineSearch: '' }, '72900000000');
+  const mixed = results();
+  assert.match(mixed, /data-line-show="lineCheck_0_0"/); assert.match(mixed, /data-extra-add="pudding"/);
+  assert.ok(mixed.indexOf('data-line-show=') < mixed.indexOf('data-extra-add='), 'קודם מה שכבר בבדיקה');
+  assert.match(strip(mixed), /\+ מעדן שוקולד 125 גרם 7290000000046$/);
+  // ההוספה עצמה — כמו קודם
+  click(r, { extraAdd: 'pudding' });
+  assert.deepEqual(review(r).extras.map(e => [e.productId, e.got]), [['butter', ''], ['pudding', '1']]);
+  assert.equal(r.run('receiptLineSearchTerm'), '');
+  // באמת אין מוצר כזה במאגר — כמו קודם
+  type(r, { lineSearch: '' }, '7290119390519');
+  assert.equal(strip(results()), 'לא נמצא מוצר כזה');
+  // תעודה אחת — "כבר בתעודה, שורה 2", בלי "מתוך"
+  const one = await scan([BIG]);
+  one.run('startReceiptLineCheck()');
+  type(one, { lineSearch: '' }, 'קוטג');
+  assert.equal(strip(one.run(`$('receiptLineSearchResults').innerHTML`)), 'כבר בתעודה, שורה 2 קוטג׳ 5% 250 גרם 6 יח׳ בתעודה · עוד לא סומנה · 7290000000015 · הצג');
+});
+
+test('הגרסה עלתה ל-407, כולל ה-service worker', () => {
+  const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  assert.match(html, /const APP_VERSION = '407'/);
+  assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_already_in_check'/);
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v407/);
 });
