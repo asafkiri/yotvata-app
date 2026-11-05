@@ -10,6 +10,8 @@
 // 6. "פירוט לפי תעודת ספק" בהיסטוריה: מה שסומן בכל תעודה במקום ההקצאה לפי הסדר; בלעדיו — כמו קודם.
 // 7. טלפון בגרסה 402 שממשיך את הקליטה רואה את הבדיקה הרגילה עם מה שכבר סומן.
 // 10. (407) חיפוש של מוצר שכבר בבדיקה: "כבר ברשימה" / "כבר בתעודה, שורה N" עם "הצג" — לא "לא נמצא מוצר כזה".
+// 11. (407) הכרטיס של "הגיע משהו נוסף" כמו שורת תעודה.
+// 12. (408) מסך ההשוואה: מוצר שהוספת בעצמך הוא "הגיע בנוסף", לא "עודף" עם "לא הגיע (0)" ירוק; הכיתוב במסך הקליטה.
 // הרצה: node --test tools/line-check.test.mjs
 import fs from 'node:fs';
 import test from 'node:test';
@@ -477,9 +479,55 @@ test('11. הכרטיס של "הגיע משהו נוסף" כמו שורת תעו�
   assert.deepEqual(json(r, 'receiptList.map(l => l.productId + " " + l.qty).sort()'), ['butter 4', 'cottage 6', 'cream 2', 'milk 17', 'yogurt 4']);
 });
 
-test('הגרסה עלתה ל-407, כולל ה-service worker', () => {
+// 408, מהשטח (5.11.2026, 10:00): 16 יח׳ "משקה פרו ויגן" שנוספו ב״הגיע משהו נוסף״ הוצגו במסך ההשוואה כ"עודף 16 יח׳" עם כפתור
+// ירוק "לא הגיע (0)"; לחיצה אחת מחקה אותם, והתעודה נסגרה ירוקה בלי 16 היחידות. שום אפשרות לא הוסרה — רק המראה והמילים
+test('12. (408) מסך ההשוואה אחרי בדיקה שורה-שורה עם "נוסף": "הגיע בנוסף", ההסבר, הכפתור האדום, "ספרתי נכון"; והכיתוב במסך הקליטה', async () => {
+  const r = await twoPapers();
+  r.run('startReceiptLineCheck()');
+  click(r, { extraAdd: 'butter' }); type(r, { extraGot: '0' }, '16');
+  click(r, { lineMark: '0:0:ok' });
+  // במסך הקליטה, כשהבדיקה פתוחה ולא הסתיימה: "בדוק שורה-שורה" אומר מאיפה ממשיכים, "כל הכמויות תואמות" אומר מה הוא מבטל
+  r.run('closeReceiptQuantityReview()');
+  assert.equal(strip(r.run('receiptQuantityButtonsHtml()')), 'בדוק שורה-שורה בטלפון ממשיך מאיפה שהפסקת · סומנו 1 מתוך 5 שורות · נוסף: חמאה 100 גרם 16 ' +
+    'בדקתי ידנית — כל הכמויות תואמות, המשך לקליטה יבטל את הבדיקה שורה-שורה שהתחלת, כולל מה שהוספת בה בדקתי ידנית — יש חוסרים או עודפים');
+  r.run('startReceiptLineCheck()'); markRestOk(r);
+  assert.equal(r.run('finishReceiptLineCheck()'), true);
+  assert.equal(r.run('currentView'), 'reconcile');
+  const html = () => r.run('app.innerHTML');
+  const t = strip(html());
+  // ההסבר לפני הרשימה, השורה עצמה ("הגיע בנוסף", "נספר ביד", "הוספת אותו בעצמך"), העורך והכפתור האדום, והאישור
+  assert.match(t, /חמאה 100 גרם הוא מוצר שהוספת בעצמך בבדיקה הידנית, ולא בתעודה — זו לא טעות סריקה\. כדי לשמור כפי שספרת: ״אשר — ספרתי נכון״ ואז ״סגור תעודה״\. ״טעות — לא הגיע בכלל \(0\)״ מוחק מהקליטה\./);
+  assert.match(t, /חמאה 100 גרם הגיע בנוסף · 16 יח׳ חויב בתעודה 0 נספר ביד 16 הגיע בנוסף 16 המוצר לא מופיע בתעודה — הוספת אותו בעצמך ב״הגיע משהו נוסף״ בבדיקה שורה-שורה \(16 יח׳\)\. זו לא טעות סריקה\. ספרת לא נכון\? תקן כאן את הכמות\. 0 מוחק את המוצר מהקליטה\./);
+  assert.doesNotMatch(t, /עודף 16 יח׳|לא הגיע \(0\)|קיבלתי בפועל|אלה אכן הבעיות — אשר/);
+  assert.match(html(), /data-role="ai-recv-set" data-id="butter" data-qty="0" class="[^"]*border-rose-300 text-rose-700[^"]*">טעות — לא הגיע בכלל \(0\)<\/button>/);
+  assert.match(t, /אשר — ספרתי נכון, הגיע בנוסף למה שבתעודה/);
+  // האפשרות לאפס נשארה — והמילים אומרות מה קרה ואיך מחזירים
+  r.click('ai-recv-set', 'butter', { qty: '0' });
+  assert.equal(r.toasts.at(-1), 'הוסר מהקליטה: חמאה 100 גרם (0 יח׳). טעות? הקלד שוב את הכמות בשורה הירוקה.');
+  assert.deepEqual(json(r, 'receiptList.map(l => l.productId + " " + l.qty).sort()'), ['cottage 6', 'cream 2', 'milk 17', 'yogurt 4']);
+  r.run("aiSetFindingReceived('butter', 16)");
+  assert.deepEqual(json(r, 'receiptList.filter(l => l.productId === "butter").map(l => l.qty)'), [16]);
+  assert.match(strip(html()), /חמאה 100 גרם הגיע בנוסף · 16 יח׳/);
+  // "ספרתי נכון" ואז "סגור תעודה — עם מה שהגיע בנוסף": 16 היחידות נשמרות, עם תיעוד הבדיקה (קליטה נפרדת — בלי העריכה
+  // שלמעלה, כי שינוי ספירה במסך ההשוואה עדיין מבטל את התיעוד, לא שונה ב-408)
+  const s = await twoPapers();
+  s.run('startReceiptLineCheck()');
+  click(s, { extraAdd: 'butter' }); type(s, { extraGot: '0' }, '16'); markRestOk(s);
+  assert.equal(s.run('finishReceiptLineCheck()'), true);
+  s.click('ai-confirm-findings');
+  assert.match(strip(s.run('app.innerHTML')), /סגור תעודה — עם מה שהגיע בנוסף/);
+  assert.doesNotMatch(strip(s.run('app.innerHTML')), /סגור תעודה עם החוסרים/);
+  s.click('ai-apply');
+  assert.ok(s.run('!!pendingReceipt'));
+  const saved = await save(s);
+  assert.deepEqual(saved.items.filter(l => l.productId === 'butter').map(l => [l.qty, l.noteQty]), [[16, 0]]);
+  assert.equal(saved.quantityCheck.byLine, true);
+  assert.equal(saved.status, 'open');
+});
+
+test('הגרסה עלתה ל-408, כולל ה-service worker', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /const APP_VERSION = '407'/);
-  assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_already_in_check'/);
-  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v407/);
+  assert.match(html, /const APP_VERSION = '408'/);
+  assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_hand_counted_extra'/);
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v408/);
 });

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v407 מוצר שכבר בבדיקה</title>
+    <title>הזמנות יטבתה - v408 הגיע בנוסף בהשוואה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -125,7 +125,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v407 מוצר שכבר בבדיקה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v408 הגיע בנוסף בהשוואה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -684,9 +684,9 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '407'; // חיפוש בבדיקה שורה-שורה: מוצר שכבר בבדיקה אומר איפה הוא ("הצג"), לא "לא נמצא מוצר כזה"
+const APP_VERSION = '408'; // מסך ההשוואה: מוצר שהוספת בעצמך בבדיקה הידנית הוא "הגיע בנוסף", לא "עודף" עם "לא הגיע (0)" ירוק
 // v398: תווית הגרסה ביומן הפעולות ובקובץ הגיבוי (עד כאן מחרוזת קבועה שנשארה 'v396_second_strong_read')
-const APP_VERSION_LABEL = 'v' + APP_VERSION + '_already_in_check';
+const APP_VERSION_LABEL = 'v' + APP_VERSION + '_hand_counted_extra';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -8909,9 +8909,12 @@ function receiptManualReceivingHtml() {
 }
 function receiptQuantityButtonsHtml() {
   if (receiptNoDoc || receiptAttachTarget || receiptPaperScanState !== 'ok' || !aiScanResponse) return '';
+  // v408: בדיקה שורה-שורה שהתחילה ולא הסתיימה — "בדוק שורה-שורה" אומר מאיפה ממשיכים, ו"כל הכמויות תואמות" אומר מה הוא מבטל
+  const progress = receiptLineCheckProgressText();
   if (receiptUsesManualQuantities()) return '<div class="space-y-3 mb-3">' +
-    receiptLineCheckButtonHtml('rc-quantity-lines', 'w-full rounded-xl py-4 px-3 text-base', '') + // v403
-    '<button data-role="rc-quantity-all" class="btn-tap w-full bg-emerald-600 text-white rounded-xl py-4 px-3 font-black text-base">בדקתי ידנית — כל הכמויות תואמות, המשך לקליטה</button>' +
+    receiptLineCheckButtonHtml('rc-quantity-lines', 'w-full rounded-xl py-4 px-3 text-base', progress ? 'ממשיך מאיפה שהפסקת · ' + htmlEscape(progress) : '') + // v403
+    '<button data-role="rc-quantity-all" class="btn-tap w-full bg-emerald-600 text-white rounded-xl py-4 px-3 font-black text-base">בדקתי ידנית — כל הכמויות תואמות, המשך לקליטה' +
+      (progress ? '<span class="block text-xs font-bold text-emerald-100 mt-0.5">יבטל את הבדיקה שורה-שורה שהתחלת, כולל מה שהוספת בה</span>' : '') + '</button>' +
     '<button data-role="rc-quantity-differences" class="btn-tap w-full bg-white border-2 border-blue-300 text-blue-800 rounded-xl py-4 px-3 font-black text-base">בדקתי ידנית — יש חוסרים או עודפים</button></div>';
   // Folded to its own question. Counting by scanner is the ordinary path, so the
   // manual shortcut asks for one line of the screen until it is actually wanted.
@@ -9149,6 +9152,16 @@ function receiptLineCheckOpen(r) {
   return out;
 }
 function receiptLineCheckTotal(r) { return (r.docs || []).reduce((a, d) => a + (d.lines || []).length, 0); }
+// v408: בדיקה שורה-שורה שהתחילה ולא הסתיימה — מה כבר סומן ומה נוסף בה ("סומנו 3 מתוך 8 שורות · נוסף: משקה פרו ויגן 16"),
+// לכפתורים במסך הקליטה. ריק כשאין בדיקה כזאת, או שעוד לא סומן ולא נוסף בה כלום
+function receiptLineCheckProgressText() {
+  const r = receiptQuantityReview;
+  if (!r || r.mode !== 'lines' || r.confirmedAt || r.key !== receiptQuantityPaperKey()) return '';
+  const marked = (r.docs || []).reduce((a, d) => a + (d.lines || []).filter(l => receiptLineGot(l) != null).length, 0);
+  const extras = (r.extras || []).filter(x => receiptLineExtraGot(x) != null);
+  if (!marked && !extras.length) return '';
+  return 'סומנו ' + marked + ' מתוך ' + receiptLineRowsText(receiptLineCheckTotal(r)) + (extras.length ? ' · נוסף: ' + extras.map(x => x.name + ' ' + receiptLineExtraGot(x)).join(', ') : '');
+}
 // הכותרת, ההסבר וכפתור הסיום של החלון — לפי הבדיקה (הבדיקה הקיימת מקבלת בדיוק את הטקסטים שהיו בה)
 function receiptQuantityModalMode(lines) {
   const title = $('receiptQuantityTitle'), intro = $('receiptQuantityIntro'), progress = $('receiptQuantityProgress'), search = $('receiptQuantitySearch'), ok = $('receiptQuantityConfirm');
@@ -17417,12 +17430,27 @@ function aiIsPendingBarcodeChoice(suggestion) {
 // מספרים סותרים גרועים משורה אחת — במקרה כזה נשארת השורה הפשוטה. הפירוט
 // הוא תצוגה בלבד: הוא לא נוגע בממצא, בסריקה או בחישוב, וכל תקלה בבנייתו
 // נבלעת וחוזרת לשורה הפשוטה.
+// v408 (מהשטח, 5.11.2026): "משקה פרו ויגן" 16 יח׳ שנוספו ב״הגיע משהו נוסף״ בבדיקה שורה-שורה הוצגו במסך ההשוואה כ"עודף 16 יח׳"
+// עם כפתור ירוק "לא הגיע (0)" — לחיצה אחת מחקה אותם, והתעודה נסגרה ירוקה בלי 16 היחידות. מוצר שאינו בתעודה ונספר ביד
+// (ב״הגיע משהו נוסף״ בבדיקה שורה-שורה, או ב"יש חוסרים או עודפים") אינו טעות סריקה: בעל העסק הוסיף אותו בעצמו. כאן אומרים
+// את זה — "הגיע בנוסף", "נספר ביד", ההסבר בשורה, "טעות — לא הגיע בכלל (0)" באדום, והאישור "ספרתי נכון". שום
+// אפשרות לא הוסרה. מחזיר מאיפה המוצר הגיע, או null כשהוא בתעודה / נספר בסורק
+function aiHandCountedExtra(productId) {
+  if (!receiptUsesManualQuantities()) return null;
+  const pid = String(productId == null ? '' : productId).trim(), r = receiptQuantityReview;
+  if (!pid || !r || !r.confirmedAt) return null;
+  const ev = aiScanEvaluation;
+  if (ev && ev.aggregates instanceof Map && (ev.aggregates.has(productId) || ev.aggregates.has(pid))) return null;
+  if (r.mode === 'lines') return (r.extras || []).some(x => x && String(x.productId) === pid && receiptLineExtraGot(x) != null) ? { source: 'lines' } : null;
+  return (r.rows || []).some(row => row && String(row.productId) === pid && Number(row.paperQty) === 0) ? { source: 'differences' } : null;
+}
 function aiQuantityFindingRowHtml(finding, type, headClass) {
   const shortage = type === 'shortage';
-  const label = shortage ? 'חסר' : 'עודף';
+  const hand = !shortage && finding ? aiHandCountedExtra(finding.productId) : null; // v408
+  const label = shortage ? 'חסר' : hand ? 'הגיע בנוסף' : 'עודף';
   const head = '<div class="flex items-start justify-between gap-3">' +
     '<div class="min-w-0 text-sm font-black text-slate-800">' + htmlEscape(finding && finding.name || '') + '</div>' +
-    '<div class="shrink-0 max-w-[60%] text-sm font-black ' + headClass + '">' + (finding && finding.creditRemainderLabel ? htmlEscape(finding.creditRemainderLabel) : label + ' ' + Number(finding && finding.qty || 0) + ' יח׳') + '</div>' +
+    '<div class="shrink-0 max-w-[60%] text-sm font-black ' + headClass + '">' + (finding && finding.creditRemainderLabel ? htmlEscape(finding.creditRemainderLabel) : label + (hand ? ' · ' : ' ') + Number(finding && finding.qty || 0) + ' יח׳') + '</div>' +
   '</div>';
   let detail = '';
   try { detail = aiQuantityFindingDetailHtml(finding, shortage, label, headClass); } catch (detailError) { detail = ''; }
@@ -17448,12 +17476,13 @@ function aiQuantityFindingEditorHtml(productId, shortage) {
   if (line && line.isDeposit) return '';
   const scanned = line ? Math.max(0, Math.round(Number(line.received) || 0)) : 0;
   const id = htmlEscape(pid);
+  const hand = !shortage && !agg ? aiHandCountedExtra(pid) : null; // v408: מוצר שהוספת בעצמך — האיפוס באדום ובמילים ברורות
   const quick = billed !== scanned
-    ? '<button type="button" data-role="ai-recv-set" data-id="' + id + '" data-qty="' + billed + '" class="btn-tap flex-1 min-w-0 h-10 rounded-lg bg-white border border-emerald-300 text-emerald-800 text-xs font-black">' +
-        (shortage ? 'הגיע הכול (' + billed + ')' : (agg ? 'כמו בתעודה (' + billed + ')' : 'לא הגיע (0)')) + '</button>'
+    ? '<button type="button" data-role="ai-recv-set" data-id="' + id + '" data-qty="' + billed + '" class="btn-tap flex-1 min-w-0 h-10 rounded-lg bg-white border ' + (hand ? 'border-rose-300 text-rose-700' : 'border-emerald-300 text-emerald-800') + ' text-xs font-black">' +
+        (shortage ? 'הגיע הכול (' + billed + ')' : (agg ? 'כמו בתעודה (' + billed + ')' : hand ? 'טעות — לא הגיע בכלל (0)' : 'לא הגיע (0)')) + '</button>'
     : '';
   return '<div class="mt-2 rounded-lg bg-white/70 border border-black/10 p-2">' +
-    '<div class="text-[11px] font-black text-slate-600 mb-1">קיבלתי בפועל — תקן כאן והחוסר יתעדכן מיד</div>' +
+    '<div class="text-[11px] font-black text-slate-600 mb-1">' + (hand ? 'ספרת לא נכון? תקן כאן את הכמות. 0 מוחק את המוצר מהקליטה.' : 'קיבלתי בפועל — תקן כאן והחוסר יתעדכן מיד') + '</div>' +
     '<div class="flex items-center gap-1.5">' +
       '<button type="button" data-role="ai-recv-step" data-id="' + id + '" data-delta="-1" class="btn-tap w-10 h-10 shrink-0 rounded-lg bg-slate-100 text-slate-700 font-black text-lg disabled:opacity-40" aria-label="פחות יחידה אחת"' + (scanned <= 0 ? ' disabled' : '') + '>−</button>' +
       '<input data-role="ai-recv-input" data-id="' + id + '" type="text" inputmode="numeric" pattern="[0-9]*" value="' + scanned + '" class="w-16 h-10 shrink-0 text-center text-base font-black border-2 border-slate-200 rounded-lg outline-none focus:border-blue-500 bg-white" aria-label="כמה יחידות התקבלו בפועל">' +
@@ -17517,7 +17546,9 @@ function aiSetFindingReceived(productId, value) {
   const open = (aiScanEvaluation && Array.isArray(aiScanEvaluation.findings) ? aiScanEvaluation.findings : [])
     .find(f => f && (f.type === 'shortage' || f.type === 'surplus') && String(f.productId) === pid);
   const name = line.name ? ' ' + line.name : '';
-  showToast('עודכן: התקבלו ' + qty + ' יח׳' + name + (open ? ' · ' + (open.type === 'shortage' ? 'עדיין חסר ' : 'עדיין עודף ') + (Number(open.qty) || 0) + ' יח׳' : ' · אין חוסר או עודף'), null, null, 3200);
+  // v408: מוצר שאינו בתעודה שאופס — אומרים שהוא הוסר מהקליטה ואיך מחזירים אותו, לא "אין חוסר או עודף"
+  if (qty === 0 && aiBilledQuantity(pid) === 0) showToast('הוסר מהקליטה:' + name + ' (0 יח׳). טעות? הקלד שוב את הכמות בשורה הירוקה.', null, null, 4200);
+  else showToast('עודכן: התקבלו ' + qty + ' יח׳' + name + (open ? ' · ' + (open.type === 'shortage' ? 'עדיין חסר ' : 'עדיין עודף ') + (Number(open.qty) || 0) + ' יח׳' : ' · אין חוסר או עודף'), null, null, 3200);
   return true;
 }
 // v400: שורה שתוקנה כאן ואין בה עוד חוסר או עודף אינה נעלמת — היא נשארת
@@ -17616,9 +17647,11 @@ function aiQuantityFindingDetailHtml(finding, shortage, label, headClass, siblin
   const { billed, scanned, gap, credited, remainingQty, partial } = numbers;
   const agg = numbers.onPaper;
   const cell = (title, value, cls) => '<div class="rounded-lg bg-slate-50 border border-black/5 py-1.5"><div class="text-[10px] font-bold text-slate-500">' + title + '</div><div class="text-base font-black ' + cls + '">' + value + '</div></div>';
+  const hand = !shortage && !agg && billed === 0 && !partial ? aiHandCountedExtra(finding.productId) : null; // v408: הוספת אותו בעצמך
   const summary = billed === 0
     ? (agg ? 'בתעודה רשומות 0 יח׳, ונסרקו ' + scanned + ' יח׳'
       : partial ? 'לא זוהה בשורות התעודה שנקראו, ונסרקו ' + scanned + ' יח׳'
+      : hand ? 'המוצר לא מופיע בתעודה — הוספת אותו בעצמך ב' + (hand.source === 'lines' ? '״הגיע משהו נוסף״ בבדיקה שורה-שורה' : 'בדיקת החוסרים והעודפים') + ' (' + scanned + ' יח׳). זו לא טעות סריקה.'
       : 'המוצר לא מופיע בתעודה, ונסרקו ' + scanned + ' יח׳')
     : scanned === 0 ? 'חויבו ' + billed + ' יח׳ בתעודה ולא נסרקה אף יחידה'
     : shortage ? 'נסרקו ' + scanned + ' יח׳ מתוך ' + billed + ' שחויבו בתעודה'
@@ -17632,7 +17665,7 @@ function aiQuantityFindingDetailHtml(finding, shortage, label, headClass, siblin
     : '';
   return '<div class="mt-1.5 grid grid-cols-3 gap-1.5 text-center">' +
       cell(partial ? 'חויב (שורות שזוהו)' : 'חויב בתעודה', billed, 'text-slate-800') +
-      cell('נסרק בפועל', scanned, 'text-slate-800') +
+      cell(hand ? 'נספר ביד' : 'נסרק בפועל', scanned, 'text-slate-800') +
       cell(label, gap, headClass) +
     '</div>' +
     '<div class="mt-1 text-xs font-bold text-slate-600">' + summary + '</div>' +
@@ -18215,7 +18248,15 @@ function aiInvoiceCaptureHtml() {
     // An old analysis describes the physical shortage before the credit. Show
     // the remaining findings, without offering to claim that credit again.
     const analyzerLed = !(credit && credit.amount) && ev.analyzerLed === true && aiAnalyzeResult && aiAnalyzeResult.accepted === true;
-    const findingsHtml = aiActionableFindingsHtml(actionableFindings, { openRows: !analyzerLed }) + residualLines + unknownCards + (credit && credit.amount ? '' : aiAnalyzeHtml(ev)) + aiScanDiagnosticsHtml(ev);
+    // v408: מוצרים שהוספת בעצמך בבדיקה הידנית ואינם בתעודה — מוסבר לפני הרשימה, והכפתורים אומרים "ספרתי נכון" / "עם מה שהגיע בנוסף"
+    const handExtras = actionableFindings.filter(f => f.type === 'surplus' && aiHandCountedExtra(f.productId));
+    const handOnly = handExtras.length > 0 && handExtras.length === actionableFindings.length;
+    const handNote = handExtras.length
+      ? '<div class="rounded-xl bg-blue-50 border border-blue-200 p-3 text-sm font-bold text-blue-900 mt-3"><i class="fa-solid fa-circle-info ml-1"></i>' +
+        (handExtras.length === 1 ? htmlEscape(handExtras[0].name || '') + ' הוא מוצר שהוספת בעצמך' : handExtras.length + ' מוצרים שהוספת בעצמך') +
+        ' בבדיקה הידנית, ולא בתעודה — זו לא טעות סריקה. כדי לשמור כפי שספרת: ' + (handOnly ? '״אשר — ספרתי נכון״' : '״אלה אכן הבעיות — אשר״') + ' ואז ״סגור תעודה״. ״טעות — לא הגיע בכלל (0)״ מוחק מהקליטה.</div>'
+      : '';
+    const findingsHtml = handNote + aiActionableFindingsHtml(actionableFindings, { openRows: !analyzerLed }) + residualLines + unknownCards + (credit && credit.amount ? '' : aiAnalyzeHtml(ev)) + aiScanDiagnosticsHtml(ev);
     const allGood = aiScanAllGood(ev) && !(credit && (credit.pending || credit.invalid.length));
     const statusHtml = deliveryCreditStatusHtml(credit) + (allGood
       ? '<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-3 font-black text-emerald-800"><i class="fa-solid fa-circle-check ml-1"></i>הכול תואם — לא נמצאו חוסר, עודף או בעיית מחיר/מבצע.</div>'
@@ -18243,12 +18284,12 @@ function aiInvoiceCaptureHtml() {
       actionsHtml = '<button data-role="ai-apply" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-3.5 font-black mt-4"><i class="fa-solid fa-check"></i> הכול תואם — המשך</button>';
     } else if (!confirmed) {
       actionsHtml = '<div class="mt-4 space-y-2">' +
-        '<button data-role="ai-confirm-findings" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-3.5 font-black"><i class="fa-solid fa-check-double"></i> אלה אכן הבעיות — אשר</button>' +
+        '<button data-role="ai-confirm-findings" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-3.5 font-black"><i class="fa-solid fa-check-double"></i> ' + (handOnly ? 'אשר — ספרתי נכון, הגיע בנוסף למה שבתעודה' : 'אלה אכן הבעיות — אשר') + '</button>' +
         '<button data-role="ai-edit-images" class="btn-tap w-full bg-white border border-slate-200 text-slate-500 rounded-xl py-2.5 font-black text-xs"><i class="fa-solid fa-camera-rotate"></i> תיקון תעודה — חזרה לצילומים</button></div>';
     } else {
       actionsHtml = '<div class="mt-4 space-y-2">' +
         (ev.valid
-          ? '<button data-role="ai-apply" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-3.5 font-black"><i class="fa-solid fa-file-circle-check"></i> סגור תעודה עם החוסרים</button>'
+          ? '<button data-role="ai-apply" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-3.5 font-black"><i class="fa-solid fa-file-circle-check"></i> ' + (handOnly ? 'סגור תעודה — עם מה שהגיע בנוסף' : 'סגור תעודה עם החוסרים') + '</button>'
           : '<div class="rounded-xl bg-slate-100 text-slate-400 text-center py-3.5 font-black text-sm"><i class="fa-solid fa-lock ml-1"></i>סגירת תעודה תיפתח אחרי שכל השורות ייסגרו</div>' +
             '<button data-role="ai-edit-images" class="btn-tap w-full bg-white border-2 border-violet-300 text-violet-700 rounded-xl py-3 font-black"><i class="fa-solid fa-camera-rotate"></i> תיקון תעודה — חזרה לצילומים</button>') +
         '<button data-role="rc-recon-cancel" class="btn-tap w-full bg-white border border-slate-200 text-slate-500 rounded-xl py-2.5 font-black text-xs"><i class="fa-solid fa-rotate-right"></i> ביטול — חזרה לסריקה לתיקון הכמויות</button></div>';
