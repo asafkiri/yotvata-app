@@ -92,7 +92,7 @@ const css = `.hidden{display:none!important}.flex{display:flex}.grid{display:gri
 .bg-white{background:#fff}.bg-black{background:#000}.bg-slate-50{background:#f8fafc}.bg-indigo-600{background:#4f46e5;color:#fff}.bg-emerald-600{background:#059669;color:#fff}.bg-amber-500{background:#f59e0b;color:#fff}.bg-slate-400{background:#94a3b8}.bg-blue-600{background:#2563eb}
 .rounded-2xl{border-radius:1rem}.rounded-xl{border-radius:.75rem}.border-2{border:2px solid #cbd5e1}.border{border:1px solid #cbd5e1}.border-emerald-300{border-color:#6ee7b7}.bg-emerald-50{background:#ecfdf5}.border-amber-300{border-color:#fcd34d}.bg-amber-50{background:#fffbeb}
 .text-3xl{font-size:1.875rem}.text-lg{font-size:1.125rem}.text-xs{font-size:.75rem}.text-sm{font-size:.875rem}.text-\\[11px\\]{font-size:11px}.font-black{font-weight:900}.font-bold{font-weight:700}.text-white{color:#fff}.text-center{text-align:center}
-.min-h-\\[48px\\]{min-height:48px}.min-h-\\[52px\\]{min-height:52px}.w-24{width:6rem}.w-10{width:2.5rem}.h-10{height:2.5rem}.top-2{top:.5rem}.left-2{left:.5rem}.ring-4{box-shadow:0 0 0 4px #93c5fd}
+.min-h-\\[48px\\]{min-height:48px}.min-h-\\[52px\\]{min-height:52px}.w-24{width:6rem}.w-10{width:2.5rem}.h-10{height:2.5rem}.top-2{top:.5rem}.left-2{left:.5rem}.ring-4{box-shadow:0 0 0 4px #93c5fd}.h-full{height:100%}.items-stretch{align-items:stretch}.px-4{padding-left:1rem;padding-right:1rem}.pt-4{padding-top:1rem}.pb-4{padding-bottom:1rem}
 body{margin:0;font:16px Arial}button,input{font:inherit;padding:8px;max-width:100%;box-sizing:border-box}video{background:#222}`;
 const pageHtml = html.replace(/<script\s+src="https:[^"]+"><\/script>/g, '').replace(/<link[^>]+(?:href="https:[^"]+"|rel="manifest")[^>]*>/g, '')
   .replace(/<script type="module">[\s\S]*?<\/script>/, () => '<script type="module">' + setup + moduleSource + replay + '</script>')
@@ -134,6 +134,10 @@ try {
   assert.equal(await page.evaluate(() => document.getElementById('receiptQuantityFooter').getBoundingClientRect().top), before, 'התחתית לא זזה בגלילה');
   const footerBox = await page.locator('#receiptQuantityFooter').boundingBox(), scanBox = await scanBtn.boundingBox(), finishBox = await finish.boundingBox();
   assert.ok(footerBox.y + footerBox.height <= 844 && scanBox.y >= 0, 'התחתית בתוך המסך');
+  // v409: בטלפון החלון על כל המסך — התיבה מהקצה לקצה, והתחתית צמודה לתחתית המסך
+  const box = await page.locator('#receiptQuantityModal > div').boundingBox();
+  assert.ok(Math.abs(box.y) < 1 && Math.abs(box.height - 844) < 2 && Math.abs(box.width - 390) < 2, 'מסך מלא: ' + JSON.stringify(box));
+  assert.ok(Math.abs(footerBox.y + footerBox.height - 844) < 2, 'התחתית צמודה לתחתית המסך: ' + JSON.stringify(footerBox));
   assert.ok(scanBox.x > finishBox.x && scanBox.width > finishBox.width, '"סרוק" מימין (RTL) ורחב יותר');
   await snap(page, '1-list');
   // הלחיצה פותחת את המצלמה; החלון מוסתר

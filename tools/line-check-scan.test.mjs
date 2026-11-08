@@ -109,7 +109,7 @@ test('1. "סרוק מוצר" בתחתית הקבועה ליד "סיום" — ר�
   const r = await twoPapers();
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   // המבנה: התחתית מחוץ לגוף הנגלל (shrink-0, אחרי receiptQuantityBody), ובה "סרוק מוצר" ואז "סיום"
-  assert.match(html, /<div id="receiptQuantityBody" class="p-4 overflow-y-auto min-h-0">[\s\S]*?<div id="receiptQuantityFooter" class="p-4 border-t border-slate-100 shrink-0 grid gap-2"><button id="receiptLineScan"[^>]*>[\s\S]*?סרוק מוצר<\/button><button id="receiptQuantityConfirm"/);
+  assert.match(html, /<div id="receiptQuantityBody" class="p-4 overflow-y-auto min-h-0">[\s\S]*?<div id="receiptQuantityFooter" class="[^"]*border-t border-slate-100 shrink-0 grid gap-2"><button id="receiptLineScan"[^>]*>[\s\S]*?סרוק מוצר<\/button><button id="receiptQuantityConfirm"/);
   r.run('startReceiptLineCheck()');
   assert.equal(r.run(`$('receiptLineScan').classList.contains('hidden')`), false, 'הכפתור גלוי');
   assert.equal(r.run(`$('receiptQuantityFooter').classList.contains('grid-cols-[1.15fr_1fr]')`), true, 'שני כפתורים זה לצד זה — "סרוק" רחב יותר');
@@ -431,10 +431,10 @@ test('11. הקליטה התחלפה או קריאה בלבד — המצלמה נ
   assert.equal(modalHidden(q), false, 'החלון נשאר');
 });
 
-test('12. הגרסה עלתה ל-408, כולל ה-service worker', () => {
+test('12. הגרסה (408 ומעלה), כולל ה-service worker', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /const APP_VERSION = '408'/);
-  assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_line_check_scan'/);
-  assert.match(html, /<title>הזמנות יטבתה - v408 /); assert.match(html, /id="verBadge"[^>]*>v408 /);
-  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v408/);
+  const v = html.match(/const APP_VERSION = '(\d+)'/)[1];
+  assert.ok(Number(v) >= 408, v);
+  assert.match(html, new RegExp('<title>הזמנות יטבתה - v' + v + ' ')); assert.match(html, new RegExp('id="verBadge"[^>]*>v' + v + ' '));
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), new RegExp('yotvata-v' + v));
 });
