@@ -42,9 +42,9 @@ test('3. בזמן ריצה הכול כמו קודם: פתיחה, סגירה, ש�
   assert.equal(c.run(`$('receiptQuantityModal').classList.contains('hidden')`), true);
 });
 
-test('4. הגרסה עלתה ל-409, כולל ה-service worker', () => {
-  assert.match(html, /const APP_VERSION = '409'/);
-  assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_full_screen_check'/);
-  assert.match(html, /<title>הזמנות יטבתה - v409 /); assert.match(html, /id="verBadge"[^>]*>v409 /);
-  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v409/);
+test('4. הגרסה (409 ומעלה), כולל ה-service worker', () => {
+  const v = html.match(/const APP_VERSION = '(\d+)'/)[1];
+  assert.ok(Number(v) >= 409, v);
+  assert.match(html, new RegExp('<title>הזמנות יטבתה - v' + v + ' ')); assert.match(html, new RegExp('id="verBadge"[^>]*>v' + v + ' '));
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), new RegExp('yotvata-v' + v));
 });

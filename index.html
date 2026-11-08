@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v409 בדיקה במסך מלא</title>
+    <title>הזמנות יטבתה - v410 מה שנסרק עובר לרשימה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -127,7 +127,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v409 בדיקה במסך מלא</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v410 מה שנסרק עובר לרשימה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -690,9 +690,9 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '409'; // חלון הבדיקה (שורה-שורה / חוסרים ועודפים) במסך מלא בטלפון; מרוחב 640px — חלון ממורכז כמו קודם
+const APP_VERSION = '410'; // מעבר מסריקה לבדיקה שורה-שורה: מה שנסרק עובר לרשימה כסימון ("הגיע" / "אחרת" עם המספר)
 // v398: תווית הגרסה ביומן הפעולות ובקובץ הגיבוי (עד כאן מחרוזת קבועה שנשארה 'v396_second_strong_read')
-const APP_VERSION_LABEL = 'v' + APP_VERSION + '_full_screen_check';
+const APP_VERSION_LABEL = 'v' + APP_VERSION + '_scan_carry';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -9131,12 +9131,33 @@ function receiptLineCheckDocs() {
     return { docs, paperRows };
   } finally { reconcileData = previous; }
 }
-// בדיקה חדשה; מה שכבר סומן (prev) נשאר בשורות שעדיין קיימות — אחרי שתעודה יצאה מהקליטה, או כשחוזרים לבדיקה
+// v410: מה שכבר נסרק בקליטה (receiptList) עובר לרשימה — לשורות שעוד לא סומנו. מוצר שנסרק בדיוק כמו בתעודה (סך כל השורות
+// שלו) — כל שורותיו "הגיע"; מוצר בשורה אחת שנסרק בכמות אחרת — "אחרת" עם המספר, כך שהחוסר או העודף מול העיניים; מוצר בכמה
+// תעודות שנסרק בכמות שאינה הסך — נשאר פתוח, בלי לנחש לאיזו תעודה שייכות היחידות, עם ההערה כמה נסרק (l.scanned). מוצר שאחת
+// משורותיו כבר סומנה (בבדיקה קודמת) — לא נוגעים בו. "סיום" עדיין דורש שכל שורה תסומן, אז שום דבר לא נסגר בלי שראו אותו.
+function receiptLineCarryScanned(docs) {
+  const scanned = new Map();
+  receiptList.forEach(l => { const q = Number(l && l.qty) || 0; if (l && q > 0) scanned.set(l.productId, (scanned.get(l.productId) || 0) + q); });
+  if (!scanned.size) return;
+  const byProduct = new Map();
+  docs.forEach(d => (d.lines || []).forEach(l => { if (!byProduct.has(l.productId)) byProduct.set(l.productId, []); byProduct.get(l.productId).push(l); }));
+  byProduct.forEach((lines, pid) => {
+    const q = scanned.get(pid);
+    if (!q || lines.some(l => l.mark)) return;
+    const total = lines.reduce((a, l) => a + l.paperQty, 0);
+    if (q === total) lines.forEach(l => { l.mark = 'ok'; l.got = ''; });
+    else if (lines.length === 1) { lines[0].mark = 'qty'; lines[0].got = String(q); }
+    else lines.forEach(l => { l.scanned = q; });
+  });
+}
+// בדיקה חדשה; מה שכבר סומן (prev) נשאר בשורות שעדיין קיימות — אחרי שתעודה יצאה מהקליטה, או כשחוזרים לבדיקה; מה שנסרק
+// עובר לשורות שלא סומנו (v410)
 function receiptLineCheckFresh(found, prev) {
   const keyOf = (d, l) => (d.scanId || '#' + d.doc) + '|' + l.line + '|' + l.productId;
   const old = new Map();
   if (prev && prev.mode === 'lines') (prev.docs || []).forEach(d => (d.lines || []).forEach(l => old.set(keyOf(d, l), l)));
   const docs = found.docs.map(d => ({ ...d, lines: d.lines.map(l => { const o = old.get(keyOf(d, l)); return o && o.paperQty === l.paperQty ? { ...l, mark: o.mark || '', got: o.got || '' } : l; }) }));
+  receiptLineCarryScanned(docs); // v410
   const onPaper = new Set(found.paperRows.map(r => r.productId));
   // מה שנספר ואינו בתעודות — "הגיע משהו נוסף" (כמו העודפים שנספרו ב"יש חוסרים או עודפים"); מה שכבר הוסף שם — נשאר
   const extras = (prev && prev.mode === 'lines' ? (prev.extras || []) : []).filter(x => x && !onPaper.has(x.productId));
@@ -9256,7 +9277,9 @@ function receiptLineRowHtml(di, li, l) {
       '<div class="font-black text-lg text-slate-800 leading-tight">' + htmlEscape(l.name) + '</div>' +
       posPriceLineHtml(p) +
       '<div class="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1.5 flex-wrap"><span><i class="fa-solid fa-barcode"></i> ' + htmlEscape(l.barcode || 'ללא ברקוד') + '</span>' +
-        (p ? '<span>· ₪' + fmtUnitPrice(unit, false) + ' ליח׳</span>' : '') + '</div></div>' +
+        (p ? '<span>· ₪' + fmtUnitPrice(unit, false) + ' ליח׳</span>' : '') + '</div>' +
+      // v410: מוצר בכמה תעודות שנסרק בכמות שאינה סך השורות — נשאר פתוח, ואומר כמה נסרק
+      (l.scanned != null && !l.mark ? '<div class="text-[11px] font-black text-amber-700 mt-1"><i class="fa-solid fa-barcode" aria-hidden="true"></i> נסרקו ' + l.scanned + ' יח׳ מהמוצר, בכל התעודות יחד — סמן בכל שורה כמה הגיע</div>' : '') + '</div>' +
       '<div class="shrink-0 text-center"><div class="text-3xl font-black text-slate-900 leading-none tabular-nums">' + l.paperQty + '</div><div class="text-[11px] font-bold text-slate-500">יח׳ בתעודה</div>' +
         (box ? '<div class="text-[11px] font-bold text-slate-400">' + box + '</div>' : '') + '</div></div>' +
     // "הגיע" תופס את כל הרוחב שנשאר; "אחרת" ו"לא הגיע" ברוחב הטקסט שלהם, בשורה אחת גם בטלפון צר
@@ -9411,7 +9434,8 @@ function startReceiptLineCheck() {
     renderReceiptQuantityReview();
   };
   const counted = receiptList.reduce((a, l) => a + (Number(l && l.qty) || 0), 0);
-  if (counted > 0 && !resume) showConfirm('בדיקה שורה-שורה', 'כבר נספרו ' + counted + ' יח׳. בסיום הבדיקה הספירה תוחלף במה שסימנת בשורות. מה שנספר ואינו בתעודות יופיע ב"הגיע משהו נוסף".', 'התחל בדיקה', begin);
+  // v410: מה שנסרק עובר לרשימה (receiptLineCarryScanned), והספירה הסופית היא מה שסומן בשורות
+  if (counted > 0 && !resume) showConfirm('בדיקה שורה-שורה', 'כבר נספרו ' + counted + ' יח׳ — הם עוברים לרשימה: מוצר שנסרק בדיוק כמו בתעודה מסומן "הגיע", כמות אחרת מסומנת "אחרת" עם המספר, והשאר ממתינים לסימון. מה שנספר ואינו בתעודות יופיע ב"הגיע משהו נוסף". בסיום, הספירה היא מה שסומן בשורות.', 'התחל בדיקה', begin);
   else begin();
 }
 function receiptLineCheckClick(e) {
