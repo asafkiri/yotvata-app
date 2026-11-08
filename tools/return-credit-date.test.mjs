@@ -94,7 +94,7 @@ test('כותרת הדוח אומרת שהחזרות לפי יום אימות ה�
 
 test('הגרסה עלתה (406 ומעלה), כולל ה-service worker', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /const APP_VERSION = '407'/); // גרסה 407: חיפוש בבדיקה שורה-שורה — מוצר שכבר בבדיקה אומר איפה הוא
-  assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_already_in_check'/);
-  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v407/);
+  assert.match(html, /const APP_VERSION = '408'/); // גרסה 408: סריקה בתוך הבדיקה שורה-שורה
+  assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_line_check_scan'/);
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v408/);
 });

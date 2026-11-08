@@ -31,8 +31,8 @@ test('the quantity window and the product card carry the crate controls, and the
   assert.match(html, /title="יח׳ בארגז — מפעיל את כפתור ״\+ ארגז״ בקליטה"/);
   assert.match(html, /עמודת 📦: יח׳ בארגז — מפעיל את כפתור ״\+ ארגז״ בקליטה\. אכיפת ״רק ארגזים שלמים״ לבלש מסומנת בכרטיס המוצר/);
   assert.doesNotMatch(html, /מלא <b>רק<\/b> למוצרים שמגיעים אך ורק בארגזים שלמים/);
-  assert.match(html, /const APP_VERSION = '407'/); // גרסה 407: חיפוש בבדיקה שורה-שורה — מוצר שכבר בבדיקה אומר איפה הוא, לא "לא נמצא מוצר כזה"
-  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v407/); // גרסה 407
+  assert.match(html, /const APP_VERSION = '408'/); // גרסה 408: סריקה בתוך הבדיקה שורה-שורה
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v408/); // גרסה 408
 });
 
 test('"+ ארגז" shows only for a product with a crate size, replaces the untouched 1 and then adds whole crates', () => {
