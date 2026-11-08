@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v408 סריקה בבדיקה שורה-שורה</title>
+    <title>הזמנות יטבתה - v409 בדיקה במסך מלא</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -28,6 +28,8 @@
       input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
       input[type="number"] { -moz-appearance: textfield; }
       .btn-tap { transition: transform .08s ease; }
+      /* v409: חלון הבדיקה (שורה-שורה / חוסרים ועודפים) — מרוחב 640px חלון ממורכז בגובה מוגבל; בטלפון הוא על כל המסך (h-full) */
+      @media (min-width: 640px) { .quantity-modal-box { max-height: 90vh; max-height: 90dvh; } }
       .btn-tap:active { transform: scale(.93); }
       .row-card { transition: background-color .15s ease, border-color .15s ease; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
       .row-card input { -webkit-user-select: text; user-select: text; }
@@ -125,7 +127,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v408 סריקה בבדיקה שורה-שורה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v409 בדיקה במסך מלא</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -325,16 +327,17 @@
       </div>
     </div>
 
-    <div id="receiptQuantityModal" role="dialog" aria-modal="true" aria-label="בדיקת כמויות ידנית" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm items-center justify-center p-3 z-[70]" dir="rtl">
-      <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col" style="max-height:90vh;max-height:90dvh">
-        <div class="p-4 border-b border-slate-100 shrink-0"><div class="flex items-center justify-between gap-2"><h3 id="receiptQuantityTitle" tabindex="-1" class="font-black text-xl text-slate-800 outline-none">חוסרים ועודפים</h3><button id="receiptQuantityClose" class="btn-tap p-2 text-slate-600 font-bold" aria-label="סגור בדיקת כמויות">חזרה</button></div>
+    <!-- v409: בטלפון החלון על כל המסך (בלי שוליים ופינות, בגובה המסך, עם ריפוד לפס המצב ולפס הבית); מרוחב 640px — חלון ממורכז כמו קודם -->
+    <div id="receiptQuantityModal" role="dialog" aria-modal="true" aria-label="בדיקת כמויות ידנית" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm items-stretch justify-center sm:items-center sm:p-3 z-[70]" dir="rtl">
+      <div class="quantity-modal-box bg-white sm:rounded-2xl shadow-2xl w-full sm:max-w-lg flex flex-col h-full sm:h-auto">
+        <div class="px-4 pb-4 pt-[max(1rem,env(safe-area-inset-top))] border-b border-slate-100 shrink-0"><div class="flex items-center justify-between gap-2"><h3 id="receiptQuantityTitle" tabindex="-1" class="font-black text-xl text-slate-800 outline-none">חוסרים ועודפים</h3><button id="receiptQuantityClose" class="btn-tap p-2 text-slate-600 font-bold" aria-label="סגור בדיקת כמויות">חזרה</button></div>
           <p id="receiptQuantityIntro" class="text-sm text-slate-600 mt-2">סמן רק את ההפרשים שמצאת. בסיום תאשר ששאר הכמויות תואמות.</p>
           <div id="receiptQuantityProgress" class="hidden text-sm font-black text-slate-700 mt-2" role="status" aria-live="polite"></div>
           <input id="receiptQuantitySearch" type="search" placeholder="חפש מוצר, גם אם אינו בתעודה" aria-label="חיפוש מוצר בבדיקה הידנית" class="w-full border-2 border-slate-200 rounded-xl p-3 mt-3 text-base">
         </div>
         <div id="receiptQuantityBody" class="p-4 overflow-y-auto min-h-0"><div id="receiptQuantityRows"></div><div id="receiptQuantityExtras"></div></div>
         <!-- v408: בבדיקה שורה-שורה — "סרוק מוצר" קבוע בתחתית, ליד "סיום" (שניהם מחוץ לגלילה); בבדיקה הקיימת — "אשר הפרשים" לבדו -->
-        <div id="receiptQuantityFooter" class="p-4 border-t border-slate-100 shrink-0 grid gap-2"><button id="receiptLineScan" type="button" class="btn-tap hidden min-h-[48px] rounded-xl bg-indigo-600 text-white font-black text-base flex items-center justify-center gap-2"><i class="fa-solid fa-barcode" aria-hidden="true"></i> סרוק מוצר</button><button id="receiptQuantityConfirm" class="btn-tap w-full bg-blue-600 text-white rounded-xl py-3 font-black text-base">אשר הפרשים — שאר הכמויות תואמות</button></div>
+        <div id="receiptQuantityFooter" class="px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] border-t border-slate-100 shrink-0 grid gap-2"><button id="receiptLineScan" type="button" class="btn-tap hidden min-h-[48px] rounded-xl bg-indigo-600 text-white font-black text-base flex items-center justify-center gap-2"><i class="fa-solid fa-barcode" aria-hidden="true"></i> סרוק מוצר</button><button id="receiptQuantityConfirm" class="btn-tap w-full bg-blue-600 text-white rounded-xl py-3 font-black text-base">אשר הפרשים — שאר הכמויות תואמות</button></div>
       </div>
     </div>
 
@@ -687,9 +690,9 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '408'; // סריקה בתוך הבדיקה שורה-שורה: "סרוק מוצר" קבוע בתחתית החלון, והברקוד מסמן את השורה (או "הגיע בנוסף")
+const APP_VERSION = '409'; // חלון הבדיקה (שורה-שורה / חוסרים ועודפים) במסך מלא בטלפון; מרוחב 640px — חלון ממורכז כמו קודם
 // v398: תווית הגרסה ביומן הפעולות ובקובץ הגיבוי (עד כאן מחרוזת קבועה שנשארה 'v396_second_strong_read')
-const APP_VERSION_LABEL = 'v' + APP_VERSION + '_line_check_scan';
+const APP_VERSION_LABEL = 'v' + APP_VERSION + '_full_screen_check';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
