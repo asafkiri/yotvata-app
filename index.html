@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v407 מוצר שכבר בבדיקה</title>
+    <title>הזמנות יטבתה - v408 סריקה בבדיקה שורה-שורה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -125,7 +125,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v407 מוצר שכבר בבדיקה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v408 סריקה בבדיקה שורה-שורה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -198,11 +198,11 @@
           <div id="scanFrame" class="w-72 h-44 border-4 border-white/90 rounded-2xl" style="box-shadow:0 0 0 9999px rgba(0,0,0,0.45)"></div>
         </div>
         <div class="absolute top-0 inset-x-0 p-4 flex items-center justify-between">
-          <span class="text-white font-black text-lg" style="text-shadow:0 1px 3px rgba(0,0,0,.6)">סריקת ברקוד</span>
+          <span id="scanTitle" class="text-white font-black text-lg" style="text-shadow:0 1px 3px rgba(0,0,0,.6)">סריקת ברקוד</span>
           <button id="scanClose" class="btn-tap w-11 h-11 rounded-full bg-black/50 text-white flex items-center justify-center"><i class="fa-solid fa-xmark text-xl"></i></button>
         </div>
         <div id="scanOverlay" class="hidden absolute top-16 inset-x-0 px-4 flex flex-col items-center gap-1 pointer-events-none">
-          <div class="bg-blue-600/90 text-white rounded-full px-4 py-1.5 font-black text-sm shadow-lg">פריטים: <span id="scanOverlayCount">0</span></div>
+          <div class="bg-blue-600/90 text-white rounded-full px-4 py-1.5 font-black text-sm shadow-lg"><span id="scanOverlayLabel">פריטים:</span> <span id="scanOverlayCount">0</span></div>
           <div id="scanOverlayName" class="text-white text-xs font-bold" style="text-shadow:0 1px 3px rgba(0,0,0,.7)"></div>
           <button id="scanPriceNotice" class="hidden pointer-events-auto bg-amber-100 text-amber-950 border-2 border-amber-300 rounded-xl px-3 py-2 text-sm font-black max-w-sm" type="button"></button>
         </div>
@@ -211,6 +211,8 @@
           <p id="scanDiag" class="text-white/60 text-[10px] font-bold mt-1" style="text-shadow:0 1px 3px rgba(0,0,0,.6)"></p>
         </div>
         <button id="scanTorch" class="btn-tap hidden absolute bottom-24 left-5 w-14 h-14 rounded-full bg-black/60 text-white flex items-center justify-center text-xl" title="פנס"><i class="fa-solid fa-bolt"></i></button>
+        <!-- v408: בסריקה בתוך הבדיקה שורה-שורה — הכרטיס של המוצר שנסרק, מעל הווידאו, מלמטה (המצלמה נשארת דולקת) -->
+        <div id="scanLineCard" class="hidden absolute inset-x-0 bottom-0 p-3 pb-5" dir="rtl" role="dialog" aria-label="המוצר שנסרק — מה הגיע"></div>
       </div>
     </div>
 
@@ -331,7 +333,8 @@
           <input id="receiptQuantitySearch" type="search" placeholder="חפש מוצר, גם אם אינו בתעודה" aria-label="חיפוש מוצר בבדיקה הידנית" class="w-full border-2 border-slate-200 rounded-xl p-3 mt-3 text-base">
         </div>
         <div id="receiptQuantityBody" class="p-4 overflow-y-auto min-h-0"><div id="receiptQuantityRows"></div><div id="receiptQuantityExtras"></div></div>
-        <div class="p-4 border-t border-slate-100 shrink-0"><button id="receiptQuantityConfirm" class="btn-tap w-full bg-blue-600 text-white rounded-xl py-3 font-black text-base">אשר הפרשים — שאר הכמויות תואמות</button></div>
+        <!-- v408: בבדיקה שורה-שורה — "סרוק מוצר" קבוע בתחתית, ליד "סיום" (שניהם מחוץ לגלילה); בבדיקה הקיימת — "אשר הפרשים" לבדו -->
+        <div id="receiptQuantityFooter" class="p-4 border-t border-slate-100 shrink-0 grid gap-2"><button id="receiptLineScan" type="button" class="btn-tap hidden min-h-[48px] rounded-xl bg-indigo-600 text-white font-black text-base flex items-center justify-center gap-2"><i class="fa-solid fa-barcode" aria-hidden="true"></i> סרוק מוצר</button><button id="receiptQuantityConfirm" class="btn-tap w-full bg-blue-600 text-white rounded-xl py-3 font-black text-base">אשר הפרשים — שאר הכמויות תואמות</button></div>
       </div>
     </div>
 
@@ -684,9 +687,9 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '407'; // חיפוש בבדיקה שורה-שורה: מוצר שכבר בבדיקה אומר איפה הוא ("הצג"), לא "לא נמצא מוצר כזה"
+const APP_VERSION = '408'; // סריקה בתוך הבדיקה שורה-שורה: "סרוק מוצר" קבוע בתחתית החלון, והברקוד מסמן את השורה (או "הגיע בנוסף")
 // v398: תווית הגרסה ביומן הפעולות ובקובץ הגיבוי (עד כאן מחרוזת קבועה שנשארה 'v396_second_strong_read')
-const APP_VERSION_LABEL = 'v' + APP_VERSION + '_already_in_check';
+const APP_VERSION_LABEL = 'v' + APP_VERSION + '_line_check_scan';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -3005,7 +3008,7 @@ function handoffEventKind(t) {
   if(t.closest('#draftHandoffBanner'))return null;
   if(t.closest('#receiptSummaryModal,#receiptQuantityModal,#aiOrientationModal,#aiLiveCamModal'))return 'receiving';
   if(t.closest('#sendModal'))return sendCtx&&sendCtx.type==='returns'?null:'order';
-  if(t.closest('#scanModal'))return scanPurpose==='receiving'?'receiving':null;
+  if(t.closest('#scanModal'))return scanPurpose==='receiving'||scanPurpose==='linecheck'?'receiving':null; // v408: גם הכרטיס שמעל המצלמה בבדיקה שורה-שורה
   if(t.closest('#qtyModal'))return qtyTarget==='receipt'?'receiving':null;
   return t.closest('#app,#confirmModal,#cartBtn')?handoffKind():null;
 }
@@ -7496,9 +7499,12 @@ async function openScanner() {
   ensureScanAudio();
   scanTickCount = 0;
   const m = $('scanModal'); m.classList.remove('hidden'); m.classList.add('flex');
-  const continuous = (scanPurpose === 'receiving' || scanPurpose === 'returns' || scanPurpose === 'promo' || scanPurpose === 'signprod');
+  const lineScan = scanPurpose === 'linecheck'; // v408: סריקה בתוך הבדיקה שורה-שורה — רציפה, עם כרטיס מעל הווידאו
+  const continuous = (scanPurpose === 'receiving' || scanPurpose === 'returns' || scanPurpose === 'promo' || scanPurpose === 'signprod' || lineScan);
   const ov = $('scanOverlay'); if (ov) ov.classList.toggle('hidden', !continuous);
-  const readyHint = continuous ? 'סרוק פריטים — לחץ ✕ לסיום' : 'כוון את הברקוד אל תוך המסגרת';
+  const title = $('scanTitle'); if (title) title.textContent = lineScan ? 'בדיקה שורה-שורה — סריקה' : 'סריקת ברקוד';
+  const label = $('scanOverlayLabel'); if (label) label.textContent = lineScan ? 'סומנו' : 'פריטים:';
+  const readyHint = lineScan ? 'סרוק מוצר מהסחורה — ✕ חוזר לרשימה' : continuous ? 'סרוק פריטים — לחץ ✕ לסיום' : 'כוון את הברקוד אל תוך המסגרת';
   setScanHint(continuous ? readyHint : 'מבקש גישה למצלמה...');
   try {
     if (nativeScanSupported() && !isIOSDevice()) {
@@ -7739,6 +7745,20 @@ function onScanned(val) {
     anApplyScannedCode(val);
     return;
   }
+  if (scanPurpose === 'linecheck') { // v408: סריקה בתוך הבדיקה שורה-שורה — הברקוד מעלה כרטיס מעל המצלמה, והלולאה מושהית עד שהכרטיס נסגר
+    if (receiptLineScanCard) return; // כרטיס פתוח — קריאה נוספת (מנוע הגיבוי קורא ברצף) אינה נספרת ואינה מתזמנת טיק
+    // אותו ברקוד שוב תוך 2 שניות — המוצר עדיין מול המצלמה אחרי שהכרטיס נסגר (lastScanTime מתחדש בסגירה), לא סריקה חדשה
+    const now = Date.now();
+    if (val === lastScanCode && (now - lastScanTime) < 2000) {
+      if (barcodeDetector && scanStream) scanTimer = setTimeout(scanTick, scanUsingWasm ? 150 : 250);
+      return;
+    }
+    lastScanCode = val; lastScanTime = now;
+    scanBeep(); buzz(50);
+    handleLineCheckScan(val);
+    if (!receiptLineScanCard && barcodeDetector && scanStream) scanTimer = setTimeout(scanTick, 350);
+    return;
+  }
   if (scanPurpose === 'receiving' || scanPurpose === 'returns' || scanPurpose === 'promo' || scanPurpose === 'signprod') {
     const now = Date.now();
     if (val === lastScanCode && (now - lastScanTime) < 1400) {
@@ -7757,6 +7777,7 @@ function onScanned(val) {
 }
 function closeScanner() {
   scannerEpoch++;
+  const lineScan = scanPurpose === 'linecheck'; // v408: בסגירה חוזרים לרשימה של הבדיקה שורה-שורה
   const restoreProductEditor = productEditorScanReturn;
   productEditorScanReturn = false;
   if (scanTimer) { clearTimeout(scanTimer); scanTimer = null; }
@@ -7773,6 +7794,7 @@ function closeScanner() {
   const ov = $('scanOverlay'); if (ov) ov.classList.add('hidden');
   const m = $('scanModal'); if (m) { m.classList.add('hidden'); m.classList.remove('flex'); }
   scanPurpose = 'field';
+  if (lineScan) receiptLineScanClosed();
 }
 
 // ===== Undo (toast) =====
@@ -9154,6 +9176,9 @@ function receiptQuantityModalMode(lines) {
   const title = $('receiptQuantityTitle'), intro = $('receiptQuantityIntro'), progress = $('receiptQuantityProgress'), search = $('receiptQuantitySearch'), ok = $('receiptQuantityConfirm');
   // v405: בבדיקה שורה-שורה גוף החלון אפור (כמו מסך הקליטה), והכרטיסים הלבנים נפרדים זה מזה; הבדיקה הקיימת — לבן כמו קודם
   const body = $('receiptQuantityBody'); if (body) body.classList[lines ? 'add' : 'remove']('bg-slate-50');
+  // v408: "סרוק מוצר" ליד "סיום" בתחתית הקבועה — רק בבדיקה שורה-שורה; בבדיקה הקיימת הכפתור היחיד כמו קודם
+  const footer = $('receiptQuantityFooter'); if (footer) footer.classList[lines ? 'add' : 'remove']('grid-cols-[1.15fr_1fr]');
+  const scan = $('receiptLineScan'); if (scan) scan.classList[lines ? 'remove' : 'add']('hidden');
   if (!lines) {
     title.textContent = 'חוסרים ועודפים';
     intro.textContent = 'סמן רק את ההפרשים שמצאת. בסיום תאשר ששאר הכמויות תואמות.';
@@ -9163,7 +9188,7 @@ function receiptQuantityModalMode(lines) {
     return;
   }
   title.textContent = 'בדיקה שורה-שורה';
-  intro.textContent = 'עבור על הסחורה וסמן כל שורה: הגיע, כמות אחרת או לא הגיע. כל תעודה בנפרד.';
+  intro.textContent = 'סרוק מוצר מהסחורה, או סמן ביד בכל שורה: הגיע, כמות אחרת או לא הגיע.'; // v408
   search.classList.add('hidden');
   refreshReceiptLineProgress();
 }
@@ -9481,6 +9506,205 @@ function receiptLineCheckDrop(di) {
   saveReceiptDraft(); renderReceiving();
   if (receiptQuantityReview) { receiptLineNotice = { tone: 'ok', text: name + ' יצאה מהקליטה, והצילום שלה נמחק מהטלפון' }; renderReceiptQuantityReview(); }
   else { closeReceiptQuantityReview(); showToast(name + ' יצאה מהקליטה — בחר שוב איך לבדוק את הכמויות', null, null, 4000); }
+}
+// ===== v408: סריקה בתוך הבדיקה שורה-שורה =====
+// בקשת המשתמשים: לא לבחור בין "לסרוק" ל"לבדוק שורה-שורה" — באותה בדיקה, מי שרוצה סורק ומי שרוצה מסמן ביד. הסריקה היא עוד
+// אצבע: היא ממלאת בדיוק את שני השדות של השורה (mark / got) דרך אותו נתיב כמו לחיצה על "הגיע" (receiptLineCheckChanged —
+// הטיוטה, השורות לכל מוצר), ולכן "סיום", ההשוואה, מה שנשמר בקליטה והכרטיס בהיסטוריה אינם משתנים.
+// - "סרוק מוצר" (receiptLineScan) יושב בתחתית הקבועה של החלון ליד "סיום" — גלוי תמיד, לא תלוי בגלילה. הלחיצה מסתירה את
+//   החלון (שכבה 70, מעל המצלמה בשכבה 55) ופותחת את המצלמה במצב רציף (scanPurpose = 'linecheck').
+// - ברקוד שנסרק → כרטיס מעל הווידאו (scanLineCard), מלמטה, והמצלמה נשארת דולקת; לולאת הסריקה מושהית עד שהכרטיס נסגר
+//   (onScanned אינו מתזמן טיק כשהכרטיס פתוח, וסגירת הכרטיס מתזמנת אחד). "הגיע N" (ברירת המחדל — הכמות בתעודה, לא 1 כמו
+//   בקליטה בסריקה) / "אחרת" (שדה כמות) / "לא הגיע", ו-✕ קטן שסוגר בלי לסמן.
+// - איזו שורה: הברקוד נבדק קודם מול שורות התעודות (ברקוד שקיים בשני מוצרים במאגר נפתר למוצר שבנייר), ואחריו מול המאגר.
+//   אותו מוצר בכמה שורות (שתי תעודות) — השורה הראשונה שעוד לא סומנה; כשכולן סומנו — הראשונה, עם מה שסומן בה ואפשרות לשנות.
+//   יחידה שסרקו כשבתעודה מארז החיוב שלה (billingPackId), או להפך — השורה של הקרוב, והכרטיס אומר זאת במקום להוסיף "הגיע בנוסף".
+// - מוצר שאינו באף תעודה → כרטיס "לא בתעודה — הגיע בנוסף" עם כמות (1), ונכנס ל"הגיע משהו נוסף" (extras) כמו מהחיפוש; מוצר
+//   שכבר שם — הכמות הנוכחית, "עדכן". ברקוד שאינו במאגר → אותה הודעה כמו בקליטה בסריקה (rejectUnknownReceivingBarcode).
+// - על המצלמה: "סומנו 9 מתוך 28" (scanOverlayCount) והפעולה האחרונה (scanOverlayName). ✕ → closeScanner →
+//   receiptLineScanClosed: החלון חוזר, מצויר מחדש (מה שסומן בסריקה מקופל כמו ביד), והשורה האחרונה שסומנה מודגשת (receiptLineReveal).
+// - receiptLineScanEpoch — receiptLocalEpoch בפתיחת הסריקה: סריקה או לחיצה בכרטיס אחרי שהקליטה התחלפה סוגרות את המצלמה בלי לסמן.
+let receiptLineScanCard = null, receiptLineScanLast = null, receiptLineScanEpoch = null;
+function openReceiptLineScanner() {
+  const r = receiptQuantityReview;
+  if (!r || r.mode !== 'lines' || !canEditDraft('receiving')) return;
+  receiptLineScanEpoch = receiptLocalEpoch;
+  receiptLineScanCard = null; receiptLineScanLast = null;
+  lastScanCode = ''; lastScanTime = 0;
+  const m = $('receiptQuantityModal'); m.classList.add('hidden'); m.classList.remove('flex');
+  scanPurpose = 'linecheck';
+  refreshReceiptLineScanOverlay('');
+  openScanner();
+}
+// "סומנו 9 מתוך 28" בעיגול שבראש המצלמה, ומתחתיו מה סומן זה עתה
+function refreshReceiptLineScanOverlay(last) {
+  const r = receiptQuantityReview; if (!r || r.mode !== 'lines') return;
+  const total = receiptLineCheckTotal(r), openLines = receiptLineCheckOpen(r).filter(x => x.extra == null).length;
+  const c = $('scanOverlayCount'); if (c) c.textContent = (total - openLines) + ' מתוך ' + total;
+  const n = $('scanOverlayName'); if (n) n.textContent = last || '';
+}
+// מה נסרק ואיזו שורה זו. line — { di, li, scanned, related (המוצר בשורה כשאינו מה שנסרק), others (עוד שורות של אותו מוצר) };
+// extra — { k (המקום ב"הגיע משהו נוסף", או -1), scanned }; unknown — הברקוד אינו במאגר
+function receiptLineScanTarget(code) {
+  const r = receiptQuantityReview, key = normalizeBarcode(code);
+  if (!r || r.mode !== 'lines' || !key) return { kind: 'unknown' };
+  const lines = [];
+  (r.docs || []).forEach((d, di) => (d.lines || []).forEach((l, li) => lines.push({ di, li, l })));
+  const onPaper = lines.find(x => normalizeBarcode(x.l.barcode) === key);
+  const scanned = onPaper ? (products.find(p => p.id === onPaper.l.productId) || null) : findProductByBarcode(code);
+  if (!scanned) return { kind: 'unknown' };
+  const pick = ids => {
+    const hits = lines.filter(x => ids.has(x.l.productId));
+    if (!hits.length) return null;
+    const open = hits.filter(x => receiptLineGot(x.l) == null);
+    return { di: (open[0] || hits[0]).di, li: (open[0] || hits[0]).li, others: hits.length - 1 };
+  };
+  const exact = pick(new Set([scanned.id]));
+  if (exact) return { kind: 'line', ...exact, scanned, related: null };
+  const kin = new Set();
+  if (scanned.billingPackId) kin.add(scanned.billingPackId);
+  products.forEach(p => { if (p && p.billingPackId === scanned.id) kin.add(p.id); });
+  const near = kin.size ? pick(kin) : null;
+  if (near) return { kind: 'line', ...near, scanned, related: products.find(p => p.id === r.docs[near.di].lines[near.li].productId) || null };
+  return { kind: 'extra', k: (r.extras || []).findIndex(x => x && x.productId === scanned.id), scanned };
+}
+function handleLineCheckScan(code) {
+  const r = receiptQuantityReview;
+  if (!r || r.mode !== 'lines' || receiptLineScanEpoch !== receiptLocalEpoch || !canEditDraft('receiving')) { closeScanner(); return; }
+  const t = receiptLineScanTarget(code);
+  if (t.kind === 'unknown') { rejectUnknownReceivingBarcode(); return; }
+  receiptLineScanCard = t.kind === 'line'
+    ? { kind: 'line', di: t.di, li: t.li, others: t.others, scanned: t.scanned, related: t.related, askQty: false, got: '' }
+    : { kind: 'extra', k: t.k, scanned: t.scanned, got: t.k >= 0 ? String(r.extras[t.k].got == null ? '' : r.extras[t.k].got) : '1' };
+  renderReceiptLineScanCard();
+}
+// הכמות שהוקלדה בכרטיס — מספר שלם (0 ומעלה; ב"נוסף" — 1 ומעלה), או null
+function receiptLineScanGotNumber(c) {
+  const t = String(c && c.got != null ? c.got : '').trim();
+  if (!/^\d{1,5}$/.test(t)) return null;
+  const n = Number(t);
+  return c.kind === 'extra' && n === 0 ? null : n;
+}
+function receiptLineScanSumText(c) {
+  const n = receiptLineScanGotNumber(c);
+  if (n == null) return c.invalid ? 'הקלד מספר — כמה יחידות הגיעו' : 'הקלד כמה יחידות הגיעו';
+  if (c.kind === 'extra') return 'התקבלו ' + n + ' · עודף ' + n;
+  const l = receiptQuantityReview.docs[c.di].lines[c.li];
+  return n === l.paperQty ? 'כמו בתעודה' : 'התקבלו ' + n + ' · ' + (n < l.paperQty ? 'חוסר ' + (l.paperQty - n) : 'עודף ' + (n - l.paperQty));
+}
+// שדה הכמות ו"שמור" — ל"אחרת" בשורת תעודה ול"הגיע בנוסף"
+function receiptLineScanQtyHtml(c, name, saveText) {
+  return '<div class="flex items-center gap-2 mt-3"><label class="flex items-center gap-2 text-sm font-bold text-slate-700 flex-1 min-w-0">כמה הגיע?<input id="scanLineGot" data-scan-got type="text" inputmode="numeric" autocomplete="off" value="' + htmlEscape(c.got) + '" aria-label="כמה הגיע: ' + htmlEscape(name) + '" class="w-24 border-2 border-amber-400 rounded-xl p-2 text-xl text-center font-black bg-white tabular-nums"></label>' +
+      '<button type="button" data-scan-save class="btn-tap min-h-[52px] px-5 rounded-xl font-black bg-amber-500 text-white">' + saveText + '</button></div>' +
+    '<div id="scanLineSum" class="text-sm font-bold mt-1 ' + (c.invalid ? 'text-rose-700' : 'text-amber-800') + '" aria-live="polite">' + receiptLineScanSumText(c) + '</div>';
+}
+// הכרטיס: שורת תעודה — כמו השורה ברשימה (מספר השורה, השם, מחיר הקופה, הכמות בתעודה גדולה) ושלושת הכפתורים; "נוסף" — כמו
+// הכרטיס הצהוב, עם הכמות
+function receiptLineScanCardHtml(c) {
+  const r = receiptQuantityReview;
+  if (c.kind === 'line') {
+    const l = r.docs[c.di].lines[c.li], p = products.find(x => x.id === l.productId) || null, got = receiptLineGot(l), multi = r.docs.length > 1;
+    const kin = c.related ? '<div class="text-xs font-black text-indigo-900 bg-indigo-50 border border-indigo-200 rounded-lg px-2 py-1.5 mb-2">סרקת ' + htmlEscape(c.scanned.name) + ' — בתעודה ' +
+      (c.scanned.billingPackId === c.related.id ? 'מארז החיוב שלו' : 'היחידה הבודדת שלו') + ':</div>' : '';
+    const state = got == null ? '' : '<div class="text-xs font-black mt-1 ' + (got === l.paperQty ? 'text-emerald-700' : got === 0 ? 'text-rose-700' : 'text-amber-700') + '">כבר סומנה: ' +
+      (got === l.paperQty ? 'הגיע' : got === 0 ? 'לא הגיע' : 'הגיעו ' + got) + ' — אפשר לשנות</div>';
+    const others = c.others ? '<div class="text-[11px] font-bold text-slate-500 mt-1">המוצר גם בשורה נוספת' + (multi ? ' (תעודה אחרת)' : '') + ' — סרוק שוב כדי להגיע אליה</div>' : '';
+    const box = receiptLineBoxText(p, l.paperQty);
+    const btn = (mark, icon, text, cls, size) => '<button type="button" data-scan-mark="' + mark + '" class="btn-tap min-h-[52px] rounded-xl font-black flex items-center justify-center gap-1 ' + size + ' ' + cls + '"><i class="fa-solid ' + icon + '" aria-hidden="true"></i> ' + text + '</button>';
+    return kin + '<div class="flex items-start gap-3 pl-10"><div class="flex-1 min-w-0">' +
+        '<div class="text-[11px] font-black text-slate-400">שורה ' + l.line + (multi ? ' בתעודה ' + (c.di + 1) + ' מתוך ' + r.docs.length : ' בתעודה') + '</div>' +
+        '<div class="font-black text-lg text-slate-800 leading-tight">' + htmlEscape(l.name) + '</div>' + posPriceLineHtml(p) + state + others + '</div>' +
+        '<div class="shrink-0 text-center"><div class="text-3xl font-black text-slate-900 leading-none tabular-nums">' + l.paperQty + '</div><div class="text-[11px] font-bold text-slate-500">יח׳ בתעודה</div>' +
+          (box ? '<div class="text-[11px] font-bold text-slate-400">' + box + '</div>' : '') + '</div></div>' +
+      (c.askQty ? receiptLineScanQtyHtml(c, l.name, 'שמור')
+        : '<div class="grid grid-cols-[1fr_auto_auto] gap-1.5 mt-3" role="group" aria-label="' + htmlEscape(l.name) + ' — מה הגיע">' +
+          btn('ok', 'fa-check', 'הגיע ' + l.paperQty, 'bg-emerald-600 text-white', 'text-base px-1 min-w-0') +
+          btn('qty', 'fa-pen', 'אחרת', 'bg-white border border-slate-300 text-slate-700', 'text-sm px-2 whitespace-nowrap') +
+          btn('none', 'fa-xmark', 'לא הגיע', 'bg-white border border-slate-300 text-slate-700', 'text-sm px-2 whitespace-nowrap') + '</div>');
+  }
+  const p = c.scanned, inList = c.k >= 0;
+  return '<div class="pl-10"><div class="text-[11px] font-black text-amber-700">' + (inList ? 'כבר ברשימה ״הגיע משהו נוסף״' : 'לא בתעודה — הגיע בנוסף') + '</div>' +
+      '<div class="font-black text-lg text-slate-800 leading-tight">' + htmlEscape(p.name) + '</div>' + posPriceLineHtml(p) +
+      '<div class="text-[11px] text-slate-400 mt-0.5"><i class="fa-solid fa-barcode"></i> ' + htmlEscape(p.barcode || 'ללא ברקוד') + '</div></div>' +
+    receiptLineScanQtyHtml(c, p.name, inList ? 'עדכן' : 'הוסף');
+}
+function renderReceiptLineScanCard() {
+  const box = $('scanLineCard'); if (!box) return;
+  const c = receiptLineScanCard, r = receiptQuantityReview;
+  if (!c || !r || r.mode !== 'lines') { box.innerHTML = ''; box.classList.add('hidden'); return; }
+  box.innerHTML = '<div class="relative bg-white rounded-2xl shadow-2xl p-3 max-w-lg mx-auto ' + (c.kind === 'extra' ? 'border-2 border-amber-300' : '') + '">' +
+    '<button type="button" data-scan-dismiss class="btn-tap absolute top-2 left-2 w-10 h-10 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center" aria-label="סגור בלי לסמן"><i class="fa-solid fa-xmark" aria-hidden="true"></i></button>' +
+    receiptLineScanCardHtml(c) + '</div>';
+  box.classList.remove('hidden');
+  if (c.askQty || c.kind === 'extra') { const i = $('scanLineGot'); if (i && i.focus) { try { i.focus(); i.select && i.select(); } catch (e) {} } }
+}
+// סגירת הכרטיס — והסריקה ממשיכה (טיק אחד; הלולאה הייתה מושהית כל עוד הכרטיס היה פתוח). המוצר שזה עתה סומן עדיין מול
+// המצלמה — הברקוד שלו לא ייקרא שוב בשתי השניות הבאות (onScanned)
+function closeReceiptLineScanCard() {
+  receiptLineScanCard = null; lastScanTime = Date.now();
+  renderReceiptLineScanCard();
+  if (scanPurpose === 'linecheck' && barcodeDetector && scanStream) scanTimer = setTimeout(scanTick, 350);
+}
+// הסימון מהכרטיס — אותם שדות ואותו נתיב כמו לחיצה ברשימה (receiptLineCheckClick): mark/got, קיפול, הטיוטה והשורות לכל מוצר
+function receiptLineScanApply(mark, got) {
+  const r = receiptQuantityReview, c = receiptLineScanCard;
+  if (!r || r.mode !== 'lines' || !c || c.kind !== 'line') return false;
+  if (receiptLineScanEpoch !== receiptLocalEpoch || !canEditDraft('receiving')) { closeScanner(); return false; }
+  const l = r.docs[c.di] && r.docs[c.di].lines[c.li]; if (!l) { closeReceiptLineScanCard(); return false; }
+  l.mark = mark; l.got = mark === 'qty' ? String(got) : '';
+  receiptLineOpen.delete(c.di + ':' + c.li); receiptLineDropAsk = null; receiptLineNotice = null;
+  receiptLineCheckChanged();
+  receiptLineScanLast = 'lineCheck_' + c.di + '_' + c.li;
+  const n = receiptLineGot(l);
+  refreshReceiptLineScanOverlay((n === l.paperQty ? '✓ ' : n === 0 ? '✗ ' : '✎ ') + l.name + ' · ' + (n === l.paperQty ? 'הגיע ' + n : n === 0 ? 'לא הגיע' : 'הגיעו ' + n + ' מתוך ' + l.paperQty));
+  closeReceiptLineScanCard();
+  return true;
+}
+// "הגיע בנוסף" מהכרטיס — כמו "+ מוצר" מהחיפוש (data-extra-add), עם הכמות שהוקלדה; מוצר שכבר שם — הכמות מתעדכנת
+function receiptLineScanApplyExtra(got) {
+  const r = receiptQuantityReview, c = receiptLineScanCard;
+  if (!r || r.mode !== 'lines' || !c || c.kind !== 'extra') return false;
+  if (receiptLineScanEpoch !== receiptLocalEpoch || !canEditDraft('receiving')) { closeScanner(); return false; }
+  const p = c.scanned;
+  if (r.docs.some(d => d.lines.some(l => l.productId === p.id))) { closeReceiptLineScanCard(); return false; }
+  r.extras = r.extras || [];
+  let k = r.extras.findIndex(x => x && x.productId === p.id);
+  if (k < 0) { r.extras.push({ productId: p.id, name: p.name, barcode: p.barcode || '', got: String(got) }); k = r.extras.length - 1; }
+  else r.extras[k].got = String(got);
+  receiptLineNotice = null; receiptLineCheckChanged();
+  receiptLineScanLast = 'lineExtra_' + k;
+  refreshReceiptLineScanOverlay('+ ' + p.name + ' · ' + got + ' יח׳ — לא בתעודה');
+  closeReceiptLineScanCard();
+  return true;
+}
+function receiptLineScanSave() {
+  const c = receiptLineScanCard; if (!c) return false;
+  const n = receiptLineScanGotNumber(c);
+  if (n == null) { c.invalid = true; renderReceiptLineScanCard(); return false; }
+  return c.kind === 'extra' ? receiptLineScanApplyExtra(n) : receiptLineScanApply('qty', n);
+}
+function receiptLineScanCardClick(e) {
+  const c = receiptLineScanCard; if (!c) return;
+  const t = e.target.closest('[data-scan-mark], [data-scan-save], [data-scan-dismiss]'); if (!t) return;
+  if (t.dataset.scanDismiss != null) { closeReceiptLineScanCard(); return; }
+  if (t.dataset.scanSave != null) { receiptLineScanSave(); return; }
+  const mark = t.dataset.scanMark;
+  if (mark === 'qty') { c.askQty = true; c.got = ''; c.invalid = false; renderReceiptLineScanCard(); return; }
+  if (mark === 'ok' || mark === 'none') receiptLineScanApply(mark, '');
+}
+function receiptLineScanCardInput(e) {
+  const c = receiptLineScanCard, el = e.target; if (!c || !el || !el.dataset || el.dataset.scanGot == null) return;
+  c.got = el.value; c.invalid = false;
+  const s = $('scanLineSum'); if (s) { s.textContent = receiptLineScanSumText(c); s.className = 'text-sm font-bold mt-1 text-amber-800'; }
+}
+// ✕ במצלמה (או כשל מצלמה, או קליטה שהתחלפה): חזרה לרשימה — מצוירת מחדש עם מה שסומן בסריקה, והשורה האחרונה שסומנה מודגשת
+function receiptLineScanClosed() {
+  receiptLineScanCard = null; renderReceiptLineScanCard();
+  const r = receiptQuantityReview, last = receiptLineScanLast;
+  receiptLineScanLast = null; receiptLineScanEpoch = null;
+  if (!r || r.mode !== 'lines') return;
+  renderReceiptQuantityReview();
+  if (last) receiptLineReveal(last);
 }
 // תעודה שצולמה לקליטה הפתוחה ואינה שלנו — יוצאת ממנה כאילו לא צולמה, בדיוק כמו "הסר תעודה" במסך הצילום
 // (rc-photo-remove-doc): הצילום והקריאה שלה נמחקים מהטלפון, התעודות שנשארו ממוספרות מחדש (receiptRebuildScanResponse),
@@ -25656,6 +25880,11 @@ $('receiptQuantityClose').addEventListener('click', closeReceiptQuantityReview);
 // v403: בבדיקה שורה-שורה "סיום" בודק שכל השורות סומנו ומתרגם אותן לאותן שורות כמו "יש חוסרים או עודפים"
 $('receiptQuantityConfirm').addEventListener('click', e => { if (receiptQuantityReview && receiptQuantityReview.mode === 'lines') finishReceiptLineCheck(); else commitReceiptQuantityReview(e); });
 $('receiptQuantityModal').addEventListener('keydown', e => { if (e.key === 'Escape') closeReceiptQuantityReview(); });
+// v408: סריקה בתוך הבדיקה שורה-שורה — "סרוק מוצר" בתחתית החלון, והכרטיס שמעל המצלמה
+$('receiptLineScan').addEventListener('click', openReceiptLineScanner);
+$('scanLineCard').addEventListener('click', receiptLineScanCardClick);
+$('scanLineCard').addEventListener('input', receiptLineScanCardInput);
+$('scanLineCard').addEventListener('keydown', e => { if (e.key === 'Enter' && e.target && e.target.dataset && e.target.dataset.scanGot != null) { e.preventDefault(); receiptLineScanSave(); } });
 $('receiptQuantitySearch').addEventListener('input', e => renderReceiptQuantityRows(e.target.value));
 $('receiptQuantityRows').addEventListener('input', e => {
   if (receiptQuantityReview && receiptQuantityReview.mode === 'lines') { receiptLineCheckInput(e); return; } // v403

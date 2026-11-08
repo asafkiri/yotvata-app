@@ -477,9 +477,9 @@ test('11. הכרטיס של "הגיע משהו נוסף" כמו שורת תעו�
   assert.deepEqual(json(r, 'receiptList.map(l => l.productId + " " + l.qty).sort()'), ['butter 4', 'cottage 6', 'cream 2', 'milk 17', 'yogurt 4']);
 });
 
-test('הגרסה עלתה ל-407, כולל ה-service worker', () => {
+test('הגרסה עלתה ל-408, כולל ה-service worker', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /const APP_VERSION = '407'/);
-  assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_already_in_check'/);
-  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v407/);
+  assert.match(html, /const APP_VERSION = '408'/);
+  assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_line_check_scan'/);
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v408/);
 });
