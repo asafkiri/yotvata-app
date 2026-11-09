@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v411 עוד כמה? והמספר קובע</title>
+    <title>הזמנות יטבתה - v412 מוצר אחד — שורה אחת</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -127,7 +127,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v411 עוד כמה? והמספר קובע</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v412 מוצר אחד — שורה אחת</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -690,9 +690,9 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '411'; // בדיקה שורה-שורה: סריקה חוזרת של שורה שסומנה — "סרקת עד עכשיו 1 מתוך 2 — עוד כמה?", ומה שמוקלד מתווסף; והמספר קובע את הסימון
+const APP_VERSION = '412'; // בדיקה שורה-שורה: מוצר אחד — שורה אחת, גם כשהוא בשתי תעודות; החלוקה בין התעודות אוטומטית, והחוסר על האחרונה
 // v398: תווית הגרסה ביומן הפעולות ובקובץ הגיבוי (עד כאן מחרוזת קבועה שנשארה 'v396_second_strong_read')
-const APP_VERSION_LABEL = 'v' + APP_VERSION + '_scan_add';
+const APP_VERSION_LABEL = 'v' + APP_VERSION + '_line_groups';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -9036,8 +9036,10 @@ function receiptQuantityCheckAudit() {
   // v403: בדיקה שורה-שורה — מה סומן בכל תעודה (לפירוט לפי תעודה בהיסטוריה). בלי מערכים בתוך מערכים (Firestore)
   if (r.mode === 'lines') {
     audit.byLine = true;
+    // v412: מוצר שמופיע בכמה שורות (תעודות) נספר יחד, והחלוקה בין השורות אוטומטית — split, כדי שהכרטיס בהיסטוריה יאמר זאת
+    const multi = new Set(receiptLineGroups(r).filter(g => g.lines.length > 1).map(g => g.productId));
     audit.papers = (r.docs || []).map(d => ({ number: d.number || null, amount: d.amount == null ? null : d.amount,
-      lines: (d.lines || []).map(l => ({ productId: l.productId, paperQty: l.paperQty, got: receiptLineGot(l) })) }));
+      lines: (d.lines || []).map(l => Object.assign({ productId: l.productId, paperQty: l.paperQty, got: receiptLineGot(l) }, multi.has(l.productId) ? { split: true } : {})) }));
   }
   return audit;
 }
@@ -9146,8 +9148,7 @@ function receiptLineCarryScanned(docs) {
     if (!q || lines.some(l => l.mark)) return;
     const total = lines.reduce((a, l) => a + l.paperQty, 0);
     if (q === total) lines.forEach(l => { l.mark = 'ok'; l.got = ''; });
-    else if (lines.length === 1) { lines[0].mark = 'qty'; lines[0].got = String(q); }
-    else lines.forEach(l => { l.scanned = q; });
+    else receiptLineGroupSet({ lines: lines.map(l => ({ l })) }, 'qty', String(q)); // v412: גם מוצר בכמה תעודות — המספר מתחלק לפי הסדר, במקום להישאר פתוח עם הערה
   });
 }
 // בדיקה חדשה; מה שכבר סומן (prev) נשאר בשורות שעדיין קיימות — אחרי שתעודה יצאה מהקליטה, או כשחוזרים לבדיקה; מה שנסרק
@@ -9158,6 +9159,7 @@ function receiptLineCheckFresh(found, prev) {
   if (prev && prev.mode === 'lines') (prev.docs || []).forEach(d => (d.lines || []).forEach(l => old.set(keyOf(d, l), l)));
   const docs = found.docs.map(d => ({ ...d, lines: d.lines.map(l => { const o = old.get(keyOf(d, l)); return o && o.paperQty === l.paperQty ? { ...l, mark: o.mark || '', got: o.got || '' } : l; }) }));
   receiptLineCarryScanned(docs); // v410
+  receiptLineGroupsNormalize({ docs }); // v412
   const onPaper = new Set(found.paperRows.map(r => r.productId));
   // מה שנספר ואינו בתעודות — "הגיע משהו נוסף" (כמו העודפים שנספרו ב"יש חוסרים או עודפים"); מה שכבר הוסף שם — נשאר
   const extras = (prev && prev.mode === 'lines' ? (prev.extras || []) : []).filter(x => x && !onPaper.has(x.productId));
@@ -9207,14 +9209,92 @@ function receiptLineSettle(r) {
   }));
   return changed;
 }
-// השורה הראשונה שעוד לא הושלמה (או "נוסף" בלי כמות) — לסיום ולמונה
+// v412: מוצר אחד — שורה אחת (כמו ברמן 164). בעל העסק (9.11.2026): "אני עדיין לא בטוח מה נעשה כשיהיו שתי תעודות — זה יסבך את
+// כל המערכת". הסחורה על הרצפה לא אומרת לאיזו תעודה היא שייכת, ולכן מוצר שמופיע בכמה תעודות (או בכמה שורות) נספר פעם אחת:
+// שורותיו הן קבוצה אחת עם הסך שלהן, והחלוקה בין השורות אוטומטית — ממלאים לפי סדר התעודות, והשארית (חוסר או עודף) על
+// האחרונה. הקבוצה היא מבט על השורות: מה שנשמר נשאר לכל שורה בכל תעודה (receiptLineGot), ולכן "סיום", ההשוואה, מה שנשמר
+// והכרטיס בהיסטוריה אינם משתנים במבנה. העוגן של הקבוצה הוא השורה הראשונה שלה (ה-id של הכרטיס והמפתחות data-line-*); שאר
+// השורות מוצגות בתעודה שלהן כשורת הפניה ("נספר יחד עם תעודה 1", receiptLinePointerHtml).
+function receiptLineGroups(r) {
+  const groups = [], byProduct = new Map();
+  ((r && r.docs) || []).forEach((d, di) => (d.lines || []).forEach((l, li) => {
+    let g = byProduct.get(l.productId);
+    if (!g) { g = { key: di + ':' + li, di, li, productId: l.productId, lines: [], paperQty: 0 }; byProduct.set(l.productId, g); groups.push(g); }
+    g.lines.push({ di, li, l }); g.paperQty += l.paperQty;
+  }));
+  return groups;
+}
+function receiptLineGroupOf(r, di, li) {
+  const l = r && r.docs && r.docs[di] && r.docs[di].lines[li];
+  return l ? receiptLineGroups(r).find(g => g.productId === l.productId) || null : null;
+}
+// כמה הגיע בקבוצה — הסך של השורות כשכולן סומנו; אחרת null (פתוחה)
+function receiptLineGroupGot(g) {
+  let total = 0;
+  for (const x of g.lines) { const n = receiptLineGot(x.l); if (n == null) return null; total += n; }
+  return total;
+}
+// הסימון בנתונים של הקבוצה: כל השורות "הגיע" — ok; כולן "לא הגיע" — none; יש שורה "אחרת", או שכולן סומנו בערבוב — qty (השדה
+// מוצג עם הסך); אחרת — '' (עוד לא סומנה)
+function receiptLineGroupMark(g) {
+  const marks = g.lines.map(x => x.l.mark || '');
+  if (marks.every(m => m === 'ok')) return 'ok';
+  if (marks.every(m => m === 'none')) return 'none';
+  return marks.some(m => m === 'qty') || marks.every(m => m) ? 'qty' : '';
+}
+// כפי שהקבוצה נראית — לפי הסך מול הכמות בתעודות (כמו receiptLineShownMark לשורה אחת)
+function receiptLineGroupShown(g) {
+  const n = receiptLineGroupGot(g);
+  return n == null ? receiptLineGroupMark(g) : receiptLineMarkFor(g, n);
+}
+// מה שבשדה הכמות של הקבוצה: הסך כשבכל השורות יש מספר, ואחרת מה שהוקלד (שמור בשורה הראשונה)
+function receiptLineGroupText(g) {
+  const n = receiptLineGroupGot(g);
+  return n == null ? String(g.lines[0].l.got == null ? '' : g.lines[0].l.got) : String(n);
+}
+// הסימון של הקבוצה נכתב לשורות: "הגיע"/"לא הגיע" — לכל שורה; "אחרת" עם מספר — מתחלק לפי הסדר, השארית על האחרונה; מה שאינו
+// מספר (ריק, או באמצע הקלדה) — נשמר כמו שהוא בכל השורות, והקבוצה פתוחה עד שיוקלד מספר. ההחלפה ל"הגיע"/"לא הגיע" לפי המספר —
+// ב-receiptLineSettle, לא כאן, כדי שהכרטיס לא יתקפל תוך כדי הקלדה.
+function receiptLineGroupSet(g, mark, text) {
+  if (mark !== 'qty') { g.lines.forEach(x => { x.l.mark = mark; x.l.got = ''; }); return; }
+  const raw = String(text == null ? '' : text), t = raw.trim();
+  if (!/^\d{1,5}$/.test(t)) { g.lines.forEach(x => { x.l.mark = 'qty'; x.l.got = raw; }); return; }
+  let left = Number(t);
+  g.lines.forEach((x, i) => {
+    const share = i === g.lines.length - 1 ? left : Math.min(left, x.l.paperQty);
+    x.l.mark = 'qty'; x.l.got = String(share); left -= share;
+  });
+}
+function receiptLineGroupSumText(g) {
+  const n = receiptLineGroupGot(g);
+  if (n == null) return 'הקלד כמה יחידות הגיעו';
+  return n === g.paperQty ? 'כמו בתעודה' : 'התקבלו ' + n + ' · ' + (n < g.paperQty ? 'חוסר ' + (g.paperQty - n) : 'עודף ' + (n - g.paperQty));
+}
+// "יח׳ ב-2 תעודות" (או "ב-2 שורות" כשהן באותה תעודה), "12 + 5", ו"גם בתעודה 2 (5 יח׳)"
+function receiptLineGroupUnitsLabel(g) {
+  if (g.lines.length < 2) return 'יח׳ בתעודה';
+  const docs = new Set(g.lines.map(x => x.di)).size;
+  return docs > 1 ? 'יח׳ ב-' + docs + ' תעודות' : 'יח׳ ב-' + g.lines.length + ' שורות';
+}
+function receiptLineGroupSplitText(g) { return g.lines.length < 2 ? '' : g.lines.map(x => x.l.paperQty).join(' + '); }
+function receiptLineGroupAlsoText(g, di) {
+  const others = g.lines.filter(x => x.di !== di);
+  return others.length ? 'גם ' + others.map(x => 'בתעודה ' + (x.di + 1) + ' (' + x.l.paperQty + ' יח׳)').join(', ') : '';
+}
+// יישור הקבוצות בבנייה ובפתיחה (אין אז שדה פתוח שעלול להתקפל): מוצר בכמה תעודות שסומן חלקית בגרסה קודמת (שורה אחת כן, אחרת
+// לא) — מה שסומן הופך לסך של הקבוצה; ומה שמתאים בדיוק נהיה "הגיע"/"לא הגיע" כבר עכשיו (receiptLineSettle)
+function receiptLineGroupsNormalize(r) {
+  receiptLineGroups(r).forEach(g => { if (g.lines.length > 1 && g.lines.some(x => x.l.mark) && g.lines.some(x => !x.l.mark)) receiptLineGroupSet(g, 'qty', String(g.lines.reduce((a, x) => a + (receiptLineGot(x.l) || 0), 0))); });
+  return receiptLineSettle(r);
+}
+// הקבוצה הראשונה שעוד לא הושלמה (או "נוסף" בלי כמות) — לסיום ולמונה. v412: לפי קבוצות — מוצר אחד, שורה אחת
 function receiptLineCheckOpen(r) {
   const out = [];
-  (r.docs || []).forEach((d, di) => (d.lines || []).forEach((l, li) => { if (receiptLineGot(l) == null) out.push({ di, li }); }));
+  receiptLineGroups(r).forEach(g => { if (receiptLineGroupGot(g) == null) out.push({ di: g.di, li: g.li }); });
   (r.extras || []).forEach((x, k) => { if (receiptLineExtraGot(x) == null) out.push({ extra: k }); });
   return out;
 }
-function receiptLineCheckTotal(r) { return (r.docs || []).reduce((a, d) => a + (d.lines || []).length, 0); }
+function receiptLineCheckTotal(r) { return receiptLineGroups(r).length; }
 // הכותרת, ההסבר וכפתור הסיום של החלון — לפי הבדיקה (הבדיקה הקיימת מקבלת בדיוק את הטקסטים שהיו בה)
 function receiptQuantityModalMode(lines) {
   const title = $('receiptQuantityTitle'), intro = $('receiptQuantityIntro'), progress = $('receiptQuantityProgress'), search = $('receiptQuantitySearch'), ok = $('receiptQuantityConfirm');
@@ -9284,47 +9364,60 @@ function receiptLineBtnClass(mark, lit) { const b = RECEIPT_LINE_BTN[mark]; retu
 // v411: הצבע של הכרטיס והכפתור הדולק לפי המספר — תוך כדי הקלדה ב"אחרת", בלי לצייר מחדש (השדה, הפוקוס והמקלדת נשארים)
 function receiptLineRowTone(di, li, l) {
   const el = $('lineCheck_' + di + '_' + li); if (!el) return;
-  const shown = receiptLineShownMark(l), ring = String(el.className || '').split(/\s+/).filter(c => c.startsWith('ring-')).join(' ');
+  const g = receiptLineGroupOf(receiptQuantityReview, di, li); // v412: הצבע — של הקבוצה (המוצר בכל התעודות יחד)
+  const shown = g ? receiptLineGroupShown(g) : receiptLineShownMark(l), ring = String(el.className || '').split(/\s+/).filter(c => c.startsWith('ring-')).join(' ');
   el.className = RECEIPT_LINE_CARD + ' ' + (RECEIPT_LINE_TONE[shown] || 'border-slate-200 bg-white') + (ring ? ' ' + ring : '');
   ['ok', 'qty', 'none'].forEach(m => {
     const b = el.querySelector('[data-line-mark="' + di + ':' + li + ':' + m + '"]'); if (!b) return;
     b.setAttribute('aria-pressed', shown === m ? 'true' : 'false'); b.className = receiptLineBtnClass(m, shown === m);
   });
 }
-function receiptLineRowHtml(di, li, l) {
-  const id = di + ':' + li, p = products.find(x => x.id === l.productId) || null;
-  const shown = receiptLineShownMark(l); // v411: "אחרת" עם הכמות שבתעודה נראית ומתקפלת כ"הגיע", עם אפס — כ"לא הגיע"
+// v412: הכרטיס הוא של הקבוצה (g) — המוצר בכל התעודות יחד; לשורה יחידה הקבוצה היא השורה עצמה, והכרטיס כמו קודם
+function receiptLineRowHtml(di, li, l, g) {
+  g = g || receiptLineGroupOf(receiptQuantityReview, di, li) || { key: di + ':' + li, di, li, productId: l.productId, lines: [{ di, li, l }], paperQty: l.paperQty };
+  const id = di + ':' + li, p = products.find(x => x.id === l.productId) || null, qtyText = String(g.paperQty), grouped = g.lines.length > 1;
+  const shown = receiptLineGroupShown(g), gmark = receiptLineGroupMark(g); // "אחרת" עם הכמות שבתעודה נראית ומתקפלת כ"הגיע", עם אפס — כ"לא הגיע"
   if ((shown === 'ok' || shown === 'none') && !receiptLineOpen.has(id)) {
     const ok = shown === 'ok';
     return '<div id="lineCheck_' + di + '_' + li + '" class="rounded-2xl border-2 px-3 py-2 mb-2.5 flex items-center justify-between gap-2 ' + (ok ? 'border-emerald-300 bg-emerald-50' : 'border-rose-300 bg-rose-50') + '">' +
       '<div class="min-w-0"><div class="font-black text-slate-800 truncate">' + htmlEscape(l.name) + '</div>' +
         '<div class="text-xs font-bold ' + (ok ? 'text-emerald-700' : 'text-rose-700') + '">' +
-          (ok ? '<i class="fa-solid fa-check" aria-hidden="true"></i> הגיע · ' + l.paperQty + ' יח׳' : '<i class="fa-solid fa-xmark" aria-hidden="true"></i> לא הגיע · 0 מתוך ' + l.paperQty) +
+          (ok ? '<i class="fa-solid fa-check" aria-hidden="true"></i> הגיע · ' + qtyText + ' ' + (grouped ? receiptLineGroupUnitsLabel(g) : 'יח׳') : '<i class="fa-solid fa-xmark" aria-hidden="true"></i> לא הגיע · 0 מתוך ' + qtyText) +
           (p && p.posPrice != null ? ' · בקופה ₪' + fmtMoney(p.posPrice) : '') + '</div></div>' +
       '<button type="button" data-line-open="' + id + '" class="btn-tap shrink-0 min-h-[44px] px-3 rounded-lg bg-white border border-slate-300 text-slate-700 text-xs font-black" aria-label="שנה: ' + htmlEscape(l.name) + '">שנה</button></div>';
   }
   const tone = RECEIPT_LINE_TONE[shown] || 'border-slate-200 bg-white';
   const btn = (mark, icon, text) => '<button type="button" data-line-mark="' + id + ':' + mark + '" aria-pressed="' + (shown === mark ? 'true' : 'false') + '" class="' + receiptLineBtnClass(mark, shown === mark) + '"><i class="fa-solid ' + icon + '" aria-hidden="true"></i> ' + text + '</button>';
-  const box = receiptLineBoxText(p, l.paperQty);
+  const box = receiptLineBoxText(p, g.paperQty), also = grouped ? receiptLineGroupAlsoText(g, di) : '';
   const unit = p ? effectivePrice(p, l.paperQty, activeReceiptDate()) : 0;
   return '<div id="lineCheck_' + di + '_' + li + '" class="' + RECEIPT_LINE_CARD + ' ' + tone + '">' +
     '<div class="flex items-start gap-3"><div class="flex-1 min-w-0">' +
-      '<div class="text-[11px] font-black text-slate-400">שורה ' + l.line + ' בתעודה</div>' +
+      '<div class="text-[11px] font-black text-slate-400">שורה ' + l.line + ' בתעודה' + (also ? ' · ' + also : '') + '</div>' +
       '<div class="font-black text-lg text-slate-800 leading-tight">' + htmlEscape(l.name) + '</div>' +
       posPriceLineHtml(p) +
       '<div class="text-[11px] text-slate-400 mt-0.5 flex items-center gap-1.5 flex-wrap"><span><i class="fa-solid fa-barcode"></i> ' + htmlEscape(l.barcode || 'ללא ברקוד') + '</span>' +
-        (p ? '<span>· ₪' + fmtUnitPrice(unit, false) + ' ליח׳</span>' : '') + '</div>' +
-      // v410: מוצר בכמה תעודות שנסרק בכמות שאינה סך השורות — נשאר פתוח, ואומר כמה נסרק
-      (l.scanned != null && !l.mark ? '<div class="text-[11px] font-black text-amber-700 mt-1"><i class="fa-solid fa-barcode" aria-hidden="true"></i> נסרקו ' + l.scanned + ' יח׳ מהמוצר, בכל התעודות יחד — סמן בכל שורה כמה הגיע</div>' : '') + '</div>' +
-      '<div class="shrink-0 text-center"><div class="text-3xl font-black text-slate-900 leading-none tabular-nums">' + l.paperQty + '</div><div class="text-[11px] font-bold text-slate-500">יח׳ בתעודה</div>' +
+        (p ? '<span>· ₪' + fmtUnitPrice(unit, false) + ' ליח׳</span>' : '') + '</div></div>' +
+      // v412: הכמות — הסך בכל התעודות ("17" / "יח׳ ב-2 תעודות" / "12 + 5"); לשורה יחידה — כמו קודם
+      '<div class="shrink-0 text-center"><div class="text-3xl font-black text-slate-900 leading-none tabular-nums">' + qtyText + '</div><div class="text-[11px] font-bold text-slate-500">' + receiptLineGroupUnitsLabel(g) + '</div>' +
+        (grouped ? '<div class="text-[11px] font-bold text-slate-400 tabular-nums">' + receiptLineGroupSplitText(g) + '</div>' : '') +
         (box ? '<div class="text-[11px] font-bold text-slate-400">' + box + '</div>' : '') + '</div></div>' +
     // "הגיע" תופס את כל הרוחב שנשאר; "אחרת" ו"לא הגיע" ברוחב הטקסט שלהם, בשורה אחת גם בטלפון צר
     '<div class="grid grid-cols-[1fr_auto_auto] gap-1.5 mt-3" role="group" aria-label="' + htmlEscape(l.name) + ' — מה הגיע">' +
-      btn('ok', 'fa-check', 'הגיע ' + l.paperQty) + btn('qty', 'fa-pen', 'אחרת') + btn('none', 'fa-xmark', 'לא הגיע') +
+      btn('ok', 'fa-check', 'הגיע ' + qtyText) + btn('qty', 'fa-pen', 'אחרת') + btn('none', 'fa-xmark', 'לא הגיע') +
     '</div>' +
-    (l.mark === 'qty' ? '<label class="flex items-center gap-2 mt-3 text-sm font-bold text-slate-700">כמה הגיע?<input data-line-got="' + id + '" type="text" inputmode="numeric" autocomplete="off" value="' + htmlEscape(l.got) + '" aria-label="כמה הגיע: ' + htmlEscape(l.name) + '" class="w-24 border-2 border-amber-400 rounded-xl p-2 text-xl text-center font-black bg-white tabular-nums"></label>' +
-      '<div id="lineCheckSum_' + di + '_' + li + '" class="text-sm font-bold mt-1 text-amber-800" aria-live="polite">' + receiptLineSumText(l) + '</div>' : '') +
+    (gmark === 'qty' ? '<label class="flex items-center gap-2 mt-3 text-sm font-bold text-slate-700">כמה הגיע?<input data-line-got="' + id + '" type="text" inputmode="numeric" autocomplete="off" value="' + htmlEscape(receiptLineGroupText(g)) + '" aria-label="כמה הגיע: ' + htmlEscape(l.name) + '" class="w-24 border-2 border-amber-400 rounded-xl p-2 text-xl text-center font-black bg-white tabular-nums"></label>' +
+      '<div id="lineCheckSum_' + di + '_' + li + '" class="text-sm font-bold mt-1 text-amber-800" aria-live="polite">' + receiptLineGroupSumText(g) + '</div>' : '') +
   '</div>';
+}
+// v412: שורת הפניה — שורה של מוצר שנספר בקבוצה שהעוגן שלה במקום אחר (תעודה קודמת): מה בשורה, איפה הוא נספר ומה סומן, ו"הצג"
+function receiptLinePointerHtml(di, li, l, g) {
+  const a = g.lines[0].l, n = receiptLineGroupGot(g), shown = receiptLineGroupShown(g);
+  const state = n == null ? '' : ' · ' + (shown === 'ok' ? '<span class="text-emerald-700">✓ הגיע</span>' : shown === 'none' ? '<span class="text-rose-700">✗ לא הגיע</span>' : '<span class="text-amber-700">התקבלו ' + n + ' מתוך ' + g.paperQty + '</span>');
+  return '<div id="lineCheckRef_' + di + '_' + li + '" class="rounded-xl border border-dashed border-slate-300 bg-white px-3 py-2 mb-2.5 flex items-center justify-between gap-2">' +
+    '<div class="min-w-0"><div class="text-[11px] font-black text-slate-400">שורה ' + l.line + ' בתעודה</div>' +
+      '<div class="text-sm font-black text-slate-700 truncate">' + htmlEscape(l.name) + ' · ' + l.paperQty + ' יח׳</div>' +
+      '<div class="text-[11px] font-bold text-slate-500">נספר יחד עם תעודה ' + (g.di + 1) + ', שורה ' + a.line + state + '</div></div>' +
+    '<button type="button" data-line-show="lineCheck_' + g.di + '_' + g.li + '" class="btn-tap shrink-0 min-h-[44px] px-3 rounded-lg bg-white border border-slate-300 text-slate-700 text-xs font-black" aria-label="הצג: ' + htmlEscape(l.name) + '">הצג</button></div>';
 }
 // v407: מוצר שכבר בבדיקה — בשורת תעודה או ב"הגיע משהו נוסף" — אינו מוצע להוספה שוב (כמו קודם), אבל גם לא "לא נמצא
 // מוצר כזה": מהשטח (5.11.2026) — "משקה פרו ויגן" 7290119390519 כבר היה ברשימה עם 8 יח׳, והסריקה שלו לשדה החיפוש ענתה
@@ -9346,7 +9439,8 @@ function receiptLineSearchResultsHtml(term) {
   const { free, taken } = receiptLineSearchMatches(r, q), multi = (r.docs || []).length > 1;
   // קודם מה שכבר בבדיקה (שלא יתווסף פעמיים), ואחריו מה שאפשר להוסיף — עם הברקוד, כי שני מוצרים באותו שם נבדלים רק בו
   const already = taken.slice(0, 5).map(t => {
-    const extra = t.kind === 'extra', id = extra ? 'lineExtra_' + t.k : 'lineCheck_' + t.di + '_' + t.li;
+    const extra = t.kind === 'extra', anchor = extra ? null : (receiptLineGroupOf(r, t.di, t.li) || t); // v412: "הצג" — לכרטיס של הקבוצה (המוצר בכל התעודות)
+    const id = extra ? 'lineExtra_' + t.k : 'lineCheck_' + anchor.di + '_' + anchor.li;
     const where = extra ? 'כבר ברשימה ״הגיע משהו נוסף״' : 'כבר ' + (multi ? 'בתעודה ' + (t.di + 1) + ' מתוך ' + r.docs.length : 'בתעודה') + ', שורה ' + t.l.line;
     const got = extra ? receiptLineExtraGot(t.x) : receiptLineGot(t.l);
     const state = extra ? (got == null ? 'עוד לא הוקלד כמה הגיע' : got + ' יח׳')
@@ -9411,6 +9505,10 @@ function receiptLineCheckHtml(r) {
   const multi = r.docs.length > 1;
   // "לא שלנו" — רק כשיש עוד תעודה בקליטה (תעודה יחידה שאינה שלנו: מבטלים את הקליטה)
   const canDrop = multi;
+  // v412: מוצר אחד — שורה אחת: הכרטיס בשורה הראשונה של המוצר, ובשאר שורותיו (תעודות אחרות) שורת הפניה
+  const groupAt = new Map();
+  receiptLineGroups(r).forEach(g => g.lines.forEach(x => groupAt.set(x.di + ':' + x.li, g)));
+  const lineHtml = (di, li, l) => { const g = groupAt.get(di + ':' + li); return g.key === di + ':' + li ? receiptLineRowHtml(di, li, l, g) : receiptLinePointerHtml(di, li, l, g); };
   return r.docs.map((d, di) => {
     const units = d.lines.reduce((a, l) => a + l.paperQty, 0);
     const sep = di ? '<div class="flex items-center gap-2 my-4 text-xs font-black text-slate-500" aria-hidden="true"><span class="flex-1 border-t-2 border-dashed border-slate-300"></span>תעודה נפרדת<span class="flex-1 border-t-2 border-dashed border-slate-300"></span></div>' : '';
@@ -9427,7 +9525,7 @@ function receiptLineCheckHtml(r) {
         '<div class="text-sm font-bold text-slate-700">' + meta + '</div></div>' +
         (canDrop && receiptLineDropAsk !== di ? '<button type="button" data-line-drop="' + di + '" class="btn-tap shrink-0 min-h-[44px] px-3 rounded-lg bg-white border border-rose-300 text-rose-700 text-xs font-black">התעודה הזאת לא שלנו</button>' : '') +
       '</div>' + ask + '</div>';
-    return '<section aria-label="' + htmlEscape(receiptLineDocName(d, di)) + '">' + sep + head + d.lines.map((l, li) => receiptLineRowHtml(di, li, l)).join('') + '</section>';
+    return '<section aria-label="' + htmlEscape(receiptLineDocName(d, di)) + '">' + sep + head + d.lines.map((l, li) => lineHtml(di, li, l)).join('') + '</section>';
   }).join('') + receiptLineExtrasHtml(r);
 }
 // focus: הכפתור או השדה שהיו בפוקוס — חוזרים אליו אחרי הציור (בלי לגלול). שדה כמות חדש — עם גלילה אליו, כדי
@@ -9463,6 +9561,7 @@ function startReceiptLineCheck() {
     receiptCountingMode = 'manual';
     // הקליטה השתנתה מאז (תעודה נוספת נכנסה, למשל) — בדיקה חדשה, ומה שכבר סומן בשורות שנשארו כמו שהן — נשאר
     if (!resume) { receiptQuantityReview = receiptLineCheckFresh(found, r && r.mode === 'lines' ? r : null); receiptLineDropAsk = null; receiptLineSearchTerm = ''; }
+    else receiptLineGroupsNormalize(receiptQuantityReview); // v412: טיוטה מגרסה קודמת — הקבוצות מיושרות גם בהמשך מאותו מקום
     receiptLineNotice = null; receiptLineOpen.clear(); // v405: בפתיחה, מה שכבר סומן — מקופל
     saveReceiptDraft(); renderReceiving();
     renderReceiptQuantityReview();
@@ -9478,9 +9577,9 @@ function receiptLineCheckClick(e) {
   const t = e.target.closest('[data-line-mark], [data-line-open], [data-line-drop], [data-line-drop-yes], [data-line-drop-no], [data-extra-add], [data-extra-remove], [data-line-show]');
   if (!t) return;
   if (t.dataset.lineMark) {
-    const [di, li, mark] = t.dataset.lineMark.split(':'); const l = r.docs[+di] && r.docs[+di].lines[+li];
-    if (!l || ['ok', 'qty', 'none'].indexOf(mark) === -1) return;
-    if (l.mark !== mark) { l.mark = mark; if (mark !== 'qty') l.got = ''; }
+    const [di, li, mark] = t.dataset.lineMark.split(':'); const g = receiptLineGroupOf(r, +di, +li); // v412: הסימון — לקבוצה (המוצר בכל התעודות)
+    if (!g || ['ok', 'qty', 'none'].indexOf(mark) === -1) return;
+    if (receiptLineGroupMark(g) !== mark) receiptLineGroupSet(g, mark, '');
     receiptLineOpen.delete(di + ':' + li); // v405: "הגיע" / "לא הגיע" — השורה מתקפלת; "אחרת" נשארת פתוחה
     receiptLineDropAsk = null; receiptLineNotice = null; receiptLineCheckChanged();
     renderReceiptLineRows(mark === 'qty' ? '[data-line-got="' + di + ':' + li + '"]' : '[data-line-open="' + di + ':' + li + '"]');
@@ -9509,10 +9608,11 @@ function receiptLineCheckClick(e) {
 function receiptLineCheckInput(e) {
   const r = receiptQuantityReview, el = e.target; if (!r || r.mode !== 'lines' || !el || !el.dataset) return;
   if (el.dataset.lineGot) {
-    const [di, li] = el.dataset.lineGot.split(':'); const l = r.docs[+di] && r.docs[+di].lines[+li]; if (!l) return;
-    l.mark = 'qty'; l.got = el.value; receiptLineNotice = null; receiptLineCheckChanged(); // v411: גם אחרי שהשורה התיישבה ל"הגיע" — הקלדה בשדה היא שוב "אחרת" עם המספר
-    const sum = $('lineCheckSum_' + di + '_' + li); if (sum) sum.textContent = receiptLineSumText(l);
-    receiptLineRowTone(+di, +li, l); // v411: הצבע והכפתור הדולק לפי המספר, בלי לצייר מחדש
+    const [di, li] = el.dataset.lineGot.split(':'); const g = receiptLineGroupOf(r, +di, +li); if (!g) return;
+    // הקלדה בשדה היא שוב "אחרת" עם המספר (גם אחרי שהשורה התיישבה ל"הגיע"); v412: המספר — של הקבוצה, מתחלק בין השורות
+    receiptLineGroupSet(g, 'qty', el.value); receiptLineNotice = null; receiptLineCheckChanged();
+    const sum = $('lineCheckSum_' + di + '_' + li); if (sum) sum.textContent = receiptLineGroupSumText(g);
+    receiptLineRowTone(+di, +li, g.lines[0].l); // הצבע והכפתור הדולק לפי המספר, בלי לצייר מחדש
     refreshReceiptLineProgress();
   } else if (el.dataset.extraGot != null) {
     const k = +el.dataset.extraGot, x = r.extras && r.extras[k]; if (!x) return;
@@ -9588,7 +9688,7 @@ function receiptLineCheckDrop(di) {
 //   (onScanned אינו מתזמן טיק כשהכרטיס פתוח, וסגירת הכרטיס מתזמנת אחד). "הגיע N" (ברירת המחדל — הכמות בתעודה, לא 1 כמו
 //   בקליטה בסריקה) / "אחרת" (שדה כמות) / "לא הגיע", ו-✕ קטן שסוגר בלי לסמן.
 // - איזו שורה: הברקוד נבדק קודם מול שורות התעודות (ברקוד שקיים בשני מוצרים במאגר נפתר למוצר שבנייר), ואחריו מול המאגר.
-//   אותו מוצר בכמה שורות (שתי תעודות) — השורה הראשונה שעוד לא סומנה; כשכולן סומנו — הראשונה, עם מה שסומן בה ואפשרות לשנות.
+//   v412: אותו מוצר בכמה שורות (שתי תעודות) — קבוצה אחת (receiptLineGroups): הכרטיס של הקבוצה, עם הסך, והחלוקה אוטומטית.
 //   יחידה שסרקו כשבתעודה מארז החיוב שלה (billingPackId), או להפך — השורה של הקרוב, והכרטיס אומר זאת במקום להוסיף "הגיע בנוסף".
 // - מוצר שאינו באף תעודה → כרטיס "לא בתעודה — הגיע בנוסף" עם כמות (1), ונכנס ל"הגיע משהו נוסף" (extras) כמו מהחיפוש; מוצר
 //   שכבר שם — הכמות הנוכחית, "עדכן". ברקוד שאינו במאגר → אותה הודעה כמו בקליטה בסריקה (rejectUnknownReceivingBarcode).
@@ -9623,16 +9723,16 @@ function refreshReceiptLineScanOverlay(last) {
 function receiptLineScanTarget(code) {
   const r = receiptQuantityReview, key = normalizeBarcode(code);
   if (!r || r.mode !== 'lines' || !key) return { kind: 'unknown' };
-  const lines = [];
-  (r.docs || []).forEach((d, di) => (d.lines || []).forEach((l, li) => lines.push({ di, li, l })));
-  const onPaper = lines.find(x => normalizeBarcode(x.l.barcode) === key);
-  const scanned = onPaper ? (products.find(p => p.id === onPaper.l.productId) || null) : findProductByBarcode(code);
+  // v412: היעד הוא קבוצה — המוצר בכל התעודות יחד (receiptLineGroups); הכרטיס הוא של העוגן שלה (השורה הראשונה)
+  const groups = receiptLineGroups(r);
+  const onPaper = groups.find(g => g.lines.some(x => normalizeBarcode(x.l.barcode) === key));
+  const scanned = onPaper ? (products.find(p => p.id === onPaper.productId) || null) : findProductByBarcode(code);
   if (!scanned) return { kind: 'unknown' };
   const pick = ids => {
-    const hits = lines.filter(x => ids.has(x.l.productId));
+    const hits = groups.filter(g => ids.has(g.productId));
     if (!hits.length) return null;
-    const open = hits.filter(x => receiptLineGot(x.l) == null);
-    return { di: (open[0] || hits[0]).di, li: (open[0] || hits[0]).li, others: hits.length - 1 };
+    const g = hits.find(x => receiptLineGroupGot(x) == null) || hits[0];
+    return { di: g.di, li: g.li };
   };
   const exact = pick(new Set([scanned.id]));
   if (exact) return { kind: 'line', ...exact, scanned, related: null };
@@ -9649,9 +9749,9 @@ function handleLineCheckScan(code) {
   const t = receiptLineScanTarget(code);
   if (t.kind === 'unknown') { rejectUnknownReceivingBarcode(); return; }
   // v411: שורה שכבר סומנה — "עוד כמה?" (addQty), ומה שחסר עד הכמות בתעודה כבר בשדה (כלום — כשהכול כבר הגיע)
-  const l = t.kind === 'line' ? r.docs[t.di].lines[t.li] : null, got = l ? receiptLineGot(l) : null;
+  const g = t.kind === 'line' ? receiptLineGroupOf(r, t.di, t.li) : null, got = g ? receiptLineGroupGot(g) : null; // v412: הכמות והסימון — של הקבוצה
   receiptLineScanCard = t.kind === 'line'
-    ? { kind: 'line', di: t.di, li: t.li, others: t.others, scanned: t.scanned, related: t.related, askQty: false, addQty: got != null, got: got != null && got < l.paperQty ? String(l.paperQty - got) : '' }
+    ? { kind: 'line', di: t.di, li: t.li, scanned: t.scanned, related: t.related, askQty: false, addQty: got != null, got: got != null && got < g.paperQty ? String(g.paperQty - got) : '' }
     : { kind: 'extra', k: t.k, scanned: t.scanned, got: t.k >= 0 ? String(r.extras[t.k].got == null ? '' : r.extras[t.k].got) : '1' };
   renderReceiptLineScanCard();
 }
@@ -9666,11 +9766,11 @@ function receiptLineScanSumText(c) {
   const n = receiptLineScanGotNumber(c);
   if (n == null) return c.invalid ? (c.addQty ? 'הקלד מספר — כמה עוד הגיעו' : 'הקלד מספר — כמה יחידות הגיעו') : (c.addQty ? 'הקלד כמה עוד הגיעו' : 'הקלד כמה יחידות הגיעו');
   if (c.kind === 'extra') return 'התקבלו ' + n + ' · עודף ' + n;
-  const l = receiptQuantityReview.docs[c.di].lines[c.li];
-  const diff = t => t === l.paperQty ? 'כמו בתעודה' : t < l.paperQty ? 'חוסר ' + (l.paperQty - t) : 'עודף ' + (t - l.paperQty);
+  const g = receiptLineGroupOf(receiptQuantityReview, c.di, c.li), qty = g.paperQty; // v412: מול הסך בכל התעודות
+  const diff = t => t === qty ? 'כמו בתעודה' : t < qty ? 'חוסר ' + (qty - t) : 'עודף ' + (t - qty);
   // v411: "עוד כמה?" — הסה״כ אחרי ההוספה, מול התעודה
-  if (c.addQty) { const total = (receiptLineGot(l) || 0) + n; return 'סה״כ ' + total + ' · ' + diff(total); }
-  return n === l.paperQty ? 'כמו בתעודה' : 'התקבלו ' + n + ' · ' + diff(n);
+  if (c.addQty) { const total = (receiptLineGroupGot(g) || 0) + n; return 'סה״כ ' + total + ' · ' + diff(total); }
+  return n === qty ? 'כמו בתעודה' : 'התקבלו ' + n + ' · ' + diff(n);
 }
 // שדה הכמות ו"שמור" — ל"אחרת" בשורת תעודה ול"הגיע בנוסף"; v411: "עוד כמה?" ו"הוסף" — לסריקה חוזרת של שורה שסומנה
 function receiptLineScanQtyHtml(c, name, saveText) {
@@ -9684,28 +9784,30 @@ function receiptLineScanQtyHtml(c, name, saveText) {
 function receiptLineScanCardHtml(c) {
   const r = receiptQuantityReview;
   if (c.kind === 'line') {
-    const l = r.docs[c.di].lines[c.li], p = products.find(x => x.id === l.productId) || null, got = receiptLineGot(l), multi = r.docs.length > 1;
+    // v412: הכרטיס — של הקבוצה: המוצר בכל התעודות יחד; הכמות (qty), הסימון והחלוקה — של הקבוצה
+    const g = receiptLineGroupOf(r, c.di, c.li), l = r.docs[c.di].lines[c.li], p = products.find(x => x.id === l.productId) || null, got = receiptLineGroupGot(g), multi = r.docs.length > 1, qty = g.paperQty;
     const kin = c.related ? '<div class="text-xs font-black text-indigo-900 bg-indigo-50 border border-indigo-200 rounded-lg px-2 py-1.5 mb-2">סרקת ' + htmlEscape(c.scanned.name) + ' — בתעודה ' +
       (c.scanned.billingPackId === c.related.id ? 'מארז החיוב שלו' : 'היחידה הבודדת שלו') + ':</div>' : '';
     // v411: שורה שכבר סומנה — "סרקת עד עכשיו 1 מתוך 2"; אחרי "תקן את הסה״כ" — הכרטיס הקודם: "כבר סומנה: הגיעו 1 — אפשר לשנות"
-    const tone = got === l.paperQty ? 'text-emerald-700' : got === 0 ? 'text-rose-700' : 'text-amber-700';
+    const tone = got === qty ? 'text-emerald-700' : got === 0 ? 'text-rose-700' : 'text-amber-700';
     const state = got == null ? '' : '<div class="text-xs font-black mt-1 ' + tone + '">' + (c.addQty
-      ? 'סרקת עד עכשיו ' + got + ' מתוך ' + l.paperQty + (got === l.paperQty ? ' — הכל הגיע' : got > l.paperQty ? ' — עודף ' + (got - l.paperQty) : '')
-      : 'כבר סומנה: ' + (got === l.paperQty ? 'הגיע' : got === 0 ? 'לא הגיע' : 'הגיעו ' + got) + ' — אפשר לשנות') + '</div>';
-    const others = c.others ? '<div class="text-[11px] font-bold text-slate-500 mt-1">המוצר גם בשורה נוספת' + (multi ? ' (תעודה אחרת)' : '') + ' — סרוק שוב כדי להגיע אליה</div>' : '';
-    const box = receiptLineBoxText(p, l.paperQty);
+      ? 'סרקת עד עכשיו ' + got + ' מתוך ' + qty + (got === qty ? ' — הכל הגיע' : got > qty ? ' — עודף ' + (got - qty) : '')
+      : 'כבר סומנה: ' + (got === qty ? 'הגיע' : got === 0 ? 'לא הגיע' : 'הגיעו ' + got) + ' — אפשר לשנות') + '</div>';
+    const also = g.lines.length > 1 ? receiptLineGroupAlsoText(g, c.di) : '';
+    const box = receiptLineBoxText(p, qty);
     const btn = (mark, icon, text, cls, size) => '<button type="button" data-scan-mark="' + mark + '" class="btn-tap min-h-[52px] rounded-xl font-black flex items-center justify-center gap-1 ' + size + ' ' + cls + '"><i class="fa-solid ' + icon + '" aria-hidden="true"></i> ' + text + '</button>';
     return kin + '<div class="flex items-start gap-3 pl-10"><div class="flex-1 min-w-0">' +
-        '<div class="text-[11px] font-black text-slate-400">שורה ' + l.line + (multi ? ' בתעודה ' + (c.di + 1) + ' מתוך ' + r.docs.length : ' בתעודה') + '</div>' +
-        '<div class="font-black text-lg text-slate-800 leading-tight">' + htmlEscape(l.name) + '</div>' + posPriceLineHtml(p) + state + others + '</div>' +
-        '<div class="shrink-0 text-center"><div class="text-3xl font-black text-slate-900 leading-none tabular-nums">' + l.paperQty + '</div><div class="text-[11px] font-bold text-slate-500">יח׳ בתעודה</div>' +
+        '<div class="text-[11px] font-black text-slate-400">שורה ' + l.line + (multi ? ' בתעודה ' + (c.di + 1) + ' מתוך ' + r.docs.length : ' בתעודה') + (also ? ' · ' + also : '') + '</div>' +
+        '<div class="font-black text-lg text-slate-800 leading-tight">' + htmlEscape(l.name) + '</div>' + posPriceLineHtml(p) + state + '</div>' +
+        '<div class="shrink-0 text-center"><div class="text-3xl font-black text-slate-900 leading-none tabular-nums">' + qty + '</div><div class="text-[11px] font-bold text-slate-500">' + receiptLineGroupUnitsLabel(g) + '</div>' +
+          (g.lines.length > 1 ? '<div class="text-[11px] font-bold text-slate-400 tabular-nums">' + receiptLineGroupSplitText(g) + '</div>' : '') +
           (box ? '<div class="text-[11px] font-bold text-slate-400">' + box + '</div>' : '') + '</div></div>' +
       (c.askQty ? receiptLineScanQtyHtml(c, l.name, 'שמור')
         // v411: סריקה חוזרת — "עוד כמה?" עם "הוסף", ומתחת "לא נכון? תקן את הסה״כ" (חזרה לשלושת הכפתורים: הגיע N / אחרת / לא הגיע)
         : c.addQty ? receiptLineScanQtyHtml(c, l.name, 'הוסף') +
           '<button type="button" data-scan-mark="fix" class="btn-tap min-h-[44px] w-full mt-1 text-xs font-black text-slate-500">לא נכון? <span class="underline">תקן את הסה״כ</span></button>'
         : '<div class="grid grid-cols-[1fr_auto_auto] gap-1.5 mt-3" role="group" aria-label="' + htmlEscape(l.name) + ' — מה הגיע">' +
-          btn('ok', 'fa-check', 'הגיע ' + l.paperQty, 'bg-emerald-600 text-white', 'text-base px-1 min-w-0') +
+          btn('ok', 'fa-check', 'הגיע ' + qty, 'bg-emerald-600 text-white', 'text-base px-1 min-w-0') +
           btn('qty', 'fa-pen', 'אחרת', 'bg-white border border-slate-300 text-slate-700', 'text-sm px-2 whitespace-nowrap') +
           btn('none', 'fa-xmark', 'לא הגיע', 'bg-white border border-slate-300 text-slate-700', 'text-sm px-2 whitespace-nowrap') + '</div>');
   }
@@ -9737,13 +9839,14 @@ function receiptLineScanApply(mark, got) {
   const r = receiptQuantityReview, c = receiptLineScanCard;
   if (!r || r.mode !== 'lines' || !c || c.kind !== 'line') return false;
   if (receiptLineScanEpoch !== receiptLocalEpoch || !canEditDraft('receiving')) { closeScanner(); return false; }
-  const l = r.docs[c.di] && r.docs[c.di].lines[c.li]; if (!l) { closeReceiptLineScanCard(); return false; }
-  l.mark = mark; l.got = mark === 'qty' ? String(got) : '';
-  receiptLineOpen.delete(c.di + ':' + c.li); receiptLineDropAsk = null; receiptLineNotice = null;
+  const g = receiptLineGroupOf(r, c.di, c.li); if (!g) { closeReceiptLineScanCard(); return false; }
+  receiptLineGroupSet(g, mark, mark === 'qty' ? String(got) : ''); // v412: הקבוצה — כל השורות של המוצר, מחולק לפי הסדר
+  receiptLineSettle(r); // בכרטיס המצלמה השמירה היא סוף ההקלדה — שורה שהתמלאה בדיוק נהיית "הגיע" מיד
+  receiptLineOpen.delete(g.key); receiptLineDropAsk = null; receiptLineNotice = null;
   receiptLineCheckChanged();
-  receiptLineScanLast = 'lineCheck_' + c.di + '_' + c.li;
-  const n = receiptLineGot(l), added = c.added != null ? 'עוד ' + c.added + ' — ' : ''; // v411: "✓ שם · עוד 1 — הגיע 2"
-  refreshReceiptLineScanOverlay((n === l.paperQty ? '✓ ' : n === 0 ? '✗ ' : '✎ ') + l.name + ' · ' + added + (n === l.paperQty ? 'הגיע ' + n : n === 0 ? 'לא הגיע' : 'הגיעו ' + n + ' מתוך ' + l.paperQty));
+  receiptLineScanLast = 'lineCheck_' + g.di + '_' + g.li;
+  const n = receiptLineGroupGot(g), name = g.lines[0].l.name, qty = g.paperQty, added = c.added != null ? 'עוד ' + c.added + ' — ' : ''; // "✓ שם · עוד 1 — הגיע 2"
+  refreshReceiptLineScanOverlay((n === qty ? '✓ ' : n === 0 ? '✗ ' : '✎ ') + name + ' · ' + added + (n === qty ? 'הגיע ' + n : n === 0 ? 'לא הגיע' : 'הגיעו ' + n + ' מתוך ' + qty));
   closeReceiptLineScanCard();
   return true;
 }
@@ -9753,10 +9856,10 @@ function receiptLineScanApply(mark, got) {
 function receiptLineScanAdd(n) {
   const r = receiptQuantityReview, c = receiptLineScanCard;
   if (!r || r.mode !== 'lines' || !c || c.kind !== 'line' || !c.addQty) return false;
-  const l = r.docs[c.di] && r.docs[c.di].lines[c.li]; if (!l) { closeReceiptLineScanCard(); return false; }
-  const total = (receiptLineGot(l) || 0) + n;
+  const g = receiptLineGroupOf(r, c.di, c.li); if (!g) { closeReceiptLineScanCard(); return false; }
+  const total = (receiptLineGroupGot(g) || 0) + n; // v412: למה שסומן בקבוצה (המוצר בכל התעודות)
   c.added = n;
-  return receiptLineScanApply(receiptLineMarkFor(l, total), total);
+  return receiptLineScanApply(receiptLineMarkFor(g, total), total);
 }
 // "הגיע בנוסף" מהכרטיס — כמו "+ מוצר" מהחיפוש (data-extra-add), עם הכמות שהוקלדה; מוצר שכבר שם — הכמות מתעדכנת
 function receiptLineScanApplyExtra(got) {
@@ -9782,8 +9885,8 @@ function receiptLineScanSave() {
   if (c.kind === 'extra') return receiptLineScanApplyExtra(n);
   if (c.addQty) return receiptLineScanAdd(n);
   // v411: "אחרת" עם הכמות שבתעודה בדיוק — "הגיע"; אפס — "לא הגיע" (receiptLineMarkFor), כמו ברשימה
-  const l = receiptQuantityReview && receiptQuantityReview.docs[c.di] && receiptQuantityReview.docs[c.di].lines[c.li];
-  return receiptLineScanApply(l ? receiptLineMarkFor(l, n) : 'qty', n);
+  const g = receiptLineGroupOf(receiptQuantityReview, c.di, c.li);
+  return receiptLineScanApply(g ? receiptLineMarkFor(g, n) : 'qty', n);
 }
 function receiptLineScanCardClick(e) {
   const c = receiptLineScanCard; if (!c) return;
@@ -20869,10 +20972,11 @@ function receiptDocSplit(rc) {
   // ולספירה שנשמרה — הכמות בכל תעודה ידועה ולא משוערת: בלי הקצאה לפי הסדר ובלי כוכבית. אחרת — ההנחה כמו קודם.
   const qc = rc && rc.quantityCheck;
   if (qc && qc.byLine && Array.isArray(qc.papers) && qc.papers.length === order.length) {
+    let splitAny = false; // v412: החלוקה בין התעודות אוטומטית (מוצר שבכמה תעודות נספר יחד)
     const marked = order.map((d, i) => {
       const lines = qc.papers[i] && Array.isArray(qc.papers[i].lines) ? qc.papers[i].lines : [];
       const paper = new Map(), got = new Map();
-      lines.forEach(x => { const id = String(x && x.productId || ''); if (!id) return; paper.set(id, (paper.get(id) || 0) + (Number(x.paperQty) || 0)); got.set(id, (got.get(id) || 0) + (Number(x.got) || 0)); });
+      lines.forEach(x => { const id = String(x && x.productId || ''); if (!id) return; if (x.split) splitAny = true; paper.set(id, (paper.get(id) || 0) + (Number(x.paperQty) || 0)); got.set(id, (got.get(id) || 0) + (Number(x.got) || 0)); });
       const onDoc = new Map();
       d.rows.forEach(r => { if (r.identified) onDoc.set(r.id, (onDoc.get(r.id) || 0) + r.paperQty); });
       if (!onDoc.size || onDoc.size !== paper.size || Array.from(onDoc).some(([id, q]) => paper.get(id) !== q)) return null;
@@ -20892,7 +20996,7 @@ function receiptDocSplit(rc) {
           r.received = last ? l : Math.min(l, r.paperQty); // מוצר שחוזר באותה תעודה — השורה האחרונה מקבלת את היתרה
           left.set(r.id, l - r.received); remaining.set(r.id, remaining.get(r.id) - 1); r.spans = false;
         });
-        d.assumed = false; d.byLine = true;
+        d.assumed = false; d.byLine = true; d.split = splitAny; // v412
       });
     }
   }
@@ -20917,7 +21021,7 @@ function receiptDocSplitHtml(rc) {
             (r.unit != null ? ' · ₪' + fmtUnitPrice(r.unit, true) : '') + '</span>' +
         '</div>').join('') +
       (d.assumed ? '<div class="mt-1 pt-1 border-t border-amber-200 text-[11px] font-bold text-amber-700">* המוצר מופיע ביותר מתעודה אחת. הספירה אינה יודעת מאיזו תעודה הגיעה כל יחידה, ולכן שויכה לפי סדר התעודות — <b>שיוך משוער</b>.</div>' : '') +
-      (d.byLine ? '<div class="mt-1 pt-1 border-t border-emerald-200 text-[11px] font-bold text-emerald-700">הכמויות לפי הבדיקה שורה-שורה בטלפון — מה שסומן בכל שורה של התעודה הזאת.</div>' : '') + // v403
+      (d.byLine ? '<div class="mt-1 pt-1 border-t border-emerald-200 text-[11px] font-bold text-emerald-700">הכמויות לפי הבדיקה שורה-שורה בטלפון — מה שסומן בכל שורה של התעודה הזאת.' + (d.split ? ' מוצר שמופיע בכמה תעודות נספר יחד, והחלוקה בין התעודות אוטומטית — לפי סדר התעודות, והחוסר על האחרונה.' : '') + '</div>' : '') + // v403
     '</div>').join('') +
     '<div class="text-[11px] text-slate-500 font-bold px-1">הפירוט לפי הנייר. התשלום, הזיכויים והקיזוזים מחושבים על הקליטה כולה, כמו קודם.</div>' +
   '</div>';

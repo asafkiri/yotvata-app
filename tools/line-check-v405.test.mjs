@@ -205,7 +205,7 @@ test('5. השורה כמו במסך הסריקה: מחיר קופה, ברקוד 
   r.run('startReceiptLineCheck()');
   assert.equal(r.run(`$('receiptQuantityBody').classList.contains('bg-slate-50')`), true, 'גוף החלון אפור');
   const a = row(r, 0, 0);
-  assert.equal(strip(a), 'שורה 1 בתעודה חלב 3% בקרטון 1 ליטר בקופה: ₪6.90 7290000000008 · ₪5.00 ליח׳ 12 יח׳ בתעודה 2 ארגזים × 6 הגיע 12 אחרת לא הגיע');
+  assert.equal(strip(a), 'שורה 1 בתעודה · גם בתעודה 2 (5 יח׳) חלב 3% בקרטון 1 ליטר בקופה: ₪6.90 7290000000008 · ₪5.00 ליח׳ 17 יח׳ ב-2 תעודות 12 + 5 הגיע 17 אחרת לא הגיע');
   const pos = r.run(`posPriceLineHtml(products.find(p => p.id === 'milk'))`);
   assert.match(pos, /fa-cash-register.*בקופה: ₪6\.90/);
   assert.ok(a.includes(pos), 'בבדיקה שורה-שורה');
@@ -216,7 +216,7 @@ test('5. השורה כמו במסך הסריקה: מחיר קופה, ברקוד 
   assert.equal(r.run(`receiptLineBoxText({ boxSize: 6 }, 6)`), 'ארגז אחד של 6');
   assert.equal(r.run(`receiptLineBoxText({ boxSize: 4 }, 6)`), '', 'לא מתחלק — בלי ארגזים');
   const all = rows(r);
-  assert.equal((all.match(/data-line-mark="\d+:\d+:ok"/g) || []).length, 5);
+  assert.equal((all.match(/data-line-mark="\d+:\d+:ok"/g) || []).length, 4); // v412: 4 מוצרים — 4 שורות
   assert.equal((all.match(/aria-pressed="true"/g) || []).length, 0);
   assert.doesNotMatch(strip(all), /סמן הכל|הכל הגיע/);
   assert.match(a, /data-line-mark="0:0:ok"[^>]*class="[^"]*text-base[^"]*bg-emerald-50 border-2 border-emerald-500/, '"הגיע" רחב ומודגש');
@@ -237,33 +237,34 @@ test('6. קיפול: "הגיע"/"לא הגיע" מקפלים, "שנה" פותח,
   click(r, { lineMark: '0:0:ok' });
   let a = row(r, 0, 0);
   assert.doesNotMatch(a, /data-line-mark=/, 'מקופלת — בלי כפתורי סימון');
-  assert.equal(strip(a), 'חלב 3% בקרטון 1 ליטר הגיע · 12 יח׳ · בקופה ₪6.90 שנה');
+  assert.equal(strip(a), 'חלב 3% בקרטון 1 ליטר הגיע · 17 יח׳ ב-2 תעודות · בקופה ₪6.90 שנה');
   assert.match(a, /data-line-open="0:0"/); assert.match(a, /border-emerald-300 bg-emerald-50/);
-  assert.equal(progress(r), 'סומנו 1 מתוך 5 שורות');
+  assert.equal(progress(r), 'סומנו 1 מתוך 4 שורות');
+  assert.equal(json(r, 'receiptQuantityReview.docs[1].lines[0].mark'), 'ok', 'v412: גם השורה בתעודה השנייה');
   assert.equal(json(r, 'receiptQuantityReview.docs[0].lines[0].mark'), 'ok', 'הסימון נשמר כמו ב-v403');
   click(r, { lineOpen: '0:0' });
   a = row(r, 0, 0);
   assert.match(a, /data-line-mark="0:0:ok" aria-pressed="true"/); assert.equal((a.match(/data-line-mark=/g) || []).length, 3);
-  assert.equal(progress(r), 'סומנו 1 מתוך 5 שורות', 'פתיחה אינה סימון');
+  assert.equal(progress(r), 'סומנו 1 מתוך 4 שורות', 'פתיחה אינה סימון');
   click(r, { lineMark: '0:0:ok' });
   assert.doesNotMatch(row(r, 0, 0), /data-line-mark=/, 'מתקפלת שוב');
-  click(r, { lineMark: '1:0:none' });
-  const c = row(r, 1, 0);
-  assert.equal(strip(c), 'חלב 3% בקרטון 1 ליטר לא הגיע · 0 מתוך 5 · בקופה ₪6.90'.replace(' · בקופה ₪6.90', '') + ' · בקופה ₪6.90 שנה');
+  click(r, { lineMark: '0:2:none' }); // v412: החלב הוא קבוצה אחת לשתי התעודות — השורה האדומה כאן היא היוגורט
+  const c = row(r, 0, 2);
+  assert.equal(strip(c), 'יוגורט טבעי 150 גרם לא הגיע · 0 מתוך 4 שנה');
   assert.match(c, /border-rose-300 bg-rose-50/);
-  assert.equal(progress(r), 'סומנו 2 מתוך 5 שורות · חוסר 5 יח׳');
+  assert.equal(progress(r), 'סומנו 2 מתוך 4 שורות · חוסר 4 יח׳');
   click(r, { lineMark: '0:1:qty' }); type(r, { lineGot: '0:1' }, '4');
   const b = row(r, 0, 1);
   assert.match(b, /data-line-got="0:1"/); assert.match(b, /data-line-mark="0:1:qty" aria-pressed="true"/);
   assert.equal(r.run(`$('lineCheckSum_0_1').textContent`), 'התקבלו 4 · חוסר 2');
-  assert.equal(progress(r), 'סומנו 3 מתוך 5 שורות · חוסר 7 יח׳');
+  assert.equal(progress(r), 'סומנו 3 מתוך 4 שורות · חוסר 6 יח׳');
   type(r, { lineGot: '0:1' }, '8');
-  assert.equal(progress(r), 'סומנו 3 מתוך 5 שורות · חוסר 5 יח׳ · עודף 2 יח׳');
+  assert.equal(progress(r), 'סומנו 3 מתוך 4 שורות · חוסר 4 יח׳ · עודף 2 יח׳');
   type(r, { lineGot: '0:1' }, 'x');
-  assert.equal(progress(r), 'סומנו 2 מתוך 5 שורות · חוסר 5 יח׳', 'כמות לא תקינה — השורה לא נספרת');
+  assert.equal(progress(r), 'סומנו 2 מתוך 4 שורות · חוסר 4 יח׳', 'כמות לא תקינה — השורה לא נספרת');
   type(r, { lineGot: '0:1' }, '4');
   click(r, { extraAdd: 'butter' }); type(r, { extraGot: '0' }, '3');
-  assert.equal(progress(r), 'סומנו 3 מתוך 5 שורות · חוסר 7 יח׳ · עודף 3 יח׳');
+  assert.equal(progress(r), 'סומנו 3 מתוך 4 שורות · חוסר 6 יח׳ · עודף 3 יח׳');
   // פתיחה מחדש של החלון: מה שסומן מקופל, גם מה שנפתח ב"שנה"; "אחרת" פתוחה
   click(r, { lineOpen: '0:0' }); assert.match(row(r, 0, 0), /data-line-mark=/);
   r.run('closeReceiptQuantityReview(); startReceiptLineCheck()');
@@ -271,10 +272,10 @@ test('6. קיפול: "הגיע"/"לא הגיע" מקפלים, "שנה" פותח,
   assert.doesNotMatch(row(r, 0, 0), /data-line-mark=/); assert.match(row(r, 0, 1), /data-line-got="0:1"/);
   // "סיום" לפני הזמן — השורה הפתוחה הראשונה שנשארה מסומנת; ואז הכל "הגיע" — אותה ספירה כמו ב-v403
   assert.equal(r.run('finishReceiptLineCheck()'), false);
-  assert.equal(r.run(`$('lineCheck_0_2').classList.contains('ring-4')`), true);
+  assert.equal(r.run(`$('lineCheck_1_1').classList.contains('ring-4')`), true, 'השורה הפתוחה הראשונה — השמנת');
   markRestOk(r);
-  assert.equal(progress(r), 'כל 5 שורות סומנו — אפשר לסיים · חוסר 7 יח׳ · עודף 3 יח׳');
+  assert.equal(progress(r), 'כל 4 שורות סומנו — אפשר לסיים · חוסר 6 יח׳ · עודף 3 יח׳');
   assert.equal(r.run('finishReceiptLineCheck()'), true);
   assert.equal(modalOpen(r), false);
-  assert.deepEqual(json(r, 'receiptList.map(l => l.productId + " " + l.qty).sort()'), ['butter 3', 'cottage 4', 'cream 2', 'milk 12', 'yogurt 4']);
+  assert.deepEqual(json(r, 'receiptList.map(l => l.productId + " " + l.qty).sort()'), ['butter 3', 'cottage 4', 'cream 2', 'milk 17', 'yogurt 0']);
 });

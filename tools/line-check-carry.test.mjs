@@ -95,18 +95,18 @@ test('1. הכלל: כמו בתעודה — "הגיע" (גם בשתי תעודו�
   assert.equal(review(r).mode, 'lines');
   assert.deepEqual(marks(r), ['ok,ok,qty:3', 'ok,qty:3'], 'חלב בשתי התעודות — "הגיע" בשתיהן; יוגורט ושמנת — "אחרת" עם מה שנסרק');
   assert.deepEqual(review(r).extras.map(x => [x.productId, x.got]), [['pudding', '2']]);
-  assert.equal(progress(r), 'כל 5 שורות סומנו — אפשר לסיים · חוסר 1 יח׳ · עודף 3 יח׳');
+  assert.equal(progress(r), 'כל 4 שורות סומנו — אפשר לסיים · חוסר 1 יח׳ · עודף 3 יח׳');
   const html = rows(r);
-  assert.match(strip(html), /חלב 3% בקרטון 1 ליטר הגיע · 12 יח׳ שנה/, 'שורה שסומנה "הגיע" — מקופלת, כמו סימון ביד');
+  assert.match(strip(html), /חלב 3% בקרטון 1 ליטר הגיע · 17 יח׳ ב-2 תעודות שנה/, 'שורה שסומנה "הגיע" — מקופלת, כמו סימון ביד; 412: הקבוצה של שתי התעודות');
   assert.match(strip(html), /קוטג׳ 5% 250 גרם הגיע · 6 יח׳ שנה/);
   assert.match(html, /data-line-got="0:2"[^>]*value="3"/, '"אחרת" פתוחה עם המספר שנסרק');
   assert.match(html, /id="lineCheckSum_0_2"[^>]*>התקבלו 3 · חוסר 1</);
   assert.match(html, /id="lineCheckSum_1_1"[^>]*>התקבלו 3 · עודף 1</);
   assert.doesNotMatch(strip(html), /נסרקו \d+ יח׳ מהמוצר/, 'ההערה — רק למוצר בכמה תעודות שלא התיישב');
   assert.equal(r.run('receiptList.length'), 5, 'הספירה עצמה לא השתנתה עד "סיום"');
-  // אפשר לשנות כל סימון שהגיע מהסריקה, כמו כל סימון
-  click(r, { lineMark: '0:0:none' });
-  assert.deepEqual(marks(r), ['none,ok,qty:3', 'ok,qty:3']);
+  // אפשר לשנות כל סימון שהגיע מהסריקה, כמו כל סימון (412: חלב — קבוצה אחת; "אחרת" 5 מתחלקת 5 בתעודה הראשונה, 0 בשנייה)
+  click(r, { lineMark: '0:0:qty' }); type(r, { lineGot: '0:0' }, '5');
+  assert.deepEqual(marks(r), ['qty:5,ok,qty:3', 'qty:0,qty:3']);
   // "סיום" — מה שסומן (כולל מה שהגיע מהסריקה), ואותה דרך כמו תמיד
   assert.equal(r.run('finishReceiptLineCheck()'), true);
   assert.deepEqual(json(r, 'receiptList.map(l => l.productId + " " + l.qty).sort()'), ['cottage 6', 'cream 3', 'milk 5', 'pudding 2', 'yogurt 3']);
@@ -115,26 +115,24 @@ test('1. הכלל: כמו בתעודה — "הגיע" (גם בשתי תעודו�
   plain.run('startReceiptLineCheck()');
   assert.equal(plain.run('testConfirms.length'), 0);
   assert.deepEqual(marks(plain), [',,', ',']);
-  assert.equal(progress(plain), 'סומנו 0 מתוך 5 שורות');
+  assert.equal(progress(plain), 'סומנו 0 מתוך 4 שורות');
 });
 
-test('2. מוצר בשתי תעודות שנסרק בכמות שאינה הסך — פתוח, בלי ניחוש, עם ההערה; אחרי "לא שלנו" הוא שורה אחת ומתיישב לבד', async () => {
+test('2. מוצר בשתי תעודות שנסרק בכמות שאינה הסך — 412: קבוצה אחת "אחרת" עם המספר, מחולק לפי הסדר; אחרי "לא שלנו" הוא שורה אחת ומתיישב לבד', async () => {
   const r = await twoPapers();
   scannedThen(r, [['milk', 12], ['cottage', 6]]); // חלב: 12 מול 12 + 5
-  assert.deepEqual(marks(r), [',ok,', ','], 'חלב לא סומן באף תעודה — אין לדעת איפה ה-12');
-  assert.deepEqual(json(r, 'receiptQuantityReview.docs.map(d => d.lines.map(l => l.scanned == null ? null : l.scanned))'), [[12, null, null], [12, null]]);
+  assert.deepEqual(marks(r), ['ok,ok,', 'none,'], 'חלב: 12 בתעודה הראשונה (מלאה — "הגיע"), 0 בשנייה ("לא הגיע"); הקבוצה — 12 מתוך 17');
   const html = rows(r);
-  assert.equal((strip(html).match(/נסרקו 12 יח׳ מהמוצר, בכל התעודות יחד — סמן בכל שורה כמה הגיע/g) || []).length, 2, 'ההערה בשתי שורות החלב');
-  assert.equal(progress(r), 'סומנו 1 מתוך 5 שורות');
-  // ההערה אינה חלק ממה שנשמר בקליטה
-  r.run(`receiptQuantityReview.docs[0].lines[0].mark = 'ok'; receiptQuantityReview.docs[1].lines[0].mark = 'ok'; receiptLineCheckChanged();`);
-  assert.deepEqual(Object.keys(json(r, 'receiptQuantityCheckAudit() || {}')), [], 'לפני הסיום אין עדיין ביקורת (confirmedAt)');
-  r.run(`receiptQuantityReview.docs[0].lines[0].mark = ''; receiptQuantityReview.docs[1].lines[0].mark = ''; receiptLineCheckChanged();`);
+  assert.match(strip(html), /חלב 3% בקרטון 1 ליטר .* 17 יח׳ ב-2 תעודות 12 \+ 5 הגיע 17 אחרת לא הגיע כמה הגיע\? התקבלו 12 · חוסר 5/, 'הקבוצה פתוחה — "אחרת" עם 12, והחוסר מול העיניים');
+  assert.match(html, /data-line-got="0:0"[^>]*value="12"/);
+  assert.match(strip(html), /שורה 1 בתעודה חלב 3% בקרטון 1 ליטר · 5 יח׳ נספר יחד עם תעודה 1, שורה 1 · התקבלו 12 מתוך 17 הצג/, 'בתעודה השנייה — שורת הפניה, לא כרטיס');
+  assert.doesNotMatch(strip(html), /נסרקו \d+ יח׳ מהמוצר/);
+  assert.equal(progress(r), 'סומנו 2 מתוך 4 שורות · חוסר 5 יח׳');
   // "התעודה הזאת לא שלנו" על התעודה הקטנה — חלב נשאר בשורה אחת של 12, והסריקה (12) מתיישבת: "הגיע"
   click(r, { lineDrop: '1' }); click(r, { lineDropYes: '1' });
   assert.equal(review(r).docs.length, 1);
   assert.deepEqual(marks(r), ['ok,ok,']);
-  assert.doesNotMatch(strip(rows(r)), /נסרקו \d+ יח׳ מהמוצר/);
+  assert.doesNotMatch(strip(rows(r)), /נספר יחד עם|data-line-show/);
   assert.equal(progress(r), 'תעודת ספק 4471002 יצאה מהקליטה, והצילום שלה נמחק מהטלפון');
 });
 
@@ -183,10 +181,10 @@ test('4. שוויון: בדיקה שהתחילה מסריקה ובדיקה שס�
   for (const k of ['noteParts', 'count', 'status', 'noDoc', 'vatPct', 'totalExVat']) assert.deepEqual(savedA[k], savedB[k], k);
 });
 
-test('5. הגרסה עלתה ל-411, כולל ה-service worker', () => {
+test('5. הגרסה עלתה ל-412, כולל ה-service worker', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /const APP_VERSION = '411'/);
-  assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_scan_add'/);
-  assert.match(html, /<title>הזמנות יטבתה - v411 /); assert.match(html, /id="verBadge"[^>]*>v411 /);
-  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v411/);
+  assert.match(html, /const APP_VERSION = '412'/);
+  assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_line_groups'/);
+  assert.match(html, /<title>הזמנות יטבתה - v412 /); assert.match(html, /id="verBadge"[^>]*>v412 /);
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v412/);
 });
