@@ -114,28 +114,29 @@ test('2. השורות של כל תעודה בנפרד; בלי "סמן הכל"; "
     [1, '4471002', SMALL_AMOUNT, 'milk×5 cream×2']], 'חלב: 12 בתעודה הראשונה ו-5 בשנייה — לא 17 בשורה אחת');
   assert.equal(r.run(`$('receiptQuantityTitle').textContent`), 'בדיקה שורה-שורה');
   assert.equal(r.run(`$('receiptQuantitySearch').classList.contains('hidden')`), true);
-  assert.equal(r.run(`$('receiptQuantityProgress').textContent`), 'סומנו 0 מתוך 5 שורות');
-  assert.equal(r.run(`$('receiptQuantityConfirm').textContent`), 'סיום (נשארו 5)');
+  assert.equal(r.run(`$('receiptQuantityProgress').textContent`), 'סומנו 0 מתוך 4 שורות'); // 412: 5 שורות בשתי תעודות, 4 מוצרים — 4 שורות ברשימה
+  assert.equal(r.run(`$('receiptQuantityConfirm').textContent`), 'סיום (נשארו 4)');
   assert.match(r.run(`$('receiptQuantityConfirm').className`), /bg-slate-400/, 'אפור, לא מושבת');
   const html = r.run(`$('receiptQuantityRows').innerHTML`);
   assert.match(strip(html), /^תעודה 1 מתוך 2 תעודת ספק 4471001 · ₪114\.00 · 3 שורות · 22 יח׳ התעודה הזאת לא שלנו/);
   assert.match(strip(html), /תעודה נפרדת תעודה 2 מתוך 2 תעודת ספק 4471002 · ₪29\.00 · 2 שורות · 7 יח׳ התעודה הזאת לא שלנו/);
-  assert.equal((html.match(/data-line-mark="\d+:\d+:ok"/g) || []).length, 5, 'שלוש בחירות לכל אחת מ-5 השורות');
+  assert.equal((html.match(/data-line-mark="\d+:\d+:ok"/g) || []).length, 4, 'שלוש בחירות לכל אחת מ-4 השורות — החלב פעם אחת, לשתי התעודות (412)');
+  assert.equal((html.match(/data-line-show=/g) || []).length, 1, 'בתעודה השנייה — שורת הפניה לחלב');
   assert.equal((html.match(/aria-pressed="true"/g) || []).length, 0, 'אף שורה לא מסומנת מראש');
   assert.doesNotMatch(strip(html), /סמן הכל|הכל הגיע/);
   assert.match(strip(html), /הגיע משהו נוסף\?/);
   // "סיום" לפני שהכל סומן — לא נשמר כלום, ואומר מה נשאר (בחלון עצמו)
   click(r, { lineMark: '0:0:ok' });
   assert.equal(r.run('finishReceiptLineCheck()'), false);
-  assert.equal(r.run(`$('receiptQuantityProgress').textContent`), 'נשארו 4 שורות בלי סימון — סמן בכל שורה: הגיע, כמות אחרת או לא הגיע');
+  assert.equal(r.run(`$('receiptQuantityProgress').textContent`), 'נשארו 3 שורות בלי סימון — סמן בכל שורה: הגיע, כמות אחרת או לא הגיע');
   assert.equal(r.run(`$('lineCheck_0_1').classList.contains('ring-4')`), true, 'השורה הראשונה שנשארה — מסומנת');
   assert.equal(r.run('receiptList.length'), 0, 'הספירה לא השתנתה'); assert.equal(review(r).confirmedAt, null);
   // כמות אחרת בלי מספר — עדיין לא סומנה; עם מספר — כן
   click(r, { lineMark: '0:1:qty' });
-  assert.equal(r.run(`$('receiptQuantityProgress').textContent`), 'סומנו 1 מתוך 5 שורות');
+  assert.equal(r.run(`$('receiptQuantityProgress').textContent`), 'סומנו 1 מתוך 4 שורות');
   type(r, { lineGot: '0:1' }, '4');
   assert.equal(r.run(`$('lineCheckSum_0_1').textContent`), 'התקבלו 4 · חוסר 2');
-  assert.equal(r.run(`$('receiptQuantityProgress').textContent`), 'סומנו 2 מתוך 5 שורות · חוסר 2 יח׳', 'v405: המונה אומר גם מה סומן');
+  assert.equal(r.run(`$('receiptQuantityProgress').textContent`), 'סומנו 2 מתוך 4 שורות · חוסר 2 יח׳', 'v405: המונה אומר גם מה סומן');
   type(r, { lineGot: '0:1' }, 'x'); assert.equal(r.run(`receiptLineGot(receiptQuantityReview.docs[0].lines[1])`), null, 'לא מספר — לא סומנה');
   type(r, { lineGot: '0:1' }, '6'); assert.equal(r.run(`$('lineCheckSum_0_1').textContent`), 'כמו בתעודה');
   type(r, { lineGot: '0:1' }, '8'); assert.equal(r.run(`$('lineCheckSum_0_1').textContent`), 'התקבלו 8 · עודף 2');
@@ -150,12 +151,12 @@ test('2. השורות של כל תעודה בנפרד; בלי "סמן הכל"; "
 });
 
 test('3. "סיום" עובר בדיוק כמו "יש חוסרים או עודפים": אותה ספירה, אותו סיכום, ועוד מה שסומן בכל תעודה', async () => {
-  // חלב: מהתעודה הראשונה הגיעו 10 מתוך 12; מהשנייה לא הגיע כלום
+  // חלב: "אחרת" 10 מתוך 17 בשתי התעודות (412: קבוצה אחת; החלוקה אוטומטית — 10 בתעודה הראשונה, 0 בשנייה)
   const a = await twoPapers();
   a.run('startReceiptLineCheck()');
-  click(a, { lineMark: '0:0:qty' }); type(a, { lineGot: '0:0' }, '10'); click(a, { lineMark: '1:0:none' }); markRestOk(a);
+  click(a, { lineMark: '0:0:qty' }); type(a, { lineGot: '0:0' }, '10'); markRestOk(a);
   assert.equal(a.run(`$('receiptQuantityConfirm').textContent`), 'סיום — שמור את הבדיקה');
-  assert.equal(a.run(`$('receiptQuantityProgress').textContent`), 'כל 5 שורות סומנו — אפשר לסיים · חוסר 7 יח׳');
+  assert.equal(a.run(`$('receiptQuantityProgress').textContent`), 'כל 4 שורות סומנו — אפשר לסיים · חוסר 7 יח׳');
   assert.equal(a.run('finishReceiptLineCheck()'), true);
   assert.equal(a.run(`$('receiptQuantityModal').classList.contains('hidden')`), true, 'החלון נסגר');
   const listA = json(a, 'receiptList');
@@ -175,8 +176,8 @@ test('3. "סיום" עובר בדיוק כמו "יש חוסרים או עודפ�
   assert.equal(qa.method, 'manual'); assert.equal(qb.byLine, undefined, 'הדרך הקיימת — בלי תוספת');
   assert.equal(qa.byLine, true);
   assert.deepEqual(qa.papers, [
-    { number: '4471001', amount: BIG_AMOUNT, lines: [{ productId: 'milk', paperQty: 12, got: 10 }, { productId: 'cottage', paperQty: 6, got: 6 }, { productId: 'yogurt', paperQty: 4, got: 4 }] },
-    { number: '4471002', amount: SMALL_AMOUNT, lines: [{ productId: 'milk', paperQty: 5, got: 0 }, { productId: 'cream', paperQty: 2, got: 2 }] }]);
+    { number: '4471001', amount: BIG_AMOUNT, lines: [{ productId: 'milk', paperQty: 12, got: 10, split: true }, { productId: 'cottage', paperQty: 6, got: 6 }, { productId: 'yogurt', paperQty: 4, got: 4 }] }, // 412: split — החלוקה בין התעודות אוטומטית
+    { number: '4471002', amount: SMALL_AMOUNT, lines: [{ productId: 'milk', paperQty: 5, got: 0, split: true }, { productId: 'cream', paperQty: 2, got: 2 }] }]);
   assert.ok(!JSON.stringify(qa).includes('[['), 'בלי מערך בתוך מערך (Firestore)');
   // ובתעודה שנשמרה — אותן שורות
   const savedA = await save(a), savedB = await save(b);
@@ -236,7 +237,7 @@ test('4ב. "לא שלנו" שנכשל — הקליטה בדיוק כמו שהי�
   assert.equal(r.run('receivingDropScanDoc(1)'), null);
   assert.deepEqual(state(r), before, 'בלי שינוי');
   assert.equal(r.storage.get('yt_receipt_draft'), draftBefore, 'הטיוטה — כמו שהייתה');
-  assert.deepEqual(marks(r), ['ok,,', ',']);
+  assert.deepEqual(marks(r), ['ok,,', 'ok,']); // 412: החלב — בשתי התעודות
   // דרך החלון — הודעה בראש החלון, והבדיקה נשארת
   click(r, { lineDrop: '1' }); click(r, { lineDropYes: '1' });
   assert.equal(r.run(`$('receiptQuantityProgress').textContent`), 'לא הצלחתי להוציא את התעודה מהקליטה — נסה שוב');
@@ -248,7 +249,7 @@ test('5. נשמר בטיוטה וממשיך מאותו מקום; החלון חו
   const storage = new Map();
   const r = await twoPapers({ storage });
   r.run('startReceiptLineCheck()');
-  click(r, { lineMark: '0:0:ok' }); click(r, { lineMark: '1:0:none' });
+  click(r, { lineMark: '0:0:ok' }); click(r, { lineMark: '0:1:none' });
   // פתיחה מחדש של האפליקציה באותו טלפון — הקריאה מהטיוטה, בלי סריקה
   const again = runtime('yotvata', { storage, data: { products, promos: [], items: [], paper: { ok: true, serviceVersion: 160, scan: { warnings: [], documents: [] } } } });
   again.run(`todayStr = () => '2026-11-03'; currentView = 'receiving'; mainMode = 'receiving'; testConfirms = []; showConfirm = (title, message, label, cb) => testConfirms.push({ title, message, label, cb });`);
@@ -257,8 +258,8 @@ test('5. נשמר בטיוטה וממשיך מאותו מקום; החלון חו
   again.run('startReceiptLineCheck()');
   assert.equal(again.run('testConfirms.length'), 0, 'בלי שאלה');
   assert.equal(again.requests.length, 0, 'בלי קריאה נוספת לשירות');
-  assert.deepEqual(marks(again), ['ok,,', 'none,'], 'מה שסומן — נשאר');
-  assert.equal(again.run(`$('receiptQuantityProgress').textContent`), 'סומנו 2 מתוך 5 שורות · חוסר 5 יח׳');
+  assert.deepEqual(marks(again), ['ok,none,', 'ok,'], 'מה שסומן — נשאר (412: "הגיע" על החלב — בשתי התעודות)');
+  assert.equal(again.run(`$('receiptQuantityProgress').textContent`), 'סומנו 2 מתוך 4 שורות · חוסר 6 יח׳');
   // "חזרה" ו"יש חוסרים או עודפים" — החלון כמו שהיה תמיד
   again.run('closeReceiptQuantityReview(); startReceiptQuantityReview(false)');
   assert.equal(again.run(`$('receiptQuantityTitle').textContent`), 'חוסרים ועודפים');
@@ -292,18 +293,20 @@ test('5. נשמר בטיוטה וממשיך מאותו מקום; החלון חו
 test('6. "פירוט לפי תעודת ספק" בהיסטוריה: מה שסומן בכל תעודה במקום ההקצאה לפי הסדר — ובלעדיו, כמו קודם', async () => {
   const r = await twoPapers();
   r.run('startReceiptLineCheck()');
-  // חלב: מהתעודה הראשונה לא הגיע כלום, מהשנייה הגיעו כל ה-5
-  click(r, { lineMark: '0:0:none' }); markRestOk(r);
+  // חלב: הגיעו 5 מתוך 17 — החלוקה אוטומטית (412): 5 בתעודה הראשונה, 0 (החוסר) בשנייה, האחרונה
+  click(r, { lineMark: '0:0:qty' }); type(r, { lineGot: '0:0' }, '5'); markRestOk(r);
   assert.equal(r.run('finishReceiptLineCheck()'), true);
   const saved = await save(r);
   r.context.SAVED = saved;
   const split = json(r, 'receiptDocSplit(SAVED)');
   assert.deepEqual(split.map(d => [d.number, d.assumed, d.byLine, d.rows.map(x => x.name + ' ' + x.received + '/' + x.paperQty + (x.spans ? '*' : '')).join(' | ')]), [
-    ['4471001', false, true, 'חלב 3% בקרטון 1 ליטר 0/12 | קוטג׳ 5% 250 גרם 6/6 | יוגורט טבעי 150 גרם 4/4'],
-    ['4471002', false, true, 'חלב 3% בקרטון 1 ליטר 5/5 | שמנת חמוצה 15% 200 מ״ל 2/2']], 'מה שסומן בכל תעודה — בלי שיוך משוער');
+    ['4471001', false, true, 'חלב 3% בקרטון 1 ליטר 5/12 | קוטג׳ 5% 250 גרם 6/6 | יוגורט טבעי 150 גרם 4/4'],
+    ['4471002', false, true, 'חלב 3% בקרטון 1 ליטר 0/5 | שמנת חמוצה 15% 200 מ״ל 2/2']], 'מה שסומן בכל תעודה — לפי החלוקה האוטומטית (412)');
+  assert.deepEqual(split.map(d => !!d.split), [true, true], 'הכרטיס יודע שהחלוקה אוטומטית');
   const html = strip(r.run('receiptDocSplitHtml(SAVED)'));
-  assert.match(html, /תעודת ספק 4471001 .* 0 נספרו .* תעודת ספק 4471002 .* 5 נספרו/);
+  assert.match(html, /תעודת ספק 4471001 .* 5 נספרו .* תעודת ספק 4471002 .* 0 נספרו/);
   assert.match(html, /הכמויות לפי הבדיקה שורה-שורה בטלפון/);
+  assert.match(html, /מוצר שמופיע בכמה תעודות נספר יחד, והחלוקה בין התעודות אוטומטית — לפי סדר התעודות, והחוסר על האחרונה\./, '412: ההערה על החלוקה');
   assert.doesNotMatch(html, /שיוך משוער|\*/);
   // בלי מה שסומן (קליטה ישנה): ההקצאה לפי הסדר — תעודה 1 מתמלאת ראשונה, בניגוד למה שקרה באמת — ומסומנת "שיוך משוער"
   r.context.OLD = { ...saved, quantityCheck: { method: 'manual', confirmedAt: 1, differences: [] } };
@@ -331,7 +334,8 @@ test('7. טלפון בגרסה 402 שממשיך את הקליטה: השורות 
   r.run('startReceiptLineCheck()');
   const rows = () => json(r, 'receiptQuantityReview.rows.map(x => x.productId + " " + x.kind + " " + x.difference + "/" + x.paperQty).sort().join(" | ")');
   assert.equal(rows(), 'cottage match 0/6 | cream match 0/2 | milk match 0/17 | yogurt match 0/4', 'עוד לא סומן כלום — כמו "יש חוסרים או עודפים" בפתיחה');
-  click(r, { lineMark: '1:0:none' }); click(r, { lineMark: '0:1:qty' }); type(r, { lineGot: '0:1' }, '4');
+  // 412: חלב — קבוצה אחת: "אחרת" 12 מתוך 17 (12 בתעודה הראשונה, 0 בשנייה)
+  click(r, { lineMark: '0:0:qty' }); type(r, { lineGot: '0:0' }, '12'); click(r, { lineMark: '0:1:qty' }); type(r, { lineGot: '0:1' }, '4');
   assert.equal(rows(), 'cottage shortage 2/6 | cream match 0/2 | milk shortage 5/17 | yogurt match 0/4');
   // מה שטלפון ב-402 עושה עם הבדיקה הזו: החלון הרגיל, "אשר הפרשים — שאר הכמויות תואמות"
   assert.equal(r.run('commitReceiptQuantityReview()'), true);
@@ -399,12 +403,14 @@ test('10. חיפוש של מוצר שכבר בבדיקה: "כבר ברשימה" 
   // מוצר בשורת תעודה — חלב בשתי התעודות: שורה לכל תעודה, עם מספר השורה בנייר ומה שסומן בה
   click(r, { lineMark: '0:0:ok' });
   type(r, { lineSearch: '' }, 'חלב');
+  // 412: "הגיע" על החלב סימן את שתי השורות (קבוצה אחת), ו"הצג" של שתיהן מוביל לכרטיס של הקבוצה
   assert.equal(strip(results()), 'כבר בתעודה 1 מתוך 2, שורה 1 חלב 3% בקרטון 1 ליטר 12 יח׳ בתעודה · סומנה: הגיע · 7290000000008 · הצג ' +
-    'כבר בתעודה 2 מתוך 2, שורה 1 חלב 3% בקרטון 1 ליטר 5 יח׳ בתעודה · עוד לא סומנה · 7290000000008 · הצג');
-  assert.match(results(), /data-line-show="lineCheck_0_0"[\s\S]*data-line-show="lineCheck_1_0"/);
-  click(r, { lineShow: 'lineCheck_1_0' });
-  assert.equal(r.run(`$('lineCheck_1_0').classList.contains('ring-4')`), true);
-  assert.deepEqual(marks(r), ['ok,,', ','], 'שום דבר לא סומן בגלל "הצג"');
+    'כבר בתעודה 2 מתוך 2, שורה 1 חלב 3% בקרטון 1 ליטר 5 יח׳ בתעודה · סומנה: הגיע · 7290000000008 · הצג');
+  assert.match(results(), /data-line-show="lineCheck_0_0"[\s\S]*data-line-show="lineCheck_0_0"/);
+  assert.doesNotMatch(results(), /lineCheck_1_0/);
+  click(r, { lineShow: 'lineCheck_0_0' });
+  assert.equal(r.run(`$('lineCheck_0_0').classList.contains('ring-4')`), true);
+  assert.deepEqual(marks(r), ['ok,,', 'ok,'], 'שום דבר לא סומן בגלל "הצג"');
   // "לא הגיע" ו"אחרת" עם כמות
   click(r, { lineMark: '1:1:none' });
   type(r, { lineSearch: '' }, 'שמנת');
@@ -451,13 +457,13 @@ test('11. הכרטיס של "הגיע משהו נוסף" כמו שורת תעו�
   type(r, { extraGot: '0' }, '8');
   assert.equal(r.run(`$('lineExtraSum_0').textContent`), 'התקבלו 8 · עודף 8');
   assert.equal(r.run(`$('lineExtraBox_0').textContent`), '2 ארגזים × 4');
-  assert.equal(r.run(`$('receiptQuantityProgress').textContent`), 'סומנו 0 מתוך 5 שורות · עודף 8 יח׳');
+  assert.equal(r.run(`$('receiptQuantityProgress').textContent`), 'סומנו 0 מתוך 4 שורות · עודף 8 יח׳');
   type(r, { extraGot: '0' }, '4');
   assert.equal(r.run(`$('lineExtraBox_0').textContent`), 'ארגז אחד של 4');
   type(r, { extraGot: '0' }, 'x');
   assert.equal(r.run(`$('lineExtraSum_0').textContent`), 'הקלד כמה יחידות הגיעו');
   assert.equal(r.run(`$('lineExtraBox_0').textContent`), '');
-  assert.equal(r.run(`$('receiptQuantityProgress').textContent`), 'סומנו 0 מתוך 5 שורות', 'כמות לא תקינה — לא נספרת');
+  assert.equal(r.run(`$('receiptQuantityProgress').textContent`), 'סומנו 0 מתוך 4 שורות', 'כמות לא תקינה — לא נספרת');
   type(r, { extraGot: '0' }, '4');
   // ציור מחדש — הכמות, הסיכום והארגזים בכרטיס
   r.run('renderReceiptLineRows()');
@@ -479,7 +485,7 @@ test('11. הכרטיס של "הגיע משהו נוסף" כמו שורת תעו�
 
 test('הגרסה עלתה ל-410, כולל ה-service worker', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /const APP_VERSION = '410'/);
-  assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_scan_carry'/);
-  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v410/);
+  assert.match(html, /const APP_VERSION = '412'/);
+  assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_line_groups'/);
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v412/);
 });
