@@ -200,7 +200,7 @@ test('3. ברקוד של שורה: הכרטיס מעל המצלמה, ו"הגיע
   assert.equal(json(r, 'receiptQuantityReview.rows.map(x => x.productId + " " + x.kind + " " + x.difference).sort().join(" | ")'), 'cottage match 0 | cream match 0 | milk match 0 | yogurt match 0');
   assert.equal(r.callbacks.length, ticks, 'המצלמה נסגרה — לא תוזמן טיק של סריקה');
   assert.equal(progress(r), 'סומנו 1 מתוך 4 שורות');
-  assert.match(strip(r.run(`$('receiptQuantityRows').innerHTML`)), /קוטג׳ 5% 250 גרם הגיע · 6 יח׳ שנה/, 'מקופלת וירוקה, כמו "הגיע" ביד');
+  assert.match(strip(r.run(`$('receiptQuantityRows').innerHTML`)), /קוטג׳ 5% 250 גרם הגיע · 6 יח׳ אין מחיר קופה — אפשר להשלים כאן כמה עובר בקופה \(כולל מע״מ\) ₪ שנה/, 'מקופלת וירוקה, כמו "הגיע" ביד');
   // "סרוק מוצר" שוב — המונה על המצלמה מעודכן, בלי כרטיס ובלי "מה סומן זה עתה"
   await rescan(r);
   assert.equal(overlay(r), 'סומנו 1 מתוך 4 | ');
@@ -258,7 +258,7 @@ test('4. "אחרת" עם כמות, "לא הגיע", ו-✕ בכרטיס שסוג
   cardClick(r, { scanMark: 'none' });
   returned(r, 'lineCheck_1_1');
   assert.deepEqual(marks(r), [',qty:4,', ',none']);
-  assert.match(strip(r.run(`$('receiptQuantityRows').innerHTML`)), /שמנת חמוצה 15% 200 מ״ל לא הגיע · 0 מתוך 2 שנה/, '"לא הגיע" מקופלת');
+  assert.match(strip(r.run(`$('receiptQuantityRows').innerHTML`)), /שמנת חמוצה 15% 200 מ״ל לא הגיע · 0 מתוך 2 אין מחיר קופה — אפשר להשלים כאן כמה עובר בקופה \(כולל מע״מ\) ₪ שנה/, '"לא הגיע" מקופלת');
   assert.equal(progress(r), 'סומנו 2 מתוך 4 שורות · חוסר 4 יח׳');
   // ✕ בכרטיס — כלום לא משתנה, המצלמה נשארת והסריקה ממשיכה
   await rescan(r);

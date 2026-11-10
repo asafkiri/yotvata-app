@@ -155,7 +155,7 @@ test('1. סריקה חוזרת של שורה שסומנה "אחרת" חלקית:
   assert.equal(json(r, 'receiptQuantityReview.rows.find(x => x.productId === "cottage")').kind, 'match');
   assert.equal(r.callbacks.length, ticks, 'המצלמה נסגרה — לא תוזמן טיק של סריקה');
   // ברשימה — מקופלת וירוקה, כמו "הגיע" ביד
-  assert.match(strip(row(r, 0, 1)), /^קוטג׳ 5% 250 גרם הגיע · 6 יח׳ שנה$/);
+  assert.match(strip(row(r, 0, 1)), /^קוטג׳ 5% 250 גרם הגיע · 6 יח׳ אין מחיר קופה — אפשר להשלים כאן כמה עובר בקופה \(כולל מע״מ\) ₪ שנה$/);
   assert.equal(progress(r), 'סומנו 1 מתוך 4 שורות');
   await rescan(r);
   assert.equal(overlay(r), 'סומנו 1 מתוך 4 | ', 'המונה על המצלמה מעודכן');
@@ -196,7 +196,7 @@ test('3. שורה שסומנה "לא הגיע" ואז נסרקה: "סרקת עד
   beep(r, BC.yogurt); cardClick(r, { scanMark: 'none' });
   returned(r, 'lineCheck_0_2'); // v413
   assert.deepEqual(marks(r), [',,none', ',']);
-  assert.match(strip(row(r, 0, 2)), /^יוגורט טבעי 150 גרם לא הגיע · 0 מתוך 4 שנה$/);
+  assert.match(strip(row(r, 0, 2)), /^יוגורט טבעי 150 גרם לא הגיע · 0 מתוך 4 אין מחיר קופה — אפשר להשלים כאן כמה עובר בקופה \(כולל מע״מ\) ₪ שנה$/);
   await rescan(r); beep(r, BC.yogurt);
   const c = card(r);
   assert.match(strip(c), /סרקת עד עכשיו 0 מתוך 4 4 יח׳ בתעודה עוד כמה\? הוסף סה״כ 4 · כמו בתעודה/);
@@ -204,7 +204,7 @@ test('3. שורה שסומנה "לא הגיע" ואז נסרקה: "סרקת עד
   cardEnter(r);
   returned(r, 'lineCheck_0_2');
   assert.deepEqual(marks(r), [',,ok', ',']);
-  assert.match(strip(row(r, 0, 2)), /^יוגורט טבעי 150 גרם הגיע · 4 יח׳ שנה$/);
+  assert.match(strip(row(r, 0, 2)), /^יוגורט טבעי 150 גרם הגיע · 4 יח׳ אין מחיר קופה — אפשר להשלים כאן כמה עובר בקופה \(כולל מע״מ\) ₪ שנה$/);
   assert.equal(progress(r), 'סומנו 1 מתוך 4 שורות');
 });
 
@@ -253,8 +253,8 @@ test('5. "אחרת" במצלמה עם הכמות שבתעודה בדיוק — "
   await rescan(r); beep(r, BC.cream); cardClick(r, { scanMark: 'qty' }); cardType(r, '1'); cardClick(r, { scanSave: '' });
   returned(r, 'lineCheck_1_1');
   assert.deepEqual(marks(r), [',ok,none', ',qty:1'], 'מספר אחר — "אחרת" עם המספר, כמו קודם');
-  assert.match(strip(row(r, 0, 1)), /^קוטג׳ 5% 250 גרם הגיע · 6 יח׳ שנה$/);
-  assert.match(strip(row(r, 0, 2)), /^יוגורט טבעי 150 גרם לא הגיע · 0 מתוך 4 שנה$/);
+  assert.match(strip(row(r, 0, 1)), /^קוטג׳ 5% 250 גרם הגיע · 6 יח׳ אין מחיר קופה — אפשר להשלים כאן כמה עובר בקופה \(כולל מע״מ\) ₪ שנה$/);
+  assert.match(strip(row(r, 0, 2)), /^יוגורט טבעי 150 גרם לא הגיע · 0 מתוך 4 אין מחיר קופה — אפשר להשלים כאן כמה עובר בקופה \(כולל מע״מ\) ₪ שנה$/);
   assert.match(row(r, 1, 1), /data-line-got="1:1"[^>]*value="1"/);
   assert.equal(progress(r), 'סומנו 3 מתוך 4 שורות · חוסר 5 יח׳');
 });
@@ -292,7 +292,7 @@ test('6. ברשימה: הכמות שבתעודה — ירוק ו"הגיע" דו�
   type(r, { lineGot: '0:1' }, '6'); blur(r, '0:1'); assert.deepEqual(marks(r), [',ok,', ',']);
   // הפעולה הבאה מציירת — מקופלת וירוקה, בדיוק כמו "הגיע" ביד
   click(r, { lineMark: '0:0:ok' });
-  assert.match(strip(row(r, 0, 1)), /^קוטג׳ 5% 250 גרם הגיע · 6 יח׳ שנה$/);
+  assert.match(strip(row(r, 0, 1)), /^קוטג׳ 5% 250 גרם הגיע · 6 יח׳ אין מחיר קופה — אפשר להשלים כאן כמה עובר בקופה \(כולל מע״מ\) ₪ שנה$/);
   assert.equal(progress(r), 'סומנו 2 מתוך 4 שורות');
   // "שנה" פותח אותה כמו שורת "הגיע": "הגיע 6" דולק, בלי שדה
   click(r, { lineOpen: '0:1' });
@@ -301,7 +301,7 @@ test('6. ברשימה: הכמות שבתעודה — ירוק ו"הגיע" דו�
   click(r, { lineMark: '0:2:qty' }); type(r, { lineGot: '0:2' }, '0'); blur(r, '0:2');
   assert.deepEqual(marks(r), ['ok,ok,none', 'ok,'], 'v412: "הגיע" על החלב סימן גם את השורה שלו בתעודה השנייה');
   click(r, { lineOpen: '0:0' });
-  assert.match(strip(row(r, 0, 2)), /^יוגורט טבעי 150 גרם לא הגיע · 0 מתוך 4 שנה$/);
+  assert.match(strip(row(r, 0, 2)), /^יוגורט טבעי 150 גרם לא הגיע · 0 מתוך 4 אין מחיר קופה — אפשר להשלים כאן כמה עובר בקופה \(כולל מע״מ\) ₪ שנה$/);
   // מספר אחר — נשאר "אחרת" פתוח, כמו קודם
   click(r, { lineMark: '1:1:qty' }); type(r, { lineGot: '1:1' }, '1'); blur(r, '1:1');
   assert.deepEqual(marks(r), ['ok,ok,none', 'ok,qty:1']);
@@ -342,7 +342,7 @@ test('7. בלי יציאה מהשדה: "סיום" ו"סרוק מוצר" מייש
   assert.deepEqual(marks(c), [',ok,', ',']);
   assert.equal(c.run(`$('scanOverlayCount').textContent`), '1 מתוך 4');
   c.run('closeScanner()');
-  assert.match(strip(row(c, 0, 1)), /^קוטג׳ 5% 250 גרם הגיע · 6 יח׳ שנה$/);
+  assert.match(strip(row(c, 0, 1)), /^קוטג׳ 5% 250 גרם הגיע · 6 יח׳ אין מחיר קופה — אפשר להשלים כאן כמה עובר בקופה \(כולל מע״מ\) ₪ שנה$/);
 });
 
 test('8. המקרה מהטלפון: מוצר שנסרק חלקית בקליטה (410) ואז נסרק שוב בבדיקה — "סרקת עד עכשיו 3 מתוך 4", "הוסף" משלים', async () => {
@@ -359,7 +359,7 @@ test('8. המקרה מהטלפון: מוצר שנסרק חלקית בקליטה 
   cardClick(r, { scanSave: '' });
   returned(r, 'lineCheck_0_2'); // v413
   assert.deepEqual(marks(r), [',,ok', ',']);
-  assert.match(strip(row(r, 0, 2)), /^יוגורט טבעי 150 גרם הגיע · 4 יח׳ שנה$/);
+  assert.match(strip(row(r, 0, 2)), /^יוגורט טבעי 150 גרם הגיע · 4 יח׳ אין מחיר קופה — אפשר להשלים כאן כמה עובר בקופה \(כולל מע״מ\) ₪ שנה$/);
   assert.equal(progress(r), 'סומנו 1 מתוך 4 שורות');
 });
 

@@ -211,8 +211,9 @@ test('5. השורה כמו במסך הסריקה: מחיר קופה, ברקוד 
   assert.ok(a.includes(pos), 'בבדיקה שורה-שורה');
   assert.ok(r.run(`buildReceiptRow({ productId: 'milk', name: 'חלב 3% בקרטון 1 ליטר', barcode: '7290000000008', qty: 1 })`).includes(pos), 'ובסריקה — אותה שורה');
   const b = row(r, 0, 1);
-  assert.match(strip(b), /^שורה 2 בתעודה קוטג׳ 5% 250 גרם אין מחיר קופה — בדוק בקופה ועדכן 7290000000015 · ₪7\.00 ליח׳ 6 יח׳ בתעודה הגיע 6 אחרת לא הגיע$/);
-  assert.match(b, /fa-triangle-exclamation/);
+  // v415: בלי מחיר קופה — שדה ההשלמה בשורה במקום "בדוק בקופה ועדכן" (line-check-pos-price.test.mjs)
+  assert.match(strip(b), /^שורה 2 בתעודה קוטג׳ 5% 250 גרם אין מחיר קופה — אפשר להשלים כאן כמה עובר בקופה \(כולל מע״מ\) ₪ 7290000000015 · ₪7\.00 ליח׳ 6 יח׳ בתעודה הגיע 6 אחרת לא הגיע$/);
+  assert.match(b, /fa-triangle-exclamation/); assert.match(b, /data-line-pos="cottage"/);
   assert.equal(r.run(`receiptLineBoxText({ boxSize: 6 }, 6)`), 'ארגז אחד של 6');
   assert.equal(r.run(`receiptLineBoxText({ boxSize: 4 }, 6)`), '', 'לא מתחלק — בלי ארגזים');
   const all = rows(r);
@@ -250,7 +251,7 @@ test('6. קיפול: "הגיע"/"לא הגיע" מקפלים, "שנה" פותח,
   assert.doesNotMatch(row(r, 0, 0), /data-line-mark=/, 'מתקפלת שוב');
   click(r, { lineMark: '0:2:none' }); // v412: החלב הוא קבוצה אחת לשתי התעודות — השורה האדומה כאן היא היוגורט
   const c = row(r, 0, 2);
-  assert.equal(strip(c), 'יוגורט טבעי 150 גרם לא הגיע · 0 מתוך 4 שנה');
+  assert.equal(strip(c), 'יוגורט טבעי 150 גרם לא הגיע · 0 מתוך 4 אין מחיר קופה — אפשר להשלים כאן כמה עובר בקופה (כולל מע״מ) ₪ שנה');
   assert.match(c, /border-rose-300 bg-rose-50/);
   assert.equal(progress(r), 'סומנו 2 מתוך 4 שורות · חוסר 4 יח׳');
   click(r, { lineMark: '0:1:qty' }); type(r, { lineGot: '0:1' }, '4');
