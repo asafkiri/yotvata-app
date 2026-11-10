@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v413 הסימון מחזיר לשורה</title>
+    <title>הזמנות יטבתה - v414 תעודה ארוכה מתחלקת</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -127,7 +127,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v413 הסימון מחזיר לשורה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v414 תעודה ארוכה מתחלקת</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -690,9 +690,9 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '413'; // בדיקה שורה-שורה: סימון מהכרטיס שמעל המצלמה ("הגיע" / "אחרת" / "לא הגיע" / "הוסף" / "הגיע בנוסף") סוגר את המצלמה וחוזר לשורה של המוצר ברשימה
+const APP_VERSION = '414'; // תעודה ארוכה בצילום אחד מתחלקת לחלקים לפני השליחה, בקו חיתוך נטוי כמו שורות הדפוס (כמו תנובה 158–159)
 // v398: תווית הגרסה ביומן הפעולות ובקובץ הגיבוי (עד כאן מחרוזת קבועה שנשארה 'v396_second_strong_read')
-const APP_VERSION_LABEL = 'v' + APP_VERSION + '_scan_return';
+const APP_VERSION_LABEL = 'v' + APP_VERSION + '_long_receipt';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -1323,7 +1323,7 @@ function yotvataPhotoGateHtml() {
     const pages = doc.pages.map((p, j) => '<div class="relative w-24 shrink-0">' +
       '<button data-role="ai-review-page" data-doc="' + i + '" data-page="' + j + '" class="w-24 h-28 border-2 rounded-xl overflow-hidden ' + (p.orientationConfirmed ? 'border-emerald-400' : 'border-amber-400') + '"><img src="' + p.dataUrl + '" class="w-full h-full object-contain" alt="עמוד ' + (j + 1) + '"></button>' +
       '<button data-role="ai-remove-page" data-doc="' + i + '" data-page="' + j + '" class="absolute top-1 left-1 bg-rose-600 text-white rounded-full w-7 h-7" aria-label="מחק עמוד">×</button>' +
-      '<div class="text-xs font-bold text-center">עמוד ' + (j + 1) + (p.orientationConfirmed ? ' ✓' : ' · אשר כיוון') + '</div></div>').join('');
+      '<div class="text-xs font-bold text-center">' + aiPageLabel(p, j) + (p.orientationConfirmed ? ' ✓' : ' · אשר כיוון') + '</div></div>').join('');
     return '<div class="border-2 border-slate-200 rounded-2xl p-3 mt-3"><div class="flex justify-between gap-2 items-center"><b>תעודה ' + (i + 1) + '</b>' +
       (aiScanDocuments.length > 1 ? '<button data-role="rc-photo-remove-doc" data-doc="' + i + '" class="text-xs font-bold text-rose-600">הסר תעודה</button>' : '') + '</div>' +
       (cached ? '<div class="text-sm font-bold text-emerald-700 mt-2">הפענוח שמור — אין צורך בסריקה נוספת</div>' : '') +
@@ -12215,6 +12215,8 @@ function aiScanPageAudit(docIndex) {
   if (!pages.length) return {};
   return { pageCount: pages.length,
     cropReasons: pages.map(page => (page && page.cropInfo && page.cropInfo.reason) || '?'),
+    // v414: למה תעודה לא חולקה (או 'split' כשחולקה), לצד מרווח השורות והנטייה שנמדדו.
+    splitReasons: pages.map(page => (page && page.cropInfo && (page.cropInfo.reason === 'split' ? 'split' : page.cropInfo.splitReason)) || null),
     photoQuality: pages.map(page => (page && page.quality) || null),
     qualityAdvice: pages.map(page => (page && page.qualityAdvice && page.qualityAdvice.code) || 'ok') };
 }
@@ -12348,6 +12350,156 @@ const AI_CREDIT_MAX_LONG_SIDE = 4096;
 function aiInvoiceOutputScale(width, height, maxPixels) {
   if (!maxPixels) return Math.min(1, AI_INVOICE_MAX_SIDE / Math.max(width, height));
   return Math.min(1, Math.sqrt(maxPixels / Math.max(1, width * height)), AI_CREDIT_MAX_LONG_SIDE / Math.max(width, height));
+}
+// v414: תעודה ארוכה בפריים אחד. הצד הארוך של הנייר נשלח תמיד ב-1850 פיקסל, בלי קשר לאורך התעודה —
+// ולכן תעודה של 12 שורות מקבלת כ-25 פיקסל לגובה ספרה, ותעודה של 30 שורות (54 שורות טקסט עם הכותרת
+// והסיכומים, נמדד 10.11) כ-11 — ושם 7 נראה כמו 1, ו-4 ו-5 כמו 1. כשהמרווח בין שורות הדפוס בתמונה
+// שנשלחת קטן מ-AI_SPLIT_MIN_PITCH והצילום המקורי מכיל מספיק פיקסלים, התמונה מתחלקת ל-2 או 3 חלקים
+// ברווח הלבן שבין שתי שורות, וכל חלק נשלח כעמוד של אותה תעודה. המשתמש מצלם צילום אחד, כמו תמיד.
+const AI_SPLIT_MIN_PITCH = 38;        // פיקסלים לשורת דפוס בתמונה שנשלחת ≈ 17 פיקסל לגובה ספרה
+const AI_SPLIT_MAX_PARTS = 3;
+const AI_SPLIT_MIN_SOURCE_GAIN = 1.3; // המקור חייב להכיל לפחות פי 1.3 פיקסלים מהפלט — אחרת אין מה להרוויח
+// v414: על צילום אמיתי הרווח בין שורות אינו לבן: רעש JPEG, שולי דלפק בתוך המסגרת ופס הלוגו לאורך הקצה
+// משאירים בו דיו. לכן הרווח נמדד יחסית לחלון החיפוש עצמו — הקו הלבן ביותר בחלון של מרווח שורה אחד סביב
+// המקום האידיאלי, בתנאי שהוא בהיר מהשורה הכהה ביותר בחלון בלפחות AI_SPLIT_GAP_DEPTH; החיתוך במרכז הרצועה
+// שבתוך AI_SPLIT_GAP_INK מהטווח מעל הקו הלבן ביותר; והקו חייב להיות נקי — דיו של עד AI_SPLIT_GAP_CLEAN מהשורה
+// הכהה ביותר (רעש בלבד), או עד 1.5% מעמודות הטקסט.
+const AI_SPLIT_GAP_INK = 0.25;        // חלק הטווח (כהה פחות לבן) שבתוכו שורת פיקסלים עדיין נחשבת לרווח
+const AI_SPLIT_GAP_DEPTH = 0.2;       // עומק המחזוריות המזערי בחלון: (הכהה − הלבן) / הכהה
+const AI_SPLIT_GAP_CLEAN = 0.15;
+// נטייה (v414). בצילום של 10.11 שורות הדפוס אינן אופקיות: הנייר נטוי כ-3° (וליד הכותרת, במקום מקומט, 5°), וזה
+// 70–110 פיקסל של הפרש גובה בין שני קצות הטקסט — שתי שורות דפוס. קו חיתוך אופקי חוצה שם טקסט בצד אחד בהכרח,
+// ומדידת ההסטה "רווח מול רווח" בשני הצדדים טועה בשורות שלמות. לכן הזווית נמדדת ישירות (aiRowTilt): הפרופיל
+// של הרצועה מסוכם לאורך קווים נטויים, והזווית הנכונה היא זו שבה השורות נערמות זו על זו והפרופיל הכי חד (שונות
+// מרבית — deskew לפי פרופיל הטלה). קו החיתוך עוקב אחרי הזווית הזאת, והחלק שמעבר לו נצבע לבן (aiRenderSplitPages).
+const AI_SPLIT_MAX_TILT = 7;          // מעלות, לכל כיוון; זווית על גבול הטווח — "התעודה נטויה", אין חלוקה
+const AI_SPLIT_TILT_STEP = 0.25;      // מעלות; שגיאה של עד 0.125° היא 3 פיקסל על רוחב הנייר — בתוך הרווח
+const AI_SPLIT_TILT_PEAK = 1.5;       // השונות בזווית הנבחרת מול החציון על כל הזוויות; פחות מזה — אין שורות ברורות
+// v414: מפת דיו של רצועה מהמקור, על קנבס שרוחבו עד maxWidth (ציור אחד, getImageData אחד). "כהה" = מתחת ל-60%
+// מלובן הנייר ברצועה (אחוזון 90). kept — עמודות הטקסט: עמודה שיש בה דיו אבל לא ברוב השורות (שוליים ריקים ופס
+// כהה של שולחן או צל יוצאים).
+function aiBandDarkMap(img, x, y, width, height, maxWidth) {
+  if (!(width >= 16) || !(height >= 8)) return null;
+  const scale = Math.min(1, maxWidth / width);
+  const w = Math.max(1, Math.round(width * scale)), h = Math.max(1, Math.round(height * scale));
+  const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d', { alpha: false });
+  if (!ctx) return null;
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(img, x, y, width, height, 0, 0, w, h);
+  const data = ctx.getImageData(0, 0, w, h).data;
+  const luma = new Uint8Array(w * h);
+  const hist = new Uint32Array(256);
+  for (let i = 0, p = 0; p < luma.length; p++, i += 4) { luma[p] = ((data[i] * 299 + data[i + 1] * 587 + data[i + 2] * 114) / 1000) | 0; hist[luma[p]]++; }
+  let cum = 0, white = 255;
+  for (let v = 0; v < 256; v++) { cum += hist[v]; if (cum >= luma.length * 0.9) { white = v; break; } }
+  const ink = white * 0.6;
+  const dark = new Uint8Array(w * h), columnInk = new Uint32Array(w);
+  for (let p = 0; p < luma.length; p++) if (luma[p] < ink) { dark[p] = 1; columnInk[p % w]++; }
+  const kept = []; for (let xx = 0; xx < w; xx++) if (columnInk[xx] > 0 && columnInk[xx] < h * 0.5) kept.push(xx);
+  return { dark, width: w, height: h, scale, white, kept };
+}
+// v414: זווית שורות הדפוס ברצועה. לכל זווית בטווח ±AI_SPLIT_MAX_TILT נבנה פרופיל הדיו לאורך קווים באותה זווית
+// (לכל עמודת טקסט — הסטה אנכית לפי מרחקה ממרכז הטקסט), ונבחרת הזווית שבה הפרופיל הכי חד. כשהזווית נכונה
+// כל השורות נערמות ויש פסגות ובורות; כשהיא שגויה בשורה שלמה על פני הרוחב, כל הפאזות נספרות והפרופיל שטוח —
+// ולכן אין כאן את הדו-משמעות של "רווח מול רווח". רק השורות שבהן כל הקווים נשארים בתוך הרצועה נספרות
+// ([from, to)). מחזיר את הפרופיל (חלק מעמודות הטקסט שכהה, לכל שורה) בזווית הנבחרת, ואת חדותה מול השאר.
+function aiRowTilt(band, pitchBand) {
+  const { dark, width, height, kept } = band;
+  if (!kept || kept.length < 8) return null;
+  const xFirst = kept[0], xLast = kept[kept.length - 1], xc = (xFirst + xLast) / 2;
+  const maxTan = Math.tan(AI_SPLIT_MAX_TILT * Math.PI / 180);
+  const reach = Math.ceil(maxTan * Math.max(xc - xFirst, xLast - xc)) + 1;
+  const from = reach, to = height - reach;
+  if (to - from < pitchBand * 2) return null;
+  const variances = [];
+  let best = null;
+  for (let deg = -AI_SPLIT_MAX_TILT; deg <= AI_SPLIT_MAX_TILT + 1e-9; deg += AI_SPLIT_TILT_STEP) {
+    const slope = Math.tan(deg * Math.PI / 180);
+    const profile = new Float32Array(height);
+    for (const x of kept) { const off = Math.round(slope * (x - xc)); for (let y = from; y < to; y++) profile[y] += dark[(y + off) * width + x]; }
+    let mean = 0;
+    for (let y = from; y < to; y++) { profile[y] /= kept.length; mean += profile[y]; }
+    mean /= (to - from);
+    let variance = 0;
+    for (let y = from; y < to; y++) variance += (profile[y] - mean) * (profile[y] - mean);
+    variance /= (to - from);
+    variances.push(variance);
+    if (!best || variance > best.variance) best = { angle: Math.round(deg * 100) / 100, slope, variance, profile };
+  }
+  const sorted = variances.slice().sort((a, b) => a - b);
+  const median = sorted[sorted.length >> 1];
+  const ratio = median > 0 ? best.variance / median : (best.variance > 0 ? Infinity : 0);
+  return { angle: best.angle, slope: best.slope, ratio, profile: best.profile, from, to, xc };
+}
+// הקו הלבן ביותר של פרופיל (אחרי החלקה של 3), ואיתו עומק המחזוריות ומרכז הרצועה הלבנה סביבו.
+// lo/hi (אופציונלי): לחפש רק בטווח שורות הזה.
+function aiProfileWhitestLine(profile, lo, hi) {
+  if (!profile || profile.length < 5) return null;
+  const smooth = new Float32Array(profile.length);
+  for (let y = 0; y < profile.length; y++) {
+    let sum = 0, count = 0;
+    for (let k = -1; k <= 1; k++) { const yy = y + k; if (yy >= 0 && yy < profile.length) { sum += profile[yy]; count++; } }
+    smooth[y] = sum / count;
+  }
+  const from = Math.max(1, Math.round(Number.isFinite(lo) ? lo : 1)), to = Math.min(smooth.length - 2, Math.round(Number.isFinite(hi) ? hi : smooth.length - 2));
+  if (to - from < 2) return null;
+  let minY = from, minV = Infinity, maxV = -Infinity;
+  for (let y = from; y <= to; y++) { const v = smooth[y]; if (v < minV) { minV = v; minY = y; } if (v > maxV) maxV = v; }
+  if (!(maxV > 0)) return null;
+  const limit = minV + (maxV - minV) * AI_SPLIT_GAP_INK;
+  let a = minY, b = minY;
+  while (a - 1 >= from && smooth[a - 1] <= limit) a--;
+  while (b + 1 <= to && smooth[b + 1] <= limit) b++;
+  return { centre: (a + b + 1) / 2, min: minV, max: maxV, depth: (maxV - minV) / maxV };
+}
+// v414: קו החיתוך של חלוקה אחת, מהמקור עצמו. רצועה של חמישה מרווחי שורה לכל כיוון סביב המקום האידיאלי נמשכת
+// לקנבס של עד 1000 פיקסל רוחב; נמדדת זווית השורות (aiRowTilt); ובפרופיל שבזווית הזאת נבחר הקו הלבן ביותר
+// בטווח של מרווח שורה אחד סביב המקום האידיאלי — עמוק (AI_SPLIT_GAP_DEPTH) ונקי (AI_SPLIT_GAP_CLEAN). מחזיר
+// את הקו בקואורדינטות המקור — הגובה שלו בקצה השמאלי ובקצה הימני של אזור הנייר — או סיבה לסירוב: no_profile
+// (אין קנבס), no_rows (אין שורות דפוס ברורות ברצועה), tilted (הזווית על גבול הטווח), no_gap (אין קו נקי).
+function aiFindSplitLine(img, region, cutSource, pitchSource) {
+  const halfBand = Math.round(pitchSource * 5);
+  const y0 = Math.max(region.y, Math.round(cutSource - halfBand)), y1 = Math.min(region.y + region.height, Math.round(cutSource + halfBand));
+  if (y1 - y0 < pitchSource * 6) return { ok: false, reason: 'no_gap' };
+  const band = aiBandDarkMap(img, region.x, y0, region.width, y1 - y0, 1000);
+  if (!band) return { ok: false, reason: 'no_profile' };
+  if (band.kept.length < band.width * 0.2) return { ok: false, reason: 'no_rows', kept: band.kept.length };
+  const pitchBand = pitchSource * band.scale;
+  const tilt = aiRowTilt(band, pitchBand);
+  if (!tilt) return { ok: false, reason: 'no_rows' };
+  const result = { angle: tilt.angle, ratio: Math.round(tilt.ratio * 100) / 100 };
+  if (!(tilt.ratio >= AI_SPLIT_TILT_PEAK)) return Object.assign(result, { ok: false, reason: 'no_rows' });
+  if (Math.abs(tilt.angle) >= AI_SPLIT_MAX_TILT - AI_SPLIT_TILT_STEP / 2) return Object.assign(result, { ok: false, reason: 'tilted' });
+  const centre = (cutSource - y0) * band.scale;
+  const lo = Math.max(tilt.from + 1, centre - pitchBand), hi = Math.min(tilt.to - 2, centre + pitchBand);
+  if (hi - lo < 4) return Object.assign(result, { ok: false, reason: 'no_gap' });
+  const line = aiProfileWhitestLine(tilt.profile, lo, hi);
+  if (!line) return Object.assign(result, { ok: false, reason: 'no_gap' });
+  // קו נקי: דיו של עד AI_SPLIT_GAP_CLEAN מהשורה הכהה ביותר בחלון, או עד 1.5% מעמודות הטקסט (רעש, זנבות אותיות).
+  const clean = Math.max(line.max * AI_SPLIT_GAP_CLEAN, 0.015);
+  result.depth = Math.round(line.depth * 100) / 100;
+  if (line.depth < AI_SPLIT_GAP_DEPTH || line.min > clean) return Object.assign(result, { ok: false, reason: 'no_gap' });
+  // הקו במקור: עובר דרך מרכז הטקסט בגובה שנבחר, בשיפוע הזווית (אותו שיפוע בכל קנה מידה).
+  const xCentre = region.x + tilt.xc / band.scale, yCentre = y0 + line.centre / band.scale;
+  const yAt = x => yCentre + tilt.slope * (x - xCentre);
+  return Object.assign(result, { ok: true, yLeft: yAt(region.x), yRight: yAt(region.x + region.width), shift: Math.round(tilt.slope * region.width) });
+}
+// תכנון החלוקה — פונקציה טהורה (נבדקת ב-tools/long-receipt-split.test.mjs). הקלט: מרווח השורות במקור
+// (פיקסלים של הצילום המקורי) והצלע הארוכה של הנייר במקור ובפלט. הפלט: { parts: 1, reason } כשאין מה לחלק,
+// או { parts, pitchOut, idealCuts } — המקומות האידיאליים לחיתוך, כהיסט מראש אזור הנייר בפיקסלים של המקור.
+// את הקו עצמו (ברווח, בזווית השורות) מוצאת aiFindSplitLine ליד כל מקום כזה.
+function aiPlanLongReceiptSplit(input) {
+  const pitchSource = Number(input && input.pitchSource), sourceLong = Number(input && input.sourceLong), outputLong = Number(input && input.outputLong);
+  if (!(pitchSource > 0) || !(sourceLong > 0) || !(outputLong > 0)) return { parts: 1, reason: 'no_pitch' };
+  const outScale = Math.min(1, outputLong / sourceLong);
+  const pitchOut = pitchSource * outScale;
+  if (pitchOut >= AI_SPLIT_MIN_PITCH) return { parts: 1, reason: 'pitch_ok', pitchOut };
+  if (sourceLong / outputLong < AI_SPLIT_MIN_SOURCE_GAIN) return { parts: 1, reason: 'source_too_small', pitchOut };
+  const parts = Math.min(AI_SPLIT_MAX_PARTS, Math.max(2, Math.ceil(AI_SPLIT_MIN_PITCH / pitchOut)));
+  const idealCuts = [];
+  for (let k = 1; k < parts; k++) idealCuts.push(sourceLong * k / parts);
+  return { parts, pitchOut, idealCuts };
 }
 // העותק שעליו מזוהה הנייר: גדול מספיק שאריח יהיה משמעותי, קטן מספיק
 // ש-getImageData לא יפיל מכשיר ישן.
@@ -12945,7 +13097,109 @@ function aiDetectPaperRegion(img, sourceWidth, sourceHeight, report) {
   report.reason = 'cropped';
   report.value = Math.round(100 * (1 - areaFraction));
   report.kept = { x: x0 / pw, y: y0 / ph, w: w / pw, h: h / ph };
+  // v414: מרווח שורות הדפוס (פיקסלים של הפרוקסי) — לחלוקת תעודה ארוכה (aiPlanLongReceiptSplit). המרווח בא
+  // מעוגן המחזוריות שכבר נמדד; שום פענוח נוסף. את הרווח עצמו מוצאת aiFindSplitLine מהמקור.
+  report.rowPitch = resultA && Number.isFinite(resultA.P) && resultA.P > 0 ? resultA.P : null;
+  report.proxyScale = proxyScale;
   return region;
+}
+// v414: ציור אזור מהמקור לתמונה שנשלחת — הקטנה ל-AI_INVOICE_MAX_SIDE בצד הארוך, שיפור קריאות עדין
+// (v137; כל כשל → ממשיכים עם המקור), קידוד JPEG. משמש גם את הצילום השלם וגם כל חלק של תעודה ארוכה.
+// masks (v414): מצולעים בקואורדינטות המקור ({ points: [[x, y], ...] }) שנצבעים לבן אחרי הציור — מה שמעבר לקו
+// החיתוך הנטוי שייך לחלק האחר.
+function aiRenderInvoiceRegion(img, region, masks, maxPixels) {
+  const scale = aiInvoiceOutputScale(region.width, region.height, maxPixels);
+  const width = Math.max(1, Math.round(region.width * scale)), height = Math.max(1, Math.round(region.height * scale));
+  const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
+  const ctx = canvas.getContext('2d', { alpha: false });
+  if (!ctx) throw new Error('canvas_failed');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(img, region.x, region.y, region.width, region.height, 0, 0, width, height);
+  (Array.isArray(masks) ? masks : []).forEach(mask => {
+    const points = mask && Array.isArray(mask.points) ? mask.points : [];
+    if (points.length < 3) return;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    points.forEach((point, index) => { const x = (point[0] - region.x) * scale, y = (point[1] - region.y) * scale; if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y); });
+    ctx.closePath();
+    ctx.fill();
+  });
+  try {
+    const pixels = ctx.getImageData(0, 0, width, height);
+    if (aiEnhanceDocumentPixels(pixels.data, width, height)) ctx.putImageData(pixels, 0, 0);
+  } catch (enhanceError) { /* התמונה המקורית נשארת */ }
+  return { encoded: aiCanvasToInvoiceJpeg(canvas, 0.92), width, height, scale };
+}
+// v414: חלקי צילום אחד של תעודה ארוכה. כל חלק הוא עמוד של אותה תעודה, עם אזור המקור שלו (לחיתוך ידני
+// ולשחזור), ועם split: { group, index, count } שקושר אותם: אישור כיוון, סיבוב, מחיקה ו"השאר תמונה
+// מלאה" פועלים על הקבוצה כולה (ראו aiSplitSiblings).
+// v414: קו החיתוך נטוי כמו שורות הדפוס (plan.lines — לכל קו הגובה בקצה השמאלי ובקצה הימני של הנייר). כל חלק הוא
+// מלבן ישר שמכיל את הקו כולו, והמשולש שמעבר לקו — מה ששייך לחלק השכן — נצבע לבן. כך כל שורת דפוס מופיעה בחלק
+// אחד בדיוק גם כשהנייר נטוי בשתי שורות על פני רוחבו (10.11), ואזורי המקור של החלקים השכנים חופפים בגובה הנטייה.
+function aiRenderSplitPages(img, file, region, plan, quality, cropInfo, sourceWidth, sourceHeight) {
+  const group = 'split-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+  const x0 = region.x, x1 = region.x + region.width, top = region.y, bottom = region.y + region.height;
+  const clampY = y => Math.min(bottom - 64, Math.max(top + 64, y));
+  const lines = plan.lines.map(line => ({ yLeft: clampY(line.yLeft), yRight: clampY(line.yRight), angle: line.angle }))
+    .sort((a, b) => (a.yLeft + a.yRight) - (b.yLeft + b.yRight));
+  const stamp = Date.now();
+  const pages = [];
+  for (let i = 0; i < plan.parts; i++) {
+    const above = i > 0 ? lines[i - 1] : null, below = i < plan.parts - 1 ? lines[i] : null;
+    const tileTop = above ? Math.round(Math.min(above.yLeft, above.yRight)) : top;
+    const tileBottom = below ? Math.round(Math.max(below.yLeft, below.yRight)) : bottom;
+    const tile = { x: x0, y: tileTop, width: region.width, height: tileBottom - tileTop };
+    const masks = [];
+    // מעל הקו הקודם — השורות של החלק הקודם; מתחת לקו הבא — של החלק הבא. קו אופקי אינו משאיר מה לצבוע.
+    if (above && Math.max(above.yLeft, above.yRight) - tileTop >= 1) masks.push({ points: [[x0, tileTop], [x1, tileTop], [x1, above.yRight], [x0, above.yLeft]] });
+    if (below && tileBottom - Math.min(below.yLeft, below.yRight) >= 1) masks.push({ points: [[x0, below.yLeft], [x1, below.yRight], [x1, tileBottom], [x0, tileBottom]] });
+    const rendered = aiRenderInvoiceRegion(img, tile, masks);
+    const tileQuality = quality ? Object.assign({}, quality, { paperPx: Math.max(rendered.width, rendered.height),
+      rowPitchPx: Math.round(plan.pitchSource * rendered.scale), splitPart: i + 1, splitParts: plan.parts }) : null;
+    const info = Object.assign({}, cropInfo, { v: 414, reason: 'split', part: i + 1, parts: plan.parts, pitch: Math.round(plan.pitchOut),
+      tilt: cropInfo.tilt != null ? cropInfo.tilt : null, skew: cropInfo.skew != null ? cropInfo.skew : null,
+      kept: { x: tile.x / sourceWidth, y: tile.y / sourceHeight, w: tile.width / sourceWidth, h: tile.height / sourceHeight } });
+    pages.push({ dataUrl: rendered.encoded.dataUrl, baseDataUrl: rendered.encoded.dataUrl, rotation: 0, orientationConfirmed: false, cropped: true, autoCropped: true,
+      cropInfo: info, quality: tileQuality, qualityAdvice: aiQualityAdvice(tileQuality), originalImage: null, sourceBlob: file,
+      sourceRegion: { x: tile.x, y: tile.y, width: tile.width, height: tile.height }, processScale: rendered.scale,
+      name: String(file.name || ('עמוד-' + stamp + '.jpg')).replace(/(\.[a-z0-9]+)?$/i, '-' + (i + 1) + '$1'), bytes: rendered.encoded.bytes,
+      split: { group, index: i, count: plan.parts } });
+  }
+  return pages;
+}
+function aiSplitSiblings(doc, page) {
+  if (!doc || !page || !page.split || !Array.isArray(doc.pages)) return [];
+  return doc.pages.filter(other => other !== page && other && other.split && other.split.group === page.split.group);
+}
+function aiSplitGroupPages(doc, page) {
+  if (!doc || !page || !Array.isArray(doc.pages)) return page ? [page] : [];
+  return page.split ? doc.pages.filter(other => other && other.split && other.split.group === page.split.group) : [page];
+}
+// אחרי סיבוב של 180° החלק העליון של התמונה הוא תחתית התעודה — סדר החלקים מתהפך, כדי שהעמוד הראשון
+// שהמודל מקבל יישאר ראש התעודה. בסיבוב אחר הסדר המקורי חוזר.
+function aiOrderSplitGroup(doc, page) {
+  const group = aiSplitGroupPages(doc, page);
+  if (!page || !page.split || group.length < 2) return;
+  const reversed = aiNormalizeQuarterTurns((Number(page.rotation) || 0) / 90) === 2;
+  const ordered = group.slice().sort((a, b) => reversed ? b.split.index - a.split.index : a.split.index - b.split.index);
+  const first = Math.min(...group.map(item => doc.pages.indexOf(item)));
+  const rest = doc.pages.filter(item => !group.includes(item));
+  doc.pages = rest.slice(0, first).concat(ordered, rest.slice(first));
+}
+function aiPageLabel(page, pageIndex) {
+  return page && page.split ? 'חלק ' + (page.split.index + 1) + ' מתוך ' + page.split.count : 'עמוד ' + (pageIndex + 1);
+}
+// v414: למה תעודה ארוכה לא חולקה — לתווית ולהנחיה במסך האישור, כדי שצילום מסך אחד יענה. שורות מרווחות
+// (pitch_ok) אינן "לא חולקה" — פשוט לא היה צורך.
+function aiSplitSkipText(info) {
+  const reason = info && info.splitReason;
+  if (!reason || reason === 'pitch_ok') return '';
+  const pitch = info.pitch != null ? ' (' + info.pitch + ' פיקסל לשורה)' : '';
+  if (reason === 'source_too_small') return 'לא חולקה: הצילום קטן מדי לחלוקה' + pitch;
+  if (reason === 'tilted') return 'לא חולקה: התעודה נטויה בצילום' + (info.tilt != null ? ' (' + Math.abs(info.tilt) + '°)' : '') + pitch;
+  if (reason === 'no_gap') return 'לא חולקה: לא נמצא רווח ברור בין שורות' + pitch;
+  if (reason === 'no_rows' || reason === 'no_profile') return 'לא חולקה: שורות הדפוס לא נמדדו' + pitch;
+  return 'לא חולקה' + pitch;
 }
 // v180: החיתוך האוטומטי חוזר, אבל הפעם הוא מדווח על עצמו ומסיג לאחור
 // בנגיעה אחת. ההסרה ב-v179 נומקה ב"קשה לדעת אם שולי התעודה נשמרו" —
@@ -12954,7 +13208,10 @@ function aiDetectPaperRegion(img, sourceWidth, sourceHeight, report) {
 // הזיהוי כדי שאפשר יהיה לחזור לפריים המלא מאותו קובץ מקור.
 // v364: maxPixels (אופציונלי) = תקציב שטח לעמוד זיכוי; נשמר על העמוד (page.maxPixels)
 // כדי שכל קידוד חוזר מהמקור — חיתוך ידני ושחזור התמונה המלאה — ישמור עליו.
-async function aiCompressInvoiceImage(file, forceFullFrame, maxPixels) {
+// v414: מחזירה עמוד אחד — או, לתעודה ארוכה שחולקה, מערך של עמודים (aiRenderSplitPages; כמו תנובה 158–159).
+// noSplit: בלי חלוקה (כשאין מקום בתקרת 8 העמודים). עמוד זיכוי (maxPixels) אינו מתחלק לעולם; forceFullFrame —
+// בלי זיהוי ובלי חלוקה — מסלול השחזור.
+async function aiCompressInvoiceImage(file, forceFullFrame, maxPixels, noSplit) {
   const raw = await aiReadFile(file);
   const img = await aiLoadImage(raw);
   const sourceWidth = img.naturalWidth || img.width, sourceHeight = img.naturalHeight || img.height;
@@ -12962,9 +13219,9 @@ async function aiCompressInvoiceImage(file, forceFullFrame, maxPixels) {
   let region = { x: 0, y: 0, width: sourceWidth, height: sourceHeight };
   let autoCropped = false;
   let quality = null;
+  let report = {};
   if (!forceFullFrame) {
     try {
-      const report = {};
       const detected = aiDetectPaperRegion(img, sourceWidth, sourceHeight, report);
       if (report.reason) cropInfo.reason = report.reason;
       if (report.value != null) cropInfo.value = report.value;
@@ -12975,26 +13232,41 @@ async function aiCompressInvoiceImage(file, forceFullFrame, maxPixels) {
       cropInfo.reason = 'error'; cropInfo.value = (error && error.message) || '';
     }
   }
-  const scale = aiInvoiceOutputScale(region.width, region.height, maxPixels);
-  const width = Math.max(1, Math.round(region.width * scale)), height = Math.max(1, Math.round(region.height * scale));
-  const canvas = document.createElement('canvas'); canvas.width = width; canvas.height = height;
-  const ctx = canvas.getContext('2d', { alpha: false });
-  if (!ctx) throw new Error('canvas_failed');
-  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, width, height);
-  ctx.drawImage(img, region.x, region.y, region.width, region.height, 0, 0, width, height);
-  // v137: שיפור קריאות עדין. כל כשל (זיכרון במכשיר ישן וכו') → ממשיכים עם המקור.
-  try {
-    const pixels = ctx.getImageData(0, 0, width, height);
-    if (aiEnhanceDocumentPixels(pixels.data, width, height)) ctx.putImageData(pixels, 0, 0);
-  } catch (enhanceError) { /* התמונה המקורית נשארת */ }
+  // v414: תעודה ארוכה — חלוקה לחלקים כשהנייר זוהה, הוא גבוה מרוחבו, מרווח השורות בתמונה שנשלחת קטן
+  // מדי והמקור מכיל את הפיקסלים. כל כשל בתכנון → צילום אחד, כמו היום. גודל הצילום המקורי נשמר לאודיט.
+  if (quality) quality.sourcePx = Math.max(sourceWidth, sourceHeight);
+  if (autoCropped && !noSplit && !maxPixels && region.height > region.width && report.rowPitch && report.proxyScale) {
+    try {
+      const pitchSource = report.rowPitch / report.proxyScale;
+      const plan = aiPlanLongReceiptSplit({ pitchSource, sourceLong: Math.max(region.width, region.height), outputLong: AI_INVOICE_MAX_SIDE });
+      if (plan && plan.pitchOut != null) cropInfo.pitch = Math.round(plan.pitchOut);
+      if (plan && plan.parts > 1) {
+        // כל קו חיתוך נמצא מהמקור עצמו, בזווית שורות הדפוס (aiFindSplitLine); סירוב — צילום אחד, והסיבה נרשמת.
+        const lines = [];
+        let refusal = null;
+        for (const offset of plan.idealCuts) {
+          const found = aiFindSplitLine(img, region, region.y + offset, pitchSource);
+          if (found.angle != null) cropInfo.tilt = found.angle;
+          if (!found.ok) { refusal = found.reason || 'no_gap'; break; }
+          cropInfo.skew = Math.max(Number(cropInfo.skew) || 0, Math.abs(found.shift));
+          lines.push(found);
+        }
+        if (!refusal) return aiRenderSplitPages(img, file, region, Object.assign({}, plan, { pitchSource, lines }), quality, cropInfo, sourceWidth, sourceHeight);
+        cropInfo.splitReason = refusal;
+      } else if (plan) cropInfo.splitReason = plan.reason || null;
+    } catch (splitError) { cropInfo.splitReason = 'error'; }
+  }
+  const rendered = aiRenderInvoiceRegion(img, region, null, maxPixels);
+  const width = rendered.width, height = rendered.height, scale = rendered.scale;
   // הצלע הארוכה של הנייר בתמונה שנשלחת בפועל — המספר שמתרגם ישירות
   // לפיקסלים לאות, ולכן היחיד שאפשר להשוות בין צילומים שונים. כשנחתך,
   // הנייר ממלא את הפלט; אחרת הוא חלקו לפי מה שנמדד בפרוקסי.
   if (quality) {
     quality.paperPx = autoCropped ? Math.max(width, height)
       : (quality.paperLongFrac != null ? Math.round(quality.paperLongFrac * Math.max(width, height)) : null);
+    if (cropInfo.pitch != null) quality.rowPitchPx = cropInfo.pitch;
   }
-  const encoded = aiCanvasToInvoiceJpeg(canvas, 0.92);
+  const encoded = rendered.encoded;
   // v155: הקובץ המקורי והגיאומטריה נשמרים על העמוד, כדי שחיתוך ידני
   // יוכל לרוץ מהמקור הגולמי דרך כל הצינור — סטטיסטיקה נקייה, 3000px מלאים.
   // originalImage נשאר null כשנחתך אוטומטית: הוא אמור להחזיק את הפריים
@@ -13273,7 +13545,10 @@ function aiCropInfoText(page) {
   if (!info || !info.v) return 'צילום שמור';
   if (info.reason === 'full_image') return 'תמונה מלאה · ללא חיתוך';
   const version = 'v' + info.v;
-  if (page.autoCropped) return version + ' · חיתוך אוטומטי · הוסרו ' + (info.value != null ? info.value : '?') + '% מהשוליים';
+  // v414: חלק של תעודה ארוכה שחולקה; נטייה של מעלה ומעלה — החיתוך עקב אחריה.
+  if (info.reason === 'split') return version + ' · תעודה ארוכה · חלק ' + info.part + ' מתוך ' + info.parts + (info.value != null ? ' · הוסרו ' + info.value + '% מהשוליים' : '')
+    + (info.tilt != null && Math.abs(info.tilt) >= 1 ? ' · נטייה ' + Math.abs(info.tilt) + '° (החיתוך עוקב אחרי השורות)' : '');
+  if (page.autoCropped) return version + ' · חיתוך אוטומטי · הוסרו ' + (info.value != null ? info.value : '?') + '% מהשוליים' + (aiSplitSkipText(info) ? ' · ' + aiSplitSkipText(info) : '');
   if (page.cropped) return version + ' · נחתך' + (info.value != null ? ' ' + info.value + '%' : '');
   if (info.reason === 'too_small') return version + ' · ללא חיתוך: הנייר קטן מדי בפריים' + (info.value != null ? ' (' + info.value + '%)' : '');
   if (info.reason === 'aspect') return version + ' · ללא חיתוך: יחס צלעות חריג';
@@ -13308,7 +13583,11 @@ function aiUpdateOrientationControls() {
   const reviewOnly = !!session.reviewOnly, cropMode = !!session.cropMode;
   const title = $('aiOrientationTitle'), hint = $('aiOrientationHint'), crop = $('aiOrientationCrop'), restore = $('aiOrientationRestore'), confirm = $('aiOrientationConfirm');
   if (title) title.textContent = reviewOnly ? 'צילום העמוד' : cropMode ? 'חיתוך התמונה' : 'בדיקת התמונה';
-  if (hint) hint.textContent = reviewOnly ? 'צפייה בתמונה ששימשה לפענוח.' : cropMode ? 'גרור את הפינות רק אם צריך. השאר את כל הטקסט והסיכומים בתוך המסגרת.' : session.page.autoCropped ? 'השוליים נחתכו אוטומטית. בתרשים: האזור הבהיר הוא מה שנשלח — ודא שכל הטקסט והסיכומים בתוכו.' : session.page.cropped ? 'מוצגת תמונה חתוכה. אפשר לחזור לתמונה המקורית.' : 'התמונה נשמרת בשלמותה. ודא שהכותרת למעלה ושהטקסט ישר.';
+  if (hint) hint.textContent = reviewOnly ? 'צפייה בתמונה ששימשה לפענוח.' : cropMode ? 'גרור את הפינות רק אם צריך. השאר את כל הטקסט והסיכומים בתוך המסגרת.'
+    // v414: חלק של תעודה ארוכה — אישור אחד מאשר את כל החלקים; תעודה ארוכה שלא חולקה — הסיבה כאן, במקום בתווית שנחתכת.
+    : session.page.split ? 'התעודה ארוכה, ולכן חולקה ל-' + session.page.split.count + ' חלקים לקריאה מדויקת יותר. אישור אחד מאשר את כולם. בתרשים: האזור הבהיר הוא החלק הזה.'
+    : session.page.autoCropped ? 'השוליים נחתכו אוטומטית. בתרשים: האזור הבהיר הוא מה שנשלח — ודא שכל הטקסט והסיכומים בתוכו.' + (aiSplitSkipText(session.page.cropInfo) ? ' תעודה ארוכה ' + aiSplitSkipText(session.page.cropInfo) + '.' : '')
+    : session.page.cropped ? 'מוצגת תמונה חתוכה. אפשר לחזור לתמונה המקורית.' : 'התמונה נשמרת בשלמותה. ודא שהכותרת למעלה ושהטקסט ישר.';
   aiDrawCropMap(cropMode ? null : session.page);
   // הערת האיכות מתווספת להנחיה ואינה מחליפה אותה, ואינה נוגעת בכפתור
   // האישור: היום זו מדידה בלבד.
@@ -13366,10 +13645,17 @@ async function aiRestoreOriginalImage() {
     // New captures reuse the saved full image. Older in-memory pages can recover from the source file.
     // forceFullFrame=true, אחרת הזיהוי היה חותך שוב ו"חזרה לתמונה המלאה"
     // הייתה מחזירה את אותה תמונה חתוכה.
-    const original = page.originalImage || (await aiCompressInvoiceImage(page.sourceBlob, true, page.maxPixels)).originalImage;
+    const compressed = page.originalImage ? null : await aiCompressInvoiceImage(page.sourceBlob, true, page.maxPixels);
+    const original = page.originalImage || (Array.isArray(compressed) ? compressed[0] : compressed).originalImage;
     const turns = aiNormalizeQuarterTurns((Number(page.rotation) || 0) / 90 + (original.rotationOffset || 0));
     const rendered = await aiRenderInvoiceRotation(original.dataUrl, turns);
     if (aiOrientationSession !== session || !aiOrientationLocation(page)) return;
+    // v414: הפריים המלא מחליף את כל חלקי התעודה הארוכה — האחרים יורדים.
+    if (page.split && !location.credit) {
+      const siblings = aiSplitSiblings(location.doc, page);
+      location.doc.pages = location.doc.pages.filter(item => !siblings.includes(item));
+      page.split = null;
+    }
     page.originalImage = { ...original, rotationOffset: 0 };
     page.baseDataUrl = original.dataUrl; page.dataUrl = rendered.dataUrl;
     page.bytes = rendered.bytes; page.rotation = turns * 90;
@@ -13390,7 +13676,7 @@ function aiPaintOrientationReview() {
   if (img) img.src = location.page.dataUrl;
   const sourceRef = aiOrientationSession.sourceRow;
   const source = sourceRef && aiSourceRow(sourceRef.documentIndex, sourceRef.rowIndex);
-  if (label) label.textContent = source ? source.title + ' · ' + source.position : (location.credit ? 'תעודת זיכוי מהנהג' : 'תעודה ' + (location.docIndex + 1)) + ' · עמוד ' + (location.pageIndex + 1) + ((Number(location.page.rotation) || 0) ? ' · סיבוב ' + (Number(location.page.rotation) || 0) + '°' : '') + ' · ' + aiCropInfoText(location.page);
+  if (label) label.textContent = source ? source.title + ' · ' + source.position : (location.credit ? 'תעודת זיכוי מהנהג' : 'תעודה ' + (location.docIndex + 1)) + ' · ' + (location.credit ? 'עמוד ' + (location.pageIndex + 1) : aiPageLabel(location.page, location.pageIndex)) + ((Number(location.page.rotation) || 0) ? ' · סיבוב ' + (Number(location.page.rotation) || 0) + '°' : '') + ' · ' + aiCropInfoText(location.page);
   aiUpdateOrientationControls();
   return true;
 }
@@ -13444,11 +13730,19 @@ async function aiRotateOrientationReview(deltaTurns) {
     const rendered = await aiRenderInvoiceRotation(baseDataUrl, targetTurns);
     // מעדכנים רק לאחר שסיבוב מלא הצליח, כדי שכשל לא ישאיר חצי שינוי.
     if (!aiOrientationSession || aiOrientationSession.page !== page || !aiOrientationLocation(page)) return;
+    // v414: חלקי תעודה ארוכה מסתובבים יחד, ואחרי 180° סדרם מתהפך (aiOrderSplitGroup).
+    const siblings = (location.credit ? [] : aiSplitSiblings(location.doc, page)).map(sibling => ({ sibling, base: sibling.baseDataUrl || sibling.dataUrl }));
+    const siblingRenders = [];
+    for (const item of siblings) siblingRenders.push(await aiRenderInvoiceRotation(item.base, targetTurns));
+    if (!aiOrientationSession || aiOrientationSession.page !== page || !aiOrientationLocation(page)) return;
     page.baseDataUrl = baseDataUrl;
     page.dataUrl = rendered.dataUrl;
     page.rotation = targetTurns * 90;
     page.bytes = rendered.bytes;
     page.orientationConfirmed = false;
+    siblings.forEach((item, index) => { item.sibling.baseDataUrl = item.base; item.sibling.dataUrl = siblingRenders[index].dataUrl;
+      item.sibling.rotation = targetTurns * 90; item.sibling.bytes = siblingRenders[index].bytes; item.sibling.orientationConfirmed = false; });
+    if (siblings.length) aiOrderSplitGroup(location.doc, page);
     aiInvalidateOrientationLocation(location);
     aiPaintOrientationReview();
   } catch (error) {
@@ -13502,6 +13796,8 @@ async function aiConfirmOrientationReview(options) {
   if (creditViewOnly && !cropApplied) { aiCloseOrientationReview(); setTimeout(aiOpenNextUnconfirmedOrientation, 0); return; }
   if (location.credit) deliveryCreditInvalidate(location.doc); else yotvataInvalidatePhotoDoc(location.doc);
   location.page.orientationConfirmed = true;
+  // v414: אישור של חלק אחד של תעודה ארוכה מאשר את כל חלקיה — אותו צילום, אותו כיוון.
+  if (!location.credit) aiSplitSiblings(location.doc, location.page).forEach(sibling => { sibling.orientationConfirmed = true; });
   aiCloseOrientationReview();
   if (location.credit) {
     saveReceiptDraft(); renderReceiving();
@@ -13522,7 +13818,9 @@ function aiCancelOrientationReview() {
   if (!location || aiOrientationBusy) return;
   if (aiOrientationSession.reviewOnly) { aiCloseOrientationReview(); return; }
   if (location.credit) deliveryCreditInvalidate(location.doc); else yotvataInvalidatePhotoDoc(location.doc);
-  location.doc.pages.splice(location.pageIndex, 1);
+  // v414: מחיקת חלק של תעודה ארוכה מוחקת את כל חלקיה — חצי תעודה אינה תעודה.
+  const removed = location.credit ? [location.page] : aiSplitGroupPages(location.doc, location.page);
+  location.doc.pages = location.doc.pages.filter(item => !removed.includes(item));
   aiCloseOrientationReview();
   if (location.credit) { location.doc.pageCount = location.doc.pages.length; saveReceiptDraft(); renderReceiving(); setTimeout(aiOpenNextUnconfirmedOrientation, 0); return; }
   receiptScanChanged();
@@ -13543,7 +13841,12 @@ async function aiAddInvoiceFiles(docIndex, files) {
   try {
     // Prepare first: failed compression must not discard a paid, valid result.
     const pages = [];
-    for (const file of Array.from(files).slice(0, slots)) pages.push(await aiCompressInvoiceImage(file));
+    for (const file of Array.from(files).slice(0, slots)) {
+      // v414: תעודה ארוכה חוזרת כמערך של חלקים; כשאין להם מקום בתקרת 8 העמודים — צילום אחד, בלי חלוקה.
+      let made = [].concat(await aiCompressInvoiceImage(file));
+      if (made.length > 1 && pages.length + made.length > slots) made = [].concat(await aiCompressInvoiceImage(file, false, undefined, true));
+      pages.push(...made);
+    }
     if (generation !== aiScanRunId || aiScanDocuments[docIndex] !== doc) return;
     yotvataInvalidatePhotoDoc(doc);
     doc.pages.push(...pages);
@@ -13817,7 +14120,9 @@ function aiRemoveInvoicePage(docIndex, pageIndex) {
   if(!canEditDraft('receiving'))return;
   const doc = aiScanDocuments[docIndex]; if (!doc || aiScanBusy) return;
   yotvataInvalidatePhotoDoc(doc);
-  doc.pages.splice(pageIndex, 1); receiptScanChanged(); refreshScanHost();
+  // v414: חלק של תעודה ארוכה נמחק עם כל חלקיה.
+  const removed = aiSplitGroupPages(doc, doc.pages[pageIndex]);
+  doc.pages = doc.pages.filter(item => !removed.includes(item)); receiptScanChanged(); refreshScanHost();
 }
 async function aiRotateInvoicePage(docIndex, pageIndex) {
   if(!canEditDraft('receiving'))return;
