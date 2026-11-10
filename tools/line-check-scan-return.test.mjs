@@ -144,7 +144,7 @@ test('1. "הגיע N" מהכרטיס: המצלמה נסגרת, הרשימה חו
   assert.equal(r.callbacks.length, ticks, 'המצלמה נסגרה — לא תוזמן טיק של סריקה');
   assert.deepEqual(marks(r), [',ok,', ',']);
   assert.deepEqual(draftMarks(r), [',ok,', ','], 'נשמר בטיוטה כמו סימון ביד');
-  assert.match(strip(row(r, 0, 1)), /^קוטג׳ 5% 250 גרם הגיע · 6 יח׳ שנה$/, 'מקופלת וירוקה, כמו "הגיע" ביד');
+  assert.match(strip(row(r, 0, 1)), /^קוטג׳ 5% 250 גרם הגיע · 6 יח׳ אין מחיר קופה — אפשר להשלים כאן כמה עובר בקופה \(כולל מע״מ\) ₪ שנה$/, 'מקופלת וירוקה, כמו "הגיע" ביד');
   assert.equal(progress(r), 'סומנו 1 מתוך 4 שורות');
   assert.equal(r.run(`$('receiptQuantityTitle').textContent`), 'בדיקה שורה-שורה');
   // שאר השורות — לא מודגשות
@@ -177,7 +177,7 @@ test('2. "אחרת" עם כמות (שמור / Enter) — חזרה לשורה פ�
   beep(r, BC.cream); cardClick(r, { scanMark: 'none' });
   returned(r, 'lineCheck_1_1');
   assert.deepEqual(marks(r), [',qty:4,qty:1', ',none']);
-  assert.match(strip(row(r, 1, 1)), /^שמנת חמוצה 15% 200 מ״ל לא הגיע · 0 מתוך 2 שנה$/, 'מקופלת');
+  assert.match(strip(row(r, 1, 1)), /^שמנת חמוצה 15% 200 מ״ל לא הגיע · 0 מתוך 2 אין מחיר קופה — אפשר להשלים כאן כמה עובר בקופה \(כולל מע״מ\) ₪ שנה$/, 'מקופלת');
   assert.match(row(r, 1, 1), /border-rose-300 bg-rose-50/, 'אדומה');
   assert.equal(progress(r), 'סומנו 3 מתוך 4 שורות · חוסר 7 יח׳');
   // "אחרת" עם הכמות שבתעודה בדיוק — "הגיע" (411), וגם היא חוזרת לשורה
@@ -200,7 +200,7 @@ test('3. סריקה חוזרת — "עוד כמה?" ו"הוסף" — חזרה ל
   cardClick(r, { scanSave: '' }); // "הוסף" 2 — 6: "הגיע"
   returned(r, 'lineCheck_0_1');
   assert.deepEqual(marks(r), [',ok,', ',']);
-  assert.match(strip(row(r, 0, 1)), /^קוטג׳ 5% 250 גרם הגיע · 6 יח׳ שנה$/);
+  assert.match(strip(row(r, 0, 1)), /^קוטג׳ 5% 250 גרם הגיע · 6 יח׳ אין מחיר קופה — אפשר להשלים כאן כמה עובר בקופה \(כולל מע״מ\) ₪ שנה$/);
   assert.equal(progress(r), 'סומנו 1 מתוך 4 שורות');
   // עוד אחת מעבר — עודף; גם זה חוזר לשורה
   await rescan(r); unring(r, 'lineCheck_0_1');

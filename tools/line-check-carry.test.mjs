@@ -97,8 +97,8 @@ test('1. הכלל: כמו בתעודה — "הגיע" (גם בשתי תעודו�
   assert.deepEqual(review(r).extras.map(x => [x.productId, x.got]), [['pudding', '2']]);
   assert.equal(progress(r), 'כל 4 שורות סומנו — אפשר לסיים · חוסר 1 יח׳ · עודף 3 יח׳');
   const html = rows(r);
-  assert.match(strip(html), /חלב 3% בקרטון 1 ליטר הגיע · 17 יח׳ ב-2 תעודות שנה/, 'שורה שסומנה "הגיע" — מקופלת, כמו סימון ביד; 412: הקבוצה של שתי התעודות');
-  assert.match(strip(html), /קוטג׳ 5% 250 גרם הגיע · 6 יח׳ שנה/);
+  assert.match(strip(html), /חלב 3% בקרטון 1 ליטר הגיע · 17 יח׳ ב-2 תעודות אין מחיר קופה — אפשר להשלים כאן כמה עובר בקופה \(כולל מע״מ\) ₪ שנה/, 'שורה שסומנה "הגיע" — מקופלת, כמו סימון ביד; 412: הקבוצה של שתי התעודות');
+  assert.match(strip(html), /קוטג׳ 5% 250 גרם הגיע · 6 יח׳ אין מחיר קופה — אפשר להשלים כאן כמה עובר בקופה \(כולל מע״מ\) ₪ שנה/);
   assert.match(html, /data-line-got="0:2"[^>]*value="3"/, '"אחרת" פתוחה עם המספר שנסרק');
   assert.match(html, /id="lineCheckSum_0_2"[^>]*>התקבלו 3 · חוסר 1</);
   assert.match(html, /id="lineCheckSum_1_1"[^>]*>התקבלו 3 · עודף 1</);
@@ -181,10 +181,10 @@ test('4. שוויון: בדיקה שהתחילה מסריקה ובדיקה שס�
   for (const k of ['noteParts', 'count', 'status', 'noDoc', 'vatPct', 'totalExVat']) assert.deepEqual(savedA[k], savedB[k], k);
 });
 
-test('5. הגרסה עלתה ל-414, כולל ה-service worker', () => {
+test('5. הגרסה עלתה ל-415, כולל ה-service worker', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /const APP_VERSION = '414'/);
-  assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_long_receipt'/);
-  assert.match(html, /<title>הזמנות יטבתה - v414 /); assert.match(html, /id="verBadge"[^>]*>v414 /);
-  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v414/);
+  assert.match(html, /const APP_VERSION = '415'/); // גרסה 415: מחיר קופה חסר מושלם מהשורה בבדיקה שורה-שורה
+  assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_line_pos_price'/);
+  assert.match(html, /<title>הזמנות יטבתה - v415 /); assert.match(html, /id="verBadge"[^>]*>v415 /);
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v415/);
 });

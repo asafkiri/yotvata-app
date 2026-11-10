@@ -279,7 +279,7 @@ test('5. נשמר בטיוטה וממשיך מאותו מקום; החלון חו
   x.run('testConfirms[testConfirms.length - 1].cb()');
   assert.deepEqual(review(x).extras.map(e => [e.productId, e.got]), [['pudding', '2']], 'רק מה שאינו בתעודות');
   // 407: הכרטיס כמו שורת תעודה — "לא בתעודה", מחיר קופה, ברקוד ומחיר ליחידה, הכמות, הסיכום ו"הסר"
-  assert.match(strip(x.run(`$('receiptQuantityRows').innerHTML`)), /הגיע משהו נוסף\? .* לא בתעודה — הגיע בנוסף מעדן שוקולד 125 גרם אין מחיר קופה — בדוק בקופה ועדכן 7290000000046 · ₪4\.00 ליח׳ יח׳ הגיעו התקבלו 2 · עודף 2 הסר/);
+  assert.match(strip(x.run(`$('receiptQuantityRows').innerHTML`)), /הגיע משהו נוסף\? .* לא בתעודה — הגיע בנוסף מעדן שוקולד 125 גרם אין מחיר קופה — אפשר להשלים כאן כמה עובר בקופה \(כולל מע״מ\) ₪ 7290000000046 · ₪4\.00 ליח׳ יח׳ הגיעו התקבלו 2 · עודף 2 הסר/); // v415: שדה מחיר הקופה בשורה
   type(x, { lineSearch: '' }, 'חמאה');
   assert.match(x.run(`$('receiptLineSearchResults').innerHTML`), /data-extra-add="butter"/);
   click(x, { extraAdd: 'butter' }); type(x, { extraGot: '1' }, '3');
@@ -469,10 +469,10 @@ test('11. הכרטיס של "הגיע משהו נוסף" כמו שורת תעו�
   r.run('renderReceiptLineRows()');
   assert.equal(strip(card(0)), 'לא בתעודה — הגיע בנוסף חמאה 100 גרם בקופה: ₪9.90 7290000000053 · ₪6.00 ליח׳ יח׳ הגיעו ארגז אחד של 4 התקבלו 4 · עודף 4 הסר');
   assert.match(card(0), /value="4"/);
-  // בלי מחיר קופה ובלי ארגז — "אין מחיר קופה", כמו בשורת תעודה
+  // בלי מחיר קופה ובלי ארגז — "אין מחיר קופה" עם שדה ההשלמה (v415), כמו בשורת תעודה
   click(r, { extraAdd: 'pudding' });
   const b = card(1);
-  assert.equal(strip(b), 'לא בתעודה — הגיע בנוסף מעדן שוקולד 125 גרם אין מחיר קופה — בדוק בקופה ועדכן 7290000000046 · ₪4.00 ליח׳ יח׳ הגיעו התקבלו 1 · עודף 1 הסר');
+  assert.equal(strip(b), 'לא בתעודה — הגיע בנוסף מעדן שוקולד 125 גרם אין מחיר קופה — אפשר להשלים כאן כמה עובר בקופה (כולל מע״מ) ₪ 7290000000046 · ₪4.00 ליח׳ יח׳ הגיעו התקבלו 1 · עודף 1 הסר');
   assert.match(b, /fa-triangle-exclamation/);
   // "הסר" ו"סיום" — כמו קודם
   click(r, { extraRemove: '1' });
@@ -483,9 +483,9 @@ test('11. הכרטיס של "הגיע משהו נוסף" כמו שורת תעו�
   assert.deepEqual(json(r, 'receiptList.map(l => l.productId + " " + l.qty).sort()'), ['butter 4', 'cottage 6', 'cream 2', 'milk 17', 'yogurt 4']);
 });
 
-test('הגרסה עלתה ל-410, כולל ה-service worker', () => {
+test('הגרסה עלתה ל-415, כולל ה-service worker', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /const APP_VERSION = '414'/);
-  assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_long_receipt'/);
-  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v414/);
+  assert.match(html, /const APP_VERSION = '415'/); // גרסה 415: מחיר קופה חסר מושלם מהשורה בבדיקה שורה-שורה
+  assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_line_pos_price'/);
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v415/);
 });
