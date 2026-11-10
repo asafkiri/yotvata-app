@@ -11,7 +11,8 @@ function source(name) {
   const end = html.slice(m.index, eol).trimEnd().endsWith('}') ? eol : html.indexOf('\n}', eol) + 2;
   return html.slice(m.index, end);
 }
-const names = ['aiCompressInvoiceImage', 'aiInvoiceOutputScale', 'aiDetectPaperRegion', 'aiMeasurePageQuality', 'aiQualityAdvice', 'aiDrawCropMap', 'aiCropInitFrame', 'aiCropResetOverlay', 'aiCropDraw',
+const names = ['aiCompressInvoiceImage', 'aiInvoiceOutputScale', 'aiRenderInvoiceRegion', 'aiRenderSplitPages', 'aiPlanLongReceiptSplit', 'aiBandDarkMap', 'aiRowTilt', 'aiProfileWhitestLine', 'aiFindSplitLine',
+  'aiSplitSkipText', 'aiSplitSiblings', 'aiSplitGroupPages', 'aiOrderSplitGroup', 'aiPageLabel', 'aiDetectPaperRegion', 'aiMeasurePageQuality', 'aiQualityAdvice', 'aiDrawCropMap', 'aiCropInitFrame', 'aiCropResetOverlay', 'aiCropDraw',
   'aiCropSyncCanvasBox', 'aiCropContainRect', 'aiCropFit', 'aiCropHitTest', 'aiCropPointerPosition',
   'aiCropPointerDown', 'aiCropPointerMove', 'aiCropPointerUp', 'aiApplyCropIfMoved',
   'aiReprocessFromSource', 'aiUnrotateRect', 'aiNormalizeQuarterTurns', 'aiRenderInvoiceRotation',
@@ -49,7 +50,9 @@ function context() {
     aiReadFile: async () => 'source', aiLoadImage: async url => { assert.ok(images.has(url), url); return images.get(url); },
     aiEnhanceDocumentPixels: () => false,
     AI_INVOICE_MAX_SIDE: 1850, AI_CROP_PROXY_SIDE: 1500, AI_CREDIT_MAX_PIXELS: Math.round(1850 * 1850 * 0.75), AI_CREDIT_MAX_LONG_SIDE: 4096,
-    Uint8ClampedArray, Uint8Array, Uint32Array,
+    // v414: תעודה ארוכה — הקבועים נדרשים לטעינה; בבדיקות כאן אין מרווח שורות (P) ולכן אין חלוקה.
+    AI_SPLIT_MIN_PITCH: 38, AI_SPLIT_MAX_PARTS: 3, AI_SPLIT_MIN_SOURCE_GAIN: 1.3, AI_SPLIT_GAP_INK: 0.25, AI_SPLIT_GAP_DEPTH: 0.2, AI_SPLIT_GAP_CLEAN: 0.15, AI_SPLIT_MAX_TILT: 7, AI_SPLIT_TILT_STEP: 0.25, AI_SPLIT_TILT_PEAK: 1.5,
+    Uint8ClampedArray, Uint8Array, Uint32Array, Float32Array,
     aiFlattenIllumination: (data, width, height, analysis) => { if (analysis) analysis.ready = true; return true; },
     aiTextAnchorBox: () => cropPlan ? { x: cropPlan.x, y: cropPlan.y, width: cropPlan.width, height: cropPlan.height } : null,
     aiTextCropBox: () => cropPlan ? { box: { x: cropPlan.x, y: cropPlan.y, width: cropPlan.width, height: cropPlan.height } } : null,
