@@ -3,9 +3,11 @@
 // הטיוטה בזיכרון הטלפון (localStorage) — בדיוק כמו פתיחה מחדש של האפליקציה. המצלמה מזויפת (זרם מקנבס, BarcodeDetector שלא
 // קורא כלום), והברקוד "נקרא" דרך onScanned. מה שנבדק בדום אמיתי:
 // - "סרוק מוצר" ו"סיום" בתחתית הקבועה: גלויים, ולא זזים כשגוללים את הרשימה.
-// - הלחיצה פותחת את המצלמה (החלון מוסתר), עם "סומנו 0 מתוך 5"; ברקוד מעלה את הכרטיס, ולחיצה אמיתית על "הגיע 6" מסמנת;
+// - הלחיצה פותחת את המצלמה (החלון מוסתר), עם "סומנו 0 מתוך 4"; ברקוד מעלה את הכרטיס, ולחיצה אמיתית על "הגיע 6" מסמנת;
 //   "אחרת" — השדה בפוקוס, הסיכום מתעדכן בהקלדה, Enter שומר; מוצר שאינו בתעודה — "הוסף"; ברקוד לא מוכר — ההודעה.
-// - ✕ מחזיר לרשימה: השורות שסומנו בסריקה מקופלות, השורה האחרונה מודגשת, המונה נכון; בלי שגיאות דף ובלי גלילה לצדדים.
+// - 413: כל סימון מהכרטיס סוגר את המצלמה וחוזר לרשימה — רק השורה שסומנה מודגשת, והיא נגללת לתוך המסך (גם הכרטיס הצהוב
+//   בתחתית); "סרוק מוצר" שוב למוצר הבא, עם המונה המעודכן. ✕ בכרטיס, "תקן את הסה״כ" וברקוד לא מוכר משאירים את המצלמה.
+// - ✕ במצלמה מחזיר לרשימה כמו שהיא: השורות שסומנו בסריקה מקופלות, המונה נכון; בלי שגיאות דף ובלי גלילה לצדדים.
 // הרצה: node tools/line-check-scan-browser.mjs (Playwright + Chromium; YOTVATA_CHROMIUM — נתיב לדפדפן, אופציונלי)
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -112,6 +114,28 @@ const snap = async (page, name) => { if (shots) await page.screenshot({ path: pa
 const errors = [];
 // הכרטיס נסגר (המחלקה hidden) — waitForSelector מחכה לנראות, ולכן בודקים את המחלקה עצמה
 const cardHidden = page => page.waitForFunction(() => document.getElementById('scanLineCard').classList.contains('hidden'));
+const highlighted = page => page.evaluate(() => [...document.querySelectorAll('#receiptQuantityRows .ring-4')].map(e => e.id));
+// v413: הסימון סגר את המצלמה — הרשימה חזרה, רק השורה שסומנה מודגשת, והיא בתוך המסך (נגללת למרכז)
+async function returned(page, id) {
+  await page.waitForSelector('#receiptQuantityModal:not(.hidden)');
+  assert.equal(await page.locator('#scanModal').isVisible(), false, 'המצלמה נסגרה אחרי הסימון');
+  assert.equal(await page.evaluate(() => t.purpose()), 'field');
+  assert.equal(await page.evaluate(() => t.card()), null);
+  assert.deepEqual(await highlighted(page), [id], 'רק השורה שסומנה מודגשת');
+  // בתוך הגוף הנגלל — ולא מתחת לכותרת הדביקה של התעודה (413: כשהרשימה קצרה והגלילה נעצרת בסופה, "למרכז" היה משאיר אותה מאחוריה)
+  await page.waitForFunction(i => { const el = document.getElementById(i), e = el.getBoundingClientRect(), b = document.getElementById('receiptQuantityBody').getBoundingClientRect();
+    const head = el.closest('section') && el.closest('section').querySelector('.sticky'), headBottom = head ? head.getBoundingClientRect().bottom : b.top;
+    return e.height > 0 && e.top >= b.top - 1 && e.top >= headBottom - 1 && e.bottom <= b.bottom + 1; }, id, { timeout: 5000 })
+    .catch(() => assert.fail(id + ' — השורה שסומנה לא נגללה לתוך המסך (או שהיא מתחת לכותרת הדביקה)'));
+}
+// "סרוק מוצר" שוב — המצלמה נפתחת נקייה למוצר הבא
+async function rescan(page) {
+  await page.locator('#receiptLineScan').click();
+  await page.waitForSelector('#scanModal:not(.hidden)');
+  await page.waitForFunction(() => t.stream());
+  assert.equal(await page.locator('#receiptQuantityModal').isVisible(), false);
+  assert.equal(await page.locator('#scanLineCard').isVisible(), false);
+}
 try {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, locale: 'he-IL' });
   await context.addInitScript(entries => { for (const [k, v] of entries) localStorage.setItem(k, v); }, [...storage.entries()]);
@@ -156,11 +180,17 @@ try {
   assert.match((await page.locator('#scanLineCard').innerText()).replace(/\s+/g, ' '), /שורה 2 בתעודה 1 מתוך 2 קוטג׳ 5% 250 גרם .*6 יח׳ בתעודה.*הגיע 6/);
   await snap(page, '3-card');
   await page.locator('[data-scan-mark="ok"]').click();
-  await cardHidden(page);
+  await returned(page, 'lineCheck_0_1'); // 413: המצלמה נסגרה, הרשימה חזרה על השורה
   assert.deepEqual(await page.evaluate(() => t.marks()), [',ok,', ',']);
-  assert.equal(await page.evaluate(() => document.getElementById('scanOverlayCount').textContent + ' | ' + document.getElementById('scanOverlayName').textContent), '1 מתוך 4 | ✓ קוטג׳ 5% 250 גרם · הגיע 6');
+  assert.match((await page.locator('#lineCheck_0_1').innerText()).replace(/\s+/g, ' '), /הגיע · 6 יח׳.*שנה/, 'מקופלת, כמו "הגיע" ביד');
+  assert.equal((await page.locator('#receiptQuantityProgress').textContent()).trim(), 'סומנו 1 מתוך 4 שורות');
+  assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.id), 'receiptQuantityTitle', 'הפוקוס על הכותרת — לא על שדה (המקלדת לא קופצת)');
+  await snap(page, '3b-returned');
+  // "סרוק מוצר" שוב — המונה מעודכן, בלי "מה סומן זה עתה"
+  await rescan(page);
+  assert.equal(await page.evaluate(() => document.getElementById('scanOverlayCount').textContent + ' | ' + document.getElementById('scanOverlayName').textContent), '1 מתוך 4 | ');
   // "אחרת": השדה בפוקוס, הסיכום בהקלדה, Enter שומר
-  await page.evaluate(() => { t.later(); t.beep('7290000000008'); });
+  await page.evaluate(() => t.beep('7290000000008'));
   await page.waitForSelector('#scanLineCard:not(.hidden)');
   await page.locator('[data-scan-mark="qty"]').click();
   await page.waitForSelector('#scanLineGot');
@@ -169,16 +199,20 @@ try {
   assert.equal((await page.locator('#scanLineSum').textContent()).trim(), 'התקבלו 10 · חוסר 7'); // 412: החלב — 17 בשתי התעודות
   await snap(page, '4-qty');
   await page.keyboard.press('Enter');
-  await cardHidden(page);
+  await returned(page, 'lineCheck_0_0');
   assert.deepEqual(await page.evaluate(() => t.marks()), ['qty:10,ok,', 'none,']); // 412: 10 מתוך 17 — 10 בתעודה הראשונה, 0 ("לא הגיע") בשנייה
+  assert.equal(await page.locator('#lineCheck_0_0 [data-line-got]').inputValue(), '10', '"אחרת" — השורה פתוחה עם הכמות');
   // גרסה 411: סריקה חוזרת של שורה שסומנה — "סרקת עד עכשיו 3 מתוך 4", מה שחסר כבר בשדה (בפוקוס ומסומן), Enter מוסיף ומשלים ל"הגיע"
-  await page.evaluate(() => { t.later(); t.beep('7290000000022'); }); // יוגורט — 4 בתעודה
+  await rescan(page);
+  await page.evaluate(() => t.beep('7290000000022')); // יוגורט — 4 בתעודה
   await page.waitForSelector('#scanLineCard:not(.hidden)');
   await page.locator('[data-scan-mark="qty"]').click();
   await page.waitForSelector('#scanLineGot');
-  await page.keyboard.type('3'); await page.keyboard.press('Enter'); await cardHidden(page);
+  await page.keyboard.type('3'); await page.keyboard.press('Enter');
+  await returned(page, 'lineCheck_0_2');
   assert.deepEqual(await page.evaluate(() => t.marks()), ['qty:10,ok,qty:3', 'none,']);
-  await page.evaluate(() => { t.later(); t.beep('7290000000022'); });
+  await rescan(page);
+  await page.evaluate(() => t.beep('7290000000022'));
   await page.waitForSelector('#scanLineCard:not(.hidden)');
   assert.match((await page.locator('#scanLineCard').innerText()).replace(/\s+/g, ' '), /סרקת עד עכשיו 3 מתוך 4 .*4 יח׳ בתעודה.*עוד כמה\?.*הוסף.*סה״כ 4 · כמו בתעודה.*תקן את הסה״כ/);
   assert.equal(await page.locator('#scanLineGot').inputValue(), '1', 'מה שחסר — בשדה');
@@ -187,42 +221,50 @@ try {
   assert.equal(await page.locator('[data-scan-mark="ok"]').count(), 0, 'בלי "הגיע N" — זה כרטיס של תוספת');
   await snap(page, '4b-add');
   await page.keyboard.press('Enter');
-  await cardHidden(page);
+  await returned(page, 'lineCheck_0_2');
   assert.deepEqual(await page.evaluate(() => t.marks()), ['qty:10,ok,ok', 'none,'], '3 + 1 = 4 — "הגיע"');
-  assert.equal(await page.evaluate(() => document.getElementById('scanOverlayCount').textContent + ' | ' + document.getElementById('scanOverlayName').textContent), '3 מתוך 4 | ✓ יוגורט טבעי 150 גרם · עוד 1 — הגיע 4');
-  // "לא נכון? תקן את הסה״כ" — הכרטיס הקודם עם שלושת הכפתורים; ✕ סוגר בלי לשנות
-  await page.evaluate(() => { t.later(); t.beep('7290000000015'); }); // קוטג׳ — כבר "הגיע" 6 מתוך 6
+  assert.match((await page.locator('#lineCheck_0_2').innerText()).replace(/\s+/g, ' '), /הגיע · 4 יח׳.*שנה/, 'גרסה 411: השורה שהושלמה ב"עוד כמה?" — מקופלת כמו "הגיע"');
+  assert.equal((await page.locator('#receiptQuantityProgress').textContent()).trim(), 'סומנו 3 מתוך 4 שורות · חוסר 7 יח׳');
+  // "לא נכון? תקן את הסה״כ" — הכרטיס הקודם עם שלושת הכפתורים; ✕ בכרטיס סוגר בלי לשנות — והמצלמה נשארת
+  await rescan(page);
+  await page.evaluate(() => t.beep('7290000000015')); // קוטג׳ — כבר "הגיע" 6 מתוך 6
   await page.waitForSelector('#scanLineCard:not(.hidden)');
   assert.match((await page.locator('#scanLineCard').innerText()).replace(/\s+/g, ' '), /סרקת עד עכשיו 6 מתוך 6 — הכל הגיע/);
   assert.equal(await page.locator('#scanLineGot').inputValue(), '');
   await page.locator('[data-scan-mark="fix"]').click();
   assert.match((await page.locator('#scanLineCard').innerText()).replace(/\s+/g, ' '), /כבר סומנה: הגיע — אפשר לשנות.*הגיע 6.*אחרת.*לא הגיע/);
   assert.equal(await page.locator('#scanLineGot').count(), 0);
+  assert.equal(await page.evaluate(() => t.purpose()), 'linecheck', '"תקן את הסה״כ" אינו סימון — המצלמה נשארת');
   await page.locator('[data-scan-dismiss]').click();
   await cardHidden(page);
   assert.deepEqual(await page.evaluate(() => t.marks()), ['qty:10,ok,ok', 'none,']);
-  // מוצר שאינו בתעודה — "הוסף"
+  assert.equal(await page.locator('#scanModal').isVisible(), true, '✕ בכרטיס — המצלמה נשארת');
+  assert.equal(await page.evaluate(() => t.purpose()), 'linecheck');
+  // מוצר שאינו בתעודה — "הוסף": חזרה לרשימה, לכרטיס הצהוב שבתחתית — נגלל לתוך המסך
   await page.evaluate(() => { t.later(); t.beep('7290000000046'); });
   await page.waitForSelector('#scanLineCard:not(.hidden)');
   assert.match((await page.locator('#scanLineCard').innerText()).replace(/\s+/g, ' '), /לא בתעודה — הגיע בנוסף מעדן שוקולד 125 גרם/);
   assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.id), 'scanLineGot');
   await page.locator('[data-scan-save]').click();
-  await cardHidden(page);
+  await returned(page, 'lineExtra_0');
   assert.deepEqual(await page.evaluate(() => t.extras()), [['pudding', '1']]);
-  // ברקוד לא מוכר — ההודעה, בלי כרטיס
-  await page.evaluate(() => { t.later(); t.beep('7290119390519'); });
+  assert.ok(await page.evaluate(() => document.getElementById('receiptQuantityBody').scrollTop) > 0, 'הרשימה נגללה אל הכרטיס הצהוב שבתחתית');
+  await snap(page, '4c-extra-returned');
+  // ברקוד לא מוכר — ההודעה, בלי כרטיס, והמצלמה נשארת
+  await rescan(page);
+  await page.evaluate(() => t.beep('7290119390519'));
   assert.equal(await page.locator('#scanLineCard').isVisible(), false);
   assert.match(await page.locator('#toastMsg').textContent(), /ברקוד לא קיים במערכת/);
-  // ✕ — חזרה לרשימה
+  assert.equal(await page.locator('#scanModal').isVisible(), true);
+  // ✕ במצלמה — חזרה לרשימה כמו שהיא, בלי שורה מודגשת (כלום לא סומן מאז)
   await page.locator('#scanClose').click();
   await page.waitForSelector('#receiptQuantityModal:not(.hidden)');
   assert.equal(await page.locator('#scanModal').isVisible(), false);
   assert.equal(await page.evaluate(() => t.purpose()), 'field');
   assert.equal((await page.locator('#receiptQuantityProgress').textContent()).trim(), 'סומנו 3 מתוך 4 שורות · חוסר 7 יח׳ · עודף 1 יח׳');
   assert.match((await page.locator('#lineCheck_0_1').innerText()).replace(/\s+/g, ' '), /הגיע · 6 יח׳.*שנה/, 'השורה שסומנה בסריקה — מקופלת');
-  assert.match((await page.locator('#lineCheck_0_2').innerText()).replace(/\s+/g, ' '), /הגיע · 4 יח׳.*שנה/, 'גרסה 411: השורה שהושלמה ב"עוד כמה?" — מקופלת כמו "הגיע"');
   assert.equal(await page.locator('#lineCheck_0_0 [data-line-got]').inputValue(), '10', '"אחרת" — פתוחה עם הכמות');
-  assert.equal(await page.evaluate(() => document.getElementById('lineExtra_0').classList.contains('ring-4')), true, 'השורה האחרונה שסומנה — מודגשת');
+  assert.deepEqual(await highlighted(page), [], '✕ בלי סימון — שום שורה לא מודגשת');
   await snap(page, '5-back');
   // 412: המספר קובע — ב"אחרת" של החלב (10 מתוך 17 בשתי התעודות) מקלידים 17: תוך כדי ההקלדה הכרטיס ירוק ו"הגיע 17" דולק, בלי
   //     שהשדה נעלם; 170 — שוב כתום; 17, ויציאה מהשדה עם לחיצה על "סיום" — "הגיע" (12 + 5), מקופלת, והלחיצה לא נבלעה
@@ -253,5 +295,5 @@ try {
   const width = await page.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, client: document.scrollingElement.clientWidth }));
   assert.ok(width.scroll <= width.client, 'בלי גלילה לצדדים');
   assert.deepEqual(errors, [], 'בלי שגיאות דף');
-  console.log('yotvata: הסריקה בבדיקה שורה-שורה בדפדפן אמיתי (390px) — התחתית הקבועה, המצלמה, הכרטיס, "אחרת", "עוד כמה?" (פוקוס, מסומן, Enter), "תקן את הסה״כ", "הגיע בנוסף", ברקוד לא מוכר, חזרה לרשימה, והמספר שקובע את הסימון — תקין');
+  console.log('yotvata: הסריקה בבדיקה שורה-שורה בדפדפן אמיתי (390px) — התחתית הקבועה, המצלמה, הכרטיס, "אחרת", "עוד כמה?" (פוקוס, מסומן, Enter), "תקן את הסה״כ", "הגיע בנוסף", ברקוד לא מוכר, כל סימון חוזר לשורה שלו ברשימה (413), והמספר שקובע את הסימון — תקין');
 } finally { await browser.close(); await new Promise(r => server.close(r)); }

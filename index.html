@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v412 מוצר אחד — שורה אחת</title>
+    <title>הזמנות יטבתה - v413 הסימון מחזיר לשורה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -127,7 +127,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v412 מוצר אחד — שורה אחת</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v413 הסימון מחזיר לשורה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -213,7 +213,7 @@
           <p id="scanDiag" class="text-white/60 text-[10px] font-bold mt-1" style="text-shadow:0 1px 3px rgba(0,0,0,.6)"></p>
         </div>
         <button id="scanTorch" class="btn-tap hidden absolute bottom-24 left-5 w-14 h-14 rounded-full bg-black/60 text-white flex items-center justify-center text-xl" title="פנס"><i class="fa-solid fa-bolt"></i></button>
-        <!-- v408: בסריקה בתוך הבדיקה שורה-שורה — הכרטיס של המוצר שנסרק, מעל הווידאו, מלמטה (המצלמה נשארת דולקת) -->
+        <!-- v408: בסריקה בתוך הבדיקה שורה-שורה — הכרטיס של המוצר שנסרק, מעל הווידאו, מלמטה (המצלמה נשארת דולקת עד הסימון; v413: הסימון סוגר אותה וחוזר לשורה ברשימה) -->
         <div id="scanLineCard" class="hidden absolute inset-x-0 bottom-0 p-3 pb-5" dir="rtl" role="dialog" aria-label="המוצר שנסרק — מה הגיע"></div>
       </div>
     </div>
@@ -690,9 +690,9 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '412'; // בדיקה שורה-שורה: מוצר אחד — שורה אחת, גם כשהוא בשתי תעודות; החלוקה בין התעודות אוטומטית, והחוסר על האחרונה
+const APP_VERSION = '413'; // בדיקה שורה-שורה: סימון מהכרטיס שמעל המצלמה ("הגיע" / "אחרת" / "לא הגיע" / "הוסף" / "הגיע בנוסף") סוגר את המצלמה וחוזר לשורה של המוצר ברשימה
 // v398: תווית הגרסה ביומן הפעולות ובקובץ הגיבוי (עד כאן מחרוזת קבועה שנשארה 'v396_second_strong_read')
-const APP_VERSION_LABEL = 'v' + APP_VERSION + '_line_groups';
+const APP_VERSION_LABEL = 'v' + APP_VERSION + '_scan_return';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -9460,7 +9460,24 @@ function receiptLineReveal(id) {
   const el = $(id); if (!el) return;
   $('receiptQuantityRows').querySelectorAll('.ring-4').forEach(x => x.classList.remove('ring-4', 'ring-rose-300', 'ring-blue-300'));
   el.classList.add('ring-4', 'ring-blue-300');
-  try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (err) {}
+  receiptLineScrollTo(el);
+}
+// v413: הגלילה לשורה — למרכז הגוף הנגלל (receiptQuantityBody), אבל לא מתחת לכותרת הדביקה של התעודה (v405, sticky): כשהרשימה
+// קצרה והגלילה נעצרת בסופה, "למרכז" אינו אפשרי, והשורה הייתה נשארת מוסתרת מאחורי הכותרת — בדיוק אחרי שהסימון במצלמה
+// החזיר אליה. לכן המקום מחושב כאן: המרכז, ואם אחרי הגלילה השורה תהיה מתחת לכותרת — קצת מתחתיה. (בלי גוף נגלל — scrollIntoView.)
+function receiptLineScrollTo(el) {
+  try {
+    const body = $('receiptQuantityBody');
+    const b = body.getBoundingClientRect(), r = el.getBoundingClientRect();
+    const max = Math.max(0, body.scrollHeight - body.clientHeight), clamp = t => Math.max(0, Math.min(max, Math.round(t)));
+    const rowTop = (r.top - b.top) + body.scrollTop; // המקום של השורה בתוכן הנגלל
+    let top = clamp(rowTop - (body.clientHeight - r.height) / 2);
+    const section = el.closest('section'), head = section ? section.querySelector('.sticky') : null, headH = head ? head.getBoundingClientRect().height : 0;
+    if (headH && rowTop - top < headH + 8) top = clamp(rowTop - headH - 8);
+    if (body.scrollTo) body.scrollTo({ top, behavior: 'smooth' }); else body.scrollTop = top;
+  } catch (err) {
+    try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
+  }
 }
 // v407 (בעל העסק, 5.11.2026: "בשורה הצהובה לא רשום ברקוד, לא מחיר קופה, לא כלום — שורה בודדת מסכנה בצבע צהוב"): הכרטיס
 // של "הגיע משהו נוסף" כמו שורת תעודה (receiptLineRowHtml) — "לא בתעודה" במקום מספר השורה, השם גדול, מחיר הקופה
@@ -9685,15 +9702,21 @@ function receiptLineCheckDrop(di) {
 // - "סרוק מוצר" (receiptLineScan) יושב בתחתית הקבועה של החלון ליד "סיום" — גלוי תמיד, לא תלוי בגלילה. הלחיצה מסתירה את
 //   החלון (שכבה 70, מעל המצלמה בשכבה 55) ופותחת את המצלמה במצב רציף (scanPurpose = 'linecheck').
 // - ברקוד שנסרק → כרטיס מעל הווידאו (scanLineCard), מלמטה, והמצלמה נשארת דולקת; לולאת הסריקה מושהית עד שהכרטיס נסגר
-//   (onScanned אינו מתזמן טיק כשהכרטיס פתוח, וסגירת הכרטיס מתזמנת אחד). "הגיע N" (ברירת המחדל — הכמות בתעודה, לא 1 כמו
-//   בקליטה בסריקה) / "אחרת" (שדה כמות) / "לא הגיע", ו-✕ קטן שסוגר בלי לסמן.
+//   (onScanned אינו מתזמן טיק כשהכרטיס פתוח, וסגירת הכרטיס בלי לסמן מתזמנת אחד). "הגיע N" (ברירת המחדל — הכמות בתעודה, לא 1
+//   כמו בקליטה בסריקה) / "אחרת" (שדה כמות) / "לא הגיע", ו-✕ קטן שסוגר בלי לסמן.
+// - v413: כל סימון מהכרטיס — "הגיע", "אחרת" עם כמות, "לא הגיע", "הוסף" ב"עוד כמה?", וגם "הגיע בנוסף" / "עדכן" של מוצר שאינו
+//   בתעודה — סוגר את המצלמה וחוזר לרשימה, לשורה של המוצר (receiptLineScanReturn → closeScanner → receiptLineScanClosed:
+//   הרשימה מצוירת מחדש, והשורה שסומנה מודגשת ונגללת למרכז). הסריקה הבאה — "סרוק מוצר" בתחתית הקבועה. (בעל העסק, 10.11.2026:
+//   "אחרי שאני מסמן מוצר ומאשר, הוא נשאר במצלמה וכביכול ממשיך למוצר הבא — ואני רוצה שיצא מהמוצר וילך לשורה של המוצר".)
+//   רק ✕ בכרטיס (בלי לסמן), ברקוד לא מוכר וכמות לא תקינה משאירים את המצלמה דולקת.
 // - איזו שורה: הברקוד נבדק קודם מול שורות התעודות (ברקוד שקיים בשני מוצרים במאגר נפתר למוצר שבנייר), ואחריו מול המאגר.
 //   v412: אותו מוצר בכמה שורות (שתי תעודות) — קבוצה אחת (receiptLineGroups): הכרטיס של הקבוצה, עם הסך, והחלוקה אוטומטית.
 //   יחידה שסרקו כשבתעודה מארז החיוב שלה (billingPackId), או להפך — השורה של הקרוב, והכרטיס אומר זאת במקום להוסיף "הגיע בנוסף".
 // - מוצר שאינו באף תעודה → כרטיס "לא בתעודה — הגיע בנוסף" עם כמות (1), ונכנס ל"הגיע משהו נוסף" (extras) כמו מהחיפוש; מוצר
 //   שכבר שם — הכמות הנוכחית, "עדכן". ברקוד שאינו במאגר → אותה הודעה כמו בקליטה בסריקה (rejectUnknownReceivingBarcode).
-// - על המצלמה: "סומנו 9 מתוך 28" (scanOverlayCount) והפעולה האחרונה (scanOverlayName). ✕ → closeScanner →
-//   receiptLineScanClosed: החלון חוזר, מצויר מחדש (מה שסומן בסריקה מקופל כמו ביד), והשורה האחרונה שסומנה מודגשת (receiptLineReveal).
+// - על המצלמה: "סומנו 9 מתוך 28" (scanOverlayCount). ✕ → closeScanner → receiptLineScanClosed: החלון חוזר, מצויר מחדש
+//   (מה שסומן בסריקה מקופל כמו ביד), והשורה האחרונה שסומנה מודגשת (receiptLineReveal). (עד 412 הפעולה האחרונה הוצגה על
+//   המצלמה ב-scanOverlayName; מ-413 המצלמה נסגרת עם הסימון, והשורה המודגשת ברשימה היא האישור.)
 // - receiptLineScanEpoch — receiptLocalEpoch בפתיחת הסריקה: סריקה או לחיצה בכרטיס אחרי שהקליטה התחלפה סוגרות את המצלמה בלי לסמן.
 // - v411: סריקה חוזרת של שורה שכבר סומנה — הכרטיס אומר "סרקת עד עכשיו 1 מתוך 2" ושואל "עוד כמה?" (addQty): מה שמוקלד
 //   מתווסף למה שסומן (receiptLineScanAdd), ומה שחסר עד הכמות בתעודה כבר בשדה — "הוסף" אחד משלים את השורה. "לא נכון? תקן את
@@ -9708,15 +9731,15 @@ function openReceiptLineScanner() {
   lastScanCode = ''; lastScanTime = 0;
   const m = $('receiptQuantityModal'); m.classList.add('hidden'); m.classList.remove('flex');
   scanPurpose = 'linecheck';
-  refreshReceiptLineScanOverlay('');
+  refreshReceiptLineScanOverlay();
   openScanner();
 }
-// "סומנו 9 מתוך 28" בעיגול שבראש המצלמה, ומתחתיו מה סומן זה עתה
-function refreshReceiptLineScanOverlay(last) {
+// "סומנו 9 מתוך 28" בעיגול שבראש המצלמה (v413: בלי "מה סומן זה עתה" מתחתיו — הסימון סוגר את המצלמה)
+function refreshReceiptLineScanOverlay() {
   const r = receiptQuantityReview; if (!r || r.mode !== 'lines') return;
   const total = receiptLineCheckTotal(r), openLines = receiptLineCheckOpen(r).filter(x => x.extra == null).length;
   const c = $('scanOverlayCount'); if (c) c.textContent = (total - openLines) + ' מתוך ' + total;
-  const n = $('scanOverlayName'); if (n) n.textContent = last || '';
+  const n = $('scanOverlayName'); if (n) n.textContent = '';
 }
 // מה נסרק ואיזו שורה זו. line — { di, li, scanned, related (המוצר בשורה כשאינו מה שנסרק), others (עוד שורות של אותו מוצר) };
 // extra — { k (המקום ב"הגיע משהו נוסף", או -1), scanned }; unknown — הברקוד אינו במאגר
@@ -9827,12 +9850,18 @@ function renderReceiptLineScanCard() {
   box.classList.remove('hidden');
   if (c.askQty || c.addQty || c.kind === 'extra') { const i = $('scanLineGot'); if (i && i.focus) { try { i.focus(); i.select && i.select(); } catch (e) {} } }
 }
-// סגירת הכרטיס — והסריקה ממשיכה (טיק אחד; הלולאה הייתה מושהית כל עוד הכרטיס היה פתוח). המוצר שזה עתה סומן עדיין מול
-// המצלמה — הברקוד שלו לא ייקרא שוב בשתי השניות הבאות (onScanned)
+// סגירת הכרטיס בלי לסמן (✕ בכרטיס) — והסריקה ממשיכה (טיק אחד; הלולאה הייתה מושהית כל עוד הכרטיס היה פתוח). המוצר עדיין
+// מול המצלמה — הברקוד שלו לא ייקרא שוב בשתי השניות הבאות (onScanned)
 function closeReceiptLineScanCard() {
   receiptLineScanCard = null; lastScanTime = Date.now();
   renderReceiptLineScanCard();
   if (scanPurpose === 'linecheck' && barcodeDetector && scanStream) scanTimer = setTimeout(scanTick, 350);
+}
+// v413: אחרי סימון מהכרטיס — המצלמה נסגרת והרשימה חוזרת, פתוחה על השורה שסומנה (receiptLineScanLast → receiptLineReveal),
+// במקום להישאר במצלמה ולהמשיך למוצר הבא. הסריקה הבאה — "סרוק מוצר" שבתחתית הקבועה.
+function receiptLineScanReturn(id) {
+  receiptLineScanLast = id;
+  closeScanner(); // → receiptLineScanClosed: הכרטיס נסגר, הרשימה מצוירת מחדש, והשורה מודגשת ונגללת למרכז
 }
 // הסימון מהכרטיס — אותם שדות ואותו נתיב כמו לחיצה ברשימה (receiptLineCheckClick): mark/got, קיפול, הטיוטה והשורות לכל מוצר
 function receiptLineScanApply(mark, got) {
@@ -9844,10 +9873,7 @@ function receiptLineScanApply(mark, got) {
   receiptLineSettle(r); // בכרטיס המצלמה השמירה היא סוף ההקלדה — שורה שהתמלאה בדיוק נהיית "הגיע" מיד
   receiptLineOpen.delete(g.key); receiptLineDropAsk = null; receiptLineNotice = null;
   receiptLineCheckChanged();
-  receiptLineScanLast = 'lineCheck_' + g.di + '_' + g.li;
-  const n = receiptLineGroupGot(g), name = g.lines[0].l.name, qty = g.paperQty, added = c.added != null ? 'עוד ' + c.added + ' — ' : ''; // "✓ שם · עוד 1 — הגיע 2"
-  refreshReceiptLineScanOverlay((n === qty ? '✓ ' : n === 0 ? '✗ ' : '✎ ') + name + ' · ' + added + (n === qty ? 'הגיע ' + n : n === 0 ? 'לא הגיע' : 'הגיעו ' + n + ' מתוך ' + qty));
-  closeReceiptLineScanCard();
+  receiptLineScanReturn('lineCheck_' + g.di + '_' + g.li); // v413: חזרה לרשימה, לשורה של המוצר
   return true;
 }
 // v411: סריקה חוזרת של שורה שכבר סומנה — מה שהוקלד מתווסף למה שסומן, והסה״כ נכנס באותו נתיב (receiptLineScanApply):
@@ -9858,7 +9884,6 @@ function receiptLineScanAdd(n) {
   if (!r || r.mode !== 'lines' || !c || c.kind !== 'line' || !c.addQty) return false;
   const g = receiptLineGroupOf(r, c.di, c.li); if (!g) { closeReceiptLineScanCard(); return false; }
   const total = (receiptLineGroupGot(g) || 0) + n; // v412: למה שסומן בקבוצה (המוצר בכל התעודות)
-  c.added = n;
   return receiptLineScanApply(receiptLineMarkFor(g, total), total);
 }
 // "הגיע בנוסף" מהכרטיס — כמו "+ מוצר" מהחיפוש (data-extra-add), עם הכמות שהוקלדה; מוצר שכבר שם — הכמות מתעדכנת
@@ -9873,9 +9898,7 @@ function receiptLineScanApplyExtra(got) {
   if (k < 0) { r.extras.push({ productId: p.id, name: p.name, barcode: p.barcode || '', got: String(got) }); k = r.extras.length - 1; }
   else r.extras[k].got = String(got);
   receiptLineNotice = null; receiptLineCheckChanged();
-  receiptLineScanLast = 'lineExtra_' + k;
-  refreshReceiptLineScanOverlay('+ ' + p.name + ' · ' + got + ' יח׳ — לא בתעודה');
-  closeReceiptLineScanCard();
+  receiptLineScanReturn('lineExtra_' + k); // v413: חזרה לרשימה, לכרטיס הצהוב של המוצר
   return true;
 }
 function receiptLineScanSave() {
@@ -9904,7 +9927,8 @@ function receiptLineScanCardInput(e) {
   c.got = el.value; c.invalid = false;
   const s = $('scanLineSum'); if (s) { s.textContent = receiptLineScanSumText(c); s.className = 'text-sm font-bold mt-1 text-amber-800'; }
 }
-// ✕ במצלמה (או כשל מצלמה, או קליטה שהתחלפה): חזרה לרשימה — מצוירת מחדש עם מה שסומן בסריקה, והשורה האחרונה שסומנה מודגשת
+// ✕ במצלמה (או כשל מצלמה, או קליטה שהתחלפה), ומ-413 גם כל סימון מהכרטיס (receiptLineScanReturn): חזרה לרשימה — מצוירת
+// מחדש עם מה שסומן בסריקה, והשורה שסומנה מודגשת ונגללת למרכז
 function receiptLineScanClosed() {
   receiptLineScanCard = null; renderReceiptLineScanCard();
   const r = receiptQuantityReview, last = receiptLineScanLast;
