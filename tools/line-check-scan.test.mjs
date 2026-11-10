@@ -3,14 +3,16 @@
 // (שתי תעודות, חלב בשתיהן). המצלמה מזויפת: BarcodeDetector ו-getUserMedia מדומים, והברקוד "נקרא" דרך onScanned — כמו בבדיקות הסריקה.
 // מה שנבדק:
 // 1. "סרוק מוצר" בתחתית הקבועה של החלון, ליד "סיום" — רק בבדיקה שורה-שורה; "חוסרים ועודפים" כמו קודם. ההסבר בכותרת.
-// 2. פתיחת הסריקה: החלון מוסתר, המצלמה במצב רציף עם "סומנו 0 מתוך 5", הכותרת והרמז; ✕ מחזיר לרשימה (ומדגיש את השורה האחרונה).
+// 2. פתיחת הסריקה: החלון מוסתר, המצלמה במצב רציף עם "סומנו 0 מתוך 4", הכותרת והרמז; ✕ מחזיר לרשימה בלי לסמן.
 // 3. ברקוד של שורה: הכרטיס מעל המצלמה (שורה N, השם, מחיר הקופה, הכמות בתעודה); "הגיע N" מסמן בדיוק כמו לחיצה ברשימה —
-//    הטיוטה, השורות לכל מוצר, המונה על המצלמה; הלולאה מושהית כשהכרטיס פתוח וממשיכה אחריו.
-// 4. "אחרת": שדה כמות, הסיכום תוך כדי הקלדה, כמות לא תקינה לא נשמרת, Enter שומר; "לא הגיע"; ✕ בכרטיס סוגר בלי לסמן.
+//    הטיוטה, השורות לכל מוצר; הלולאה מושהית כשהכרטיס פתוח. 413: הסימון סוגר את המצלמה וחוזר לרשימה, לשורה שסומנה (מודגשת);
+//    "סרוק מוצר" שוב — המונה על המצלמה מעודכן.
+// 4. "אחרת": שדה כמות, הסיכום תוך כדי הקלדה, כמות לא תקינה לא נשמרת, Enter שומר; "לא הגיע"; ✕ בכרטיס סוגר בלי לסמן — והמצלמה נשארת.
 // 5. אותו מוצר בשתי תעודות — 412: קבוצה אחת (כרטיס אחד של 17, "הגיע 17" לשתי השורות); סריקה חוזרת — "סרקת עד עכשיו … — עוד
 //    כמה?", "תקן את הסה״כ" מחזיר את שלושת הכפתורים, ו"אחרת" מתחלק אוטומטית (10 בראשונה, 0 בשנייה).
 // 6. מוצר שאינו באף תעודה: "לא בתעודה — הגיע בנוסף" עם כמות, נכנס ל"הגיע משהו נוסף"; סריקה חוזרת — "כבר ברשימה", "עדכן".
-// 7. ברקוד שאינו במאגר: ההודעה של הקליטה, הסריקה ממשיכה, כלום לא השתנה. אותו ברקוד פעמיים ברצף — נספר פעם אחת.
+// 7. ברקוד שאינו במאגר: ההודעה של הקליטה, הסריקה ממשיכה, כלום לא השתנה. אותו ברקוד פעמיים ברצף (אחרי ✕ בכרטיס) — נספר
+//    פעם אחת; אחרי סימון וחזרה לרשימה, "סרוק מוצר" פותח מצלמה נקייה — אותו ברקוד הוא סריקה חוזרת (413).
 // 8. יחידה מול מארז חיוב: סורקים את המארז כשבתעודה היחידה (ולהפך) — השורה של הקרוב, לא "הגיע בנוסף".
 // 9. ברקוד שקיים בשני מוצרים במאגר — נפתר למוצר שבנייר.
 // 10. שוויון: אותה תעודה מסומנת פעם בסריקה ופעם ביד — אותן שורות, אותו "סיום", אותה ספירה ואותה תעודה שמורה.
@@ -87,6 +89,16 @@ const card = r => r.run(`$('scanLineCard').innerHTML`);
 const cardOpen = r => !r.run(`$('scanLineCard').classList.contains('hidden')`);
 const overlay = r => r.run(`$('scanOverlayLabel').textContent + ' ' + $('scanOverlayCount').textContent + ' | ' + $('scanOverlayName').textContent`);
 const modalHidden = r => r.run(`$('receiptQuantityModal').classList.contains('hidden')`);
+const progress = r => r.run(`$('receiptQuantityProgress').textContent`);
+// v413: כל סימון מהכרטיס סוגר את המצלמה וחוזר לרשימה, לשורה שסומנה (מודגשת); למוצר הבא — "סרוק מוצר" שוב
+function returned(r, id) {
+  assert.equal(cardOpen(r), false, 'הכרטיס נסגר'); assert.equal(r.run('receiptLineScanCard'), null);
+  assert.equal(r.run('scanPurpose'), 'field'); assert.equal(r.run(`$('scanModal').classList.contains('hidden')`), true, 'המצלמה נסגרה');
+  assert.equal(modalHidden(r), false, 'הרשימה חזרה');
+  assert.equal(r.run(`$('${id}').classList.contains('ring-4')`), true, id + ' — השורה שסומנה מודגשת');
+  assert.equal(r.run('receiptLineScanLast'), null, 'ההדגשה כבר נעשתה');
+}
+async function rescan(r) { r.events.get('receiptLineScan:click')(); await settle(); assert.equal(r.run('scanPurpose'), 'linecheck', 'המצלמה נפתחה שוב'); return r; }
 const draftMarks = r => JSON.parse(r.storage.get('yt_receipt_draft')).quantityReview.docs.map(d => d.lines.map(l => l.mark + (l.got ? ':' + l.got : '')).join(','));
 function markRestOk(r) {
   review(r).docs.forEach((d, di) => d.lines.forEach((l, li) => { if (!l.mark) click(r, { lineMark: di + ':' + li + ':ok' }); }));
@@ -126,7 +138,7 @@ test('1. "סרוק מוצר" בתחתית הקבועה ליד "סיום" — ר�
   assert.equal(r.run(`$('receiptQuantityConfirm').textContent`), 'אשר הפרשים — שאר הכמויות תואמות');
 });
 
-test('2. פתיחת הסריקה: החלון מוסתר והמצלמה רציפה עם "סומנו 0 מתוך 5"; ✕ מחזיר לרשימה ומדגיש את השורה האחרונה', async () => {
+test('2. פתיחת הסריקה: החלון מוסתר והמצלמה רציפה עם "סומנו 0 מתוך 4"; ✕ מחזיר לרשימה בלי לסמן', async () => {
   const r = await twoPapers();
   r.run('startReceiptLineCheck()');
   assert.equal(modalHidden(r), false);
@@ -142,17 +154,24 @@ test('2. פתיחת הסריקה: החלון מוסתר והמצלמה רציפ�
   assert.equal(r.run(`$('scanHint').textContent`), 'סרוק מוצר מהסחורה — ✕ חוזר לרשימה');
   assert.equal(r.run(`$('scanPriceNotice').classList.contains('hidden')`), true, 'הודעת המחירים של הקליטה בסריקה — לא כאן');
   assert.equal(cardOpen(r), false);
-  // סורקים ומסמנים, ואז ✕
-  beep(r, '7290000000015'); cardClick(r, { scanMark: 'ok' });
+  // סורקים — הכרטיס פתוח — ואז ✕ במצלמה: חזרה לרשימה בלי לסמן, ובלי שורה מודגשת
+  beep(r, '7290000000015');
+  assert.equal(cardOpen(r), true);
   r.events.get('scanClose:click')();
   assert.equal(r.run('scanPurpose'), 'field');
   assert.equal(r.run(`$('scanModal').classList.contains('hidden')`), true);
   assert.equal(modalHidden(r), false, 'החלון חזר');
   assert.equal(r.run(`$('receiptQuantityTitle').textContent`), 'בדיקה שורה-שורה');
-  assert.equal(r.run(`$('receiptQuantityProgress').textContent`), 'סומנו 1 מתוך 4 שורות');
-  assert.equal(r.run(`$('lineCheck_0_1').classList.contains('ring-4')`), true, 'השורה שסומנה בסריקה — מודגשת ברשימה');
+  assert.equal(progress(r), 'סומנו 0 מתוך 4 שורות');
+  assert.deepEqual(marks(r), [',,', ',']);
+  assert.equal(r.run(`$('lineCheck_0_1').classList.contains('ring-4')`), false, 'כלום לא סומן — שום שורה לא מודגשת');
   assert.equal(cardOpen(r), false);
   assert.equal(r.run('receiptLineScanCard'), null);
+  // v413: סימון מהכרטיס — המצלמה נסגרת לבד, והרשימה חוזרת על השורה שסומנה
+  await rescan(r);
+  beep(r, '7290000000015'); cardClick(r, { scanMark: 'ok' });
+  returned(r, 'lineCheck_0_1');
+  assert.equal(progress(r), 'סומנו 1 מתוך 4 שורות');
   // המצלמה של הקליטה בסריקה — הכותרת והמונה כמו קודם
   r.run("scanPurpose = 'receiving'"); await r.run('openScanner()'); await settle();
   assert.equal(r.run(`$('scanTitle').textContent`), 'סריקת ברקוד');
@@ -161,7 +180,7 @@ test('2. פתיחת הסריקה: החלון מוסתר והמצלמה רציפ�
   r.run('closeScanner()');
 });
 
-test('3. ברקוד של שורה: הכרטיס מעל המצלמה, ו"הגיע N" מסמן בדיוק כמו לחיצה ברשימה', async () => {
+test('3. ברקוד של שורה: הכרטיס מעל המצלמה, ו"הגיע N" מסמן בדיוק כמו לחיצה ברשימה — וחוזר לשורה שלה (413)', async () => {
   const r = await scanning(await twoPapers());
   const ticks = r.callbacks.length;
   beep(r, '7290000000015'); // קוטג׳ — שורה 2 בתעודה 1
@@ -174,23 +193,32 @@ test('3. ברקוד של שורה: הכרטיס מעל המצלמה, ו"הגיע
   assert.equal(r.callbacks.length, ticks, 'כרטיס פתוח — לא תוזמן טיק (הלולאה מושהית)');
   assert.equal(r.run("lastScanCode"), '7290000000015');
   cardClick(r, { scanMark: 'ok' });
-  assert.equal(cardOpen(r), false);
+  returned(r, 'lineCheck_0_1'); // v413: המצלמה נסגרה, הרשימה חזרה, והשורה שסומנה מודגשת
   assert.deepEqual(marks(r), [',ok,', ',']);
   assert.deepEqual(draftMarks(r), [',ok,', ','], 'נשמר בטיוטה כמו סימון ביד');
   assert.equal(review(r).confirmedAt, null);
   assert.equal(json(r, 'receiptQuantityReview.rows.map(x => x.productId + " " + x.kind + " " + x.difference).sort().join(" | ")'), 'cottage match 0 | cream match 0 | milk match 0 | yogurt match 0');
-  assert.equal(overlay(r), 'סומנו 1 מתוך 4 | ✓ קוטג׳ 5% 250 גרם · הגיע 6');
-  assert.equal(r.callbacks.length, ticks + 1, 'הכרטיס נסגר — טיק אחד תוזמן והסריקה ממשיכה');
-  assert.equal(r.run('receiptLineScanLast'), 'lineCheck_0_1');
+  assert.equal(r.callbacks.length, ticks, 'המצלמה נסגרה — לא תוזמן טיק של סריקה');
+  assert.equal(progress(r), 'סומנו 1 מתוך 4 שורות');
+  assert.match(strip(r.run(`$('receiptQuantityRows').innerHTML`)), /קוטג׳ 5% 250 גרם הגיע · 6 יח׳ שנה/, 'מקופלת וירוקה, כמו "הגיע" ביד');
+  // "סרוק מוצר" שוב — המונה על המצלמה מעודכן, בלי כרטיס ובלי "מה סומן זה עתה"
+  await rescan(r);
+  assert.equal(overlay(r), 'סומנו 1 מתוך 4 | ');
+  assert.equal(cardOpen(r), false);
   // מחיר קופה וארגזים בכרטיס — כמו בשורה ברשימה
   r.run(`products.find(p => p.id === 'yogurt').boxSize = 2;`);
   beep(r, '7290000000022');
   assert.match(strip(card(r)), /^שורה 3 בתעודה 1 מתוך 2 יוגורט טבעי 150 גרם אין מחיר קופה — בדוק בקופה ועדכן 4 יח׳ בתעודה 2 ארגזים × 2 הגיע 4 אחרת לא הגיע$/);
   cardClick(r, { scanMark: 'ok' });
+  returned(r, 'lineCheck_0_2');
+  await rescan(r);
   beep(r, '7290000000039'); // שמנת — תעודה 2
   assert.match(strip(card(r)), /^שורה 2 בתעודה 2 מתוך 2 שמנת חמוצה/);
   cardClick(r, { scanMark: 'ok' });
-  assert.equal(overlay(r), 'סומנו 3 מתוך 4 | ✓ שמנת חמוצה 15% 200 מ״ל · הגיע 2');
+  returned(r, 'lineCheck_1_1');
+  assert.equal(progress(r), 'סומנו 3 מתוך 4 שורות');
+  await rescan(r);
+  assert.equal(overlay(r), 'סומנו 3 מתוך 4 | ');
   // תעודה אחת — "שורה 2 בתעודה", בלי "מתוך"
   const one = await scanning(await scan([BIG]));
   one.run(`products.find(p => p.id === 'cottage').posPrice = 12.9;`);
@@ -220,31 +248,35 @@ test('4. "אחרת" עם כמות, "לא הגיע", ו-✕ בכרטיס שסוג
   cardType(r, '6'); assert.equal(r.run(`$('scanLineSum').textContent`), 'כמו בתעודה');
   cardType(r, '4');
   r.events.get('scanLineCard:keydown')({ key: 'Enter', target: { dataset: { scanGot: '' } }, preventDefault() {} });
-  assert.equal(cardOpen(r), false);
+  returned(r, 'lineCheck_0_1'); // v413: חזרה לרשימה — השורה של "אחרת" פתוחה עם הכמות, מודגשת
   assert.deepEqual(marks(r), [',qty:4,', ',']);
-  assert.equal(overlay(r), 'סומנו 1 מתוך 4 | ✎ קוטג׳ 5% 250 גרם · הגיעו 4 מתוך 6');
   assert.equal(json(r, 'receiptQuantityReview.rows.find(x => x.productId === "cottage")').kind, 'shortage');
+  assert.match(r.run(`$('receiptQuantityRows').innerHTML`), /data-line-got="0:1"[^>]*value="4"/);
+  assert.equal(progress(r), 'סומנו 1 מתוך 4 שורות · חוסר 2 יח׳');
   // "לא הגיע"
-  later(r); beep(r, '7290000000039');
+  await rescan(r); beep(r, '7290000000039');
   cardClick(r, { scanMark: 'none' });
+  returned(r, 'lineCheck_1_1');
   assert.deepEqual(marks(r), [',qty:4,', ',none']);
-  assert.equal(overlay(r), 'סומנו 2 מתוך 4 | ✗ שמנת חמוצה 15% 200 מ״ל · לא הגיע');
-  // ✕ בכרטיס — כלום לא משתנה, והסריקה ממשיכה
+  assert.match(strip(r.run(`$('receiptQuantityRows').innerHTML`)), /שמנת חמוצה 15% 200 מ״ל לא הגיע · 0 מתוך 2 שנה/, '"לא הגיע" מקופלת');
+  assert.equal(progress(r), 'סומנו 2 מתוך 4 שורות · חוסר 4 יח׳');
+  // ✕ בכרטיס — כלום לא משתנה, המצלמה נשארת והסריקה ממשיכה
+  await rescan(r);
+  assert.equal(overlay(r), 'סומנו 2 מתוך 4 | ');
   const ticks = r.callbacks.length;
-  later(r); beep(r, '7290000000022');
+  beep(r, '7290000000022');
   assert.equal(cardOpen(r), true);
   cardClick(r, { scanDismiss: '' });
   assert.equal(cardOpen(r), false);
+  assert.equal(r.run('scanPurpose'), 'linecheck'); assert.equal(r.run(`$('scanModal').classList.contains('hidden')`), false, '✕ בכרטיס — המצלמה נשארת');
+  assert.equal(modalHidden(r), true);
   assert.deepEqual(marks(r), [',qty:4,', ',none']);
-  assert.equal(r.callbacks.length, ticks + 1);
-  assert.equal(overlay(r), 'סומנו 2 מתוך 4 | ✗ שמנת חמוצה 15% 200 מ״ל · לא הגיע', 'המונה כמו שהיה');
-  // חזרה לרשימה: השורה של "אחרת" פתוחה עם הכמות, "לא הגיע" מקופלת
+  assert.equal(r.callbacks.length, ticks + 1, 'טיק אחד — הסריקה ממשיכה');
+  assert.equal(overlay(r), 'סומנו 2 מתוך 4 | ', 'המונה כמו שהיה');
+  // ✕ במצלמה — חזרה לרשימה כמו שהיא
   r.run('closeScanner()');
-  const html = r.run(`$('receiptQuantityRows').innerHTML`);
-  assert.match(html, /data-line-got="0:1"[^>]*value="4"/);
-  assert.match(strip(html), /שמנת חמוצה 15% 200 מ״ל לא הגיע · 0 מתוך 2 שנה/);
-  assert.equal(r.run(`$('receiptQuantityProgress').textContent`), 'סומנו 2 מתוך 4 שורות · חוסר 4 יח׳');
-  assert.equal(r.run(`$('lineCheck_1_1').classList.contains('ring-4')`), true);
+  assert.equal(modalHidden(r), false);
+  assert.equal(progress(r), 'סומנו 2 מתוך 4 שורות · חוסר 4 יח׳');
 });
 
 test('5. אותו מוצר בשתי תעודות — קבוצה אחת (412): כרטיס אחד של 17, "הגיע 17" לשתי השורות, סריקה חוזרת "סרקת עד עכשיו … — עוד כמה?", ו"תקן את הסה״כ" מחלק 10 + 0', async () => {
@@ -254,34 +286,38 @@ test('5. אותו מוצר בשתי תעודות — קבוצה אחת (412): כ
   assert.match(strip(card(r)), /^שורה 1 בתעודה 1 מתוך 2 · גם בתעודה 2 \(5 יח׳\) חלב 3% בקרטון 1 ליטר בקופה: ₪6\.90 17 יח׳ ב-2 תעודות 12 \+ 5 הגיע 17 אחרת לא הגיע$/);
   assert.doesNotMatch(strip(card(r)), /שורה נוספת|סרוק שוב/);
   cardClick(r, { scanMark: 'ok' });
+  returned(r, 'lineCheck_0_0'); // v413: חזרה לכרטיס של הקבוצה ברשימה
   assert.deepEqual(marks(r), ['ok,,', 'ok,'], '"הגיע 17" — שתי השורות');
-  assert.equal(overlay(r), 'סומנו 1 מתוך 4 | ✓ חלב 3% בקרטון 1 ליטר · הגיע 17');
-  // אותו ברקוד מיד שוב — המוצר עדיין מול המצלמה — לא נספר; אחרי שתי שניות — סריקה חוזרת של אותה קבוצה
+  assert.equal(progress(r), 'סומנו 1 מתוך 4 שורות');
+  // "סרוק מוצר" ואותו ברקוד שוב — סריקה חוזרת של אותה קבוצה
+  await rescan(r);
+  assert.equal(overlay(r), 'סומנו 1 מתוך 4 | ');
   beep(r, '7290000000008');
-  assert.equal(cardOpen(r), false);
-  later(r); beep(r, '7290000000008');
   assert.deepEqual(json(r, '[receiptLineScanCard.di, receiptLineScanCard.li, receiptLineScanCard.addQty]'), [0, 0, true]);
   assert.match(strip(card(r)), /סרקת עד עכשיו 17 מתוך 17 — הכל הגיע 17 יח׳ ב-2 תעודות 12 \+ 5 עוד כמה\? הוסף הקלד כמה עוד הגיעו לא נכון\? תקן את הסה״כ$/);
   assert.doesNotMatch(card(r), /data-scan-mark="(ok|qty|none)"/);
   cardClick(r, { scanMark: 'fix' });
   assert.match(strip(card(r)), /כבר סומנה: הגיע — אפשר לשנות 17 יח׳ ב-2 תעודות 12 \+ 5 הגיע 17 אחרת לא הגיע$/);
   cardClick(r, { scanMark: 'none' });
+  returned(r, 'lineCheck_0_0');
   assert.deepEqual(marks(r), ['none,,', 'none,']);
   // "לא הגיע" ואז סריקה — "סרקת עד עכשיו 0 מתוך 17", וכל הכמות כבר בשדה
-  later(r); beep(r, '7290000000008');
+  await rescan(r); beep(r, '7290000000008');
   assert.match(strip(card(r)), /סרקת עד עכשיו 0 מתוך 17 .* עוד כמה\? הוסף סה״כ 17 · כמו בתעודה/);
   assert.match(card(r), /data-scan-got[^>]*value="17"/);
   // "תקן את הסה״כ" → "אחרת" 10: החלוקה אוטומטית — 10 בתעודה הראשונה, 0 בשנייה ("לא הגיע")
   cardClick(r, { scanMark: 'fix' }); cardClick(r, { scanMark: 'qty' }); cardType(r, '10'); cardClick(r, { scanSave: '' });
+  returned(r, 'lineCheck_0_0');
   assert.deepEqual(marks(r), ['qty:10,,', 'none,']);
-  assert.equal(overlay(r), 'סומנו 1 מתוך 4 | ✎ חלב 3% בקרטון 1 ליטר · הגיעו 10 מתוך 17');
-  later(r); beep(r, '7290000000008');
+  assert.equal(progress(r), 'סומנו 1 מתוך 4 שורות · חוסר 7 יח׳');
+  await rescan(r); beep(r, '7290000000008');
   assert.match(strip(card(r)), /סרקת עד עכשיו 10 מתוך 17 .* עוד כמה\? הוסף סה״כ 17 · כמו בתעודה/);
   assert.match(card(r), /data-scan-got[^>]*value="7"/, 'מה שחסר — בשדה');
   // "הוסף" 7 — 17: "הגיע", ומתחלק 12 + 5
   cardClick(r, { scanSave: '' });
+  returned(r, 'lineCheck_0_0');
   assert.deepEqual(marks(r), ['ok,,', 'ok,']);
-  assert.equal(overlay(r), 'סומנו 1 מתוך 4 | ✓ חלב 3% בקרטון 1 ליטר · עוד 7 — הגיע 17');
+  assert.equal(progress(r), 'סומנו 1 מתוך 4 שורות');
 });
 
 test('6. מוצר שאינו באף תעודה: "לא בתעודה — הגיע בנוסף" עם כמות, נכנס ל"הגיע משהו נוסף"; סריקה חוזרת מעדכנת', async () => {
@@ -296,22 +332,23 @@ test('6. מוצר שאינו באף תעודה: "לא בתעודה — הגיע 
   assert.equal(r.run('receiptLineScanSave()'), false); assert.equal(cardOpen(r), true);
   cardType(r, '3'); assert.equal(r.run(`$('scanLineSum').textContent`), 'התקבלו 3 · עודף 3');
   cardClick(r, { scanSave: '' });
-  assert.equal(cardOpen(r), false);
+  returned(r, 'lineExtra_0'); // v413: גם מוצר שאינו בתעודה — חזרה לרשימה, לכרטיס הצהוב שלו (מודגש)
   assert.deepEqual(review(r).extras.map(x => [x.productId, x.got]), [['pudding', '3']]);
   assert.deepEqual(JSON.parse(r.storage.get('yt_receipt_draft')).quantityReview.extras.map(x => [x.productId, x.got]), [['pudding', '3']]);
-  assert.equal(overlay(r), 'סומנו 0 מתוך 4 | + מעדן שוקולד 125 גרם · 3 יח׳ — לא בתעודה');
   assert.deepEqual(json(r, 'receiptQuantityReview.rows.filter(x => x.paperQty === 0).map(x => [x.productId, x.kind, x.difference])'), [['pudding', 'surplus', '3']]);
+  assert.match(strip(r.run(`$('receiptQuantityRows').innerHTML`)), /לא בתעודה — הגיע בנוסף מעדן שוקולד 125 גרם בקופה: ₪5\.50/, 'הכרטיס הצהוב כמו מהחיפוש');
+  assert.equal(progress(r), 'סומנו 0 מתוך 4 שורות · עודף 3 יח׳');
   // שוב — "כבר ברשימה", עם הכמות הנוכחית, "עדכן"; לא נוסף פעמיים
-  later(r); beep(r, '7290000000046');
+  await rescan(r);
+  assert.equal(overlay(r), 'סומנו 0 מתוך 4 | ');
+  beep(r, '7290000000046');
   assert.deepEqual(json(r, '({ k: receiptLineScanCard.k, got: receiptLineScanCard.got })'), { k: 0, got: '3' });
   assert.match(strip(card(r)), /^כבר ברשימה ״הגיע משהו נוסף״ מעדן שוקולד 125 גרם .* עדכן התקבלו 3 · עודף 3$/);
   cardType(r, '5'); cardClick(r, { scanSave: '' });
+  returned(r, 'lineExtra_0');
   assert.deepEqual(review(r).extras.map(x => [x.productId, x.got]), [['pudding', '5']]);
-  // חזרה לרשימה — הכרטיס הצהוב כמו מהחיפוש, מודגש
-  r.run('closeScanner()');
-  assert.match(strip(r.run(`$('receiptQuantityRows').innerHTML`)), /לא בתעודה — הגיע בנוסף מעדן שוקולד 125 גרם בקופה: ₪5\.50/);
-  assert.equal(r.run(`$('lineExtra_0').classList.contains('ring-4')`), true);
-  assert.equal(r.run(`$('receiptQuantityProgress').textContent`), 'סומנו 0 מתוך 4 שורות · עודף 5 יח׳');
+  assert.match(r.run(`$('receiptQuantityRows').innerHTML`), /data-extra-got="0"[^>]*value="5"/);
+  assert.equal(progress(r), 'סומנו 0 מתוך 4 שורות · עודף 5 יח׳');
 });
 
 test('7. ברקוד שאינו במאגר — ההודעה של הקליטה והסריקה ממשיכה; אותו ברקוד פעמיים ברצף — פעם אחת', async () => {
@@ -321,10 +358,11 @@ test('7. ברקוד שאינו במאגר — ההודעה של הקליטה ו�
   assert.equal(cardOpen(r), false);
   assert.equal(r.toasts[r.toasts.length - 1], '❌ ברקוד לא קיים במערכת — הוסף את המוצר במסך מוצרים ומחירים וסרוק שוב');
   assert.equal(r.callbacks.length, ticks + 1, 'הסריקה ממשיכה');
+  assert.equal(r.run('scanPurpose'), 'linecheck', 'המצלמה נשארת — אין שורה לחזור אליה');
   assert.deepEqual(marks(r), [',,', ',']); assert.deepEqual(review(r).extras, []);
   assert.equal(overlay(r), 'סומנו 0 מתוך 4 | ');
-  // אותו ברקוד מיד שוב — אחרי שהכרטיס הקודם נסגר — לא נספר (המוצר עדיין מול המצלמה)
-  beep(r, '7290000000015'); cardClick(r, { scanMark: 'ok' });
+  // אותו ברקוד מיד שוב — אחרי שהכרטיס הקודם נסגר ב-✕ בלי לסמן — לא נספר (המוצר עדיין מול המצלמה)
+  beep(r, '7290000000015'); cardClick(r, { scanDismiss: '' });
   assert.ok(r.run('Date.now() - lastScanTime') < 1000, 'השעון של הסריקה האחרונה מתחדש בסגירת הכרטיס');
   beep(r, '7290000000015');
   assert.equal(cardOpen(r), false, 'קריאה כפולה של אותו ברקוד תוך 2 שניות — מתעלמים');
@@ -335,6 +373,14 @@ test('7. ברקוד שאינו במאגר — ההודעה של הקליטה ו�
   beep(r, '7290000000039');
   assert.deepEqual(json(r, '[receiptLineScanCard.di, receiptLineScanCard.li]'), [0, 2], 'הכרטיס של היוגורט נשאר');
   assert.equal(r.callbacks.length, t2);
+  cardClick(r, { scanDismiss: '' });
+  // v413: אחרי סימון וחזרה לרשימה, "סרוק מוצר" פותח מצלמה נקייה — אותו ברקוד מיד הוא סריקה חוזרת של השורה, לא "קריאה כפולה"
+  later(r); beep(r, '7290000000015'); cardClick(r, { scanMark: 'ok' });
+  returned(r, 'lineCheck_0_1');
+  await rescan(r);
+  assert.equal(r.run('lastScanCode'), '');
+  beep(r, '7290000000015');
+  assert.equal(cardOpen(r), true); assert.equal(json(r, 'receiptLineScanCard.addQty'), true, 'סריקה חוזרת — "עוד כמה?"');
   cardClick(r, { scanDismiss: '' });
 });
 
@@ -349,6 +395,7 @@ test('8. יחידה מול מארז חיוב: סורקים את המארז כש�
   assert.deepEqual(json(a, '[receiptLineScanCard.di, receiptLineScanCard.li, receiptLineScanCard.scanned.id, receiptLineScanCard.related.id]'), [0, 0, 'milkpack', 'milk']);
   assert.match(strip(card(a)), /^סרקת חלב 3% — מארז 6 — בתעודה היחידה הבודדת שלו: שורה 1 בתעודה חלב 3% בקרטון 1 ליטר בקופה: ₪6\.90 12 יח׳ בתעודה הגיע 12 אחרת לא הגיע$/);
   cardClick(a, { scanMark: 'ok' });
+  returned(a, 'lineCheck_0_0');
   assert.deepEqual(marks(a), ['ok,,']); assert.deepEqual(review(a).extras, [], 'לא נוסף "הגיע בנוסף"');
   // בתעודה המארז, סורקים את היחידה
   const b = await scanning(await scan([paper([['milkpack', 2], ['cottage', 6]], '4471005', catalog)], {}, catalog));
@@ -356,8 +403,10 @@ test('8. יחידה מול מארז חיוב: סורקים את המארז כש�
   assert.deepEqual(json(b, '[receiptLineScanCard.di, receiptLineScanCard.li, receiptLineScanCard.scanned.id, receiptLineScanCard.related.id]'), [0, 0, 'milk', 'milkpack']);
   assert.match(strip(card(b)), /^סרקת חלב 3% בקרטון 1 ליטר — בתעודה מארז החיוב שלו: שורה 1 בתעודה חלב 3% — מארז 6 .* 2 יח׳ בתעודה הגיע 2 אחרת לא הגיע$/);
   cardClick(b, { scanMark: 'qty' }); cardType(b, '1'); cardClick(b, { scanSave: '' });
+  returned(b, 'lineCheck_0_0');
   assert.deepEqual(marks(b), ['qty:1,']);
   // המוצר עצמו בתעודה — קודם הוא, בלי הסבר על קרוב
+  await rescan(b);
   beep(b, '7290000000015');
   assert.doesNotMatch(strip(card(b)), /סרקת/);
   assert.equal(json(b, 'receiptLineScanCard.related'), null);
@@ -380,12 +429,13 @@ test('10. שוויון: אותה תעודה מסומנת פעם בסריקה ו�
   // בסריקה: חלב "אחרת" 10 מתוך 17 בשתי התעודות (412: קבוצה אחת — 10 בראשונה, 0 בשנייה); מעדן 2 בנוסף; השאר הגיע
   const a = await scanning(await twoPapers());
   beep(a, '7290000000008'); cardClick(a, { scanMark: 'qty' }); cardType(a, '10'); cardClick(a, { scanSave: '' });
+  returned(a, 'lineCheck_0_0');
   assert.deepEqual(marks(a), ['qty:10,,', 'none,'], 'החלוקה: 10 בראשונה, והשארית (0) בשנייה');
-  beep(a, '7290000000046'); cardType(a, '2'); cardClick(a, { scanSave: '' });
-  for (const code of ['7290000000015', '7290000000022', '7290000000039']) { beep(a, code); cardClick(a, { scanMark: 'ok' }); }
-  assert.equal(overlay(a), 'סומנו 4 מתוך 4 | ✓ שמנת חמוצה 15% 200 מ״ל · הגיע 2');
-  a.run('closeScanner()');
-  assert.equal(a.run(`$('receiptQuantityProgress').textContent`), 'כל 4 שורות סומנו — אפשר לסיים · חוסר 7 יח׳ · עודף 2 יח׳');
+  await rescan(a); beep(a, '7290000000046'); cardType(a, '2'); cardClick(a, { scanSave: '' });
+  returned(a, 'lineExtra_0');
+  for (const code of ['7290000000015', '7290000000022', '7290000000039']) { await rescan(a); beep(a, code); cardClick(a, { scanMark: 'ok' }); } // v413: כל סימון חוזר לרשימה — "סרוק מוצר" לכל מוצר
+  returned(a, 'lineCheck_1_1');
+  assert.equal(progress(a), 'כל 4 שורות סומנו — אפשר לסיים · חוסר 7 יח׳ · עודף 2 יח׳');
   assert.equal(a.run(`$('receiptQuantityConfirm').textContent`), 'סיום — שמור את הבדיקה');
   // ביד — אותם סימונים
   const b = await twoPapers();
