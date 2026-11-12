@@ -9,7 +9,7 @@
 // 3. קלט לא תקין: ריק — המחיר נמחק והרמז נעלם; אותיות, אפס או שלילי — "הזן מחיר חיובי", ומחיר שנשמר מהשדה רגע קודם נמחק.
 // 4. מתחת לעלות כולל מע״מ — נשמר, עם אזהרה אדומה (לא חסימה).
 // 5. שורה מקופלת ("הגיע") בלי מחיר קופה — השדה גם בה; "הגיע משהו נוסף" — גם שם; Enter בשדה סוגר את המקלדת (blur), Escape עדיין סוגר את החלון.
-// 6. הגרסה עלתה ל-415, כולל ה-service worker.
+// 6. הגרסה עלתה ל-416, כולל ה-service worker.
 // הרצה: node --test tools/line-check-pos-price.test.mjs
 import fs from 'node:fs';
 import test from 'node:test';
@@ -121,7 +121,7 @@ test('2. הקלדה: נשמר מיד דרך savePosPrice (posPrice, posPriceAt, 
   // הציור הבא — הסימון: השורה מקופלת עם המחיר, בלי שדה; "שנה" — הכרטיס הפתוח עם "בקופה: ₪10.50", בלי שדה
   click(r, { lineMark: '0:1:ok' });
   let b = row(r, 0, 1);
-  assert.equal(strip(b), 'קוטג׳ 5% 250 גרם הגיע · 6 יח׳ · בקופה ₪10.50 שנה'); assert.doesNotMatch(b, /data-line-pos|flex-1/);
+  assert.equal(strip(b), 'קוטג׳ 5% 250 גרם הגיע · 6 יח׳ בקופה ₪10.50 שנה'); assert.doesNotMatch(b, /data-line-pos|flex-1/);
   click(r, { lineOpen: '0:1' });
   b = row(r, 0, 1);
   assert.match(b, /בקופה: ₪10\.50/); assert.doesNotMatch(b, /data-line-pos|אין מחיר קופה/);
@@ -178,7 +178,7 @@ test('5. שורה מקופלת בלי מחיר קופה — השדה גם בה; 
   assert.match(c, /בקופה: ₪4\.50/); assert.doesNotMatch(c, /data-line-pos/);
   click(r, { lineMark: '0:2:ok' });
   c = row(r, 0, 2);
-  assert.equal(strip(c), 'יוגורט טבעי 150 גרם הגיע · 4 יח׳ · בקופה ₪4.50 שנה'); assert.match(c, /<div class="min-w-0">/, 'עם מחיר — כמו קודם');
+  assert.equal(strip(c), 'יוגורט טבעי 150 גרם הגיע · 4 יח׳ בקופה ₪4.50 שנה'); assert.match(c, /<div class="min-w-0">/, 'עם מחיר — כמו קודם');
   // "לא הגיע" — גם מקופלת עם השדה
   click(r, { lineMark: '1:1:none' }); // שמנת — בלי מחיר קופה
   const d = row(r, 1, 1);
@@ -205,11 +205,11 @@ test('5. שורה מקופלת בלי מחיר קופה — השדה גם בה; 
   assert.equal(r.run(`$('receiptQuantityModal').classList.contains('hidden')`), true, 'Escape סוגר');
 });
 
-test('6. הגרסה עלתה ל-415, כולל ה-service worker', () => {
+test('6. הגרסה עלתה ל-416, כולל ה-service worker', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /const APP_VERSION = '415'/);
-  assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_line_pos_price'/);
-  assert.match(html, /<title>הזמנות יטבתה - v415 מחיר קופה מהשורה<\/title>/);
-  assert.match(html, /id="verBadge"[^>]*>v415 מחיר קופה מהשורה</);
-  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v415/);
+  assert.match(html, /const APP_VERSION = '416'/);
+  assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_line_clear'/);
+  assert.match(html, /<title>הזמנות יטבתה - v416 בטל סימון וכתב גדול<\/title>/);
+  assert.match(html, /id="verBadge"[^>]*>v416 בטל סימון וכתב גדול</);
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v416/);
 });

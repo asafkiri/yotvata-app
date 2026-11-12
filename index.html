@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v415 מחיר קופה מהשורה</title>
+    <title>הזמנות יטבתה - v416 בטל סימון וכתב גדול</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -127,7 +127,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v415 מחיר קופה מהשורה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v416 בטל סימון וכתב גדול</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -690,9 +690,9 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '415'; // בדיקה שורה-שורה: מוצר בלי מחיר קופה — השדה להשלמת המחיר בשורה עצמה (כמו תנובה 161 וברמן 167)
+const APP_VERSION = '416'; // בדיקה שורה-שורה: "בטל סימון", ומה שהגיע ומחיר הקופה בכתב גדול ועבה יותר (כמו תנובה 162 וברמן 170)
 // v398: תווית הגרסה ביומן הפעולות ובקובץ הגיבוי (עד כאן מחרוזת קבועה שנשארה 'v396_second_strong_read')
-const APP_VERSION_LABEL = 'v' + APP_VERSION + '_line_pos_price';
+const APP_VERSION_LABEL = 'v' + APP_VERSION + '_line_clear';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
 let aiScanFromDraft = false;     // v272: הקריאה שוחזרה מהטיוטה — הצילומים עצמם כבר לא בזיכרון
 let aiScanError = '';
@@ -9418,11 +9418,14 @@ function receiptLineRowHtml(di, li, l, g) {
     const ok = shown === 'ok';
     // v415: בלי מחיר קופה — שדה ההשלמה גם בשורה המקופלת (אחרי "הגיע" במצלמה חוזרים אליה), והטקסט תופס את כל הרוחב שנשאר
     const posEdit = p && p.posPrice == null ? posPriceLineHtml(p, true) : '';
+    // v416 (בעל העסק, 12.11.2026: "הכתב שיהיה קצת יותר עבה וקצת יותר גדול, כדי שיהיה יותר קל לקרוא אותו — כמה הגיע ומה המחיר"):
+    // מה שהגיע ומחיר הקופה — 15px ו-font-black (עד עכשיו: 12px, font-bold). שני חלקים שאינם נשברים באמצע: כשאין מקום בשורה אחת
+    // (טלפון צר, "יח׳ ב-2 תעודות") מחיר הקופה יורד שלם לשורה משלו — הסמל של הקופה מפריד ביניהם, במקום הנקודה.
     return '<div id="lineCheck_' + di + '_' + li + '" class="rounded-2xl border-2 px-3 py-2 mb-2.5 flex items-center justify-between gap-2 ' + (ok ? 'border-emerald-300 bg-emerald-50' : 'border-rose-300 bg-rose-50') + '">' +
       '<div class="min-w-0' + (posEdit ? ' flex-1' : '') + '"><div class="font-black text-slate-800 truncate">' + htmlEscape(l.name) + '</div>' +
-        '<div class="text-xs font-bold ' + (ok ? 'text-emerald-700' : 'text-rose-700') + '">' +
-          (ok ? '<i class="fa-solid fa-check" aria-hidden="true"></i> הגיע · ' + qtyText + ' ' + (grouped ? receiptLineGroupUnitsLabel(g) : 'יח׳') : '<i class="fa-solid fa-xmark" aria-hidden="true"></i> לא הגיע · 0 מתוך ' + qtyText) +
-          (p && p.posPrice != null ? ' · בקופה ₪' + fmtMoney(p.posPrice) : '') + '</div>' + posEdit + '</div>' +
+        '<div class="flex flex-wrap items-baseline gap-x-2.5 text-[15px] font-black leading-snug ' + (ok ? 'text-emerald-700' : 'text-rose-700') + '">' +
+          '<span class="whitespace-nowrap">' + (ok ? '<i class="fa-solid fa-check" aria-hidden="true"></i> הגיע · ' + qtyText + ' ' + (grouped ? receiptLineGroupUnitsLabel(g) : 'יח׳') : '<i class="fa-solid fa-xmark" aria-hidden="true"></i> לא הגיע · 0 מתוך ' + qtyText) + '</span>' +
+          (p && p.posPrice != null ? '<span class="whitespace-nowrap"><i class="fa-solid fa-cash-register text-xs" aria-hidden="true"></i> בקופה ₪' + fmtMoney(p.posPrice) + '</span>' : '') + '</div>' + posEdit + '</div>' +
       '<button type="button" data-line-open="' + id + '" class="btn-tap shrink-0 min-h-[44px] px-3 rounded-lg bg-white border border-slate-300 text-slate-700 text-xs font-black" aria-label="שנה: ' + htmlEscape(l.name) + '">שנה</button></div>';
   }
   const tone = RECEIPT_LINE_TONE[shown] || 'border-slate-200 bg-white';
@@ -9445,7 +9448,9 @@ function receiptLineRowHtml(di, li, l, g) {
       btn('ok', 'fa-check', 'הגיע ' + qtyText) + btn('qty', 'fa-pen', 'אחרת') + btn('none', 'fa-xmark', 'לא הגיע') +
     '</div>' +
     (gmark === 'qty' ? '<label class="flex items-center gap-2 mt-3 text-sm font-bold text-slate-700">כמה הגיע?<input data-line-got="' + id + '" type="text" inputmode="numeric" autocomplete="off" value="' + htmlEscape(receiptLineGroupText(g)) + '" aria-label="כמה הגיע: ' + htmlEscape(l.name) + '" class="w-24 border-2 border-amber-400 rounded-xl p-2 text-xl text-center font-black bg-white tabular-nums"></label>' +
-      '<div id="lineCheckSum_' + di + '_' + li + '" class="text-sm font-bold mt-1 text-amber-800" aria-live="polite">' + receiptLineGroupSumText(g) + '</div>' : '') +
+      '<div id="lineCheckSum_' + di + '_' + li + '" class="text-[15px] font-black mt-1 text-amber-800" aria-live="polite">' + receiptLineGroupSumText(g) + '</div>' : '') +
+    // v416: "בטל סימון" — בשורה פתוחה שכבר סומנה (אחרי "שנה", או "אחרת"): השורה חוזרת ל"עוד לא נבדקה", בלי לבחור סימון אחר בינתיים
+    (g.lines.some(x => x.l.mark) ? '<button type="button" data-line-clear="' + id + '" class="btn-tap min-h-[44px] w-full mt-2 rounded-xl bg-white border border-slate-300 text-slate-600 text-sm font-black flex items-center justify-center gap-1.5" aria-label="בטל סימון: ' + htmlEscape(l.name) + '"><i class="fa-solid fa-rotate-left" aria-hidden="true"></i> בטל סימון</button>' : '') +
   '</div>';
 }
 // v412: שורת הפניה — שורה של מוצר שנספר בקבוצה שהעוגן שלה במקום אחר (תעודה קודמת): מה בשורה, איפה הוא נספר ומה סומן, ו"הצג"
@@ -9630,8 +9635,20 @@ function startReceiptLineCheck() {
 function receiptLineCheckClick(e) {
   const r = receiptQuantityReview; if (!r || r.mode !== 'lines') return;
   if (receiptLineSettle(r)) receiptLineCheckChanged(); // v411: "אחרת" עם הכמות שבתעודה — "הגיע" (מתקפלת בציור שהלחיצה מביאה)
-  const t = e.target.closest('[data-line-mark], [data-line-open], [data-line-drop], [data-line-drop-yes], [data-line-drop-no], [data-extra-add], [data-extra-remove], [data-line-show]');
+  const t = e.target.closest('[data-line-mark], [data-line-clear], [data-line-open], [data-line-drop], [data-line-drop-yes], [data-line-drop-no], [data-extra-add], [data-extra-remove], [data-line-show]');
   if (!t) return;
+  // v416 (בעל העסק, 12.11.2026: "קורה לי שאני לוחץ בטעות 'הגיע', ואז צריך ללחוץ 'לא הגיע' בינתיים עד שאני אגיע למוצר — וזה סתם
+  // עושה לי בלאגן בראש"): "בטל סימון" — הסימון של המוצר נמחק בכל שורותיו (הקבוצה), והשורה חוזרת להיות פתוחה ולבנה, כמו שורה
+  // שעוד לא נבדקה: היא שוב נספרת ב"נשארו", ו"סיום" מחכה לה. אותו נתיב שמירה כמו סימון (receiptLineCheckChanged).
+  if (t.dataset.lineClear) {
+    const [di, li] = t.dataset.lineClear.split(':'); const g = receiptLineGroupOf(r, +di, +li);
+    if (!g) return;
+    receiptLineGroupSet(g, '', '');
+    receiptLineOpen.delete(di + ':' + li);
+    receiptLineDropAsk = null; receiptLineNotice = null; receiptLineCheckChanged();
+    renderReceiptLineRows('[data-line-mark="' + di + ':' + li + ':ok"]');
+    return;
+  }
   if (t.dataset.lineMark) {
     const [di, li, mark] = t.dataset.lineMark.split(':'); const g = receiptLineGroupOf(r, +di, +li); // v412: הסימון — לקבוצה (המוצר בכל התעודות)
     if (!g || ['ok', 'qty', 'none'].indexOf(mark) === -1) return;
