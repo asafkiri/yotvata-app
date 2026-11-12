@@ -21,6 +21,7 @@
 // 11. יחידה בודדת שנסרקה כשבתעודה מארז החיוב שלה (ולהפך) — עוברת לשורה שבתעודה כשהכמות מתחלקת; אחרת נשארת "נוסף".
 // 12. בדיקה שכבר סומנו בה שורות אינה מוחלפת כשהתעודה נקראת מחדש; בדיקה ממתינה שורדת רענון; קריאה בלבד.
 // 13. הגרסה.
+// 14. הכפתור הכחול שבתחתית ("בדוק וסיים") פותח את הבדיקה עד שהיא אושרה — לא השוואה של ספירה חלקית מול התעודה; "אחת כבר סומנה".
 // הרצה: node --test tools/line-check-pending.test.mjs
 import fs from 'node:fs';
 import test from 'node:test';
@@ -620,4 +621,41 @@ test('13. הגרסה עלתה ל-417, כולל הכותרת וה-service worker;
   assert.match(html, /<title>הזמנות יטבתה - v417 /); assert.match(html, /id="verBadge"[^>]*>v417 /);
   assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v417/);
   assert.doesNotMatch(html, /data-role="rc-count-by-scan"|מעבר לקליטה בסריקת מוצרים<|>התחל קליטת מוצרים</);
+});
+
+test('14. הכפתור הכחול שבתחתית ("בדוק וסיים") פותח את הבדיקה עד שהיא אושרה — לא השוואה של ספירה חלקית מול התעודה', async () => {
+  const c = await reading([BIG]);
+  await scanQty(c, '7290000000008', 9); // חלב: 12 בתעודה
+  c.events.get('receiptQuantityClose:click')({});
+  assert.equal(modalOpen(c), false);
+  assert.ok(c.run(`mainMode === 'receiving' && currentView === 'receiving' && receiptList.length > 0`), 'יש ספירה — הכפתור הכחול מוצג (updateCart)');
+  // בזמן שהתעודה נקראת — חלון הבדיקה (עם מה שנסרק), בלי הודעת שגיאה
+  const said = c.toasts.length;
+  c.events.get('cartBtn:click')({});
+  assert.equal(modalOpen(c), true); assert.equal(review(c).pending, true); assert.equal(c.toasts.length, said);
+  assert.deepEqual(extras(c), ['milk 9']);
+  await c.release();
+  assert.equal(review(c).pending, undefined);
+  assert.deepEqual(marks(c), ['qty:9,,']);
+  assert.equal(progress(c), 'התעודה נקראה — 3 שורות · אחת כבר סומנה ממה שנסרק', 'שורה אחת — ביחיד');
+  // הרשימה עלתה ונשארו שורות — הכפתור חוזר לרשימה (מאותו מקום), לא להשוואה שרושמת כחוסר את מה שעוד לא נבדק
+  c.events.get('receiptQuantityClose:click')({});
+  c.events.get('cartBtn:click')({});
+  assert.equal(modalOpen(c), true); assert.equal(c.run('currentView'), 'receiving'); assert.equal(c.run('pendingReceipt'), null);
+  assert.equal(json(c, 'testConfirms').length, 0);
+  assert.deepEqual(marks(c), ['qty:9,,']); assert.equal(okText(c), 'סיום (נשארו 2)');
+  assert.deepEqual(list(c), ['milk 9'], 'הספירה לא נגעה');
+  // אחרי "סיום" הבדיקה אושרה — הכפתור הכחול הוא שוב הסיום הרגיל
+  click(c, { lineMark: '0:1:ok' }); click(c, { lineMark: '0:2:ok' });
+  assert.equal(c.run('finishReceiptLineCheck()'), true);
+  assert.ok(c.run('!!receiptQuantityCheckAudit()'), 'הבדיקה אושרה');
+  c.run(`pendingReceipt = null; reconcileData = null; setView('receiving');`);
+  c.events.get('cartBtn:click')({});
+  assert.equal(modalOpen(c), false, 'לא פותח שוב את הרשימה');
+  assert.ok(c.run(`currentView === 'reconcile' || !!pendingReceipt`), 'ממשיך לסיום');
+  // קליטה שנספרת במסך הסריקה (נתוני התעודה הוקלדו ביד) — הכפתור כמו קודם: בלי חלון בדיקה
+  const t = await open([BIG]);
+  t.run(`receiptCountingMode = 'scan'; receiptEntryMode = 'manual'; receiptOpened = true; receiptList = [{ productId: 'milk', name: 'חלב', barcode: '7290000000008', qty: 3 }]; saveReceiptDraft(); renderReceiving();`);
+  t.events.get('cartBtn:click')({});
+  assert.equal(modalOpen(t), false); assert.equal(t.run('receiptQuantityReview'), null);
 });
