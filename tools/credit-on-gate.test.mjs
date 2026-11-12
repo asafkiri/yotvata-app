@@ -1,5 +1,5 @@
 // v366: the driver's credit can be photographed on the photo gate ("שלב 1 · צילום
-// תעודה"), together with the invoices — not only after "התחל קליטת מוצרים".
+// תעודה"), together with the invoices — not only after the start button ("התחל בדיקה שורה-שורה" since v417).
 // Field report (owner, iPhone, app v365): the gate showed "אין תעודה בכלל" but no
 // credit button, because a no-document receipt (receiptNoDoc) hid the credit section
 // on every screen, the gate included. These tests run the complete app module
@@ -30,8 +30,9 @@ const GATE_HINT = /תעודת זיכוי מהנהג מצלמים בכפתור ה
 const DROP_TOAST = 'זיכוי מהנהג מצורף רק לקליטה עם תעודה.';
 const AUTO_TOAST = 'הזיכוי צורף למשלוח. בסיום הספירה נבדוק איזה חוסר הוא מכסה.';
 const CONFIRMED_CARD = /<details data-delivery-credit="[^"]+"[^>]*><summary[^>]*>זיכוי שאושר · ₪48\.80 לפני מע״מ · פרטים/;
-const startEnabled = html => /<button data-role="rc-photo-start"  class="[^"]*bg-blue-600 text-white"/.test(html)
-  && !/<button data-role="rc-photo-start" disabled/.test(html);
+// v417: הכפתור הראשי במסך הצילום הוא "התחל בדיקה שורה-שורה" (rc-photo-lines); "התחל קליטת מוצרים" ירד
+const startEnabled = html => /<button data-role="rc-photo-lines"  class="[^"]*bg-indigo-600 text-white"/.test(html)
+  && !/<button data-role="rc-photo-lines" disabled/.test(html);
 const health = version => ({ ok: true, keyConfigured: true, photoFirst: true, serviceVersion: version, scanResume: true, creditDocuments: true });
 
 // A scripted scan service (as delivery-credit-auto-read.test.mjs). answer(request, fetchOptions)
@@ -150,10 +151,10 @@ test('b: a no-document receipt back on the gate shows the credit button; its rec
   assert.equal(reloaded.run('receiptNoDoc'), true);
   assert.match(reloaded.node('app').innerHTML, GATE);
   assert.match(reloaded.node('app').innerHTML, CREDIT_BUTTON);
-  // "התחל קליטת מוצרים" turns it into a receipt with paper, as before.
+  // "התחל בדיקה שורה-שורה" turns it into a receipt with paper, as "התחל קליטת מוצרים" did before v417.
   c.run('aiScanDocuments = [invoicePage()]');
   const s = service(c, { answer: req => reply(req.credit ? verifiedCredit(data) : data.paper) });
-  await c.click('rc-photo-start'); await flush(c);
+  await c.click('rc-photo-lines'); await flush(c);
   assert.equal(c.run('receiptNoDoc'), false);
   assert.equal(c.run('receiptPaperScanState'), 'ok');
   assert.deepEqual(s.kinds(), ['health', 'full']);
@@ -201,7 +202,7 @@ test('c: a credit photographed on the gate is read at once and attached; "התח
   assert.equal(startEnabled(app(c)), true);
   assert.equal(c.run('receiptOpened'), false, 'nothing started the receipt');
   c.run('gateCreditObject = receiptDeliveryCredits[0]');
-  await c.click('rc-photo-start'); await flush(c);
+  await c.click('rc-photo-lines'); await flush(c);
   assert.equal(c.run('receiptDeliveryCredits.length === 1 && receiptDeliveryCredits[0] === gateCreditObject'), true, 'the same credit object survives "התחל"');
   assert.equal(creditStatus(c), 'confirmed');
   assert.equal(c.run('receiptDeliveryCredits[0].confirmedSignature === deliveryCreditSignature(receiptDeliveryCredits[0])'), true);
@@ -210,12 +211,23 @@ test('c: a credit photographed on the gate is read at once and attached; "התח
   assert.equal(c.run('receiptPaperScanState'), 'ok');
   assert.equal(c.run('receiptNoDoc'), false);
   assert.equal(c.run('receiptOpened && receiptEntryMode === "photo" && !receiptPhotoCaptureOpen'), true);
-  assert.match(app(c), /שלב 2 · סריקת מוצרים/);
+  // v417: "התחל בדיקה שורה-שורה" — מסך הבדיקה (לא מסך הסריקה), והרשימה של התעודה כבר פתוחה בחלון
+  assert.match(app(c), /data-manual-receiving/); assert.doesNotMatch(app(c), /שלב 2 · סריקת מוצרים/);
+  assert.equal(c.run('receiptQuantityReview.mode === "lines" && !receiptQuantityReview.pending'), true, 'the line check opened by itself when the invoice was read');
   assert.match(app(c), CONFIRMED_CARD, 'the receiving screen shows the confirmed card, not a fresh capture card');
   assert.doesNotMatch(app(c), /data-role="delivery-credit-(confirm|read|camera|barcode)"/, 'nothing to confirm, read or type');
   assert.equal(c.run('deliveryCreditReady()'), true);
-  // 9 milk counted: 1 milk (₪5.00) and 6 coffee (₪43.80) are missing — the gate credit covers them.
-  c.run(`receiptList = [{ productId: 'milk', name: 'חלב בדיקה', barcode: '7290000000008', qty: 9 }]; receiptDupConfirmed = true; priceAuditSetDate(0, '2026-09-15'); saveReceiptDraft(); renderReceiving()`);
+  // 9 milk arrived: 1 milk (₪5.00) and 6 coffee (₪43.80) are missing — the gate credit covers them.
+  // v417: the count is what was marked in the line check — milk "אחרת" 9, coffee "לא הגיע", "סיום".
+  // (the document date is set first: a paper that changes under an open check asks to open the check again)
+  c.run(`receiptDupConfirmed = true; priceAuditSetDate(0, '2026-09-15'); saveReceiptDraft(); startReceiptLineCheck()`);
+  const lines = json(c, 'receiptQuantityReview.docs[0].lines.map(l => l.productId)');
+  const mark = dataset => c.run(`receiptLineCheckClick({ target: { closest: () => ({ dataset: ${JSON.stringify(dataset)} }) } })`);
+  mark({ lineMark: '0:' + lines.indexOf('milk') + ':qty' });
+  c.run(`receiptLineCheckInput({ target: { dataset: { lineGot: '0:${lines.indexOf('milk')}' }, value: '9' } })`);
+  mark({ lineMark: '0:' + lines.indexOf('coffee') + ':none' });
+  assert.equal(c.run('finishReceiptLineCheck()'), true);
+  assert.deepEqual(json(c, 'receiptList.map(l => l.productId + " " + l.qty).sort()'), ['coffee 0', 'milk 9']);
   assert.match(c.run('receivingProgressHtml(receiptTotals())'), /החוסר מכוסה בזיכוי/);
   const p = finish(c);
   assert.ok(p); assert.equal(p.status, 'ok'); assert.equal(p.ex, 45);
@@ -243,15 +255,16 @@ test('d: "התחל" is enabled while the gate credit is still read; the invoice 
   assert.equal(c.run('yotvataPhotoReady()'), true, 'readiness never looks at credits');
   assert.equal(c.run('aiScanBusy'), false);
   assert.equal(startEnabled(app(c)), true, 'the start button does not wait for the credit');
-  assert.match(app(c), /קורא את הזיכוי… אפשר להמשיך לצלם את התעודות וללחוץ "התחל קליטת מוצרים"\./, 'the gate shows the reading card, worded for the gate');
+  assert.match(app(c), /קורא את הזיכוי… אפשר להמשיך לצלם את התעודות וללחוץ "התחל בדיקה שורה-שורה"\./, 'the gate shows the reading card, worded for the gate');
   assert.doesNotMatch(app(c), /אפשר להמשיך לסרוק מוצרים/, 'the gate has no product scanner, so it never says so');
   c.run('gateCreditObject = receiptDeliveryCredits[0]');
-  await c.click('rc-photo-start'); await flush(c, 5);
+  await c.click('rc-photo-lines'); await flush(c, 5);
   assert.equal(c.run('receiptOpened && receiptEntryMode === "photo" && !receiptPhotoCaptureOpen'), true, 'the receipt opened');
   assert.equal(c.run('aiScanBusy'), true);
   assert.equal(c.run('receiptPaperScanState'), 'running');
   assert.match(c.run('aiScanProgressText'), /ממתין לסיום קריאת הזיכוי…/, 'the invoice banner says it waits for the credit');
-  assert.match(c.node('rcPaperStatus').innerHTML, /ממתין לסיום קריאת הזיכוי…/);
+  assert.match(app(c), /id="rcPaperStatus">[^]*ממתין לסיום קריאת הזיכוי…/, 'v417: מסך הבדיקה (מאחורי חלון הבדיקה שנפתח מיד) אומר שהתעודה מחכה לזיכוי');
+  assert.equal(c.run('receiptQuantityReview.pending'), true, 'v417: חלון הבדיקה כבר פתוח, עוד בלי רשימה');
   assert.deepEqual(s.kinds(), ['health', 'full:credit', 'health'], 'the invoice warm-up ran, but no invoice upload while the credit is read');
   assert.equal(c.run('receiptDeliveryCredits[0] === gateCreditObject'), true);
   assert.equal(creditStatus(c), 'reading');
@@ -402,7 +415,7 @@ test('g: while gate credits are read, only their cards refresh — the gate\'s d
   assert.match(gateBefore, GATE);
   assert.match(gateBefore, /id="aiDocCam_0"/); assert.match(gateBefore, /SU5WT0lDRQ==/, 'the invoice photo is on the gate');
   const host = c.node('rcDeliveryCredits');
-  assert.match(host.outerHTML, /ממתין לסיום קריאת זיכוי אחר — הזיכוי ייקרא מיד אחריו\. אפשר להמשיך לצלם את התעודות וללחוץ "התחל קליטת מוצרים"\./);
+  assert.match(host.outerHTML, /ממתין לסיום קריאת זיכוי אחר — הזיכוי ייקרא מיד אחריו\. אפשר להמשיך לצלם את התעודות וללחוץ "התחל בדיקה שורה-שורה"\./);
   assert.doesNotMatch(gateBefore, /ממתין לסיום קריאת זיכוי אחר/, 'the waiting text arrived through the card refresh, not through a render of the gate');
   assert.match(gateBefore, /קורא את הזיכוי…/, 'the last full render (the start of B\'s read) showed B reading');
   c.run("receiptDeliveryCredits[1].progress = 'מתחבר מחדש…'; deliveryCreditRefreshCards()");
@@ -709,7 +722,7 @@ test('k: "התעודה הגיעה — הזן את נתוניה" on an old open r
   service(t.c, { answer: req => reply(req.credit ? verifiedCredit(t.data) : t.data.paper) });
   t.c.run('aiScanDocuments = [invoicePage()]');
   await gateCredit(t.c, t.opened); await flush(t.c);
-  await t.c.click('rc-photo-start'); await flush(t.c);
+  await t.c.click('rc-photo-lines'); await flush(t.c);
   assert.equal(t.c.run('receiptOpened'), true);
   t.c.run(OLD_OPEN); t.c.toasts.length = 0;
   await t.c.click('rc-attach-doc', 'old1');

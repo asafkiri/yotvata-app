@@ -90,8 +90,8 @@ test('1. הכפתור החדש בשני המסכים של הבדיקה הידנ�
   const r = await twoPapers();
   assert.equal(r.run('receiptCountingMode'), 'manual');
   const manual = r.run('receiptQuantityButtonsHtml()');
-  assert.deepEqual([...manual.matchAll(/data-role="(rc-quantity-[a-z]+)"/g)].map(m => m[1]), ['rc-quantity-lines', 'rc-quantity-all', 'rc-quantity-differences'], 'החדש ראשון, ואחריו שני הקיימים');
-  assert.match(strip(manual), /^בדוק שורה-שורה בטלפון בדקתי ידנית — כל הכמויות תואמות, המשך לקליטה בדקתי ידנית — יש חוסרים או עודפים$/);
+  assert.deepEqual([...manual.matchAll(/data-role="(rc-quantity-[a-z]+)"/g)].map(m => m[1]), ['rc-quantity-lines', 'rc-quantity-all', 'rc-quantity-differences', 'rc-quantity-none'], 'החדש ראשון, אחריו שני הקיימים, ובסוף "לא הגיע כלום" (v417)');
+  assert.match(strip(manual), /^בדוק שורה-שורה בטלפון בדקתי ידנית — כל הכמויות תואמות, המשך לקליטה בדקתי ידנית — יש חוסרים או עודפים לא הגיע כלום — הכל חסר$/);
   // בקליטה בסריקה — בתוך "בדקת ידנית את הכמויות מול התעודה?"
   r.run(`receiptCountingMode = 'scan'`);
   const folded = r.run('receiptQuantityButtonsHtml()');
@@ -483,9 +483,9 @@ test('11. הכרטיס של "הגיע משהו נוסף" כמו שורת תעו�
   assert.deepEqual(json(r, 'receiptList.map(l => l.productId + " " + l.qty).sort()'), ['butter 4', 'cottage 6', 'cream 2', 'milk 17', 'yogurt 4']);
 });
 
-test('הגרסה עלתה ל-416, כולל ה-service worker', () => {
+test('הגרסה עלתה ל-417, כולל ה-service worker', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /const APP_VERSION = '416'/); // גרסה 416: "בטל סימון" וכתב גדול ועבה יותר בבדיקה שורה-שורה
+  assert.match(html, /const APP_VERSION = '417'/); // גרסה 417: הבדיקה שורה-שורה נפתחת לפני שהתעודה נקראה, וגם בלי תעודה
   assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_line_clear'/);
-  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v416/);
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v417/);
 });

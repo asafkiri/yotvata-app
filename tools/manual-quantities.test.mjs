@@ -272,12 +272,13 @@ test(supplier+': manual scan failure and an interrupted reload offer photo recov
  assertManualScreen(b);assert.ok(b.node('app').innerHTML.includes('data-role="'+repair+'"'));
  b.click(repair);assert.ok(b.node('app').innerHTML.includes('data-role="'+gateManualRole+'"'));
 });
-test(supplier+': switching back to scanning preserves the paper, entered differences and existing quantities',async()=>{
+// v417: "מעבר לקליטה בסריקת מוצרים" ירד — הסריקה היא חלק מהבדיקה שורה-שורה. הקישור אינו במסך, והתפקיד הישן אינו משנה דבר.
+test(supplier+': there is no way back to counting by scan; the paper and the entered differences stay',async()=>{
  const r=await scanned(plainData(),[]);r.click('rc-quantity-differences');
- r.run(`receiptQuantityReview.rows[0].kind='shortage';receiptQuantityReview.rows[0].difference='2';saveReceiptDraft();closeReceiptQuantityReview()`);
+ r.run(`receiptQuantityReview.rows[0].kind='shortage';receiptQuantityReview.rows[0].difference='2';saveReceiptDraft();closeReceiptQuantityReview();renderReceiving()`);
  const paper=json(r,'aiScanResponse'),before=r.requests.length;
- r.click('rc-count-by-scan');assert.equal(r.run('receiptCountingMode'),'scan');
- assert.doesNotMatch(r.node('app').innerHTML,/data-manual-receiving/);assert.match(r.node('app').innerHTML,/data-role="rc-scan"/);
+ assert.doesNotMatch(assertManualScreen(r),/rc-count-by-scan|מעבר לקליטה בסריקת מוצרים/);
+ r.click('rc-count-by-scan');assert.equal(r.run('receiptCountingMode'),'manual');assertManualScreen(r);
  assert.deepEqual(json(r,'aiScanResponse'),paper);assert.equal(r.run('receiptQuantityReview.rows[0].difference'),'2');assert.deepEqual(json(r,'receiptList'),[]);
  r.click('rc-quantity-differences');r.run('closeReceiptQuantityReview();renderReceiving()');assertManualScreen(r);
  assert.equal(r.run('receiptQuantityReview.rows[0].difference'),'2');assert.equal(r.requests.length,before);
