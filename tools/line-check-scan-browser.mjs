@@ -8,6 +8,7 @@
 // - 413: כל סימון מהכרטיס סוגר את המצלמה וחוזר לרשימה — רק השורה שסומנה מודגשת, והיא נגללת לתוך המסך (גם הכרטיס הצהוב
 //   בתחתית); "סרוק מוצר" שוב למוצר הבא, עם המונה המעודכן. ✕ בכרטיס, "תקן את הסה״כ" וברקוד לא מוכר משאירים את המצלמה.
 // - ✕ במצלמה מחזיר לרשימה כמו שהיא: השורות שסומנו בסריקה מקופלות, המונה נכון; בלי שגיאות דף ובלי גלילה לצדדים.
+// - 416: "בטל סימון" בשורה שנפתחה ב"שנה" — בלחיצה אמיתית השורה חוזרת ל"עוד לא נבדקה", והפוקוס נשאר על "הגיע" שלה.
 // הרצה: node tools/line-check-scan-browser.mjs (Playwright + Chromium; YOTVATA_CHROMIUM — נתיב לדפדפן, אופציונלי)
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -95,7 +96,7 @@ const css = `.hidden{display:none!important}.flex{display:flex}.grid{display:gri
 .rounded-2xl{border-radius:1rem}.rounded-xl{border-radius:.75rem}.border-2{border:2px solid #cbd5e1}.border{border:1px solid #cbd5e1}.border-emerald-300{border-color:#6ee7b7}.bg-emerald-50{background:#ecfdf5}.border-amber-300{border-color:#fcd34d}.bg-amber-50{background:#fffbeb}
 .text-3xl{font-size:1.875rem}.text-lg{font-size:1.125rem}.text-xs{font-size:.75rem}.text-sm{font-size:.875rem}.text-\\[11px\\]{font-size:11px}.font-black{font-weight:900}.font-bold{font-weight:700}.text-white{color:#fff}.text-center{text-align:center}
 .min-h-\\[48px\\]{min-height:48px}.min-h-\\[52px\\]{min-height:52px}.w-24{width:6rem}.w-10{width:2.5rem}.h-10{height:2.5rem}.top-2{top:.5rem}.left-2{left:.5rem}.ring-4{box-shadow:0 0 0 4px #93c5fd}.h-full{height:100%}.items-stretch{align-items:stretch}.px-4{padding-left:1rem;padding-right:1rem}.pt-4{padding-top:1rem}.pb-4{padding-bottom:1rem}
-body{margin:0;font:16px Arial}button,input{font:inherit;padding:8px;max-width:100%;box-sizing:border-box}video{background:#222}`;
+body{margin:0;font:16px Arial}button,input{font:inherit;padding:8px;max-width:100%;box-sizing:border-box}video{background:#222}.min-h-\\[44px\\]{min-height:44px}`;
 const pageHtml = html.replace(/<script\s+src="https:[^"]+"><\/script>/g, '').replace(/<link[^>]+(?:href="https:[^"]+"|rel="manifest")[^>]*>/g, '')
   .replace(/<script type="module">[\s\S]*?<\/script>/, () => '<script type="module">' + setup + moduleSource + replay + '</script>')
   .replace('</head>', '<style>' + css + '</style></head>');
@@ -292,8 +293,25 @@ try {
   assert.equal(await page.locator('#receiptQuantityProgress').innerText(), 'נשארה שורה אחת בלי סימון — סמן בכל שורה: הגיע, כמות אחרת או לא הגיע', 'הלחיצה על "סיום" לא נבלעה');
   assert.equal((await finish.textContent()).trim(), 'סיום (נשארו 1)');
   await snap(page, '7-settled');
+  // 416: "בטל סימון" בלחיצה אמיתית — "שנה" על החלב (מקופל, "הגיע 17" בשתי התעודות), ואז "בטל סימון": בלי סימון בשתי השורות שלו,
+  // אף כפתור לא דולק, "סיום (נשארו 2)", והפוקוס על "הגיע" של השורה; בשורות מקופלות ובשורה שלא סומנה הכפתור אינו קיים
+  assert.equal(await page.locator('[data-line-clear]').count(), 0, 'בשורות מקופלות — רק "שנה"');
+  await page.locator('[data-line-open="0:0"]').click();
+  const clear = page.locator('[data-line-clear="0:0"]');
+  assert.equal(await page.locator('[data-line-clear]').count(), 1, 'רק בשורה הפתוחה שסומנה');
+  assert.equal((await clear.innerText()).trim(), 'בטל סימון');
+  const clearBox = await clear.boundingBox(), rowBox = await page.locator('#lineCheck_0_0').boundingBox();
+  assert.ok(clearBox.height >= 44 && clearBox.x >= rowBox.x && clearBox.x + clearBox.width <= rowBox.x + rowBox.width + 1, '"בטל סימון" — יעד מגע של 44px, בתוך הכרטיס: ' + JSON.stringify(clearBox));
+  await clear.click();
+  assert.deepEqual(await page.evaluate(() => t.marks()), [',ok,ok', ','], 'בלי סימון, בשתי השורות של המוצר');
+  assert.equal(await page.locator('[data-line-clear]').count(), 0);
+  for (const m of ['ok', 'qty', 'none']) assert.equal(await page.locator('[data-line-mark="0:0:' + m + '"]').getAttribute('aria-pressed'), 'false');
+  assert.equal((await finish.textContent()).trim(), 'סיום (נשארו 2)');
+  assert.doesNotMatch((await page.locator('#lineCheckRef_1_0').innerText()).replace(/\s+/g, ' '), /הגיע/, 'שורת ההפניה — בלי סטטוס');
+  assert.equal(await page.evaluate(() => document.activeElement && document.activeElement.dataset.lineMark), '0:0:ok', 'הפוקוס על "הגיע" של השורה שבוטלה');
+  await snap(page, '8-cleared');
   const width = await page.evaluate(() => ({ scroll: document.scrollingElement.scrollWidth, client: document.scrollingElement.clientWidth }));
   assert.ok(width.scroll <= width.client, 'בלי גלילה לצדדים');
   assert.deepEqual(errors, [], 'בלי שגיאות דף');
-  console.log('yotvata: הסריקה בבדיקה שורה-שורה בדפדפן אמיתי (390px) — התחתית הקבועה, המצלמה, הכרטיס, "אחרת", "עוד כמה?" (פוקוס, מסומן, Enter), "תקן את הסה״כ", "הגיע בנוסף", ברקוד לא מוכר, כל סימון חוזר לשורה שלו ברשימה (413), והמספר שקובע את הסימון — תקין');
+  console.log('yotvata: הסריקה בבדיקה שורה-שורה בדפדפן אמיתי (390px) — התחתית הקבועה, המצלמה, הכרטיס, "אחרת", "עוד כמה?" (פוקוס, מסומן, Enter), "תקן את הסה״כ", "הגיע בנוסף", ברקוד לא מוכר, כל סימון חוזר לשורה שלו ברשימה (413), המספר שקובע את הסימון, ו"בטל סימון" (416) — תקין');
 } finally { await browser.close(); await new Promise(r => server.close(r)); }

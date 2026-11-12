@@ -320,7 +320,7 @@ test('7. מוצר בשתי תעודות (412): "הגיע 17" מחזיר לכרט
   returned(r, 'lineCheck_0_0');
   assert.equal(ringed(r, 'lineCheckRef_1_0'), false, 'שורת ההפניה בתעודה השנייה — לא היא המודגשת');
   assert.deepEqual(marks(r), ['ok,ok,ok', 'ok,ok'], '"הגיע 17" — שתי השורות');
-  assert.match(strip(row(r, 0, 0)), /חלב 3% בקרטון 1 ליטר הגיע · 17 יח׳ ב-2 תעודות · בקופה ₪6\.90 שנה/);
+  assert.match(strip(row(r, 0, 0)), /חלב 3% בקרטון 1 ליטר הגיע · 17 יח׳ ב-2 תעודות בקופה ₪6\.90 שנה/);
   assert.match(strip(rows(r)), /נספר יחד עם תעודה 1, שורה 1 · ✓ הגיע/);
   assert.equal(progress(r), 'כל 4 שורות סומנו — אפשר לסיים');
   assert.equal(r.run(`$('receiptQuantityConfirm').textContent`), 'סיום — שמור את הבדיקה');

@@ -238,7 +238,7 @@ test('6. קיפול: "הגיע"/"לא הגיע" מקפלים, "שנה" פותח,
   click(r, { lineMark: '0:0:ok' });
   let a = row(r, 0, 0);
   assert.doesNotMatch(a, /data-line-mark=/, 'מקופלת — בלי כפתורי סימון');
-  assert.equal(strip(a), 'חלב 3% בקרטון 1 ליטר הגיע · 17 יח׳ ב-2 תעודות · בקופה ₪6.90 שנה');
+  assert.equal(strip(a), 'חלב 3% בקרטון 1 ליטר הגיע · 17 יח׳ ב-2 תעודות בקופה ₪6.90 שנה');
   assert.match(a, /data-line-open="0:0"/); assert.match(a, /border-emerald-300 bg-emerald-50/);
   assert.equal(progress(r), 'סומנו 1 מתוך 4 שורות');
   assert.equal(json(r, 'receiptQuantityReview.docs[1].lines[0].mark'), 'ok', 'v412: גם השורה בתעודה השנייה');

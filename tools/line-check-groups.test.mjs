@@ -126,7 +126,7 @@ test('2. סימון הקבוצה: "הגיע 17" לשתי השורות; "אחרת
   r.run('startReceiptLineCheck()');
   click(r, { lineMark: '0:0:ok' });
   assert.deepEqual(marks(r), ['ok,,', 'ok,']);
-  assert.equal(strip(row(r, 0, 0)), 'חלב 3% בקרטון 1 ליטר הגיע · 17 יח׳ ב-2 תעודות · בקופה ₪6.90 שנה', 'מקופל, עם הסך');
+  assert.equal(strip(row(r, 0, 0)), 'חלב 3% בקרטון 1 ליטר הגיע · 17 יח׳ ב-2 תעודות בקופה ₪6.90 שנה', 'מקופל, עם הסך');
   assert.equal(strip(ref(r, 1, 0)), 'שורה 1 בתעודה חלב 3% בקרטון 1 ליטר · 5 יח׳ נספר יחד עם תעודה 1, שורה 1 · ✓ הגיע הצג');
   assert.equal(progress(r), 'סומנו 1 מתוך 4 שורות');
   // "אחרת" 15: תוך כדי הקלדה — 12 + 3 בנתונים (עדיין "אחרת" בשתיהן), הסיכום על הסך, הכרטיס כתום
@@ -150,7 +150,7 @@ test('2. סימון הקבוצה: "הגיע 17" לשתי השורות; "אחרת
   // "לא הגיע" — שתי השורות
   click(r, { lineMark: '0:0:none' });
   assert.deepEqual(marks(r), ['none,ok,', 'none,']);
-  assert.equal(strip(row(r, 0, 0)), 'חלב 3% בקרטון 1 ליטר לא הגיע · 0 מתוך 17 · בקופה ₪6.90 שנה');
+  assert.equal(strip(row(r, 0, 0)), 'חלב 3% בקרטון 1 ליטר לא הגיע · 0 מתוך 17 בקופה ₪6.90 שנה');
   assert.equal(strip(ref(r, 1, 0)), 'שורה 1 בתעודה חלב 3% בקרטון 1 ליטר · 5 יח׳ נספר יחד עם תעודה 1, שורה 1 · ✗ לא הגיע הצג');
   // 20 — העודף (3) על האחרונה
   click(r, { lineOpen: '0:0' }); click(r, { lineMark: '0:0:qty' }); type(r, { lineGot: '0:0' }, '20'); blur(r, '0:0');
@@ -215,7 +215,7 @@ test('5. המעבר מסריקה עם מוצר בשתי תעודות: כמות �
   q.run(`receiptList = [{ productId: 'milk', name: 'חלב 3% בקרטון 1 ליטר', barcode: '7290000000008', qty: 17 }]; saveReceiptDraft(); receiptCountingMode = 'scan';`);
   q.run('startReceiptLineCheck()'); q.run('testConfirms[0].cb()');
   assert.deepEqual(marks(q), ['ok,,', 'ok,']);
-  assert.equal(strip(row(q, 0, 0)), 'חלב 3% בקרטון 1 ליטר הגיע · 17 יח׳ ב-2 תעודות · בקופה ₪6.90 שנה');
+  assert.equal(strip(row(q, 0, 0)), 'חלב 3% בקרטון 1 ליטר הגיע · 17 יח׳ ב-2 תעודות בקופה ₪6.90 שנה');
 });
 
 test('6. טיוטה מגרסה קודמת — שורה אחת של המוצר סומנה והשנייה לא: מה שסומן הופך לסך של הקבוצה, גם בהמשך מאותו מקום', async () => {
@@ -244,14 +244,14 @@ test('7. "התעודה הזאת לא שלנו": כל תעודה שנשארת ש�
   click(r, { lineMark: '0:0:qty' }); type(r, { lineGot: '0:0' }, '15'); blur(r, '0:0');
   click(r, { lineDrop: '1' }); click(r, { lineDropYes: '1' });
   assert.deepEqual(marks(r), ['ok,,']);
-  assert.equal(strip(row(r, 0, 0)), 'חלב 3% בקרטון 1 ליטר הגיע · 12 יח׳ · בקופה ₪6.90 שנה');
+  assert.equal(strip(row(r, 0, 0)), 'חלב 3% בקרטון 1 ליטר הגיע · 12 יח׳ בקופה ₪6.90 שנה');
   // התעודה הראשונה יוצאת — נשארת שורת ה-5 עם חלקה (3)
   const q = await twoPapers();
   q.run('startReceiptLineCheck()');
   click(q, { lineMark: '0:0:qty' }); type(q, { lineGot: '0:0' }, '15'); blur(q, '0:0');
   click(q, { lineDrop: '0' }); click(q, { lineDropYes: '0' });
   assert.deepEqual(marks(q), ['qty:3,']);
-  assert.match(strip(row(q, 0, 0)), /^שורה 1 בתעודה חלב 3% בקרטון 1 ליטר .* 5 יח׳ בתעודה הגיע 5 אחרת לא הגיע כמה הגיע\? התקבלו 3 · חוסר 2$/);
+  assert.match(strip(row(q, 0, 0)), /^שורה 1 בתעודה חלב 3% בקרטון 1 ליטר .* 5 יח׳ בתעודה הגיע 5 אחרת לא הגיע כמה הגיע\? התקבלו 3 · חוסר 2 בטל סימון$/);
   assert.doesNotMatch(strip(rows(q)), /גם בתעודה|נספר יחד עם/);
 });
 
