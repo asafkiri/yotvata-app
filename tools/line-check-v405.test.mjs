@@ -89,19 +89,28 @@ const markRestOk = r => review(r).docs.forEach((d, di) => d.lines.forEach((l, li
 // הקריאות שעובדות על הפתיחה שנדחתה (setTimeout בחלון) — בהרצה: מה שנצבר בתור
 function runQueued(r) { const fns = r.callbacks.splice(0); fns.forEach(fn => fn()); return fns.length; }
 
-test('1. מסך הצילום: סריקה כמו שהייתה, ומתחתיה שלוש הבדיקות הידניות — כבויות עד שהצילום מוכן', async () => {
+test('1. מסך הצילום: הבדיקה שורה-שורה ראשית, ומתחתיה "הכל הגיע", "לא הגיע כלום" ו"חוסרים ועודפים" — כבויות עד שהצילום מוכן; בלי "התחל קליטת מוצרים"', async () => {
   const c = ready([BIG]);
   await c.cloud.tick();
   c.run('receiptEntryMode = "photo"; receiptOpened = false; renderReceiving()');
   const html = app(c);
-  assert.match(html, /<button data-role="rc-photo-start"  class="[^"]*bg-blue-600 text-white"/, 'הסריקה — אותו כפתור');
-  assert.match(strip(html), /התחל קליטת מוצרים בלי סריקה — בדיקה מול התעודה בדוק שורה-שורה בטלפון הכל הגיע כמו בתעודה יש חוסרים או עודפים הבדיקה שתבחר תיפתח לבד כשהפענוח יסתיים הקלדת סכום ויחידות ידנית/);
-  for (const role of ['rc-photo-lines', 'rc-photo-all', 'rc-photo-differences']) assert.match(html, new RegExp('<button data-role="' + role + '"  class='), role + ' פעיל');
-  assert.doesNotMatch(html, /rc-photo-quantity|הכמויות נבדקות ידנית/, 'הכפתור הישן ירד');
+  assert.doesNotMatch(html, /rc-photo-start|התחל קליטת מוצרים/, 'v417: הסריקה בלי רשימה ירדה ממסך הצילום');
+  assert.match(html, /<button data-role="rc-photo-lines"  class="[^"]*py-4[^"]*text-lg bg-indigo-600 text-white"/, 'הבדיקה שורה-שורה — הכפתור הראשי');
+  assert.match(strip(html), /התחל בדיקה שורה-שורה אפשר לסרוק מוצרים מיד — הרשימה תעלה לבד כשהתעודה תיקרא בלי לעבור שורה-שורה הכל הגיע כמו בתעודה לא הגיע כלום יש חוסרים או עודפים הבחירה תיפתח לבד כשהפענוח יסתיים הקלדת סכום ויחידות ידנית/);
+  for (const role of ['rc-photo-lines', 'rc-photo-all', 'rc-photo-none', 'rc-photo-differences']) assert.match(html, new RegExp('<button data-role="' + role + '"  class='), role + ' פעיל');
+  assert.doesNotMatch(html, /rc-photo-quantity|הכמויות נבדקות ידנית|data-photo-counted/, 'הכפתור הישן ירד; בלי ספירה — בלי ההודעה עליה');
   // עמוד שהכיוון שלו לא אושר — הכל כבוי
   c.run('aiScanDocuments[0].pages[0].orientationConfirmed = false; renderReceiving()');
   const off = app(c);
-  for (const role of ['rc-photo-start', 'rc-photo-lines', 'rc-photo-all', 'rc-photo-differences']) assert.match(off, new RegExp('<button data-role="' + role + '" disabled class='), role + ' כבוי');
+  for (const role of ['rc-photo-lines', 'rc-photo-all', 'rc-photo-none', 'rc-photo-differences']) assert.match(off, new RegExp('<button data-role="' + role + '" disabled class='), role + ' כבוי');
+  // מה שכבר נסרק (קליטה שהתחילה בלי תעודה) — נאמר מעל הכפתור
+  c.run(`aiScanDocuments[0].pages[0].orientationConfirmed = true; receiptList = [{ productId: 'milk', name: 'חלב', barcode: '7290000000008', qty: 7 }]; receiptPhotoCaptureOpen = true; renderReceiving()`);
+  assert.match(strip(app(c)), /7 יח׳ כבר נסרקו — הם יסומנו ברשימה כשהתעודה תיקרא\. התחל בדיקה שורה-שורה/);
+  // צירוף נייר לקליטה שנשמרה בלי תעודה — הספירה כבר בפנים: כפתור אחד שקורא את הנייר
+  c.run(`receiptAttachTarget = { id: 'r1', label: '1.11' }; renderReceiving()`);
+  const attach = app(c);
+  assert.match(attach, /<button data-role="rc-photo-start"  class="[^"]*bg-blue-600 text-white">קרא את התעודה — הבדיקה תרוץ מול הספירה<\/button>/);
+  assert.doesNotMatch(attach, /rc-photo-lines|rc-photo-all|rc-photo-none|rc-photo-differences/);
 });
 
 test('2. הבחירה נפתחת לבד כשהפענוח מסתיים — שורה-שורה, "הכל הגיע" (שאלה אחת), חוסרים ועודפים; פעם אחת, עם רטט', async () => {
@@ -134,35 +143,37 @@ test('2. הבחירה נפתחת לבד כשהפענוח מסתיים — שור
   assert.match(app(n), /data-role="rc-quantity-lines"[\s\S]*data-role="rc-quantity-all"[\s\S]*data-role="rc-quantity-differences"/);
 });
 
-test('3. מסך ההמתנה אומר מה נבחר; "שנה את הבדיקה" מבטל; "מעבר לקליטה בסריקת מוצרים" מבטל', async () => {
+test('3. מסך ההמתנה אומר מה נבחר; "שנה את הבדיקה" מבטל; "התחל לסרוק בינתיים" במקום "מעבר לקליטה בסריקת מוצרים"', async () => {
   const c = ready([BIG, SMALL]);
   await c.cloud.tick();
   const release = c.hold();
-  const run = c.run(`yotvataStartPaperScan({ manualQuantities: true, intent: 'lines' })`);
+  const run = c.run(`yotvataStartPaperScan({ manualQuantities: true, intent: 'all' })`);
   await settle();
   assert.equal(c.run('receiptPaperScanState'), 'running');
+  assert.equal(modalOpen(c), false, '"הכל הגיע" מחכה לפענוח — בלי חלון');
   let html = app(c);
   assert.match(html, /data-manual-receiving/);
-  assert.match(strip(html), /בסיום הפענוח תיפתח לבד הבדיקה שורה-שורה, והטלפון ירטוט\. אפשר להניח את הטלפון בצד\. שנה את הבדיקה/);
-  assert.equal(draft(c).quantityIntent, 'lines', 'הבחירה בטיוטה');
+  assert.match(strip(html), /בסיום הפענוח תופיע לבד השאלה "הכל הגיע כמו בתעודה\?", והטלפון ירטוט\. אפשר להניח את הטלפון בצד\. התחל לסרוק בינתיים — בדיקה שורה-שורה שנה את הבדיקה/);
+  assert.doesNotMatch(html, /rc-count-by-scan|מעבר לקליטה בסריקת מוצרים/, 'v417: הקישור ירד');
+  assert.equal(draft(c).quantityIntent, 'all', 'הבחירה בטיוטה');
   c.click('rc-intent-clear');
   assert.equal(c.run('receiptQuantityIntent'), null); assert.equal(draft(c).quantityIntent, null);
   html = app(c);
-  assert.doesNotMatch(html, /rc-intent-clear|תיפתח לבד/);
-  assert.match(strip(html), /בסיום הפענוח אפשר לאשר את הכמויות או לדווח על חוסרים ועודפים/);
+  assert.doesNotMatch(html, /rc-intent-clear|תיפתח לבד|תופיע לבד/);
+  assert.match(strip(html), /בסיום הפענוח אפשר לבדוק שורה-שורה, לאשר שהכל הגיע או לדווח על חוסרים ועודפים\. התחל לסרוק בינתיים — בדיקה שורה-שורה/);
   release(); await run; await settle();
   assert.equal(c.run('receiptPaperScanState'), 'ok');
   assert.equal(modalOpen(c), false, 'בלי בחירה — לא נפתח'); assert.deepEqual(json(c, 'buzzes'), []);
   assert.match(app(c), /data-role="rc-quantity-lines"/);
   // הטקסט לכל בחירה
-  for (const [intent, text] of [['all', 'תופיע לבד השאלה "הכל הגיע כמו בתעודה?"'], ['differences', 'תיפתח לבד רשימת החוסרים והעודפים']]) {
+  for (const [intent, text] of [['all', 'תופיע לבד השאלה "הכל הגיע כמו בתעודה?"'], ['differences', 'תיפתח לבד רשימת החוסרים והעודפים'], ['none', 'תופיע לבד השאלה "לא הגיע כלום?"'], ['lines', 'תיפתח לבד הבדיקה שורה-שורה, והטלפון ירטוט. אפשר כבר לסרוק מוצרים. המשך לסרוק בינתיים']]) {
     c.run(`receiptQuantityIntent = ${JSON.stringify(intent)}; receiptPaperScanState = 'running'`);
     assert.ok(strip(c.run('receiptManualStatusHtml()')).includes(text), intent + ': ' + text);
   }
-  // "מעבר לקליטה בסריקת מוצרים" — הבחירה יורדת
+  // התפקיד הישן אינו עושה דבר — אין עוד מעבר לקליטה בסריקה
   c.run(`receiptQuantityIntent = 'lines'; receiptPaperScanState = 'ok'; saveReceiptDraft()`);
   c.click('rc-count-by-scan');
-  assert.equal(c.run('receiptCountingMode'), 'scan'); assert.equal(c.run('receiptQuantityIntent'), null); assert.equal(draft(c).quantityIntent, null);
+  assert.equal(c.run('receiptCountingMode'), 'manual'); assert.equal(c.run('receiptQuantityIntent'), 'lines');
 });
 
 test('4. הבחירה מחכה: למסך הקליטה, לפענוח שנכשל (ואחרי התיקון נפתחת), ולרענון מהטיוטה', async () => {
@@ -177,7 +188,10 @@ test('4. הבחירה מחכה: למסך הקליטה, לפענוח שנכשל (
   await f.cloud.tick();
   f.run(`const realCheck = yotvataPaperCheck; yotvataPaperCheck = (doc, pages) => ({ ...realCheck(doc, pages), ok: false, problems: ['boom'] }); globalThis.realCheck = realCheck;`);
   await f.run(`yotvataStartPaperScan({ manualQuantities: true, intent: 'lines' })`);
-  assert.equal(f.run('receiptPaperScanState'), 'failed'); assert.equal(f.run('receiptQuantityIntent'), 'lines'); assert.equal(modalOpen(f), false);
+  assert.equal(f.run('receiptPaperScanState'), 'failed'); assert.equal(f.run('receiptQuantityIntent'), 'lines');
+  // v417: החלון כבר פתוח (בדיקה ממתינה, בלי רשימה) ואומר שהקריאה לא הושלמה; התיקון — במסך הקליטה שמאחוריו
+  assert.equal(modalOpen(f), true); assert.equal(review(f).pending, true); assert.deepEqual(review(f).docs, []);
+  assert.match(strip(f.run(`$('receiptLinePaperStatus').innerHTML`)), /^קריאת התעודה לא הושלמה/, 'כרטיס המצב שבראש החלון התעדכן במקום');
   assert.match(strip(app(f)), /צריך להשלים את פענוח התעודה/);
   f.run('yotvataPaperCheck = realCheck');
   assert.equal(f.run('yotvataRecheckFailedPaper()'), true);
