@@ -615,11 +615,11 @@ test('12. בדיקה שסומנו בה שורות אינה מוחלפת כשהת
   await q.release();
 });
 
-test('13. הגרסה עלתה ל-417, כולל הכותרת וה-service worker; "סריקת מוצרים" אינה נבחרת עוד בשום מסך', () => {
+test('13. הגרסה עלתה ל-418, כולל הכותרת וה-service worker; "סריקת מוצרים" אינה נבחרת עוד בשום מסך', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /const APP_VERSION = '417'/);
-  assert.match(html, /<title>הזמנות יטבתה - v417 /); assert.match(html, /id="verBadge"[^>]*>v417 /);
-  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v417/);
+  assert.match(html, /const APP_VERSION = '418'/);
+  assert.match(html, /<title>הזמנות יטבתה - v418 /); assert.match(html, /id="verBadge"[^>]*>v418 /);
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v418/);
   assert.doesNotMatch(html, /data-role="rc-count-by-scan"|מעבר לקליטה בסריקת מוצרים<|>התחל קליטת מוצרים</);
 });
 

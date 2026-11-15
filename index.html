@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v417 בדיקה שורה-שורה מיד, גם בלי תעודה</title>
+    <title>הזמנות יטבתה - v418 מבצע שבתעודה ואינו במערכת — פתח מבצע</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -127,7 +127,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v417 בדיקה שורה-שורה מיד, גם בלי תעודה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v418 מבצע שבתעודה ואינו במערכת — פתח מבצע</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -312,6 +312,13 @@
           <div id="piBody"></div>
         </div>
         <div class="p-4 pt-0"><button id="piClose" class="btn-tap w-full py-3 rounded-xl font-black bg-slate-100 text-slate-700">סגור</button></div>
+      </div>
+    </div>
+
+    <!-- v418: "פתח מבצע" — מבצע שבתעודה ואינו במערכת. מעל חלון הבדיקה שורה-שורה (70) וחלון הסיכום (65), מתחת לחיווי "שומר לענן" (100) -->
+    <div id="paperPromoModal" role="dialog" aria-modal="true" aria-label="פתיחת מבצע מהתעודה" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-sm items-center justify-center p-4 z-[90]" dir="rtl">
+      <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm overflow-hidden flex flex-col max-h-[92vh]">
+        <div id="paperPromoBody" class="overflow-y-auto"></div>
       </div>
     </div>
 
@@ -691,7 +698,7 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '417'; // בדיקה שורה-שורה היא הדרך היחידה: נפתחת לפני שהתעודה נקראה (סורקים בינתיים) וגם בלי תעודה; "לא הגיע כלום" (כמו תנובה 163 וברמן 171)
+const APP_VERSION = '418'; // מבצע שבתעודה ואינו במערכת: כתוב על המוצר — בקליטה ובתעודה השמורה — עם "פתח מבצע" (יטבתה בלבד בינתיים)
 // v398: תווית הגרסה ביומן הפעולות ובקובץ הגיבוי (עד כאן מחרוזת קבועה שנשארה 'v396_second_strong_read')
 const APP_VERSION_LABEL = 'v' + APP_VERSION + '_line_clear';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
@@ -8403,6 +8410,372 @@ function aiPriceFindingPromoMatch(f, dateStr) {
   if (Math.abs(discountedUnitPrice(base, pct) - paper) > 0.02) return null;
   return pr;
 }
+// ===== v418: מבצע בתעודה שלא קיים במערכת — מוצג על המוצר, עם "פתח מבצע" =====
+// בעל העסק, 15.11.2026 (תעודה 407300217817, "ממרח אבוקדו אחלה 200": בנייר 8 × ₪11.89 = ₪95.12 וחיוב של ₪57.07 — 40% הנחה; במערכת
+// המבצע האחרון על המוצר נגמר ב-31.10): "יש מבצע בתעודה שלא קיים במערכת. זה לא הציג את זה בצורה ברורה גם במהלך קליטת התעודה וגם
+// עכשיו אחרי שקלטתי את התעודה. צריך להיות מוצג על המוצר: בתעודה קיים מבצע כזה וכזה עם כזה אחוז הנחה, וכפתור 'פתח מבצע' — זה לא
+// קיים במערכת, פתח אותו עכשיו במהירות, אפילו עוד במהלך הקליטה. ואם המשתמש לא פתח במהלך הקליטה — אז אחרי שהיא נסגרה."
+// עד 417 המקרה הזה היה "מחיר שונה: במערכת ₪11.89, בנייר ₪7.13": בקליטה הוא התקפל ל"פערי מחיר שאומתו ונשמרו" (שתי קריאות הסכימו
+// על הנייר), מסך ההשוואה ביקש "אלה אכן הבעיות — אשר" בלי להראות בעיה, והתעודה נשמרה "הפרש פתוח" עם "תקן הפרשים".
+// מה נחשב "מבצע בתעודה שלא קיים במערכת" — אותו כלל בקליטה (receiptPaperPromos) ובתעודה שמורה (savedReceiptPaperPromos):
+// - הנייר עצמו מדפיס הנחה בשורה: מחיר היחידה המודפס הוא מחיר המאגר, והחיוב ליחידה נמוך ממנו (בתעודה שמורה בלי בדיקת מחירים —
+//   הכוכבית שנקראה ליד המוצר). מחיר מודפס ששונה ממחיר המאגר הוא שינוי מחיר ולא מבצע — נשאר "מחיר שונה" / "עדכן מחיר במאגר".
+// - אין במערכת שום מבצע בתעודה (לא מרכזת) על המוצר שבתוקף ביום התעודה. מבצע קיים באחוז אחר, או כזה שהמינימום שלו לא הושג —
+//   לא כאן: שם עורכים מבצע קיים ולא פותחים חדש (נשאר כמו קודם).
+// - כל השורות של המוצר בקליטה מסכימות על אותו אחוז, והאחוז משחזר את המחיר שחויב (paperPromoPct).
+// "פתח מבצע" (openPaperPromoSheet) — חלון קטן שממולא מראש: האחוז מהנייר, התקופה ששאר המבצעים שבתוקף באותו יום חולקים (דף הפעילות
+// של הספק; בלי כאלה — החודש של התעודה), והשם של המוצר. נפתח מבצע בתעודה למוצר הזה בלבד, בלי מינימום; מוצרים נוספים, מינימום
+// ושלט — במסך המבצעים. אחרי השמירה: בקליטה — ההשוואה מחושבת מחדש, השורה נהיית "מבצע בתוקף" והתעודה נשמרת עם המבצע
+// (paperPromoRefreshReceiving); ובכל תעודה שמורה שהמבצע מסביר — הממצא נחתם (promoResolved, כמו v202) והסטטוס השמור מתעדכן (v398;
+// paperPromoStampReceipts). שום סכום, כמות או שורה בתעודה שמורה אינם משתנים: "מבצע X%" על השורה שם הוא תצוגה, מתוך הממצא המוסבר.
+// האחוז שהנייר נתן, מהמחיר במאגר אל המחיר שחויב ליחידה. מספר עגול קודם (כמו בדף הפעילות), ואחריו עשירית ומאית — הראשון שמשחזר את
+// המחיר שחויב עד חצי אגורה ליחידה (סכום השורה מעוגל פעם אחת, בסופה); אם אין כזה — מאית האחוז, בגבול 2 האגורות של בדיקת המחיר.
+function paperPromoPct(base, charged) {
+  base = Number(base); charged = Number(charged);
+  if (!(base > 0) || !(charged > 0) || !(charged < base - 0.02)) return null;
+  const raw = (1 - charged / base) * 100;
+  const fits = (pct, tolerance) => pct >= 1 && pct <= 95 && Math.abs(discountedUnitPrice(base, pct) - charged) <= tolerance;
+  for (const scale of [1, 10, 100]) { const pct = Math.round(raw * scale) / scale; if (fits(pct, 0.0051)) return pct; }
+  const fine = Math.round(raw * 100) / 100;
+  return fits(fine, 0.02) ? fine : null;
+}
+function paperPromoPctText(pct) { return String(r2(pct)); }
+// מבצעים בתעודה (לא מרכזת) על המוצר שבתוקף באותו יום — בלי קשר למינימום שלהם
+function paperPromoSystemPromos(productId, day) {
+  return promos.filter(pr => pr && pr.type !== 'monthEnd' && Array.isArray(pr.productIds) && pr.productIds.indexOf(productId) !== -1 && promoActive(pr, day));
+}
+function paperPromoShiftDay(day, delta) {
+  const d = new Date(day + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + delta);
+  return d.toISOString().slice(0, 10);
+}
+// התקופה שהמבצע החדש מקבל כברירת מחדל: זו ששאר המבצעים שבתוקף ביום התעודה חולקים (1.11–30.11, או 4.10–31.10 — דף הפעילות של
+// הספק אינו תמיד חודש קלנדרי); בלי שני מבצעים כאלה לפחות — החודש של התעודה (from: 'promos' / 'month', לשורת ההסבר בחלון).
+// התקופה אינה נכנסת לתוך מבצע אחר של אותו מוצר: היא מתחילה אחרי מבצע שנגמר לפני יום התעודה, ונגמרת לפני מבצע שכבר הוגדר להמשך.
+function paperPromoPeriod(day, productId) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day || ''));
+  if (!m) return { start: '', end: '', from: 'month' };
+  const counts = new Map();
+  promos.forEach(pr => { if (pr && pr.type !== 'monthEnd' && promoActive(pr, day)) { const key = pr.start + '|' + pr.end; counts.set(key, (counts.get(key) || 0) + 1); } });
+  let best = null;
+  counts.forEach((n, key) => { if (n >= 2 && (!best || n > best.n || (n === best.n && key > best.key))) best = { n, key }; });
+  let start, end;
+  if (best) [start, end] = best.key.split('|');
+  else { start = m[1] + '-' + m[2] + '-01'; end = m[1] + '-' + m[2] + '-' + String(new Date(Number(m[1]), Number(m[2]), 0).getDate()).padStart(2, '0'); }
+  if (productId) promos.forEach(pr => {
+    if (!pr || pr.type === 'monthEnd' || !Array.isArray(pr.productIds) || pr.productIds.indexOf(productId) === -1 || !pr.start || !pr.end) return;
+    if (pr.end < day && pr.end >= start) start = paperPromoShiftDay(pr.end, 1);
+    if (pr.start > day && pr.start <= end) end = paperPromoShiftDay(pr.start, -1);
+  });
+  return { start, end, from: best ? 'promos' : 'month' };
+}
+// שורה אחת של בדיקת המחירים (receiptPriceAudit) שהנייר נותן בה מבצע שאין במערכת — האחוז והמספרים שלה, או null
+function paperPromoRowInfo(r) {
+  if (!r || !r.productId || r.capability !== 'checkable' || r.result !== 'difference' || r.promo) return null;
+  const base = priceAuditNumber(r.catalogBasePrice), charged = priceAuditNumber(r.comparisonPrice), printed = priceAuditNumber(r.originalUnitPrice);
+  const qty = priceAuditNumber(r.quantity), day = r.date;
+  if (!(base > 0) || !(charged > 0) || !(qty > 0) || !day) return null;
+  // הנייר עצמו מדפיס את ההנחה: מחיר היחידה המודפס הוא מחיר המאגר, והחיוב נמוך ממנו
+  if (printed == null || Math.abs(printed - base) > 0.02 || !(charged < printed - 0.02)) return null;
+  if (paperPromoSystemPromos(r.productId, day).length) return null;
+  const pct = paperPromoPct(base, charged);
+  return pct == null ? null : { pct, base, charged, qty, day };
+}
+// המבצעים שבנייר ואינם במערכת, בקליטה שעל המסך — אחד לכל מוצר: { productId, name, pct, base, charged, qty, saving, day, lastDay }.
+// מוצר שמופיע בכמה שורות (שתי תעודות) — רק כשכל שורותיו מסכימות על אותו אחוז. תצוגה בלבד: כל תקלה כאן מחזירה רשימה ריקה.
+function receiptPaperPromos(report) {
+  try {
+    const a = report || receiptPriceAudit();
+    if (!a || a.state !== 'ready' || !Array.isArray(a.rows)) return [];
+    const byProduct = new Map();
+    a.rows.forEach(r => { if (!r || !r.productId) return; const key = String(r.productId); if (!byProduct.has(key)) byProduct.set(key, []); byProduct.get(key).push(r); });
+    const out = [];
+    byProduct.forEach(rows => {
+      const infos = rows.map(paperPromoRowInfo);
+      if (infos.some(x => !x) || infos.some(x => x.pct !== infos[0].pct)) return;
+      const qty = infos.reduce((n, x) => n + x.qty, 0), days = infos.map(x => x.day).sort();
+      out.push({ productId: rows[0].productId, name: rows[0].name || '', pct: infos[0].pct, base: infos[0].base, charged: infos.reduce((n, x) => n + x.charged * x.qty, 0) / qty, qty,
+        saving: r2(infos.reduce((n, x) => n + (x.base - x.charged) * x.qty, 0)), day: days[0], lastDay: days[days.length - 1] });
+    });
+    return out;
+  } catch (e) { console.error('paper promo', e); return []; }
+}
+function receiptPaperPromoMap(report) {
+  return new Map(receiptPaperPromos(report).map(x => [String(x.productId), x]));
+}
+// הרשימה שורה-שורה מצוירת מחדש בכל סימון, ובדיקת המחירים המלאה (receiptPriceAudit) כבדה מכדי לרוץ בכל ציור — עשרות אלפיות שנייה
+// לתעודה של 18 שורות, בכל הקשה על "הגיע". לכן המבצעים של הרשימה מחושבים פעם אחת ונשמרים כל עוד מה שהם נגזרים ממנו לא השתנה: אותה
+// בדיקה על אותה קריאה של הנייר (r.key — הבדיקה נבנית מחדש כשהנייר משתנה), אותו יום, אותם מבצעים, ואותם מחירי מאגר של מוצרי התעודה.
+// החלון "פתח מבצע" אינו נשען על העותק הזה: הוא מחשב מחדש בלחיצה (paperPromoLookup).
+let receiptLinePaperPromoCache = null; // { key, map }
+function receiptLinePaperPromos(r) {
+  r = r || receiptQuantityReview;
+  if (!r || r.mode !== 'lines' || r.pending) return new Map();
+  let key;
+  try {
+    key = [r.key, todayStr(), receiptPaperScanState, aiScanBusy ? 1 : 0, receiptPriceSaveFailed ? 1 : 0, receiptStorageWarning ? 1 : 0,
+      promos.map(pr => pr ? [pr.id, pr.type, pr.pct, pr.start, pr.end, pr.minQty, pr.minUnit, pr.cartonSize, (pr.productIds || []).join(',')].join('~') : '').join('|'),
+      (r.products || []).map(x => { const p = products.find(y => y.id === x.productId); return x.productId + '~' + (p ? p.price : ''); }).join('|')].join('#');
+  } catch (e) { return receiptPaperPromoMap(); }
+  if (!receiptLinePaperPromoCache || receiptLinePaperPromoCache.key !== key) receiptLinePaperPromoCache = { key, map: receiptPaperPromoMap() };
+  return receiptLinePaperPromoCache.map;
+}
+// אותו דבר בתעודה שמורה, מתוך מה שנשמר בה: ממצא "מחיר שונה" של הסריקה (aiAudit.findings) שבו הנייר זול מהמאגר, ושורות בדיקת
+// המחירים השמורות (priceAudit.rows) שמראות שהנייר הדפיס את ההנחה בעצמו; בתעודה ישנה בלי בדיקת מחירים — הכוכבית שנקראה ליד המוצר
+// (printed_promo). ממצא שכבר הוסבר במבצע (aiPriceFindingPromoMatch, כולל החתימה של v202) אינו כאן, וגם לא ממצא שהמחיר הצפוי שלו
+// היה מחיר של מבצע שהיה אז במערכת.
+function savedReceiptPaperPromos(rc) {
+  try {
+    const findings = rc && rc.aiAudit && Array.isArray(rc.aiAudit.findings) ? rc.aiAudit.findings : [];
+    const prices = findings.filter(f => f && f.type === 'price' && f.productId);
+    if (!prices.length) return [];
+    const day = rc.date || todayStr(), auditRows = rc.priceAudit && Array.isArray(rc.priceAudit.rows) ? rc.priceAudit.rows : [];
+    const out = [];
+    prices.forEach(f => {
+      if (prices.filter(x => x.productId === f.productId).length !== 1 || aiPriceFindingPromoMatch(f, day)) return;
+      const item = (rc.items || []).find(l => l && l.productId === f.productId);
+      const expected = Number(f.expectedPrice), charged = Number(f.paperPrice);
+      const base = item && Number(item.basePrice) > 0 ? Number(item.basePrice) : expected;
+      if (!(expected > 0) || !(charged > 0) || Math.abs(base - expected) > 0.005) return;
+      const pct = paperPromoPct(base, charged);
+      if (pct == null) return;
+      const rows = auditRows.filter(r => r && r.productId === f.productId);
+      const printed = rows.length
+        ? rows.every(r => { const p = priceAuditNumber(r.originalUnitPrice), c = priceAuditNumber(r.comparisonPrice);
+            return !r.promo && p != null && c != null && Math.abs(p - base) <= 0.02 && c < p - 0.02 && paperPromoPct(base, c) === pct; })
+        : findings.some(x => x && x.type === 'printed_promo' && x.productId === f.productId) && !/ביותר ממחיר אחד/.test(String(f.text || ''));
+      if (!printed || paperPromoSystemPromos(f.productId, day).length) return;
+      const qty = Number(f.qty) || (item ? Number(item.noteQty != null ? item.noteQty : item.qty) || 0 : 0);
+      out.push({ productId: f.productId, name: f.name || (item && item.name) || '', pct, base, charged, qty, saving: r2((base - charged) * qty), day, lastDay: day });
+    });
+    return out;
+  } catch (e) { console.error('saved paper promo', e); return []; }
+}
+// המבצע של מוצר אחד: בתעודה שמורה (receiptId) או בקליטה שעל המסך
+function paperPromoLookup(productId, receiptId) {
+  const rc = receiptId ? receipts.find(x => x.id === receiptId) : null;
+  if (receiptId && !rc) return null;
+  return (rc ? savedReceiptPaperPromos(rc) : receiptPaperPromos()).find(x => String(x.productId) === String(productId)) || null;
+}
+// מה שכתוב על המוצר: "בתעודה קיים מבצע: 40% הנחה" · "₪7.13 ליח׳ במקום ₪11.89 · המבצע לא קיים במערכת", והכפתור "פתח מבצע".
+// receiptId — תעודה שמורה (בלי — הקליטה שעל המסך). compact — שורה אחת עם כפתור קטן בצד: בשורה מקופלת ובכרטיס התעודה בהיסטוריה.
+function paperPromoTitleText(info) { return 'בתעודה קיים מבצע: ' + paperPromoPctText(info.pct) + '% הנחה'; }
+function paperPromoPriceText(info) { return '₪' + fmtMoney(info.charged) + ' ליח׳ במקום ₪' + fmtMoney(info.base); }
+function paperPromoNoticeHtml(info, receiptId, compact) {
+  if (!info) return '';
+  const pid = htmlEscape(info.productId);
+  const attrs = 'type="button" data-role="paper-promo-open" data-id="' + pid + '"' + (receiptId ? ' data-receipt="' + htmlEscape(receiptId) + '"' : '') + ' aria-label="פתח מבצע: ' + htmlEscape(info.name) + '"';
+  if (compact) return '<div data-paper-promo="' + pid + '" class="mt-1.5 rounded-xl border-2 border-rose-300 bg-white px-2.5 py-1.5 flex items-center justify-between gap-2 text-right">' +
+      '<div class="min-w-0"><div class="text-[13px] font-black text-rose-700 leading-tight"><i class="fa-solid fa-tag" aria-hidden="true"></i> בתעודה קיים מבצע ' + paperPromoPctText(info.pct) + '%</div>' +
+        '<div class="text-[11px] font-bold text-slate-600 leading-tight mt-0.5">₪' + fmtMoney(info.charged) + ' במקום ₪' + fmtMoney(info.base) + ' · לא קיים במערכת</div></div>' +
+      '<button ' + attrs + ' class="btn-tap shrink-0 min-h-[44px] px-3 rounded-lg bg-rose-600 text-white text-xs font-black whitespace-nowrap">פתח מבצע</button></div>';
+  return '<div data-paper-promo="' + pid + '" class="mt-2 rounded-xl border-2 border-rose-300 bg-white p-2.5 text-right">' +
+    '<div class="text-sm font-black text-rose-700"><i class="fa-solid fa-tag" aria-hidden="true"></i> ' + paperPromoTitleText(info) + '</div>' +
+    '<div class="text-xs font-bold text-slate-700 mt-0.5">' + paperPromoPriceText(info) + ' · המבצע לא קיים במערכת</div>' +
+    '<button ' + attrs + ' class="btn-tap w-full min-h-[44px] mt-2 rounded-xl bg-rose-600 text-white font-black text-sm flex items-center justify-center gap-2"><i class="fa-solid fa-plus" aria-hidden="true"></i> פתח מבצע</button></div>';
+}
+// אחרי "פתח מבצע" בקליטה: השורה כבר אינה "מבצע שלא קיים במערכת", ולכן נשאר עליה אישור קצר — רק למבצע שנפתח בקליטה הזאת עצמה
+// (לא בקליטה הבאה של אותו מוצר), וכל עוד הוא קיים
+let paperPromoOpened = new Map(); // productId → { id (המבצע שנפתח), draftId (הקליטה שבה נפתח) }
+function paperPromoDoneHtml(productId, day) {
+  const opened = paperPromoOpened.get(String(productId)), pr = opened && opened.draftId === receiptDraftId ? promos.find(x => x.id === opened.id) : null;
+  if (!pr || !Array.isArray(pr.productIds) || pr.productIds.indexOf(productId) === -1 || !promoActive(pr, day || activeReceiptDate())) return '';
+  return '<div data-paper-promo-done="' + htmlEscape(productId) + '" class="mt-1.5 rounded-xl border border-emerald-300 bg-white px-2.5 py-1.5 text-[13px] font-black text-emerald-800 text-right"><i class="fa-solid fa-circle-check" aria-hidden="true"></i> המבצע נפתח במערכת: ' +
+    paperPromoPctText(pr.pct) + '% · ' + dDisp(pr.start) + ' עד ' + dDisp(pr.end) + '</div>';
+}
+// ----- החלון "פתח מבצע" -----
+// paperPromoSheet: { productId, receiptId, info, pct, start, end, name, from, error, warnings, force, busy } — מה שבשדות נשמר כאן בכל הקלדה
+// (paperPromoSheetInput), והחלון אינו מצויר מחדש תוך כדי הקלדה. אזהרה (אחוז שאינו נותן את המחיר שבתעודה, יום התעודה מחוץ לתקופה,
+// חפיפה עם מבצע אחר של המוצר) אינה חוסמת: הלחיצה הראשונה מציגה אותה, והכפתור נהיה "פתח בכל זאת"; כל שינוי בשדה מתחיל מחדש.
+let paperPromoSheet = null;
+function openPaperPromoSheet(productId, receiptId) {
+  const info = paperPromoLookup(productId, receiptId || null);
+  if (!info) { showToast('המבצע כבר קיים במערכת, או שנתוני התעודה השתנו', null, null, 3200); return false; }
+  const period = paperPromoPeriod(info.day, info.productId);
+  if (info.lastDay && period.end && info.lastDay > period.end) period.end = paperPromoPeriod(info.lastDay, info.productId).end || info.lastDay;
+  paperPromoSheet = { productId: info.productId, receiptId: receiptId || null, info, pct: paperPromoPctText(info.pct), start: period.start, end: period.end,
+    name: String(info.name || '').trim(), from: period.from, error: '', warnings: [], force: false, busy: false };
+  renderPaperPromoSheet();
+  const m = $('paperPromoModal'); m.classList.remove('hidden'); m.classList.add('flex');
+  // הפוקוס על הכפתור הראשי ולא על שדה — השדות כבר מלאים, והמקלדת לא קופצת
+  const save = $('paperPromoSave'); if (save && save.focus) { try { save.focus({ preventScroll: true }); } catch (e) {} }
+  return true;
+}
+function closePaperPromoSheet() {
+  paperPromoSheet = null;
+  const m = $('paperPromoModal'); m.classList.add('hidden'); m.classList.remove('flex');
+  const body = $('paperPromoBody'); if (body) body.innerHTML = '';
+}
+function paperPromoSheetMsgHtml() {
+  const s = paperPromoSheet; if (!s) return '';
+  if (s.error) return '<div role="alert" class="mt-3 rounded-xl bg-rose-50 border border-rose-300 p-2.5 text-xs font-black text-rose-700"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> ' + htmlEscape(s.error) + '</div>';
+  if (s.warnings.length) return '<div role="alert" class="mt-3 rounded-xl bg-amber-50 border border-amber-300 p-2.5 text-xs font-bold text-amber-900">' +
+    s.warnings.map(w => '<div class="mt-1 first:mt-0"><i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> ' + htmlEscape(w) + '</div>').join('') +
+    '<div class="font-black mt-1.5">אפשר לתקן, או ללחוץ "פתח בכל זאת".</div></div>';
+  return '';
+}
+function paperPromoSheetHtml() {
+  const s = paperPromoSheet; if (!s) return '';
+  const i = s.info, field = 'w-full p-2.5 rounded-xl border-2 border-slate-200 outline-none font-bold focus:border-rose-500';
+  const label = (id, text, cls) => '<label for="' + id + '" class="text-[11px] text-slate-400 font-bold block mb-1' + (cls || '') + '">' + text + '</label>';
+  return '<div class="p-5 pb-3">' +
+      '<div class="flex items-center gap-2"><i class="fa-solid fa-tag text-rose-600 text-xl" aria-hidden="true"></i><h3 class="font-black text-lg text-slate-800">פתיחת מבצע מהתעודה</h3></div>' +
+      '<div class="font-black text-base text-slate-900 mt-2 leading-tight">' + htmlEscape(i.name) + '</div>' +
+      '<div data-paper-promo-evidence class="mt-2 rounded-xl bg-rose-50 border border-rose-200 p-2.5 text-sm font-bold text-slate-800">בתעודה: ' + i.qty + ' יח׳ ב-' + paperPromoPriceText(i) +
+        '<div class="text-xs font-black text-rose-700 mt-0.5">' + paperPromoPctText(i.pct) + '% הנחה · ₪' + fmtMoney(i.saving) + ' פחות בשורה</div></div>' +
+      label('paperPromoPct', 'אחוז הנחה', ' mt-3') +
+      '<div class="flex items-center gap-2"><input id="paperPromoPct" data-pp-field="pct" type="text" inputmode="decimal" autocomplete="off" value="' + htmlEscape(s.pct) + '" class="' + field + ' flex-1 text-center font-black text-lg"><span class="text-slate-400 font-black text-lg">%</span></div>' +
+      '<div class="flex gap-2 mt-3"><div class="flex-1 min-w-0">' + label('paperPromoStart', 'מתאריך') + '<input id="paperPromoStart" data-pp-field="start" type="date" value="' + htmlEscape(s.start) + '" class="' + field + ' text-sm"></div>' +
+        '<div class="flex-1 min-w-0">' + label('paperPromoEnd', 'עד תאריך') + '<input id="paperPromoEnd" data-pp-field="end" type="date" value="' + htmlEscape(s.end) + '" class="' + field + ' text-sm"></div></div>' +
+      '<div class="text-[11px] text-slate-500 font-bold mt-1">' + (s.from === 'promos' ? 'כמו שאר המבצעים שבתוקף ביום התעודה' : 'החודש של התעודה') + ' (' + dDisp(i.day) + ') — אפשר לשנות.</div>' +
+      label('paperPromoName', 'שם המבצע', ' mt-3') +
+      '<input id="paperPromoName" data-pp-field="name" type="text" autocomplete="off" value="' + htmlEscape(s.name) + '" class="' + field + '">' +
+      '<div class="text-[11px] text-slate-500 font-bold mt-2 leading-relaxed">המבצע נפתח למוצר הזה בלבד, בלי מינימום. מוצרים נוספים, מינימום ושלט — במסך המבצעים.</div>' +
+      '<div id="paperPromoMsg">' + paperPromoSheetMsgHtml() + '</div>' +
+    '</div>' +
+    '<div class="flex gap-2 p-4 pt-1">' +
+      '<button type="button" data-pp-action="cancel" class="btn-tap flex-1 py-3 rounded-xl font-black bg-slate-100 text-slate-600">ביטול</button>' +
+      '<button type="button" id="paperPromoSave" data-pp-action="save" class="btn-tap flex-[1.4] py-3 rounded-xl font-black bg-rose-600 text-white">' + paperPromoSaveLabel() + '</button>' +
+    '</div>';
+}
+function paperPromoSaveLabel() {
+  const s = paperPromoSheet;
+  return s && s.busy ? 'שומר…' : s && s.force ? 'פתח בכל זאת' : 'פתח מבצע';
+}
+function renderPaperPromoSheet() {
+  const body = $('paperPromoBody'); if (body) body.innerHTML = paperPromoSheetHtml();
+}
+// רק ההודעה והכפתור — בלי לצייר מחדש את השדות (הפוקוס והמקלדת נשארים)
+function refreshPaperPromoSheetStatus() {
+  const msg = $('paperPromoMsg'); if (msg) msg.innerHTML = paperPromoSheetMsgHtml();
+  const save = $('paperPromoSave'); if (save) save.textContent = paperPromoSaveLabel();
+}
+function paperPromoSheetInput(e) {
+  const s = paperPromoSheet, el = e && e.target;
+  if (!s || s.busy || !el || !el.dataset || !['pct', 'start', 'end', 'name'].includes(el.dataset.ppField)) return;
+  s[el.dataset.ppField] = String(el.value == null ? '' : el.value);
+  if (s.error || s.force || s.warnings.length) { s.error = ''; s.warnings = []; s.force = false; refreshPaperPromoSheetStatus(); }
+}
+function paperPromoSheetClick(e) {
+  const s = paperPromoSheet; if (!s) return;
+  if (e.target === $('paperPromoModal')) { if (!s.busy) closePaperPromoSheet(); return; }
+  const t = e.target.closest ? e.target.closest('[data-pp-action]') : null; if (!t) return;
+  if (t.dataset.ppAction === 'cancel') { if (!s.busy) closePaperPromoSheet(); return; }
+  if (t.dataset.ppAction === 'save') savePaperPromo();
+}
+// מה שנשמר: מבצע בתעודה, למוצר הזה בלבד, בלי מינימום — בדיוק המבנה שמסך המבצעים שומר (savePromoEntity)
+function paperPromoSheetData() {
+  const s = paperPromoSheet, i = s.info;
+  const pct = parseFloat(String(s.pct || '').replace(',', '.')), start = String(s.start || '').trim(), end = String(s.end || '').trim();
+  if (!(pct > 0) || !(pct < 100) || !/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return { error: 'מלא אחוז הנחה, תאריך התחלה ותאריך סיום' };
+  if (end < start) return { error: 'תאריך הסיום חייב להיות אחרי ההתחלה' };
+  const data = { name: String(s.name || '').trim() || String(i.name || '').trim() || ('מבצע ' + r2(pct) + '%'), pct: r2(pct), start, end, minQty: 1, minUnit: 'unit', cartonSize: null, productIds: [s.productId], type: 'receipt' };
+  const warnings = [];
+  if (Math.abs(discountedUnitPrice(i.base, data.pct) - i.charged) > 0.02) warnings.push(paperPromoPctText(data.pct) + '% לא נותן את המחיר שבתעודה (₪' + fmtMoney(i.charged) + ' ליח׳) — בתעודה ההנחה היא ' + paperPromoPctText(i.pct) + '%, והשורה תישאר הפרש מחיר.');
+  if (i.day < start || (i.lastDay || i.day) > end) warnings.push('יום התעודה (' + dDisp(i.day) + ') אינו בתוך התקופה — המבצע לא יחול על התעודה הזאת.');
+  const clash = promoConflictsWith({ ...data, id: null }, promos);
+  if (clash.length) warnings.push('למוצר כבר יש מבצע בתקופה הזאת: ' + clash.slice(0, 3).map(pr => '"' + (pr.name || ('מבצע ' + pr.pct + '%')) + '" (' + dDisp(pr.start) + ' עד ' + dDisp(pr.end) + ')').join(', ') + '. כשמוצר נמצא בשני מבצעים חופפים, רק אחד מהם יחול.');
+  return { data, warnings };
+}
+async function savePaperPromo() {
+  const s = paperPromoSheet; if (!s || s.busy) return false;
+  if (!s.receiptId && receiptFinalizing) { s.error = 'הקליטה נשמרת עכשיו — אפשר לפתוח את המבצע מכרטיס התעודה בהיסטוריה.'; refreshPaperPromoSheetStatus(); return false; }
+  const built = paperPromoSheetData();
+  if (built.error) { s.error = built.error; s.warnings = []; s.force = false; refreshPaperPromoSheetStatus(); return false; }
+  if (built.warnings.length && !s.force) { s.error = ''; s.warnings = built.warnings; s.force = true; refreshPaperPromoSheetStatus(); return false; }
+  const id = makeOperationId('promo'), data = built.data;
+  data.operationId = id;
+  s.busy = true; s.error = ''; s.warnings = []; refreshPaperPromoSheetStatus();
+  const saved = await runCloudTask('create promo', { op: 'set', path: dataPath('promos', id), data, operationId: id });
+  if (paperPromoSheet === s) s.busy = false;
+  if (!saved) {
+    if (paperPromoSheet === s) { s.error = 'המבצע לא נשמר — אין חיבור לענן, או שפעולה קודמת עדיין נשמרת. נסה שוב.'; s.force = false; refreshPaperPromoSheetStatus(); }
+    return false;
+  }
+  // עותק מקומי מיד, עד שהסנכרון מהענן יחזיר אותו — כדי שהמסך שמאחורי החלון יחושב כבר עם המבצע
+  const promo = { id, ...data };
+  if (!promos.some(p => p.id === id)) promos.push(promo);
+  if (!s.receiptId) paperPromoOpened.set(String(s.productId), { id, draftId: receiptDraftId });
+  if (paperPromoSheet === s) closePaperPromoSheet();
+  buzz(18);
+  const text = 'המבצע נפתח: ' + data.name + ' · ' + paperPromoPctText(data.pct) + '%';
+  // תעודות שמורות שהמבצע מסביר נחתמות בשני המקרים: גם מבצע שנפתח בזמן קליטה יכול להסביר תעודה קודמת מאותה תקופה
+  const stamped = paperPromoStampReceipts(promo);
+  if (s.receiptId) {
+    showToast(text + (stamped.closed === 1 ? ' · התעודה אומתה ✓' : stamped.closed > 1 ? ' · ' + stamped.closed + ' תעודות אומתו ✓' : ' ✓'), null, null, 4000);
+    paperPromoCardOpen = { id: s.receiptId, until: Date.now() + 20000 };
+    if (currentView === 'receiptsHistory') renderReceiptsHistory();
+  } else paperPromoRefreshReceiving(text, s.productId);
+  return true;
+}
+// אחרי "פתח מבצע" בזמן הקליטה: הכול מחושב מחדש מול המבצע החדש, כמו אחרי השלמת גודל ארגז במבצע (priceAuditCompleteCarton) — בדיקת
+// המחירים, ממצאי הסריקה (aiEvaluateInvoiceScan) והסיכום. השוואה שכבר הוחלה (שורות עם מחיר הנייר ו"בלי מבצע", וממצא המחיר הישן
+// בתוכה) חוזרת לשלב התוצאות, כדי שתוחל שוב עם המבצע: "הכול תואם — המשך" כותב את השורה כמבצע. חלון הסיכום נסגר — הוא חושב לפני המבצע.
+function paperPromoRefreshReceiving(text, productId) {
+  // טלפון שהקליטה אינה שלו כרגע (נמשכת בטלפון אחר, או נשמרת): המבצע נפתח — הוא שייך למאגר ולא לקליטה — אבל הקליטה עצמה אינה
+  // נערכת מכאן; רק מה שעל המסך מחושב מחדש.
+  const editable = canEditDraft('receiving', true);
+  // "הוחלה" — שורות ההשוואה כבר נושאות את מחיר הנייר (aiPaperPriceOnly, שנכתב רק בהחלת הסריקה: aiApplyInvoiceResult)
+  const applied = editable && !!(reconcileData && reconcilePaperEntered && reconcileData.some(l => l && l.aiPaperPriceOnly));
+  if (editable) receiptInvalidateReviewCalculation();
+  if (applied) { reconcilePaperEntered = false; rcStep = 'ai'; }
+  // השוואה שנפתחה לפני שהמבצע היה קיים ועוד לא הוחלה: השורה של המוצר עומדת במחיר המלא. היא מקבלת את מחיר המבצע בדיוק כמו בפתיחה
+  // חדשה (receiptReconcileRows), כדי שסרגל הסכומים שבראש המסך יהיה מאוזן יחד עם "הכול תואם". מחיר שהוקלד ביד נשאר.
+  else if (editable && reconcileData && productId != null) {
+    const day = receiptPromoDay();
+    reconcileData.forEach(l => {
+      if (!l || l.isDeposit || l.aiPaperPriceOnly || String(l.productId) !== String(productId)) return;
+      const base = r2(Number(l.basePrice) || 0), pr = promoForProduct(l.productId, day);
+      if (!(base > 0) || Math.abs((Number(l.price) || 0) - base) > 0.005 || !promoTriggered(pr, day)) return;
+      l.promoPct = Number(pr.pct) || 0; l.promoOn = true; l.price = discountedUnitPrice(base, l.promoPct);
+    });
+  }
+  if (editable) hideReceiptSummary();
+  if (aiScanResponse) { try { aiScanEvaluation = aiEvaluateInvoiceScan(aiScanResponse); } catch (e) {} }
+  if (editable) saveReceiptDraft();
+  const r = receiptQuantityReview, m = $('receiptQuantityModal');
+  const lines = !!(r && r.mode === 'lines' && m && !m.classList.contains('hidden'));
+  if (currentView === 'reconcile') renderReconcile();
+  else if (currentView === 'receiving') renderReceiving();
+  // בחלון הבדיקה שורה-שורה ההודעה בראש החלון (הודעה רגילה נשארת מתחתיו), והרשימה מצוירת מחדש עם האישור על השורה
+  receiptLinePaperPromoCache = null;
+  if (lines) { receiptLineNotice = { tone: 'ok', text: text + ' ✓' }; renderReceiptLineRows(); }
+  else showToast(text + ' ✓', null, null, 3500);
+}
+// אחרי "פתח מבצע": בכל תעודה שמורה שהמבצע מסביר בה ממצא "מחיר שונה" — הממצא נחתם (promoResolved, כמו stampResolvedAiPriceFindings של
+// v202: המסקנה שורדת גם כשהמבצע יימחק או יעבור לארכיון) והסטטוס השמור מתעדכן (receiptStoredStatusPatch, v398). התצוגה ממילא נגזרת
+// מהמבצע החי (aiPriceFindingPromoMatch), ולכן כתיבה שנכשלה אינה משנה את מה שעל המסך — היא נכנסת לתור הפעולות שלא נשמרו.
+// מחזירה כמה תעודות נחתמו, וכמה מהן היו שמורות כפתוחות ונסגרו.
+function paperPromoStampReceipts(promo) {
+  const updates = [];
+  receipts.forEach(rc => {
+    if (!rc || !rc.aiAudit || !Array.isArray(rc.aiAudit.findings)) return;
+    const day = rc.date || todayStr();
+    let changed = false;
+    const findings = rc.aiAudit.findings.map(f => {
+      if (!f || f.type !== 'price' || f.promoResolved || !f.productId || promo.productIds.indexOf(f.productId) === -1) return f;
+      const hit = aiPriceFindingPromoMatch(f, day);
+      if (!hit || hit.stamped || hit.id !== promo.id) return f;
+      changed = true;
+      return { ...f, promoResolved: { promoId: promo.id, promoName: promo.name || '', pct: Number(promo.pct) || 0, at: Date.now() } };
+    });
+    if (!changed) return;
+    const wasOpen = rc.status === 'open'; // הסטטוס השמור, מלפני המבצע (החישוב החי כבר רואה את הממצא כמוסבר)
+    const aiAudit = { ...rc.aiAudit, findings };
+    const patch = receiptStoredStatusPatch(rc, { aiAudit });
+    updates.push({ rc, wasOpen, aiAudit: patch.aiAudit || aiAudit, status: patch.status });
+  });
+  if (updates.length) {
+    updates.forEach(u => { u.rc.aiAudit = u.aiAudit; u.rc.status = u.status; });
+    runCloudTaskSilent('stamp resolved price finding', { op: 'batch', writes: updates.map(u => ({ op: 'update', path: dataPath('receipts', u.rc.id), data: { aiAudit: cloneSafe(u.aiAudit), status: u.status } })), operationId: makeOperationId('paper_promo_resolved') });
+  }
+  return { count: updates.length, closed: updates.filter(u => u.wasOpen && u.status === 'ok').length };
+}
+// כרטיס התעודה שממנו נפתח המבצע נשאר פתוח בציורים הבאים של מסך התעודות — גם כשהסנכרון מהענן (המבצע החדש, התעודה שנחתמה) מצייר
+// את המסך מחדש רגע אחר כך — כדי שהכרטיס לא ייסגר מתחת לידיים ואפשר יהיה לראות שהתעודה אומתה. לזמן קצר בלבד.
+let paperPromoCardOpen = null; // { id, until }
+function paperPromoKeepsCardOpen(receiptId) {
+  return !!(paperPromoCardOpen && paperPromoCardOpen.id === receiptId && Date.now() < paperPromoCardOpen.until);
+}
 // ===== מבצעי מרכזת (סוף חודש) — לא בתעודה, מחושב בדוח החודשי =====
 function monthEndPromoForProduct(pid, dateStr, receipt = null) {
   if (!pid) return null;
@@ -9698,23 +10071,29 @@ function receiptLineRowTone(di, li, l) {
   });
 }
 // v412: הכרטיס הוא של הקבוצה (g) — המוצר בכל התעודות יחד; לשורה יחידה הקבוצה היא השורה עצמה, והכרטיס כמו קודם
-function receiptLineRowHtml(di, li, l, g) {
+function receiptLineRowHtml(di, li, l, g, paperPromos) {
   g = g || receiptLineGroupOf(receiptQuantityReview, di, li) || { key: di + ':' + li, di, li, productId: l.productId, lines: [{ di, li, l }], paperQty: l.paperQty };
   const id = di + ':' + li, p = products.find(x => x.id === l.productId) || null, qtyText = String(g.paperQty), grouped = g.lines.length > 1;
   const shown = receiptLineGroupShown(g), gmark = receiptLineGroupMark(g); // "אחרת" עם הכמות שבתעודה נראית ומתקפלת כ"הגיע", עם אפס — כ"לא הגיע"
+  // v418: בתעודה יש על המוצר מבצע שלא קיים במערכת — כתוב על השורה, עם "פתח מבצע" (גם כשהיא מקופלת); אחרי הפתיחה — אישור קצר
+  const paperPromo = (paperPromos || receiptLinePaperPromos()).get(String(l.productId)) || null;
   if ((shown === 'ok' || shown === 'none') && !receiptLineOpen.has(id)) {
     const ok = shown === 'ok';
+    const promoNote = paperPromo ? paperPromoNoticeHtml(paperPromo, null, true) : paperPromoDoneHtml(l.productId, receiptPromoDay());
     // v415: בלי מחיר קופה — שדה ההשלמה גם בשורה המקופלת (אחרי "הגיע" במצלמה חוזרים אליה), והטקסט תופס את כל הרוחב שנשאר
     const posEdit = p && p.posPrice == null ? posPriceLineHtml(p, true) : '';
     // v416 (בעל העסק, 12.11.2026: "הכתב שיהיה קצת יותר עבה וקצת יותר גדול, כדי שיהיה יותר קל לקרוא אותו — כמה הגיע ומה המחיר"):
     // מה שהגיע ומחיר הקופה — 15px ו-font-black (עד עכשיו: 12px, font-bold). שני חלקים שאינם נשברים באמצע: כשאין מקום בשורה אחת
     // (טלפון צר, "יח׳ ב-2 תעודות") מחיר הקופה יורד שלם לשורה משלו — הסמל של הקופה מפריד ביניהם, במקום הנקודה.
-    return '<div id="lineCheck_' + di + '_' + li + '" class="rounded-2xl border-2 px-3 py-2 mb-2.5 flex items-center justify-between gap-2 ' + (ok ? 'border-emerald-300 bg-emerald-50' : 'border-rose-300 bg-rose-50') + '">' +
+    // v418: עם ההודעה על המבצע השורה המקופלת היא שתי קומות — מה שהגיע ו"שנה" למעלה, וההודעה מתחת, ברוחב מלא; בלעדיה — בדיוק כמו קודם
+    return '<div id="lineCheck_' + di + '_' + li + '" class="rounded-2xl border-2 px-3 py-2 mb-2.5 ' + (promoNote ? '' : 'flex items-center justify-between gap-2 ') + (ok ? 'border-emerald-300 bg-emerald-50' : 'border-rose-300 bg-rose-50') + '">' +
+      (promoNote ? '<div class="flex items-center justify-between gap-2">' : '') +
       '<div class="min-w-0' + (posEdit ? ' flex-1' : '') + '"><div class="font-black text-slate-800 truncate">' + htmlEscape(l.name) + '</div>' +
         '<div class="flex flex-wrap items-baseline gap-x-2.5 text-[15px] font-black leading-snug ' + (ok ? 'text-emerald-700' : 'text-rose-700') + '">' +
           '<span class="whitespace-nowrap">' + (ok ? '<i class="fa-solid fa-check" aria-hidden="true"></i> הגיע · ' + qtyText + ' ' + (grouped ? receiptLineGroupUnitsLabel(g) : 'יח׳') : '<i class="fa-solid fa-xmark" aria-hidden="true"></i> לא הגיע · 0 מתוך ' + qtyText) + '</span>' +
           (p && p.posPrice != null ? '<span class="whitespace-nowrap"><i class="fa-solid fa-cash-register text-xs" aria-hidden="true"></i> בקופה ₪' + fmtMoney(p.posPrice) + '</span>' : '') + '</div>' + posEdit + '</div>' +
-      '<button type="button" data-line-open="' + id + '" class="btn-tap shrink-0 min-h-[44px] px-3 rounded-lg bg-white border border-slate-300 text-slate-700 text-xs font-black" aria-label="שנה: ' + htmlEscape(l.name) + '">שנה</button></div>';
+      '<button type="button" data-line-open="' + id + '" class="btn-tap shrink-0 min-h-[44px] px-3 rounded-lg bg-white border border-slate-300 text-slate-700 text-xs font-black" aria-label="שנה: ' + htmlEscape(l.name) + '">שנה</button></div>' +
+      (promoNote ? promoNote + '</div>' : '');
   }
   const tone = RECEIPT_LINE_TONE[shown] || 'border-slate-200 bg-white';
   const btn = (mark, icon, text) => '<button type="button" data-line-mark="' + id + ':' + mark + '" aria-pressed="' + (shown === mark ? 'true' : 'false') + '" class="' + receiptLineBtnClass(mark, shown === mark) + '"><i class="fa-solid ' + icon + '" aria-hidden="true"></i> ' + text + '</button>';
@@ -9731,6 +10110,8 @@ function receiptLineRowHtml(di, li, l, g) {
       '<div class="shrink-0 text-center"><div class="text-3xl font-black text-slate-900 leading-none tabular-nums">' + qtyText + '</div><div class="text-[11px] font-bold text-slate-500">' + receiptLineGroupUnitsLabel(g) + '</div>' +
         (grouped ? '<div class="text-[11px] font-bold text-slate-400 tabular-nums">' + receiptLineGroupSplitText(g) + '</div>' : '') +
         (box ? '<div class="text-[11px] font-bold text-slate-400">' + box + '</div>' : '') + '</div></div>' +
+    // v418: מבצע בתעודה שלא קיים במערכת — מתחת לפרטי המוצר והמחיר, מעל כפתורי הסימון
+    (paperPromo ? paperPromoNoticeHtml(paperPromo, null, false) : paperPromoDoneHtml(l.productId, receiptPromoDay())) +
     // "הגיע" תופס את כל הרוחב שנשאר; "אחרת" ו"לא הגיע" ברוחב הטקסט שלהם, בשורה אחת גם בטלפון צר
     '<div class="grid grid-cols-[1fr_auto_auto] gap-1.5 mt-3" role="group" aria-label="' + htmlEscape(l.name) + ' — מה הגיע">' +
       btn('ok', 'fa-check', 'הגיע ' + qtyText) + btn('qty', 'fa-pen', 'אחרת') + btn('none', 'fa-xmark', 'לא הגיע') +
@@ -9858,7 +10239,8 @@ function receiptLineCheckHtml(r) {
   // v412: מוצר אחד — שורה אחת: הכרטיס בשורה הראשונה של המוצר, ובשאר שורותיו (תעודות אחרות) שורת הפניה
   const groupAt = new Map();
   receiptLineGroups(r).forEach(g => g.lines.forEach(x => groupAt.set(x.di + ':' + x.li, g)));
-  const lineHtml = (di, li, l) => { const g = groupAt.get(di + ':' + li); return g.key === di + ':' + li ? receiptLineRowHtml(di, li, l, g) : receiptLinePointerHtml(di, li, l, g); };
+  const paperPromos = receiptLinePaperPromos(r); // v418: מבצעים שבתעודה ואינם במערכת — מחושבים פעם אחת, לא בכל ציור של הרשימה
+  const lineHtml = (di, li, l) => { const g = groupAt.get(di + ':' + li); return g.key === di + ':' + li ? receiptLineRowHtml(di, li, l, g, paperPromos) : receiptLinePointerHtml(di, li, l, g); };
   return r.docs.map((d, di) => {
     const units = d.lines.reduce((a, l) => a + l.paperQty, 0);
     const sep = di ? '<div class="flex items-center gap-2 my-4 text-xs font-black text-slate-500" aria-hidden="true"><span class="flex-1 border-t-2 border-dashed border-slate-300"></span>תעודה נפרדת<span class="flex-1 border-t-2 border-dashed border-slate-300"></span></div>' : '';
@@ -9961,8 +10343,14 @@ function startReceiptLineCheck() {
 function receiptLineCheckClick(e) {
   const r = receiptQuantityReview; if (!r || r.mode !== 'lines') return;
   if (receiptLineSettle(r)) receiptLineCheckChanged(); // v411: "אחרת" עם הכמות שבתעודה — "הגיע" (מתקפלת בציור שהלחיצה מביאה)
-  const t = e.target.closest('[data-line-mark], [data-line-clear], [data-line-open], [data-line-drop], [data-line-drop-yes], [data-line-drop-no], [data-extra-add], [data-extra-remove], [data-line-show], [data-line-paper]');
+  const t = e.target.closest('[data-line-mark], [data-line-clear], [data-line-open], [data-line-drop], [data-line-drop-yes], [data-line-drop-no], [data-extra-add], [data-extra-remove], [data-line-show], [data-line-paper], [data-role="paper-promo-open"]');
   if (!t) return;
+  // v418: "פתח מבצע" על שורה שהתעודה נותנת בה מבצע שלא קיים במערכת — החלון נפתח מעל הרשימה, והבדיקה עצמה לא משתנה
+  if (t.dataset.role === 'paper-promo-open') {
+    receiptLineNotice = openPaperPromoSheet(t.dataset.id, null) ? null : { tone: 'warn', text: 'המבצע כבר קיים במערכת, או שנתוני התעודה השתנו' };
+    if (receiptLineNotice) { receiptLinePaperPromoCache = null; renderReceiptLineRows(); }
+    return;
+  }
   // v417: כרטיס המצב של בדיקה ממתינה — "צלם את התעודה" (בלי תעודה) / "בדוק את צילום התעודה"
   if (t.dataset.linePaper) { receiptLinePaperAction(t.dataset.linePaper); return; }
   // v416 (בעל העסק, 12.11.2026: "קורה לי שאני לוחץ בטעות 'הגיע', ואז צריך ללחוץ 'לא הגיע' בינתיים עד שאני אגיע למוצר — וזה סתם
@@ -10218,10 +10606,13 @@ function receiptLineScanCardHtml(c) {
       : 'כבר סומנה: ' + (got === qty ? 'הגיע' : got === 0 ? 'לא הגיע' : 'הגיעו ' + got) + ' — אפשר לשנות') + '</div>';
     const also = g.lines.length > 1 ? receiptLineGroupAlsoText(g, c.di) : '';
     const box = receiptLineBoxText(p, qty);
+    // v418: מבצע בתעודה שלא קיים במערכת — כאן רק נאמר; "פתח מבצע" נמצא על השורה ברשימה, שאליה חוזרים אחרי הסימון (413)
+    const paperPromo = receiptLinePaperPromos(r).get(String(l.productId)) || null;
+    const promoLine = paperPromo ? '<div data-paper-promo-info="' + htmlEscape(l.productId) + '" class="text-xs font-black text-rose-700 mt-1"><i class="fa-solid fa-tag" aria-hidden="true"></i> ' + paperPromoTitleText(paperPromo) + ' — לא קיים במערכת. "פתח מבצע" בשורה שברשימה.</div>' : '';
     const btn = (mark, icon, text, cls, size) => '<button type="button" data-scan-mark="' + mark + '" class="btn-tap min-h-[52px] rounded-xl font-black flex items-center justify-center gap-1 ' + size + ' ' + cls + '"><i class="fa-solid ' + icon + '" aria-hidden="true"></i> ' + text + '</button>';
     return kin + '<div class="flex items-start gap-3 pl-10"><div class="flex-1 min-w-0">' +
         '<div class="text-[11px] font-black text-slate-400">שורה ' + l.line + (multi ? ' בתעודה ' + (c.di + 1) + ' מתוך ' + r.docs.length : ' בתעודה') + (also ? ' · ' + also : '') + '</div>' +
-        '<div class="font-black text-lg text-slate-800 leading-tight">' + htmlEscape(l.name) + '</div>' + posPriceLineHtml(p) + state + '</div>' +
+        '<div class="font-black text-lg text-slate-800 leading-tight">' + htmlEscape(l.name) + '</div>' + posPriceLineHtml(p) + state + promoLine + '</div>' +
         '<div class="shrink-0 text-center"><div class="text-3xl font-black text-slate-900 leading-none tabular-nums">' + qty + '</div><div class="text-[11px] font-bold text-slate-500">' + receiptLineGroupUnitsLabel(g) + '</div>' +
           (g.lines.length > 1 ? '<div class="text-[11px] font-bold text-slate-400 tabular-nums">' + receiptLineGroupSplitText(g) + '</div>' : '') +
           (box ? '<div class="text-[11px] font-bold text-slate-400">' + box + '</div>' : '') + '</div></div>' +
@@ -15595,19 +15986,20 @@ function priceAuditPendingRows(a) {
 // של ארבע קריאות ומודל חזק, ולא הבין מה הבעיה ומה צריך לעשות. הכותרת אומרת עכשיו את הפעולה
 // (בחירת מוצר, בדיקה מול הנייר, פער מחיר, השלמת מחיר במאגר), וההסבר הטכני — מה כל קריאה
 // ראתה ולמה החשבון לא מכריע — נשאר במלואו, אבל מקופל תחת "פרטים טכניים". שום כלל לא משתנה.
-function priceAuditPendingKind(r) {
+function priceAuditPendingKind(r, paperPromos) {
   if (r.newProduct) return 'new'; // v404: מוצר שעוד לא במאגר — אין מה "לבחור"
   if (r.choice || r.capability === 'unidentified') return 'choose';
   if (r.modelReviewIssues) return 'check';
-  if (r.result === 'difference') return 'price';
+  // v418: פער מחיר שהוא מבצע שבתעודה ואינו במערכת (paperPromos — receiptPaperPromoMap) נקרא בשמו
+  if (r.result === 'difference') return paperPromos && paperPromos.has(String(r.productId)) ? 'promo' : 'price';
   if (r.capability === 'missing_catalog_price') return 'catalog';
   return 'other';
 }
-const PRICE_AUDIT_PENDING_LABELS = { new: 'להוספת מוצר חדש', choose: 'לבחירת מוצר', check: 'לבדיקה מול הנייר', price: 'עם פער מחיר', catalog: 'להשלמת מחיר במאגר', other: 'לטיפול' };
+const PRICE_AUDIT_PENDING_LABELS = { new: 'להוספת מוצר חדש', choose: 'לבחירת מוצר', check: 'לבדיקה מול הנייר', price: 'עם פער מחיר', promo: 'עם מבצע שלא קיים במערכת', catalog: 'להשלמת מחיר במאגר', other: 'לטיפול' };
 // short — לכפתור הקטן במסך הסריקה ("שורה אחת לבחירת מוצר"); אחרת למשפט המלא ("נשארה שורה אחת לבחירת מוצר").
-function priceAuditPendingTitle(pending, short) {
+function priceAuditPendingTitle(pending, short, paperPromos) {
   const n = pending.length, counts = {};
-  pending.forEach(r => { const k = priceAuditPendingKind(r); counts[k] = (counts[k] || 0) + 1; });
+  pending.forEach(r => { const k = priceAuditPendingKind(r, paperPromos); counts[k] = (counts[k] || 0) + 1; });
   const kinds = Object.keys(counts);
   const label = kinds.length === 1 ? PRICE_AUDIT_PENDING_LABELS[kinds[0]] : 'לטיפול';
   const head = n === 1 ? (short ? 'שורה אחת ' : 'נשארה שורה אחת ') + label : (short ? n + ' שורות ' : 'נשארו ' + n + ' שורות ') + label;
@@ -15783,8 +16175,9 @@ async function priceAuditCompleteCarton(documentIndex, rowIndex, promoId) {
   showToast('גודל הארגז נשמר. בדיקת המבצע עודכנה.', null, null, 3000);
   return true;
 }
-function priceAuditReviewedHtml(rows) {
-  const reviewed = rows.filter(r => r.paperConfirmed);
+// v418: שורה שאומתה אבל הנייר נותן בה מבצע שלא קיים במערכת אינה כאן — היא מוצגת פתוחה, עם "פתח מבצע" (priceAuditPaperPromoCardsHtml)
+function priceAuditReviewedHtml(rows, paperPromos) {
+  const reviewed = rows.filter(r => r.paperConfirmed && !(paperPromos && paperPromos.has(String(r.productId))));
   if (!reviewed.length) return '';
   return '<details data-price-reviewed class="rounded-xl border border-rose-200 bg-rose-50 p-3 mt-3"><summary class="cursor-pointer font-black text-rose-800">פערי מחיר שאומתו ונשמרו (' + reviewed.length + ')</summary>' +
     '<p class="text-xs mt-2">הנתונים מהנייר אומתו. הפער מול המאגר נשאר מתועד; המחירים והחיוב לא שונו באימות.</p>' +
@@ -15806,8 +16199,19 @@ function priceAuditAutomaticChoicesHtml(rows) {
       return '<div class="border rounded-xl p-3 mt-2"><b>' + htmlEscape(r.name) + '</b><details class="mt-2"><summary class="cursor-pointer text-blue-700">שנה מוצר אם צריך</summary>' + priceAuditChoiceHtml({ choice }) + '</details></div>';
     }).join('') + '</details>';
 }
-function priceAuditActionCardHtml(r) {
+// v418: מבצע בתעודה שלא קיים במערכת, כשהשורה שלו כבר אומתה מול הנייר (שתי קריאות הסכימו, או שהעובד אישר) — עד 417 היא התקפלה
+// ל"פערי מחיר שאומתו ונשמרו". עכשיו כרטיס פתוח לכל מוצר: מה כתוב בתעודה, ו"פתח מבצע". שורה שעוד מחכה לאישור — בכרטיס הרגיל שלה
+// (priceAuditActionCardHtml), עם אותה הודעה.
+function priceAuditPaperPromoCardsHtml(rows, paperPromos) {
+  if (!paperPromos || !paperPromos.size) return '';
+  return Array.from(paperPromos.values()).filter(info => rows.filter(r => String(r.productId) === String(info.productId)).every(r => r.paperConfirmed)).map(info =>
+    '<article data-price-paper-promo="' + htmlEscape(info.productId) + '" class="rounded-xl border-2 border-rose-300 p-3 mt-3 bg-white">' +
+      '<div class="font-black text-lg">' + htmlEscape(info.name) + '</div>' + paperPromoNoticeHtml(info, null, false) +
+      '<p class="text-xs text-slate-600 mt-2">' + info.qty + ' יח׳ בתעודה · ₪' + fmtMoney(info.saving) + ' פחות ממחיר המאגר. בלי המבצע השורה נשמרת כפער מחיר, והתעודה נשארת פתוחה עד שהוא ייפתח.</p></article>').join('');
+}
+function priceAuditActionCardHtml(r, paperPromos) {
   const money = n => n == null ? 'לא זמין' : '₪' + fmtUnitPrice(n, true);
+  const paperPromo = r.result === 'difference' && paperPromos ? paperPromos.get(String(r.productId)) || null : null; // v418
   const shell = '<article data-price-row="' + htmlEscape(r.id) + '" data-price-result="' + htmlEscape(r.result || r.capability) +
     '" class="rounded-xl border-2 ' + (r.result === 'difference' ? 'border-rose-200' : 'border-amber-200') + ' p-3 mt-3 bg-white">';
   if (r.choice) return shell + priceAuditChoiceHtml(r) + '</article>';
@@ -15827,7 +16231,8 @@ function priceAuditActionCardHtml(r) {
   const difference = r.result === 'difference';
   const promoGap = difference && r.promo && r.promo.pct > 0 && r.expectedOptions.length === 1 && r.expectedOptions[0].unitDifference > 0;
   const missingPromo = promoGap && Math.abs(r.comparisonPrice - r.catalogBasePrice) <= .020000001;
-  const gapTitle = promoGap ? (missingPromo ? 'הנחת המבצע לא ניתנה בתעודה' : 'ההנחה בתעודה נמוכה מהמבצע שהוגדר') : 'המחיר בתעודה שונה מהמחיר שבמאגר';
+  const gapTitle = promoGap ? (missingPromo ? 'הנחת המבצע לא ניתנה בתעודה' : 'ההנחה בתעודה נמוכה מהמבצע שהוגדר')
+    : paperPromo ? 'בתעודה קיים מבצע שלא קיים במערכת' : 'המחיר בתעודה שונה מהמחיר שבמאגר';
   const promoExplanation = promoGap ? '<div class="mt-3 rounded-lg bg-rose-50 p-3">' +
     '<p>לפי המבצע שהוגדר באפליקציה, מגיעה הנחה של <b>' + htmlEscape(r.promo.pct) + '%</b> על מוצר זה.</p>' +
     '<p class="mt-1">מבצע: <b>' + htmlEscape(r.promo.name || 'מבצע בתוקף') + '</b></p>' +
@@ -15848,7 +16253,7 @@ function priceAuditActionCardHtml(r) {
     '<button data-role="price-confirm-values" data-doc="' + r.documentIndex + '" data-row="' + r.rowIndex + '" data-review-token="' + htmlEscape(priceAuditValuesReviewToken(source)) + '" class="btn-tap w-full rounded-xl bg-emerald-700 text-white py-3 mt-3 font-black">כן, הכמות והמחיר נכונים לפי הנייר</button>' + paperRowCorrectionButton(r.documentIndex, r.rowIndex);
   // v395: החשבון של השורה סותר את עצמו — אין אישור בהקשה אחת, רק תיקון לפי הנייר.
   else if (valuesCheck.hold) action = '<p class="mt-2 font-bold">' + htmlEscape(valuesCheck.hold) + ' — תקן לפי הנייר</p>' + paperRowCorrectionButton(r.documentIndex, r.rowIndex);
-  else if (difference) action = '<p class="mt-2 font-bold">' + (promoGap ? 'בדוק בתעודה: האם זה הסכום שהספק חייב בפועל?' : 'האם המחיר והכמות כאן הם מה שמודפס בשורה של המוצר שבחרת?') + '</p>' +
+  else if (difference) action = '<p class="mt-2 font-bold">' + (promoGap ? 'בדוק בתעודה: האם זה הסכום שהספק חייב בפועל?' : paperPromo ? 'לא פותחים מבצע? האם המחיר והכמות כאן הם מה שמודפס בשורה?' : 'האם המחיר והכמות כאן הם מה שמודפס בשורה של המוצר שבחרת?') + '</p>' +
     '<button data-role="price-confirm-paper" data-doc="' + r.documentIndex + '" data-row="' + r.rowIndex + '" data-review-token="' + htmlEscape(priceAuditPaperReviewToken(r)) + '" class="btn-tap w-full rounded-xl bg-emerald-700 text-white py-3 mt-3 font-black">' + (promoGap ? 'כן — שמור את ההנחה החסרה לטיפול מול הספק' : 'כן, כך כתוב בתעודה — שמור את הפער') + '</button>' + (promoGap ? '<p class="text-xs text-slate-600 mt-2">האישור שומר את הפער ואינו משנה את סכום התעודה או מאשר שהתקבל זיכוי.</p>' : '') + paperRowCorrectionButton(r.documentIndex, r.rowIndex) +
     aiManualPaperBarcodeButton(r.documentIndex, r.rowIndex) + '<details class="mt-2 text-sm"><summary class="cursor-pointer py-2 font-bold">הנתונים מהנייר נכונים, והמחיר במאגר לא מעודכן</summary>' + editProduct + '</details>';
   else if (r.capability === 'missing_catalog_price') action = '<p class="mt-2">הוסף את מחיר הקנייה ליחידה כדי שנוכל להשוות אותו למחיר בתעודה.</p>' + editProduct;
@@ -15857,7 +16262,8 @@ function priceAuditActionCardHtml(r) {
   else if (r.conflictingPromoIds && r.conflictingPromoIds.length) action = '<p class="mt-2 font-bold">' + htmlEscape(r.reason) + '</p>' +
     r.conflictingPromoIds.map(id => '<button data-role="promo-open" data-id="' + htmlEscape(id) + '" class="btn-tap w-full rounded-xl border border-blue-200 py-3 mt-2 font-black">ערוך ' + htmlEscape((promos.find(p => p.id === id) || {}).name || 'מבצע') + '</button>').join('');
   else action = '<p class="mt-2 font-bold">' + htmlEscape(r.reason) + '</p>' + paperRowCorrectionButton(r.documentIndex, r.rowIndex) + receiptBackToPhotosHtml();
-  const comparison = promoGap ? promoExplanation : difference ? r.expectedOptions.map(o => '<div class="rounded-lg bg-rose-50 p-3 mt-2">' +
+  // v418: במקום "מחיר בתעודה / מחיר צפוי / הפרש" — מה שכתוב בתעודה ו"פתח מבצע"; המספרים המלאים נשארים ב"פירוט חישוב המחיר"
+  const comparison = promoGap ? promoExplanation : paperPromo ? paperPromoNoticeHtml(paperPromo, null, false) : difference ? r.expectedOptions.map(o => '<div class="rounded-lg bg-rose-50 p-3 mt-2">' +
     '<div>מחיר בתעודה ליחידה: <b>' + money(r.comparisonPrice) + '</b></div>' +
     '<div>מחיר צפוי · ' + htmlEscape(o.label) + ': <b>' + money(o.price) + '</b></div>' +
     '<div>הפרש ליחידה: <b>' + money(o.unitDifference) + '</b> · הפרש לשורה: <b>' + money(o.lineDifference) + '</b></div></div>').join('') : '';
@@ -15884,6 +16290,9 @@ function receiptPriceAuditHtml(report, { summary = false } = {}) {
   const reviewed = a.rows.filter(r => r.paperConfirmed);
   const documentReviews = a.documents.filter(d => d.reviewRequired);
   const correctionProblems = paperRowCorrectionProblems();
+  // v418: מבצעים שבתעודה ואינם במערכת — הכותרת אומרת זאת, כל אחד בכרטיס פתוח עם "פתח מבצע", וגם בחלון הסיכום
+  const paperPromos = receiptPaperPromoMap(a);
+  const paperPromoTitle = paperPromos.size === 1 ? 'בתעודה קיים מבצע שלא קיים במערכת' : 'בתעודה ' + paperPromos.size + ' מבצעים שלא קיימים במערכת';
   const money = n => n == null ? 'לא זמין' : '₪' + fmtUnitPrice(n, true);
   const openPanel = pending.length > 0 || !a.complete || reviewed.length > 0;
   // v399: תעודה שלא מתאזנת על הכסף בלבד — כרטיס אחד שאומר מה חסר ואיפה, והשורות שרק מחכות שהתעודה תתאזן
@@ -15892,16 +16301,18 @@ function receiptPriceAuditHtml(report, { summary = false } = {}) {
   const tasks = gaps.length ? pending.filter(r => !r.waitingForPaper) : pending;
   const waiting = pending.length - tasks.length;
   const gapTitle = gaps.map(e => 'תעודה ' + htmlEscape(e.label) + ' לא מתאזנת' + (e.gap.page ? ' · ההפרש בעמוד ' + e.gap.page : '')).join(' · ');
-  const title = gaps.length ? gapTitle + (tasks.length ? ' · ' + priceAuditPendingTitle(tasks, true) : '') :
-    pending.length ? priceAuditPendingTitle(pending) : // v398: מה לעשות, לא רק כמה
+  const title = gaps.length ? gapTitle + (tasks.length ? ' · ' + priceAuditPendingTitle(tasks, true, paperPromos) : '') :
+    pending.length ? priceAuditPendingTitle(pending, false, paperPromos) : // v398: מה לעשות, לא רק כמה
     documentReviews.length ? 'צריך לאשר את סיכום התעודה' :
+    paperPromos.size ? paperPromoTitle :
     reviewed.length && a.complete ? 'הבדיקה הושלמה · ' + reviewed.length + ' פערי מחיר נשמרו' :
     a.complete ? 'המחירים שנבדקו תואמים · ' + a.rows.length + ' שורות · אין מה לאשר' : 'צריך להשלים את צילום התעודה';
   const panelShell = '<section data-price-audit class="rounded-xl ' + (openPanel ? 'border-2 border-amber-300' : 'border border-emerald-200')
     + ' bg-white p-2.5 mb-2 text-sm" dir="rtl" aria-label="בדיקת מחירים ומבצעים">';
   // Edits must return to receiving and discard the already-calculated checkout
   // snapshot; a summary modal must not expose inert or stale approval buttons.
-  if (summary) return panelShell + '<div class="font-black">' + title + '</div>' + (openPanel ?
+  if (summary) return panelShell + '<div class="font-black">' + title + '</div>' +
+    Array.from(paperPromos.values()).map(info => '<div class="mt-2"><div class="text-sm font-black text-slate-800">' + htmlEscape(info.name) + '</div>' + paperPromoNoticeHtml(info, null, true) + '</div>').join('') + (openPanel ?
     '<button data-role="price-open-review" class="btn-tap w-full rounded-xl bg-blue-600 text-white py-3 mt-2 font-black">' + (pending.length ? 'פתח את השורות שנותרו לטיפול' : 'הצג את פרטי הבדיקה') + '</button>' : '') + '</section>';
   return panelShell + '<details data-price-panel' + (openPanel ? ' open' : '') +
     '><summary class="flex items-center justify-between gap-2 cursor-pointer font-black ' +
@@ -15910,7 +16321,8 @@ function receiptPriceAuditHtml(report, { summary = false } = {}) {
     (pending.length ? '<p class="mt-2 text-slate-600">מוצגות רק השורות שנותרו לטיפול. לאחר זיהוי המוצר המחיר נבדק אוטומטית, ושורה תקינה יוצאת מהרשימה.</p>' : '') +
     (correctionProblems.length && !gaps.length ? '<div role="alert" class="rounded-xl bg-amber-50 border-2 border-amber-300 p-3 mt-3"><b>התיקון נשמר, אבל השורות עדיין אינן תואמות לסיכום החשבונית.</b><p class="mt-1">בדוק את התיקון האחרון או תקן שורות נוספות לפי הנייר.</p>' + correctionProblems.map(d => '<p class="mt-1 text-xs">תעודה ' + htmlEscape(d.number || String(d.index + 1)) + ': ' + htmlEscape(d.problems.join(' · ')) + '</p>').join('') + '</div>' : '') +
     gaps.map(yotvataPaperGapCardHtml).join('') +
-    tasks.map(priceAuditActionCardHtml).join('') +
+    tasks.map(r => priceAuditActionCardHtml(r, paperPromos)).join('') +
+    priceAuditPaperPromoCardsHtml(a.rows, paperPromos) +
     (waiting ? '<p data-paper-gap-waiting class="mt-3 text-sm text-slate-600">' + (waiting === 1 ? 'עוד שורה אחת תיבדק' : 'עוד ' + waiting + ' שורות ייבדקו') + ' אחרי שהתעודה תתאזן. אין בהן מה לעשות עכשיו.</p>' : '') +
     documentReviews.map(info => {
       const doc = aiScanResponse.scan.documents.find(d => d.noteIndex === info.index), paper = priceAuditSource(doc), input = aiScanDocuments[info.index];
@@ -15922,7 +16334,7 @@ function receiptPriceAuditHtml(report, { summary = false } = {}) {
         (balanced ? '<button data-role="price-confirm-document" data-doc="' + info.index + '" data-review-token="' + htmlEscape(priceAuditDocumentReviewToken(doc)) + '" class="btn-tap w-full rounded-xl bg-blue-600 text-white py-3 mt-3 font-black">כן, הסיכום תואם לנייר</button>' : '') +
         priceAuditTechnicalFoldHtml(priceAuditDocumentDisputeHtml(doc, paper), 'data-document-dispute-fold') + receiptBackToPhotosHtml() + '</div>';
     }).join('') +
-    priceAuditReviewedHtml(a.rows) +
+    priceAuditReviewedHtml(a.rows, paperPromos) +
     priceAuditAutomaticChoicesHtml(a.rows) +
     (!pending.length && !a.complete && !documentReviews.length ? '<p class="mt-2">חסרה קריאה מלאה של התעודה. פתח את הצילומים והשלם את העמודים החסרים.</p>' + receiptBackToPhotosHtml() : '') +
     paperRowCorrectionHistoryHtml() + priceAuditDatesHtml(a, money) +
@@ -15958,7 +16370,7 @@ function refreshPriceScannerNotice() {
   if (!relevant) return;
   const unbalanced = receiptPaperScanState === 'failed' && (yotvataPaperGaps() || []).length > 0; // v399
   button.textContent = unbalanced ? 'התעודה לא מתאזנת — פתח את הרשימה'
-    : pending.length ? priceAuditPendingTitle(pending, true) + ' — פתח את הרשימה' : a.documents.some(d => d.reviewRequired) ? 'צריך לאשר את סיכום התעודה' : 'צריך להשלים את צילום התעודה';
+    : pending.length ? priceAuditPendingTitle(pending, true, receiptPaperPromoMap(a)) + ' — פתח את הרשימה' : a.documents.some(d => d.reviewRequired) ? 'צריך לאשר את סיכום התעודה' : 'צריך להשלים את צילום התעודה';
 }
 
 function refreshPriceAuditViews() {
@@ -18954,6 +19366,21 @@ function aiActionableFindingsHtml(findings, options) {
     aiCompactFindingGroupHtml('promo_missing', 'מבצע קיים במערכת אך לא בתעודה', open) +
   '</div></div>';
 }
+// v418: מבצע בתעודה שלא קיים במערכת — במסך תוצאות הסריקה, ראשון. ממצא "מחיר שונה" של אותו מוצר אינו מוצג שם (בדיקת המחירים שפטה את
+// השורה, priceAuditLegacyVisible), ועד 417 המסך ביקש "אלה אכן הבעיות — אשר" בלי להראות בעיה. הכרטיס המלא נמצא בראש המסך, בבדיקת
+// המחירים; כאן שורה קצרה לכל מוצר, עם "פתח מבצע", ליד כפתורי ההמשך.
+function aiPaperPromoGroupHtml(list) {
+  if (!list.length) return '';
+  return '<div data-paper-promo-group class="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3">' +
+    '<div class="flex items-center justify-between gap-2 text-rose-800"><div class="font-black"><i class="fa-solid fa-tags ml-1"></i>מבצע בתעודה שלא קיים במערכת</div><span class="rounded-full px-2 py-0.5 text-[10px] font-black bg-rose-100 text-rose-800">' + list.length + '</span></div>' +
+    list.map(info => '<div class="mt-2"><div class="text-sm font-black text-slate-800">' + htmlEscape(info.name) + '</div>' + paperPromoNoticeHtml(info, null, true) + '</div>').join('') +
+    '<div class="text-[11px] font-bold text-slate-600 mt-2">אחרי "פתח מבצע" השורה נקלטת כמבצע, בלי הפרש מחיר. בלי המבצע התעודה נקלטת כפתוחה, ואפשר לפתוח אותו אחר כך מכרטיס התעודה.</div></div>';
+}
+// כל מה שנשאר לאישור במסך התוצאות הוא מבצע שבתעודה ואינו במערכת (אין חוסר, עודף או פער מחיר אחר)
+function aiOnlyPaperPromoFindings(findings, list) {
+  const open = (Array.isArray(findings) ? findings : []).filter(aiIsActionableFinding);
+  return open.length > 0 && open.every(f => f.type === 'price' && list.some(x => String(x.productId) === String(f.productId)));
+}
 function aiInformationalFindingsHtml(findings) {
   const informational = (Array.isArray(findings) ? findings : []).filter(finding => !aiIsActionableFinding(finding));
   if (!informational.length) return '';
@@ -19398,7 +19825,7 @@ function aiConfirmBarcodeSuggestion(documentIndex, rowIndex) {
   showToast('המוצר אושר. התוצאות חושבו מחדש.', null, null, 2400);
   return true;
 }
-function aiInvoiceCaptureHtml() {
+function aiInvoiceCaptureHtml(priceReport) {
   if (aiScanBusy) return '<div class="bg-white rounded-2xl border-2 border-violet-200 p-6 text-center mb-24"><i class="fa-solid fa-spinner fa-spin text-4xl text-violet-600"></i><div class="font-black text-lg mt-3">' + htmlEscape(aiScanProgressText || (aiScanResponse ? 'מכין את התוצאות…' : 'ה-AI קורא את כל דפי התעודות…')) + '</div><div class="text-xs text-slate-500 mt-1">אל תסגור את המסך. הקריאה והאימות עשויים לקחת כמה דקות.</div></div>';
   if (aiScanEvaluation) {
     const ev = aiScanEvaluation;
@@ -19421,7 +19848,8 @@ function aiInvoiceCaptureHtml() {
     // An old analysis describes the physical shortage before the credit. Show
     // the remaining findings, without offering to claim that credit again.
     const analyzerLed = !(credit && credit.amount) && ev.analyzerLed === true && aiAnalyzeResult && aiAnalyzeResult.accepted === true;
-    const findingsHtml = aiActionableFindingsHtml(actionableFindings, { openRows: !analyzerLed }) + residualLines + unknownCards + (credit && credit.amount ? '' : aiAnalyzeHtml(ev)) + aiScanDiagnosticsHtml(ev);
+    const paperPromoList = receiptPaperPromos(priceReport); // v418: מבצע שבתעודה ואינו במערכת — ראשון ברשימה (מאותה בדיקת מחירים של ראש המסך)
+    const findingsHtml = aiPaperPromoGroupHtml(paperPromoList) + aiActionableFindingsHtml(actionableFindings, { openRows: !analyzerLed }) + residualLines + unknownCards + (credit && credit.amount ? '' : aiAnalyzeHtml(ev)) + aiScanDiagnosticsHtml(ev);
     const allGood = aiScanAllGood(ev) && !(credit && (credit.pending || credit.invalid.length));
     const statusHtml = deliveryCreditStatusHtml(credit) + (allGood
       ? '<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-3 font-black text-emerald-800"><i class="fa-solid fa-circle-check ml-1"></i>הכול תואם — לא נמצאו חוסר, עודף או בעיית מחיר/מבצע.</div>'
@@ -19447,6 +19875,12 @@ function aiInvoiceCaptureHtml() {
       actionsHtml = '<button data-role="ai-apply" class="btn-tap w-full bg-emerald-600 text-white rounded-xl py-3.5 font-black mt-4"><i class="fa-solid fa-check"></i> החוסר מכוסה בזיכוי — המשך</button>';
     } else if (allGood) {
       actionsHtml = '<button data-role="ai-apply" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-3.5 font-black mt-4"><i class="fa-solid fa-check"></i> הכול תואם — המשך</button>';
+    } else if (ev.valid && aiOnlyPaperPromoFindings(actionableFindings, paperPromoList)) {
+      // v418: אין חוסר, עודף או פער מחיר אחר — רק מבצע שבתעודה ואינו במערכת. במקום "אלה אכן הבעיות — אשר" ו"סגור תעודה עם החוסרים":
+      // כפתור אחד שאומר מה יקרה בלי המבצע ("פתח מבצע" נמצא בשורה שמעליו)
+      actionsHtml = '<div class="mt-4 space-y-2">' +
+        '<button data-role="ai-apply" class="btn-tap w-full bg-white border-2 border-violet-300 text-violet-700 rounded-xl py-3 px-2 leading-tight font-black">המשך בלי לפתוח את המבצע — התעודה תיקלט כפתוחה</button>' +
+        '<button data-role="ai-edit-images" class="btn-tap w-full bg-white border border-slate-200 text-slate-500 rounded-xl py-2.5 font-black text-xs"><i class="fa-solid fa-camera-rotate"></i> תיקון תעודה — חזרה לצילומים</button></div>';
     } else if (!confirmed) {
       actionsHtml = '<div class="mt-4 space-y-2">' +
         '<button data-role="ai-confirm-findings" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-3.5 font-black"><i class="fa-solid fa-check-double"></i> אלה אכן הבעיות — אשר</button>' +
@@ -19724,7 +20158,8 @@ function renderReconcile() {
   if (balanced && !needsPaperReview && !keepAiStep) rcStep = 'balanced';
   else if (!balanced && rcStep === 'balanced') rcStep = 'choose';
 
-  const header = receiptPriceAuditHtml() + '<div class="px-1 py-1 mb-3"><h2 class="font-black text-2xl text-slate-800">בדיקת תעודה</h2></div>';
+  const priceReport = receiptPriceAudit(); // v418: בדיקת מחירים אחת לראש המסך ולתוצאות הסריקה
+  const header = receiptPriceAuditHtml(priceReport) + '<div class="px-1 py-1 mb-3"><h2 class="font-black text-2xl text-slate-800">בדיקת תעודה</h2></div>';
 
   // סרגל סכומים תמידי
   const asgTop = reconcileAssigned();
@@ -19816,7 +20251,7 @@ function renderReconcile() {
     body = detectiveQuestionHtml(ds, q);
   }
   else if (rcStep === 'ai') {
-    body = aiInvoiceCaptureHtml();
+    body = aiInvoiceCaptureHtml(priceReport);
   }
   else if (rcStep === 'choose') {
     // הבלש לא הצליח לזהות — העובד בוחר איך לבדוק
@@ -22409,7 +22844,7 @@ function receiptFilterBucket(rc) {
 // ופעולה אחת, מאותם חישובים שמסך ההיסטוריה כבר משתמש בהם. תצוגה בלבד — שום סכום, קיזוז או
 // זיכוי לא משתנה; הסיכום בראש קובץ הגיבוי (backupPlainSummary) נבנה מאותו משפט.
 // state: awaiting_paper · credit_mismatch · short · over · units_gap · amount_gap ·
-// price_finding · claim · open · balanced. role — הכפתור הקיים בכרטיס שמבצע את הפעולה.
+// paper_promo (v418: מבצע שבתעודה ואינו במערכת) · price_finding · claim · open · balanced. role — הכפתור הקיים בכרטיס שמבצע את הפעולה.
 function receiptPlainStatus(rc, info) {
   const di = info || receiptDiscrepancyInfo(rc);
   const money = v => '₪' + fmtMoney(Math.abs(Number(v) || 0));
@@ -22430,7 +22865,16 @@ function receiptPlainStatus(rc, info) {
   if (di.unresolvedUnitsGap) return out('units_gap', 'פער של ' + Math.abs(Number(di.unresolvedUnitsGap) || 0) + ' יחידות ' + (di.unresolvedUnitsGap > 0 ? 'חסרות' : 'עודפות') + ' שטרם שויך למוצר', 'תקן הפרשים', 'rc-fix-open');
   if (di.amountGapOpen) return out('amount_gap', 'פער סכום של ' + money(di.unresolvedAmountGap) + ' מול התעודה' + (Number(di.unresolvedAmountGap) > 0 ? ' · ממתין לזיכוי מהספק' : ''), 'תקן הפרשים', 'rc-fix-open');
   if (supplierCreditClaimOpen(rc) || supplierCreditClaimDeferred(rc)) return out('claim', 'ממתין לזיכוי ספק של ' + money(supplierCreditClaimRemaining(rc)) + ' על מחיר או מבצע', 'הגיע זיכוי', 'rc-credit-verify');
-  if (di.aiAuditOpen) return out('price_finding', 'ממצא מחיר או מבצע מהסריקה ממתין לטיפול מול הספק', 'תקן הפרשים', 'rc-fix-open');
+  if (di.aiAuditOpen) {
+    // v418: כל מה שפתוח בסריקה הוא מבצע שבתעודה ואינו במערכת — המשפט אומר זאת, והפעולה היא "פתח מבצע" (למוצר הראשון; אחריו הבא)
+    const paperPromos = savedReceiptPaperPromos(rc), day = (rc && rc.date) || todayStr();
+    const openFindings = (rc && rc.aiAudit && Array.isArray(rc.aiAudit.findings) ? rc.aiAudit.findings : []).filter(f => f && (f.type === 'price' || f.type === 'promo_missing') && !aiPriceFindingPromoMatch(f, day));
+    if (paperPromos.length && openFindings.every(f => f.type === 'price' && paperPromos.some(x => x.productId === f.productId))) {
+      const names = paperPromos.map(x => x.name + ' · ' + paperPromoPctText(x.pct) + '%').join(' · ');
+      return { ...out('paper_promo', (paperPromos.length === 1 ? 'בתעודה קיים מבצע שלא קיים במערכת' : 'בתעודה ' + paperPromos.length + ' מבצעים שלא קיימים במערכת') + ' · ' + names, 'פתח מבצע', 'paper-promo-open'), productId: paperPromos[0].productId };
+    }
+    return out('price_finding', 'ממצא מחיר או מבצע מהסריקה ממתין לטיפול מול הספק', 'תקן הפרשים', 'rc-fix-open');
+  }
   if (di.open) return out('open', 'נשאר הפרש פתוח מול התעודה', 'תקן הפרשים', 'rc-fix-open');
   const how = [];
   if ((di.externalOffsets || []).length) how.push('קיזוז');
@@ -22449,7 +22893,8 @@ function receiptPlainActionHtml(rc, plain) {
   return '<div class="mt-2 bg-rose-50 border-2 border-rose-300 rounded-xl p-3" data-plain-action="' + htmlEscape(plain.state) + '">' +
     '<div class="text-[11px] font-black text-rose-600">מה לעשות עכשיו</div>' +
     '<div class="font-black text-slate-900 text-sm mt-0.5">' + htmlEscape(plain.text) + '</div>' +
-    '<button data-role="' + htmlEscape(plain.role) + '" data-id="' + htmlEscape(rc.id) + '" class="btn-tap w-full mt-2 bg-rose-600 text-white rounded-xl py-2.5 font-black text-sm">' + htmlEscape(plain.action) + '</button></div>';
+    // v418: "פתח מבצע" — הכפתור נושא את המוצר (data-id) ואת התעודה (data-receipt); בשאר המצבים — את התעודה, כמו קודם
+    '<button data-role="' + htmlEscape(plain.role) + '" data-id="' + htmlEscape(plain.state === 'paper_promo' ? plain.productId : rc.id) + '"' + (plain.state === 'paper_promo' ? ' data-receipt="' + htmlEscape(rc.id) + '"' : '') + ' class="btn-tap w-full mt-2 bg-rose-600 text-white rounded-xl py-2.5 font-black text-sm">' + htmlEscape(plain.action) + '</button></div>';
 }
 // ===== v267: שינוי תאריך תעודה =====
 // תעודת קליטה נשמרת עם timestamp (למיון ולדוח התשלום לספק) ועם date
@@ -22567,14 +23012,24 @@ function renderReceiptsHistory() {
     // v306: תעודה שממתינה לנייר פתוחה — אבל לא בגלל הפרש. אין לה הפרשים
     // לתקן, יש לה נייר לצרף.
     const fixOpen = effectiveOpen && !di.awaitingDoc;
+    // v418: כשכל מה שפתוח הוא מבצע שבתעודה ואינו במערכת, הפעולה היא "פתח מבצע" ואין הפרשים לתקן — הכפתור שבתחתית הכרטיס הוא
+    // "ערוך תעודה" הרגיל (אותו מסך), ולא "תקן הפרשים" הכחול
+    const fixButton = fixOpen && plain.state !== 'paper_promo';
     const legacyRecovering = !!(rc.offsetClosed && Number(rc.offsetSchemaVersion || 0) < 2);
-    const rows = (rc.items || []).map(l =>
-      '<div class="flex items-center justify-between gap-2 py-1 border-b border-slate-100 last:border-0">' +
-        '<div class="min-w-0"><div class="text-sm font-bold text-slate-700 truncate">' + l.name + '</div><div class="text-[11px] text-slate-400">' + l.qty + ' × ₪' + fmtUnitPrice(l.unitPrice, l.promoPct) + (l.promoPct ? ' · מבצע ' + l.promoPct + '%' : '') + '</div></div>' +
-        '<div class="text-sm font-black text-slate-600 shrink-0">₪' + fmtMoney(l.lineTotal) + '</div>' +
-      '</div>'
-    ).join('');
     const aiFindingsAll = rc.aiAudit && Array.isArray(rc.aiAudit.findings) ? rc.aiAudit.findings : [];
+    // v418: מבצע שבתעודה ואינו במערכת — על שורת המוצר, עם "פתח מבצע" (למי שלא פתח אותו בזמן הקליטה). אחרי שנפתח, הממצא מוסבר
+    // במבצע (aiPriceFindingPromoMatch), והשורה מראה "מבצע X%" כמו שורת מבצע רגילה — תצוגה בלבד, השורה השמורה אינה משתנה.
+    const savedPaperPromos = new Map(savedReceiptPaperPromos(rc).map(x => [String(x.productId), x]));
+    const explainedPromoPct = new Map();
+    aiFindingsAll.forEach(f => { if (!f || f.type !== 'price' || !f.productId) return; const hit = aiPriceFindingPromoMatch(f, rc.date || todayStr()); if (hit && Number(hit.pct) > 0) explainedPromoPct.set(String(f.productId), Number(hit.pct)); });
+    const rows = (rc.items || []).map(l => {
+      const paperPromo = savedPaperPromos.get(String(l.productId)) || null, pct = l.promoPct || explainedPromoPct.get(String(l.productId)) || 0;
+      const line = '<div class="min-w-0"><div class="text-sm font-bold text-slate-700 truncate">' + l.name + '</div><div class="text-[11px] text-slate-400">' + l.qty + ' × ₪' + fmtUnitPrice(l.unitPrice, pct) + (pct ? ' · מבצע ' + pct + '%' : '') + '</div></div>' +
+        '<div class="text-sm font-black text-slate-600 shrink-0">₪' + fmtMoney(l.lineTotal) + '</div>';
+      return paperPromo
+        ? '<div class="py-1 border-b border-slate-100 last:border-0"><div class="flex items-center justify-between gap-2">' + line + '</div>' + paperPromoNoticeHtml(paperPromo, rc.id, true) + '</div>'
+        : '<div class="flex items-center justify-between gap-2 py-1 border-b border-slate-100 last:border-0">' + line + '</div>';
+    }).join('');
     // v370: ממצאי הכמות של הסריקה (חסר/עודף) אינם מוצגים עוד בכרטיס — החוסר
     // הפתוח נמצא ב"הפרשים מול התעודה" ומה שכוסה בקופסת הזיכוי, והקופסה הסגולה
     // רק חזרה עליהם. היא נשארת רק לממצאי מחיר ומבצע, שאין להם מקום אחר ושהם
@@ -22590,6 +23045,9 @@ function renderReceiptsHistory() {
         aiPriceFindings.map(f => {
           const okPromo = aiPriceFindingPromoMatch(f, rc.date || todayStr());
           if (okPromo) return '<div class="font-black mt-1 text-emerald-700">• ' + htmlEscape(f.name || '') + ' — מבצע ' + (Number(okPromo.pct) || 0) + '%: המחיר בנייר תואם למבצע ✓</div>';
+          // v418: לא "מחיר שונה: במערכת ₪X, בנייר ₪Y" — בתעודה קיים מבצע, והוא לא קיים במערכת
+          const paperPromo = f.type === 'price' ? savedPaperPromos.get(String(f.productId)) : null;
+          if (paperPromo) return '<div data-paper-promo-finding="' + htmlEscape(f.productId) + '" class="font-black mt-1 text-rose-700">• ' + htmlEscape(paperPromo.name) + ' — ' + paperPromoTitleText(paperPromo) + ' (' + paperPromoPriceText(paperPromo) + '). המבצע לא קיים במערכת.</div>';
           return '<div class="font-black mt-1 text-orange-800">• ' + htmlEscape(f.text || '') + '</div>';
         }).join('') + '</div>'
       : '';
@@ -22627,7 +23085,7 @@ function renderReceiptsHistory() {
       statusTxt = '<i class="fa-solid fa-circle-check"></i> אומתה · מבצע לא הופיע אצל הספק';
       metaStatus = ' · <span class="text-amber-700 font-black">מבצע לא הופיע אצל הספק</span>';
     }
-    return '<details class="bg-white rounded-2xl border-2 ' + borderCls + ' shadow-sm overflow-hidden">' +
+    return '<details data-receipt-card="' + htmlEscape(rc.id) + '"' + (paperPromoKeepsCardOpen(rc.id) ? ' open' : '') + ' class="bg-white rounded-2xl border-2 ' + borderCls + ' shadow-sm overflow-hidden">' +
       '<summary class="cursor-pointer">' +
         '<div class="' + barCls + ' px-4 py-2 flex items-center justify-between gap-2 font-black text-[13px]">' +
           '<span><i class="fa-solid fa-file-invoice"></i> תעודת קליטה</span><span class="shrink-0">' + statusTxt + '</span>' +
@@ -22648,7 +23106,8 @@ function renderReceiptsHistory() {
           '<div class="text-[11px] font-bold text-amber-800 leading-relaxed mb-2">הסכום כאן מחושב מהמחירון לפי מה שנספר בפועל — אין נייר לאמת מולו, ולכן אי אפשר לתבוע מהספק חוסר או מחיר. כשהתעודה תגיע, הזן את נתוניה כאן והבדיקה הרגילה תרוץ מול הספירה הזאת.</div>' +
           '<button data-role="rc-attach-doc" data-id="' + rc.id + '" class="btn-tap w-full bg-amber-500 text-white rounded-xl py-2.5 font-black text-sm"><i class="fa-solid fa-file-invoice"></i> התעודה הגיעה — הזן את נתוניה</button>' +
         '</div>' : '') +
-        (fixOpen ? '<div class="mt-2 bg-rose-50 border border-rose-200 rounded-xl p-2.5 text-xs">' +
+        // v418: כשכל מה שפתוח הוא מבצע שבתעודה ואינו במערכת אין הפרשים להציג — הקופסה האדומה (שהייתה ריקה) אינה מוצגת
+        (fixOpen && plain.state !== 'paper_promo' ? '<div class="mt-2 bg-rose-50 border border-rose-200 rounded-xl p-2.5 text-xs">' +
           '<div class="font-black text-rose-700 mb-1"><i class="fa-solid fa-triangle-exclamation"></i> הפרשים מול התעודה</div>' +
           shortSplit.open.map(s => receiptDiffRowHtml(rc, s, 'short', { di, shortSplit })).join('') +
           shortSplit.remainder.map(receiptCreditRemainderRowHtml).join('') +
@@ -22714,7 +23173,7 @@ function renderReceiptsHistory() {
               '<button data-role="rc-offset" data-id="' + rc.id + '" data-other="' + m.other.id + '" data-product="' + m.productId + '" data-other-product="' + (m.otherProductId || m.productId) + '" class="btn-tap w-full bg-indigo-600 text-white rounded-xl py-2 font-black text-sm"><i class="fa-solid fa-check"></i> אשר קיזוז לפריט הזה</button>' +
             '</div>'; })()) +
         docDateEditorHtml('receipt', rc) + // v267
-        (legacyRecovering ? '<button disabled class="mt-2 w-full font-black py-2.5 rounded-xl text-sm bg-slate-100 text-slate-400"><i class="fa-solid fa-spinner fa-spin"></i> ממתין לשחזור הקיזוז</button>' : '<button data-role="rc-fix-open" data-id="' + rc.id + '" class="btn-tap mt-2 w-full font-black py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 ' + (fixOpen ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700') + '"><i class="fa-solid ' + (fixOpen ? 'fa-wrench' : 'fa-pen') + '"></i> ' + (fixOpen ? 'תקן הפרשים' : 'ערוך תעודה') + '</button>') +
+        (legacyRecovering ? '<button disabled class="mt-2 w-full font-black py-2.5 rounded-xl text-sm bg-slate-100 text-slate-400"><i class="fa-solid fa-spinner fa-spin"></i> ממתין לשחזור הקיזוז</button>' : '<button data-role="rc-fix-open" data-id="' + rc.id + '" class="btn-tap mt-2 w-full font-black py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 ' + (fixButton ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700') + '"><i class="fa-solid ' + (fixButton ? 'fa-wrench' : 'fa-pen') + '"></i> ' + (fixButton ? 'תקן הפרשים' : 'ערוך תעודה') + '</button>') +
         '<button data-role="del-receipt" data-id="' + rc.id + '" class="btn-tap mt-2 w-full bg-red-50 text-red-600 font-bold py-2 rounded-xl text-sm flex items-center justify-center gap-2"><i class="fa-solid fa-trash-can"></i> מחק תעודה</button>' +
       '</div>' +
     '</details>';
@@ -26857,6 +27316,14 @@ $('promptScan').addEventListener('click', () => { scanPurpose = 'field'; openSca
 $('npr_cancel').addEventListener('click', hideNewProduct);
 $('npr_ok').addEventListener('click', saveNewProduct);
 $('piClose').addEventListener('click', hidePromoInfo);
+// v418: החלון "פתח מבצע" — לחיצות (שמירה, ביטול, הרקע), הקלדה בשדות, Escape, ו-Enter בשדה שסוגר את המקלדת
+$('paperPromoModal').addEventListener('click', paperPromoSheetClick);
+$('paperPromoModal').addEventListener('input', paperPromoSheetInput);
+$('paperPromoModal').addEventListener('change', paperPromoSheetInput);
+$('paperPromoModal').addEventListener('keydown', e => {
+  if (e.key === 'Escape') { if (paperPromoSheet && !paperPromoSheet.busy) closePaperPromoSheet(); return; }
+  if (e.key === 'Enter' && e.target && e.target.dataset && e.target.dataset.ppField) { e.preventDefault(); e.target.blur(); }
+});
 $('rs_cancel').addEventListener('click', hideReceiptSummary);
 $('rs_ok').addEventListener('click', confirmReceipt);
 $('receiptQuantityClose').addEventListener('click', closeReceiptQuantityReviewByUser);
@@ -27123,6 +27590,8 @@ app.addEventListener('input', (e) => {
 $('rsBody').addEventListener('change', e => { if (e.target.dataset.role === 'price-doc-date') priceAuditSetDate(Number(e.target.dataset.doc), e.target.value); });
 $('rsBody').addEventListener('click', e => {
   const t = e.target.closest('[data-role]');
+  // v418: "פתח מבצע" גם מחלון הסיכום — החלון של המבצע נפתח מעליו; אחרי השמירה הסיכום נסגר ומחושב מחדש עם המבצע
+  if (t && t.dataset.role === 'paper-promo-open') { openPaperPromoSheet(t.dataset.id, t.dataset.receipt || null); return; }
   if (!t || t.dataset.role !== 'price-open-review') return;
   hideReceiptSummary(); pendingReceipt = null;
   currentView = 'receiving'; renderReceiving();
@@ -27353,6 +27822,8 @@ app.addEventListener('click', (e) => {
   if (role === 'price-confirm-document') { priceAuditConfirmDocument(Number(t.dataset.doc), t.dataset.reviewToken); return; }
   if (role === 'price-reopen-paper') { priceAuditReopenPaper(Number(t.dataset.doc), Number(t.dataset.row)); return; }
   if (role === 'price-complete-carton') return priceAuditCompleteCarton(Number(t.dataset.doc), Number(t.dataset.row), id);
+  // v418: "פתח מבצע" — מבצע שבתעודה ואינו במערכת: בקליטה (בלי data-receipt) או מכרטיס התעודה בהיסטוריה
+  if (role === 'paper-promo-open') { openPaperPromoSheet(id, t.dataset.receipt || null); return; }
   if (role === 'ai-manual-paper-barcode') { aiEnterPrintedBarcode(parseInt(t.dataset.doc, 10), parseInt(t.dataset.row, 10)); return; }
   if (role === 'ai-confirm-barcode-suggestion') { aiConfirmBarcodeSuggestion(parseInt(t.dataset.doc, 10), parseInt(t.dataset.row, 10)); return; }
   if (role === 'ai-confirm-name-candidate') { aiConfirmNameCandidate(parseInt(t.dataset.doc, 10), parseInt(t.dataset.row, 10), t.dataset.candidateId); return; }

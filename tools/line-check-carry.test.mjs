@@ -181,10 +181,10 @@ test('4. שוויון: בדיקה שהתחילה מסריקה ובדיקה שס�
   for (const k of ['noteParts', 'count', 'status', 'noDoc', 'vatPct', 'totalExVat']) assert.deepEqual(savedA[k], savedB[k], k);
 });
 
-test('5. הגרסה עלתה ל-417, כולל ה-service worker', () => {
+test('5. הגרסה עלתה ל-418, כולל ה-service worker', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /const APP_VERSION = '417'/); // גרסה 417: הבדיקה שורה-שורה נפתחת לפני שהתעודה נקראה, וגם בלי תעודה
+  assert.match(html, /const APP_VERSION = '418'/); // גרסה 418: מבצע שבתעודה ואינו במערכת — "פתח מבצע"
   assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_line_clear'/);
-  assert.match(html, /<title>הזמנות יטבתה - v417 /); assert.match(html, /id="verBadge"[^>]*>v417 /);
-  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v417/);
+  assert.match(html, /<title>הזמנות יטבתה - v418 /); assert.match(html, /id="verBadge"[^>]*>v418 /);
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v418/);
 });
