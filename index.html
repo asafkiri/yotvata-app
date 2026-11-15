@@ -23012,6 +23012,9 @@ function renderReceiptsHistory() {
     // v306: תעודה שממתינה לנייר פתוחה — אבל לא בגלל הפרש. אין לה הפרשים
     // לתקן, יש לה נייר לצרף.
     const fixOpen = effectiveOpen && !di.awaitingDoc;
+    // v418: כשכל מה שפתוח הוא מבצע שבתעודה ואינו במערכת, הפעולה היא "פתח מבצע" ואין הפרשים לתקן — הכפתור שבתחתית הכרטיס הוא
+    // "ערוך תעודה" הרגיל (אותו מסך), ולא "תקן הפרשים" הכחול
+    const fixButton = fixOpen && plain.state !== 'paper_promo';
     const legacyRecovering = !!(rc.offsetClosed && Number(rc.offsetSchemaVersion || 0) < 2);
     const aiFindingsAll = rc.aiAudit && Array.isArray(rc.aiAudit.findings) ? rc.aiAudit.findings : [];
     // v418: מבצע שבתעודה ואינו במערכת — על שורת המוצר, עם "פתח מבצע" (למי שלא פתח אותו בזמן הקליטה). אחרי שנפתח, הממצא מוסבר
@@ -23170,7 +23173,7 @@ function renderReceiptsHistory() {
               '<button data-role="rc-offset" data-id="' + rc.id + '" data-other="' + m.other.id + '" data-product="' + m.productId + '" data-other-product="' + (m.otherProductId || m.productId) + '" class="btn-tap w-full bg-indigo-600 text-white rounded-xl py-2 font-black text-sm"><i class="fa-solid fa-check"></i> אשר קיזוז לפריט הזה</button>' +
             '</div>'; })()) +
         docDateEditorHtml('receipt', rc) + // v267
-        (legacyRecovering ? '<button disabled class="mt-2 w-full font-black py-2.5 rounded-xl text-sm bg-slate-100 text-slate-400"><i class="fa-solid fa-spinner fa-spin"></i> ממתין לשחזור הקיזוז</button>' : '<button data-role="rc-fix-open" data-id="' + rc.id + '" class="btn-tap mt-2 w-full font-black py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 ' + (fixOpen ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700') + '"><i class="fa-solid ' + (fixOpen ? 'fa-wrench' : 'fa-pen') + '"></i> ' + (fixOpen ? 'תקן הפרשים' : 'ערוך תעודה') + '</button>') +
+        (legacyRecovering ? '<button disabled class="mt-2 w-full font-black py-2.5 rounded-xl text-sm bg-slate-100 text-slate-400"><i class="fa-solid fa-spinner fa-spin"></i> ממתין לשחזור הקיזוז</button>' : '<button data-role="rc-fix-open" data-id="' + rc.id + '" class="btn-tap mt-2 w-full font-black py-2.5 rounded-xl text-sm flex items-center justify-center gap-2 ' + (fixButton ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700') + '"><i class="fa-solid ' + (fixButton ? 'fa-wrench' : 'fa-pen') + '"></i> ' + (fixButton ? 'תקן הפרשים' : 'ערוך תעודה') + '</button>') +
         '<button data-role="del-receipt" data-id="' + rc.id + '" class="btn-tap mt-2 w-full bg-red-50 text-red-600 font-bold py-2 rounded-xl text-sm flex items-center justify-center gap-2"><i class="fa-solid fa-trash-can"></i> מחק תעודה</button>' +
       '</div>' +
     '</details>';

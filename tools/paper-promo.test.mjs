@@ -391,6 +391,9 @@ test('6. התעודה השמורה: כתוב על המוצר, עם "פתח מב�
   // הקופסה הסגולה: לא "מחיר שונה: במערכת…, בנייר…"; ואין קופסת "הפרשים מול התעודה" ריקה
   assert.match(c, /<div data-paper-promo-finding="avocado" class="font-black mt-1 text-rose-700">• ממרח אבוקדו 200 — בתעודה קיים מבצע: 40% הנחה \(₪7\.13 ליח׳ במקום ₪11\.89\)\. המבצע לא קיים במערכת\.<\/div>/);
   assert.doesNotMatch(c, /מחיר שונה:|הפרשים מול התעודה/);
+  // הכפתור שבתחתית הכרטיס: "ערוך תעודה" הרגיל (אותו מסך) ולא "תקן הפרשים" — אין הפרשים לתקן, והפעולה היא "פתח מבצע"
+  assert.match(c, /<button data-role="rc-fix-open" data-id="[^"]+" class="btn-tap mt-2 w-full font-black py-2\.5 rounded-xl text-sm flex items-center justify-center gap-2 bg-slate-100 text-slate-700"><i class="fa-solid fa-pen"><\/i> ערוך תעודה<\/button>/);
+  assert.doesNotMatch(c, /תקן הפרשים/);
   assert.match(card(r, 'rc-older'), COMPACT, 'גם בתעודה הישנה — לפי הכוכבית');
 
   // "פתח מבצע" מהשורה שבכרטיס
@@ -481,6 +484,12 @@ test('7. הזיהוי בתעודה שמורה: לפי בדיקת המחירים 
   const twoItems = { id: 't', date: '2026-11-15', status: 'open', items: [item, { productId: 'cottage', name: 'קוטג׳ 5% 250 גרם', qty: 6, unitPrice: 5.6, basePrice: 7, lineTotal: 33.6, promoPct: 0 }],
     ...audit([finding, star, { type: 'price', productId: 'cottage', name: 'קוטג׳ 5% 250 גרם', qty: 6, amount: -8.4, expectedPrice: 7, paperPrice: 5.6, text: 'מחיר שונה' }, { ...star, productId: 'cottage' }]) };
   assert.deepEqual(json(r, `(p => [p.state, p.text, p.productId])(receiptPlainStatus(${JSON.stringify(twoItems)}))`), ['paper_promo', 'בתעודה 2 מבצעים שלא קיימים במערכת · ממרח אבוקדו 200 · 40% · קוטג׳ 5% 250 גרם · 20%', 'avocado']);
+  // הכרטיס של התעודה שיש בה גם ממצא מחיר אמיתי: "תקן הפרשים" הכחול נשאר (יש מה לתקן), וההודעה על שורת המוצר מוצגת עם "פתח מבצע"
+  history(r, [{ ...mixed, timestamp: Date.parse('2026-11-15T09:00:00'), count: 2, totalExVat: 123.07, noteTotalInc: 123.07, noteParts: [{ amount: 123.07, units: 20 }] }]);
+  const mixedCard = card(r, 'm');
+  assert.match(mixedCard, /data-plain-status="price_finding"/);
+  assert.match(mixedCard, /<button data-role="rc-fix-open" data-id="m" class="btn-tap mt-2 w-full font-black py-2\.5 rounded-xl text-sm flex items-center justify-center gap-2 bg-blue-600 text-white"><i class="fa-solid fa-wrench"><\/i> תקן הפרשים<\/button>/);
+  assert.match(mixedCard, COMPACT); assert.equal(mixedCard.match(COMPACT)[1], ' data-receipt="m"');
 });
 
 test('8. התקופה: זו ששאר המבצעים שבתוקף ביום התעודה חולקים; בלעדיהם — החודש של התעודה; בלי להיכנס למבצע אחר של המוצר; ואזהרת חפיפה', async () => {
