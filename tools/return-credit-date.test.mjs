@@ -94,7 +94,7 @@ test('כותרת הדוח אומרת שהחזרות לפי יום אימות ה�
 
 test('הגרסה עלתה (406 ומעלה), כולל ה-service worker', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /const APP_VERSION = '418'/); // גרסה 418: מבצע שבתעודה ואינו במערכת — "פתח מבצע"
+  assert.match(html, /const APP_VERSION = '419'/); // גרסה 419: שורות להשלמה לפני הבדיקה — בלי מסך חוסרים
   assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_line_clear'/);
-  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v418/);
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v419/);
 });

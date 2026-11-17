@@ -9,7 +9,7 @@
 // 3. קלט לא תקין: ריק — המחיר נמחק והרמז נעלם; אותיות, אפס או שלילי — "הזן מחיר חיובי", ומחיר שנשמר מהשדה רגע קודם נמחק.
 // 4. מתחת לעלות כולל מע״מ — נשמר, עם אזהרה אדומה (לא חסימה).
 // 5. שורה מקופלת ("הגיע") בלי מחיר קופה — השדה גם בה; "הגיע משהו נוסף" — גם שם; Enter בשדה סוגר את המקלדת (blur), Escape עדיין סוגר את החלון.
-// 6. הגרסה עלתה ל-418, כולל ה-service worker.
+// 6. הגרסה עלתה ל-419, כולל ה-service worker.
 // הרצה: node --test tools/line-check-pos-price.test.mjs
 import fs from 'node:fs';
 import test from 'node:test';
@@ -205,11 +205,11 @@ test('5. שורה מקופלת בלי מחיר קופה — השדה גם בה; 
   assert.equal(r.run(`$('receiptQuantityModal').classList.contains('hidden')`), true, 'Escape סוגר');
 });
 
-test('6. הגרסה עלתה ל-418, כולל ה-service worker', () => {
+test('6. הגרסה עלתה ל-419, כולל ה-service worker', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /const APP_VERSION = '418'/);
+  assert.match(html, /const APP_VERSION = '419'/);
   assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_line_clear'/);
-  assert.match(html, /<title>הזמנות יטבתה - v418 מבצע שבתעודה ואינו במערכת — פתח מבצע<\/title>/);
-  assert.match(html, /id="verBadge"[^>]*>v418 מבצע שבתעודה ואינו במערכת — פתח מבצע</);
-  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v418/);
+  assert.match(html, /<title>הזמנות יטבתה - v419 שורות להשלמה לפני הבדיקה — בלי מסך חוסרים<\/title>/);
+  assert.match(html, /id="verBadge"[^>]*>v419 שורות להשלמה לפני הבדיקה — בלי מסך חוסרים</);
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v419/);
 });
