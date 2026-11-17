@@ -620,12 +620,12 @@ test('11. הרשימה אינה מריצה את בדיקת המחירים המל
   assert.equal(r.run('auditCalls'), 3);
 });
 
-test('12. הגרסה עלתה ל-418, כולל ה-service worker; החלון החדש בדף, מעל חלון הבדיקה ומתחת לחיווי השמירה', () => {
+test('12. הגרסה עלתה ל-419, כולל ה-service worker; החלון החדש בדף, מעל חלון הבדיקה ומתחת לחיווי השמירה', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /const APP_VERSION = '418'/);
-  assert.match(html, /<title>הזמנות יטבתה - v418 מבצע שבתעודה ואינו במערכת — פתח מבצע<\/title>/);
-  assert.match(html, /id="verBadge"[^>]*>v418 מבצע שבתעודה ואינו במערכת — פתח מבצע</);
-  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v418/);
+  assert.match(html, /const APP_VERSION = '419'/);
+  assert.match(html, /<title>הזמנות יטבתה - v419 שורות להשלמה לפני הבדיקה — בלי מסך חוסרים<\/title>/);
+  assert.match(html, /id="verBadge"[^>]*>v419 שורות להשלמה לפני הבדיקה — בלי מסך חוסרים</);
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v419/);
   assert.match(html, /<div id="paperPromoModal" role="dialog" aria-modal="true" aria-label="פתיחת מבצע מהתעודה" class="hidden fixed inset-0 bg-slate-900\/60 backdrop-blur-sm items-center justify-center p-4 z-\[90\]" dir="rtl">/);
   assert.match(html, /<div id="receiptQuantityModal"[^>]* z-\[70\]"/); assert.match(html, /cloudBusyEl\.className = 'fixed inset-0 bg-black\/40 z-\[100\]/);
 });
