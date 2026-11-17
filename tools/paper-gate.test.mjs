@@ -25,7 +25,10 @@
 // 14. מבין מוצרים באותו מחיר: הספרות שנקראו גוברות על השם; בלי ספרות — כמו ב-360; שוויון — השם מכריע.
 // ה. מהירות —
 // 15. הברקוד של כל מוצר נבדק פעם אחת ולא בכל חיפוש; שינוי של ברקוד במאגר נראה מיד; וכל שורה מזוהה פעם אחת לכל חישוב — עם אותן תשובות.
-// 16. הגרסה.
+// ו. פחות שורות לאישור, ובדיקה שנמשכת —
+// 16. הנחת שורה שהיא בדיוק ברוטו פחות נטו, כששניהם אושרו בקריאה נוספת, אינה נשלחת לאישור — הרשימה עולה מיד; ומה שהחשבון אינו מוכיח נשאר.
+// 17. בדיקה שכבר התחילה ונבנית מחדש (המוצר של שורה תוקן): מה שסומן נשאר, מה שנסרק כ"הגיע משהו נוסף" עובר לשורה שלו, בלי שאלה, עם הודעה.
+// 18. הגרסה.
 // הרצה: node --test tools/paper-gate.test.mjs
 import fs from 'node:fs';
 import test from 'node:test';
@@ -171,14 +174,17 @@ test('1. התעודה נקראה ושורה אחת מחכה לזיהוי: החל
   assert.equal(review(c).pending, true, 'הבדיקה הממתינה נשארת, עם מה שנסרק');
   assert.deepEqual(list(c), ['milk 12']);
   assert.deepEqual(readyBuzzes(c), [[60, 40, 60]], 'רטט אחד');
-  assert.equal(c.toasts.at(-1), 'התעודה נקראה. נשארה שורה אחת להשלים לפני הבדיקה.');
+  assert.equal(c.toasts.at(-1), 'התעודה נקראה. צריך רק לאשר שורה אחת — ואז ממשיכים לקלוט.');
   // הכרטיס: מה נקרא, מה נשאר, מה ייפתח, ומה כבר נסרק — ובלי מילה על חוסר שנמצא
   const html = app(c), text = strip(html);
   assert.match(html, /data-paper-gate/);
-  assert.match(text, /התעודה נקראה · 3 שורות · 22 יח׳ נשארה שורה אחת להשלים לפני הבדיקה בשורה הזאת הקריאה של התעודה לא הייתה בטוחה\. היא מחכה כאן למטה\. כשתסיים — הבדיקה שורה-שורה תיפתח לבד\. מה שכבר נסרק נשמר: מוצר אחד · 12 יח׳ — יסומן ברשימה כשהיא תיפתח\. עוד לא נבדק שום חוסר — הבדיקה מתחילה רק אחרי השורה הזאת\./);
+  assert.match(text, /התעודה נקראה · 3 שורות · 22 יח׳ צריך רק לאשר שורה אחת — ואז ממשיכים לקלוט בשורה הזאת האפליקציה לא הייתה בטוחה במה שכתוב בתעודה\. היא כאן למטה: בוחרים את המוצר, או מאשרים שהמספרים נכונים\. מיד אחרי זה הבדיקה שורה-שורה נפתחת לבד, וממשיכים לקלוט את הסחורה\. מה שכבר נסרק נשמר: מוצר אחד · 12 יח׳ — יסומן ברשימה כשהיא תיפתח\. שום דבר לא חסר — עוד לא נספר כלום\./);
   for (const role of ['rc-quantity-lines', 'rc-quantity-all', 'rc-quantity-differences', 'rc-quantity-none']) assert.doesNotMatch(html, new RegExp('data-role="' + role + '"'), 'אין כפתור בדיקה שעוד אינו יכול לפעול: ' + role);
   assert.ok(html.indexOf('data-paper-gate') < html.indexOf('data-price-audit'), 'הכרטיס מעל השורות');
-  assert.match(text, /נשארה שורה אחת לבחירת מוצר .*איזה מוצר מופיע בשורה\?/);
+  assert.match(text, /נשארה שורה אחת לבחירת מוצר איזה מוצר מופיע בשורה\?/, 'הפאנל שמתחת לכרטיס — בלי פסקת הסבר שנייה');
+  assert.doesNotMatch(text, /מוצגות רק השורות שנותרו לטיפול/);
+  assert.doesNotMatch(gateText(c), /חוסר|חסרות|חסר ₪|חסר \d/, 'הכרטיס אינו מדווח על חוסר — רק "שום דבר לא חסר"');
+  assert.doesNotMatch(c.node('app').innerHTML, /data-ai-finding|חויבו \d+ יח׳ בתעודה ולא נסרקה/, 'ואין במסך כרטיסי חוסר של מסך ההשוואה');
   // ציור חוזר של המסך (כל ציור מנסה שוב את הבחירה) אינו עושה דבר: בלי רטט נוסף, בלי הודעה נוספת, ובלי לולאה
   const toasts = c.toasts.length;
   c.run('renderReceiving()'); runQueued(c); c.run('renderReceiving()'); runQueued(c);
@@ -195,10 +201,10 @@ test('2. בזמן שהשורות מחכות: הכפתור הכחול וכל אח
     assert.equal(c.run('reconcileData'), null, what + ': ההשוואה לא נבנתה');
     assert.equal(modalOpen(c), false, what);
     assert.equal(c.run('receiptQuantityIntent'), intent, what + ': הבחירה נשמרת למה שנבחר');
-    assert.equal(c.toasts.at(-1), 'נשארה שורה אחת להשלים לפני הבדיקה — היא כאן, במסך הזה.', what);
+    assert.equal(c.toasts.at(-1), 'קודם מאשרים את השורה שכאן — ואז ממשיכים לקלוט.', what);
     assert.equal(c.run('testConfirms.length'), 0, what + ': בלי שאלה');
   }
-  assert.match(gateText(c), /כשתסיים — תופיע לבד השאלה "לא הגיע כלום\?"\./, 'הכרטיס אומר מה ייפתח');
+  assert.match(gateText(c), /מיד אחרי זה תופיע לבד השאלה "לא הגיע כלום\?"\./, 'הכרטיס אומר מה ייפתח');
   assert.deepEqual(list(c), ['milk 12'], 'הספירה לא נגעה');
 });
 
@@ -232,15 +238,17 @@ test('3. הזיהוי הושלם — הרשימה נפתחת לבד עם מה ש
 test('4. שורה לבדיקה מול הנייר: "כן, הכמות והמחיר נכונים לפי הנייר" מעדכן את הכרטיס — והרשימה נפתחת לבד אחרי האחרונה', async () => {
   const doc = BIG();
   doc.rows.forEach(r => verified(r));
-  verified(doc.rows[1], products, ['lineDiscountExVat']); verified(doc.rows[2], products, ['lineDiscountExVat']);
+  // שתי שורות שבאמת צריכות עין: גם לברוטו וגם להנחה אין קריאה תומכת (הנחה לבדה, שהחשבון מוכיח, אינה נשלחת לאישור — בדיקה 16)
+  verified(doc.rows[1], products, ['grossLineTotalExVat', 'lineDiscountExVat']); verified(doc.rows[2], products, ['grossLineTotalExVat', 'lineDiscountExVat']);
   const c = await reading([doc]);
   await c.release();
   assert.equal(c.run('currentView'), 'receiving'); assert.equal(modalOpen(c), false);
-  assert.match(gateText(c), /נשארו 2 שורות להשלים לפני הבדיקה בשורות האלה הקריאה של התעודה לא הייתה בטוחה\. הן מחכות כאן למטה, אחת אחת\. .*הבדיקה מתחילה רק אחרי השורות האלה\./);
+  assert.match(gateText(c), /צריך רק לאשר 2 שורות — ואז ממשיכים לקלוט בשורות האלה האפליקציה לא הייתה בטוחה במה שכתוב בתעודה\. הן כאן למטה, אחת אחת: בוחרים את המוצר, או מאשרים שהמספרים נכונים\. מיד אחרי זה הבדיקה שורה-שורה נפתחת לבד, וממשיכים לקלוט את הסחורה\. שום דבר לא חסר — עוד לא נספר כלום\.$/);
   assert.equal(pendingTitle(c), 'נשארו 2 שורות לבדיקה מול הנייר');
   tap(c, cardOf(c, 1), 'price-confirm-values');
   // האישור הזה אינו מצייר את כל המסך (רק את הפאנל) — הכרטיס שמעל השורות חייב להתעדכן איתו
-  assert.match(strip(c.node('rcQuantityOptions').innerHTML), /נשארה שורה אחת להשלים לפני הבדיקה/);
+  assert.match(strip(c.node('rcQuantityOptions').innerHTML), /צריך רק לאשר שורה אחת — ואז ממשיכים לקלוט/);
+  assert.doesNotMatch(c.node('rcPriceAudit').innerHTML, /מוצגות רק השורות שנותרו לטיפול/, 'גם הפאנל שצויר מחדש — בלי פסקת ההסבר');
   assert.equal(pendingTitle(c), 'נשארה שורה אחת לבדיקה מול הנייר');
   runQueued(c);
   assert.equal(modalOpen(c), false, 'עוד שורה אחת מחכה'); assert.equal(c.run('receiptQuantityIntent'), 'lines');
@@ -253,7 +261,7 @@ test('4. שורה לבדיקה מול הנייר: "כן, הכמות והמחיר
 test('5. נבחר "הכל הגיע כמו בתעודה": הכרטיס אומר מה יקרה, ואחרי השורה האחרונה השאלה מופיעה לבד', async () => {
   const c = await gated('all');
   assert.equal(c.run('currentView'), 'receiving'); assert.equal(c.run('receiptQuantityIntent'), 'all');
-  assert.match(gateText(c), /כשתסיים — תופיע לבד השאלה "הכל הגיע כמו בתעודה\?"\./);
+  assert.match(gateText(c), /מיד אחרי זה תופיע לבד השאלה "הכל הגיע כמו בתעודה\?"\./);
   assert.doesNotMatch(gateText(c), /מה שכבר נסרק/, 'לא נסרק דבר');
   assert.equal(c.run('testConfirms.length'), 0);
   tap(c, cardOf(c, 1), 'price-pick-product'); runQueued(c);
@@ -270,7 +278,7 @@ test('6. טיוטה מגרסה 418 שנעצרה לפני הרשימה: הבחי�
   assert.equal(c.run('receiptQuantityIntent'), null); assert.equal(review(c).pending, true);
   c.run('renderReceiving()'); runQueued(c);
   assert.equal(c.run('receiptQuantityIntent'), 'lines', 'הרשימה עוד חייבת לעלות');
-  assert.match(gateText(c), /כשתסיים — הבדיקה שורה-שורה תיפתח לבד\./);
+  assert.match(gateText(c), /מיד אחרי זה הבדיקה שורה-שורה נפתחת לבד, וממשיכים לקלוט את הסחורה\./);
   assert.equal(c.run('currentView'), 'receiving');
   tap(c, cardOf(c, 1), 'price-pick-product'); runQueued(c);
   assert.equal(modalOpen(c), true); assert.deepEqual(marks(c), ['milk:ok,cottage:,yogurt:']);
@@ -278,7 +286,7 @@ test('6. טיוטה מגרסה 418 שנעצרה לפני הרשימה: הבחי�
   const d = await gated('all');
   d.run('receiptQuantityIntent = null; saveReceiptDraft(); renderReceiving()'); runQueued(d);
   assert.equal(d.run('receiptQuantityIntent'), null);
-  assert.match(gateText(d), /אחר כך תבחר איך לבדוק את הכמויות\./);
+  assert.match(gateText(d), /אחרי זה בוחרים איך לבדוק את הכמויות\./);
   tap(d, cardOf(d, 1), 'price-pick-product'); runQueued(d);
   assert.equal(modalOpen(d), false); assert.equal(d.run('testConfirms.length'), 0);
   assert.match(app(d), /data-role="rc-quantity-lines"/, 'כפתורי הבדיקה חזרו');
@@ -290,7 +298,7 @@ test('6. טיוטה מגרסה 418 שנעצרה לפני הרשימה: הבחי�
   assert.equal(e.run('receiptQuantityReview'), null); assert.deepEqual(list(e), ['milk 12']);
   await e.release();
   assert.equal(e.run('receiptQuantityIntent'), null, 'שום רשימה אינה "חייבת" לעלות');
-  assert.match(gateText(e), /אחר כך תבחר איך לבדוק את הכמויות\./);
+  assert.match(gateText(e), /אחרי זה בוחרים איך לבדוק את הכמויות\./);
 });
 
 test('7. כשאין שורה שאפשר להשלים כאן — כמו קודם: ההודעה הישנה ומסך ההשוואה; ושורה שהחשבון שלה סותר את עצמו היא שורה להשלמה', async () => {
@@ -316,7 +324,7 @@ test('7. כשאין שורה שאפשר להשלים כאן — כמו קודם:
   await d.release();
   assert.equal(d.run('receiptPaperScanState'), 'ok', json(d, 'receiptPaperScanProblems').join(';'));
   assert.equal(d.run('currentView'), 'receiving');
-  assert.match(gateText(d), /נשארה שורה אחת להשלים לפני הבדיקה/);
+  assert.match(gateText(d), /צריך רק לאשר שורה אחת — ואז ממשיכים לקלוט/);
   assert.match(cardOf(d, 1), /data-role="paper-row-edit"/, 'התיקון לפי הנייר — בכרטיס שמתחת');
 });
 
@@ -472,7 +480,7 @@ test('12. "בטל את הבחירה" מחזיר את השורה בדיוק למ�
   assert.equal(c.toasts.at(-1), 'הבחירה בוטלה. השורה חזרה לרשימה — בחר את המוצר מחדש.');
   assert.equal(pendingTitle(c), 'נשארה שורה אחת לבחירת מוצר');
   assert.doesNotMatch(c.run('receiptPriceAuditHtml()'), /data-price-picked/);
-  assert.match(gateText(c), /נשארה שורה אחת להשלים לפני הבדיקה/, 'השער חזר — הרשימה מחכה שוב לשורה');
+  assert.match(gateText(c), /צריך רק לאשר שורה אחת — ואז ממשיכים לקלוט/, 'השער חזר — הרשימה מחכה שוב לשורה');
   // ביטול של שורה שלא נבחרה מהמאגר — לא עושה דבר
   assert.equal(c.run('priceAuditUndoPick(0, 0)'), false);
 });
@@ -605,7 +613,117 @@ test('15. מהירות בלי שינוי בתשובות: ברקוד של מוצ�
   assert.equal(json(c, 'receiptPriceAudit().rows[1]').productId, 'cottage');
 });
 
-test('16. הגרסה עלתה ל-419, כולל הכותרת וה-service worker', () => {
+// שורת מבצע כמו שורות 26, 29 ו-32 בתעודה 9074000379: הקריאה שנבחרה קראה ברוטו, הנחה ונטו; קריאה 0 אישרה את המחיר והברוטו ופספסה את
+// ההנחה; קריאה 1 קראה את המחיר נטו ואישרה את סכום השורה. למספר ההנחה עצמו אין קריאה תומכת.
+const PROMO = [{ id: 'p-cottage', name: 'קוטג׳ 15%', pct: 15, minQty: 1, minUnit: 'unit', cartonSize: null, type: 'receipt', productIds: ['cottage'], start: '2026-11-01', end: '2026-11-30' }];
+function discounted() {
+  const doc = BIG();
+  doc.rows.forEach(r => verified(r));
+  const row = doc.rows[1]; // קוטג׳: 6 × 5.10 = 30.60, פחות 4.59 (15%) = 26.01
+  Object.assign(row, { lineDiscountExVat: 4.59, lineTotalExVat: 26.01, promotionText: '15.00%' });
+  verified(row, products, ['lineDiscountExVat']);
+  const proof = row.modelVerification, base = proof.evidence;
+  proof.fieldSupport = { quantity: [0, 1], unitPriceExVat: [0], grossLineTotalExVat: [0], lineDiscountExVat: [], lineTotalExVat: [1] };
+  proof.readings = [{ read: 2, identity: proof.identity, values: structuredClone(base) },
+    { read: 0, identity: proof.identity, values: { ...structuredClone(base), lineDiscountExVat: 0, lineTotalExVat: 30.6 } },
+    { read: 1, identity: proof.identity, values: { ...structuredClone(base), unitPriceExVat: 4.34, grossLineTotalExVat: 26.01, lineDiscountExVat: null } }];
+  doc.subtotalExVat = doc.netToChargeExVat = doc.itemsSectionTotalExVat = r2(doc.subtotalExVat - 4.59);
+  return doc;
+}
+
+test('16. הנחת שורה שהחשבון מוכיח אינה נשלחת לאישור: הרשימה עולה מיד; ומה שהחשבון אינו מוכיח — נשאר לעובד', async () => {
+  const c = await reading([discounted()], 'lines', products, structuredClone(PROMO));
+  await c.release();
+  const row = 'aiScanResponse.scan.documents[0].rows[1]', doc = 'aiScanResponse.scan.documents[0]';
+  const proven = extra => c.run(`priceAuditDiscountProvenByArithmetic(${doc}, ${extra ? '{ ...' + row + ', ' + extra + ' }' : row})`);
+  assert.equal(c.run('receiptPaperScanState'), 'ok', json(c, 'receiptPaperScanProblems').join(';'));
+  assert.deepEqual(json(c, row + '.modelVerification.issues'), ['lineDiscountExVat'], 'השרת עדיין אומר needs_review');
+  assert.equal(proven(), true);
+  assert.deepEqual(json(c, `aiModelReviewIssues(${row})`), [], 'אין מה לאשר');
+  assert.equal(c.run(`priceAuditConsensusConfirmed(${row})`), true);
+  assert.equal(pendingTitle(c), '');
+  assert.equal(c.run('receiptPaperGate()'), null, 'אין שער');
+  assert.equal(modalOpen(c), true, 'הרשימה עלתה מיד, בלי שורה לאישור');
+  assert.equal(c.run('currentView'), 'receiving');
+  assert.equal(json(c, 'receiptPriceAudit().rows[1]').result, 'match', 'המחיר נבדק כרגיל: מבצע 15% בתוקף');
+  const before = json(c, row);
+  // שום ערך לא השתנה, ורשומת ההסכמה של השרת נשארה כמו שהיא
+  assert.equal(before.lineDiscountExVat, 4.59); assert.equal(before.modelVerification.status, 'needs_review'); assert.deepEqual(before.modelVerification.fieldSupport.lineDiscountExVat, []);
+  // מה שהחשבון אינו מוכיח: ההנחה אינה ברוטו פחות נטו; ההנחה לא נקראה; שורת פיקדון
+  assert.equal(proven('lineDiscountExVat: 4.5'), false);
+  assert.equal(proven('lineDiscountExVat: null'), false);
+  assert.equal(proven('quantity: 5'), false, 'כמות × מחיר אינו הברוטו');
+  assert.equal(proven(`description: 'פיקדון'`), false);
+  // לברוטו או לנטו אין קריאה תומכת (גם כשקריאה 4 "סגרה" אותו — היא אינה קריאה תומכת); שרת ישן בלי fieldSupport
+  for (const field of ['unitPriceExVat', 'grossLineTotalExVat', 'lineTotalExVat']) {
+    c.run(`${row}.modelVerification.fieldSupport.${field} = []`);
+    assert.equal(proven(), false, field);
+    assert.deepEqual(json(c, `aiModelReviewIssues(${row})`), ['lineDiscountExVat'], field + ': השורה נשארת לאישור העובד');
+    c.run(`${row}.modelVerification.fieldSupport.${field} = [${field === 'lineTotalExVat' ? 1 : 0}]`);
+  }
+  c.run(`${row}.modelVerification.fieldSupport.grossLineTotalExVat = ['arithmetic']`);
+  assert.equal(proven(), false, 'סמן שאינו מספר קריאה אינו קריאה תומכת');
+  c.run(`${row}.modelVerification.fieldSupport.grossLineTotalExVat = [0]`);
+  assert.equal(proven(), true);
+  c.run(`globalThis.savedSupport = ${row}.modelVerification.fieldSupport; delete ${row}.modelVerification.fieldSupport`);
+  assert.equal(proven(), false, 'בלי fieldSupport');
+  c.run(`${row}.modelVerification.fieldSupport = savedSupport`);
+  // הנייר אינו מתאזן (הסיכום המודפס אחר) — החשבון של השורה לבדו אינו מספיק
+  c.run(`${doc}.__pricePaper.subtotalExVat += 1`);
+  assert.equal(proven(), false, 'נייר שאינו מתאזן');
+  c.run(`${doc}.__pricePaper.subtotalExVat -= 1`);
+  assert.equal(proven(), true);
+  // גם לצד שדה נוסף שבאמת חסר לו אישור — השורה נשארת, עם השדה ההוא בלבד
+  c.run(`${row}.modelVerification.issues = ['lineDiscountExVat', 'unitPriceExVat']; ${row}.modelVerification.fieldSupport.unitPriceExVat = []`);
+  assert.deepEqual(json(c, `aiModelReviewIssues(${row})`), ['lineDiscountExVat', 'unitPriceExVat']);
+  assert.equal(c.run(`priceAuditConsensusConfirmed(${row})`), false);
+});
+
+test('17. בדיקה שכבר התחילה ונבנית מחדש כי המוצר של שורה תוקן: מה שסומן נשאר, מה שנסרק כ"נוסף" עובר לשורה שלו — בלי שאלה, עם הודעה', async () => {
+  const c = await reading([BIG()]);
+  await scanQty(c, '7290000000008', 12);
+  await c.release();
+  assert.equal(modalOpen(c), true);
+  assert.deepEqual(marks(c), ['milk:ok,cottage:,yogurt:']);
+  // בשורה 3 הרשימה אומרת "יוגורט", אבל מה שהגיע הוא שמנת: המשתמש מוסיף אותה כ"הגיע משהו נוסף" (4 יח׳), וגם מוצר שבאמת אינו בתעודה
+  click(c, { extraAdd: 'cream' }); c.run(`receiptLineCheckInput({ target: { dataset: { extraGot: '0' }, value: '4' } })`);
+  click(c, { extraAdd: 'soy' }); c.run(`receiptLineCheckInput({ target: { dataset: { extraGot: '1' }, value: '2' } })`);
+  click(c, { lineMark: '0:1:ok' });
+  assert.deepEqual(review(c).extras.map(x => x.productId + ' ' + x.got), ['cream 4', 'soy 2']);
+  // "חזרה", והמוצר של שורה 3 מתוקן (ברקוד שהוקלד מהנייר) — הכמויות שבתעודה השתנו, הספירה לא
+  c.run('closeReceiptQuantityReviewByUser()');
+  c.run(`aiApplyManualPaperBarcode(aiScanResponse.scan.documents[0].rows[2], '7290000000039', 'cream')`); runQueued(c);
+  c.run('testConfirms.length = 0; startReceiptLineCheck()'); runQueued(c);
+  assert.equal(c.run('testConfirms.length'), 0, 'בלי "כבר נספרו…" — המשתמש באמצע הבדיקה');
+  assert.equal(modalOpen(c), true);
+  assert.deepEqual(marks(c), ['milk:ok,cottage:ok,cream:ok'], 'מה שסומן נשאר; השמנת שנסרקה (4 = 4) סומנה בשורה שלה');
+  assert.deepEqual(review(c).extras.map(x => x.productId + ' ' + x.got), ['soy 2'], 'מה שאינו בתעודה נשאר "נוסף"; השמנת כבר לא שם');
+  assert.equal(c.run('receiptLineNotice.text'), 'הרשימה עודכנה — המוצר תוקן בשורה 3. מה שכבר סימנת נשאר, ומה שסרקת מהם סומן.');
+  // כמות אחרת ממה שבתעודה — "אחרת" עם המספר, כמו בכל סריקה (410)
+  const d = await reading([BIG()]);
+  await d.release();
+  click(d, { extraAdd: 'cream' }); d.run(`receiptLineCheckInput({ target: { dataset: { extraGot: '0' }, value: '3' } })`);
+  d.run('closeReceiptQuantityReviewByUser()');
+  d.run(`aiApplyManualPaperBarcode(aiScanResponse.scan.documents[0].rows[2], '7290000000039', 'cream')`); runQueued(d);
+  d.run('testConfirms.length = 0; startReceiptLineCheck()'); runQueued(d);
+  assert.equal(d.run('testConfirms.length'), 0);
+  assert.deepEqual(marks(d), ['milk:,cottage:,cream:qty:3']);
+  assert.equal(d.run('receiptLineNotice.text'), 'הרשימה עודכנה — המוצר תוקן בשורה 3. מה שכבר סימנת נשאר, ומה שסרקת מהם סומן.');
+  // בלי שום דבר שנסרק מהמוצר החדש — ההודעה אומרת רק מה תוקן, והשורה מחכה לסימון
+  const e = await reading([BIG()]);
+  await e.release();
+  click(e, { lineMark: '0:0:ok' });
+  e.run('closeReceiptQuantityReviewByUser()');
+  e.run(`aiApplyManualPaperBarcode(aiScanResponse.scan.documents[0].rows[2], '7290000000039', 'cream')`); runQueued(e);
+  e.run('testConfirms.length = 0; startReceiptLineCheck()'); runQueued(e);
+  assert.deepEqual(marks(e), ['milk:ok,cottage:,cream:']);
+  assert.equal(e.run('receiptLineNotice.text'), 'הרשימה עודכנה — המוצר תוקן בשורה 3. מה שכבר סימנת נשאר.');
+  // חזרה לאותה בדיקה בלי שום שינוי — בלי הודעה (resume), כמו קודם
+  e.run('closeReceiptQuantityReviewByUser(); startReceiptLineCheck()'); runQueued(e);
+  assert.equal(e.run('receiptLineNotice'), null); assert.deepEqual(marks(e), ['milk:ok,cottage:,cream:']);
+});
+
+test('18. הגרסה עלתה ל-419, כולל הכותרת וה-service worker', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   assert.match(html, /const APP_VERSION = '419'/);
   assert.match(html, /<title>הזמנות יטבתה - v419 שורות להשלמה לפני הבדיקה — בלי מסך חוסרים<\/title>/);

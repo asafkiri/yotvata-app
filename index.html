@@ -698,7 +698,7 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '419'; // שורות שמחכות להכרעה לפני הבדיקה — בלי מסך ההשוואה; בחירת מוצר מהמאגר לשורה שלא זוהתה; ספרות שנקראו גוברות על השם; מסך ההשוואה מתרענן אחרי אישור
+const APP_VERSION = '419'; // שורות שמחכות לאישור לפני הבדיקה — כרטיס אחד במקום מסך ההשוואה; הנחה שהחשבון מוכיח אינה נשלחת לאישור; בחירת מוצר מהמאגר לשורה שלא זוהתה; ספרות שנקראו גוברות על השם; מהירות
 // v398: תווית הגרסה ביומן הפעולות ובקובץ הגיבוי (עד כאן מחרוזת קבועה שנשארה 'v396_second_strong_read')
 const APP_VERSION_LABEL = 'v' + APP_VERSION + '_line_clear';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
@@ -9334,7 +9334,7 @@ function receiptManualReceivingHtml() {
     '<h2 class="font-black text-xl text-slate-800 mb-3">בדיקת הקליטה</h2>' +
     '<div id="rcPaperStatus">' + receiptManualStatusHtml() + '</div>' +
     '<div id="rcQuantityOptions">' + receiptQuantityButtonsHtml(gate) + '</div>' +
-    '<div id="rcPriceAudit">' + (!running ? receiptPriceAuditHtml(gate ? gate.audit : undefined) : '') + '</div>' + // v419: אותה בדיקת מחירים שהשער כבר חישב
+    '<div id="rcPriceAudit">' + (!running ? receiptPriceAuditHtml(gate ? gate.audit : undefined, { quiet: !!gate }) : '') + '</div>' + // v419: אותה בדיקת מחירים שהשער כבר חישב
     // v417: "מעבר לקליטה בסריקת מוצרים" ירד — הסריקה היא חלק מהבדיקה שורה-שורה ("סרוק מוצר" בתחתית החלון)
     deliveryCreditsHtml() + '</section>';
 }
@@ -9374,29 +9374,33 @@ function receiptPaperGateOnce(fn) {
   receiptPaperGateShared = { value: null, done: false };
   try { return fn(); } finally { receiptPaperGateShared = outer; }
 }
+// הניסוח — במילים של בעל העסק (17.11.2026): "שיהיה יותר מובן שצריך רק לאשר את השורות האלה ואפשר להמשיך לקלוט את הסחורה", ו"שלא יופיע
+// ישר חוסר בכל המוצרים — זה מלחיץ את המשתמש".
 const RECEIPT_GATE_NEXT = {
-  lines: 'כשתסיים — הבדיקה שורה-שורה תיפתח לבד.',
-  all: 'כשתסיים — תופיע לבד השאלה "הכל הגיע כמו בתעודה?".',
-  differences: 'כשתסיים — רשימת החוסרים והעודפים תיפתח לבד.',
-  none: 'כשתסיים — תופיע לבד השאלה "לא הגיע כלום?".' };
-function receiptPaperGateTitle(gate) {
+  lines: 'מיד אחרי זה הבדיקה שורה-שורה נפתחת לבד, וממשיכים לקלוט את הסחורה.',
+  all: 'מיד אחרי זה תופיע לבד השאלה "הכל הגיע כמו בתעודה?".',
+  differences: 'מיד אחרי זה רשימת החוסרים והעודפים תיפתח לבד.',
+  none: 'מיד אחרי זה תופיע לבד השאלה "לא הגיע כלום?".' };
+function receiptPaperGateWhat(gate) {
   const n = gate.rows.length;
-  return n === 1 ? 'נשארה שורה אחת להשלים לפני הבדיקה' : n ? 'נשארו ' + n + ' שורות להשלים לפני הבדיקה'
-    : gate.reviews.length === 1 ? 'נשאר לאשר את סיכום התעודה לפני הבדיקה' : 'נשאר לאשר את סיכומי התעודות לפני הבדיקה';
+  return n === 1 ? 'שורה אחת' : n ? n + ' שורות' : gate.reviews.length === 1 ? 'את סיכום התעודה' : 'את סיכומי התעודות';
 }
+function receiptPaperGateTitle(gate) { return 'צריך רק לאשר ' + receiptPaperGateWhat(gate) + ' — ואז ממשיכים לקלוט'; }
 function receiptPaperGateHtml(gate) {
   const docs = aiScanResponse.scan.documents || [], next = receiptQuantityIntent, n = gate.rows.length;
   const paperRows = docs.reduce((a, d) => a + (Array.isArray(d.rows) ? d.rows.filter(r => r && Number(r.quantity) > 0 && !/פ.?קדון/.test(String(r.description || ''))).length : 0), 0);
   const scannedUnits = receiptList.reduce((a, l) => a + (Number(l && l.qty) || 0), 0);
+  const where = n === 1 ? 'בשורה הזאת האפליקציה לא הייתה בטוחה במה שכתוב בתעודה. היא כאן למטה: בוחרים את המוצר, או מאשרים שהמספרים נכונים. '
+    : n ? 'בשורות האלה האפליקציה לא הייתה בטוחה במה שכתוב בתעודה. הן כאן למטה, אחת אחת: בוחרים את המוצר, או מאשרים שהמספרים נכונים. '
+    : 'הוא כאן למטה: בודקים אותו מול הנייר ומאשרים. ';
   return '<div data-paper-gate role="status" class="rounded-2xl border-2 border-amber-300 bg-amber-50 p-4 mb-3">' +
     '<div class="text-sm font-black text-emerald-800"><i class="fa-solid fa-file-circle-check" aria-hidden="true"></i> ' + (docs.length > 1 ? docs.length + ' התעודות נקראו' : 'התעודה נקראה') +
       ' · ' + receiptLineRowsText(paperRows) + (receiptNoteUnits != null ? ' · ' + receiptNoteUnits + ' יח׳' : '') + '</div>' +
     '<div class="font-black text-lg text-amber-900 leading-tight mt-2">' + receiptPaperGateTitle(gate) + '</div>' +
-    '<div class="text-sm font-bold text-slate-700 mt-1">' + (n === 1 ? 'בשורה הזאת הקריאה של התעודה לא הייתה בטוחה. היא מחכה כאן למטה. ' : n ? 'בשורות האלה הקריאה של התעודה לא הייתה בטוחה. הן מחכות כאן למטה, אחת אחת. ' : 'הוא מחכה כאן למטה. ') +
-      (next && RECEIPT_GATE_NEXT[next] ? RECEIPT_GATE_NEXT[next] : 'אחר כך תבחר איך לבדוק את הכמויות.') + '</div>' +
+    '<div class="text-sm font-bold text-slate-700 mt-1">' + where + (next && RECEIPT_GATE_NEXT[next] ? RECEIPT_GATE_NEXT[next] : 'אחרי זה בוחרים איך לבדוק את הכמויות.') + '</div>' +
     (scannedUnits > 0 ? '<div class="text-sm font-bold text-slate-600 mt-2"><i class="fa-solid fa-barcode" aria-hidden="true"></i> מה שכבר נסרק נשמר: ' + receiptLineProductsText(receiptList.length) + ' · ' + scannedUnits + ' יח׳' +
       (next === 'lines' ? ' — יסומן ברשימה כשהיא תיפתח.' : '.') + '</div>' : '') +
-    '<div class="text-xs font-bold text-slate-500 mt-2">עוד לא נבדק שום חוסר — הבדיקה מתחילה רק אחרי ' + (n === 1 ? 'השורה הזאת' : n ? 'השורות האלה' : 'האישור') + '.</div></div>';
+    '<div class="text-sm font-black text-emerald-800 mt-2">שום דבר לא חסר — עוד לא נספר כלום.</div></div>';
 }
 // טיוטה מגרסה 418 ומטה שנעצרה בדיוק כאן: שם הבחירה נמחקה לפני שמסך ההשוואה נפתח, ונשארה רק הבדיקה הממתינה (החלון שבו סרקו בזמן
 // הקריאה). הרשימה עוד "חייבת" לעלות, ולכן הבחירה חוזרת — רק כשיש שער, ורק כשיש בדיקה ממתינה.
@@ -9431,7 +9435,8 @@ function receiptCountBlocked(intent) {
   if (RECEIPT_QUANTITY_INTENTS.includes(intent) && receiptQuantityIntent !== intent) { receiptQuantityIntent = intent; saveReceiptDraft(); }
   if (currentView !== 'receiving') setView('receiving'); else renderReceiving();
   window.scrollTo(0, 0);
-  showToast(receiptPaperGateTitle(gate) + ' — ' + (gate.rows.length === 1 ? 'היא' : gate.rows.length ? 'הן' : 'הוא') + ' כאן, במסך הזה.', null, null, 4500);
+  const n = gate.rows.length;
+  showToast('קודם מאשרים ' + (n === 1 ? 'את השורה שכאן' : n ? 'את ' + n + ' השורות שכאן' : receiptPaperGateWhat(gate) + ' שכאן') + ' — ואז ממשיכים לקלוט.', null, null, 4500);
 }
 function receiptQuantityButtonsHtml(known) {
   if (receiptNoDoc || receiptAttachTarget || receiptPaperScanState !== 'ok' || !aiScanResponse) return '';
@@ -9663,9 +9668,11 @@ function receiptLineCheckDocs() {
 // שלו) — כל שורותיו "הגיע"; מוצר בשורה אחת שנסרק בכמות אחרת — "אחרת" עם המספר, כך שהחוסר או העודף מול העיניים; מוצר בכמה
 // תעודות שנסרק בכמות שאינה הסך — נשאר פתוח, בלי לנחש לאיזו תעודה שייכות היחידות, עם ההערה כמה נסרק (l.scanned). מוצר שאחת
 // משורותיו כבר סומנה (בבדיקה קודמת) — לא נוגעים בו. "סיום" עדיין דורש שכל שורה תסומן, אז שום דבר לא נסגר בלי שראו אותו.
-function receiptLineCarryScanned(docs) {
+function receiptLineCarryScanned(docs, moved) {
   const scanned = new Map();
   receiptList.forEach(l => { const q = Number(l && l.qty) || 0; if (l && q > 0) scanned.set(l.productId, (scanned.get(l.productId) || 0) + q); });
+  // v419: מה שנוסף ב"הגיע משהו נוסף" ועכשיו נמצא בתעודה — הכמות שהוקלדה שם היא העדכנית, והיא שעוברת לשורה
+  if (moved) moved.forEach((q, pid) => scanned.set(pid, q));
   if (!scanned.size) return;
   const byProduct = new Map();
   docs.forEach(d => (d.lines || []).forEach(l => { if (!byProduct.has(l.productId)) byProduct.set(l.productId, []); byProduct.get(l.productId).push(l); }));
@@ -9711,7 +9718,12 @@ function receiptLineCheckFresh(found, prev) {
   // v417: הרשימה עולה אחרי שכבר סרקו (בדיקה ממתינה) — יחידה בודדת שנסרקה כשבתעודה מארז החיוב שלה, או להפך, עוברת לשורה שבתעודה
   const fromPending = !!(prev && prev.mode === 'lines' && prev.pending);
   if (fromPending) receiptLineCarryKin(onPaper);
-  receiptLineCarryScanned(docs); // v410
+  // v419: בדיקה שכבר התחילה נבנית מחדש (המוצר של שורה תוקן, או נוספה תעודה), ומוצר שנסרק בה כ"הגיע משהו נוסף" נמצא עכשיו בתעודה —
+  // הוא עובר לשורה שלו לפי אותו כלל של 410, במקום להיעלם ולהשאיר את השורה לא מסומנת. מהשטח (17.11.2026): "דנונה פרו וניל עוגיות" נסרק
+  // כנוסף, כי בשורה 17 האפליקציה שמה "דנונה פרו וניל"; כשהשורה מתוקנת, 12 היחידות שנסרקו הן בדיוק מה שבתעודה.
+  const moved = new Map();
+  if (prev && prev.mode === 'lines' && !prev.pending) (prev.extras || []).forEach(x => { const got = x && onPaper.has(x.productId) ? receiptLineExtraGot(x) : null; if (got != null) moved.set(x.productId, got); });
+  receiptLineCarryScanned(docs, moved); // v410
   receiptLineGroupsNormalize({ docs }); // v412
   // מה שנספר ואינו בתעודות — "הגיע משהו נוסף" (כמו העודפים שנספרו ב"יש חוסרים או עודפים"); מה שכבר הוסף שם — נשאר
   const extras = (prev && prev.mode === 'lines' ? (prev.extras || []) : []).filter(x => x && !onPaper.has(x.productId)
@@ -10397,6 +10409,20 @@ function receiptLineArrivedInScanner() {
   next.touched = true;
   renderReceiptLineScanCard();
 }
+// v419: בדיקה שכבר התחילה נבנתה מחדש כי מוצר של שורה השתנה (תוקן ביד, או שהזיהוי שלו השתפר בגרסה חדשה). בראש החלון נאמר באילו
+// שורות, ושמה שסומן נשאר — אחרת שורה שהייתה "פסטה טורטליני" והפכה ל"רביולי גבינה" נראית כמו טעות חדשה.
+function receiptLineRebuiltNotice(prev, next) {
+  const before = new Map();
+  (prev.docs || []).forEach(d => (d.lines || []).forEach(l => before.set((d.scanId || '#' + d.doc) + '|' + l.line, l.productId)));
+  const changed = [];
+  (next.docs || []).forEach((d, di) => (d.lines || []).forEach(l => { const was = before.get((d.scanId || '#' + d.doc) + '|' + l.line); if (was != null && was !== l.productId) changed.push({ di, l }); }));
+  if (!changed.length) return null;
+  const multi = (next.docs || []).length > 1, list = n => n.length > 1 ? n.slice(0, -1).join(', ') + ' ו-' + n[n.length - 1] : String(n[0]);
+  const where = [...new Set(changed.map(c => c.di))].map(di => { const lines = changed.filter(c => c.di === di).map(c => c.l.line);
+    return (multi ? 'תעודה ' + (di + 1) + ', ' : '') + (lines.length > 1 ? 'שורות ' : 'שורה ') + list(lines); }).join(' · ');
+  const carried = changed.filter(c => c.l.mark).length;
+  return { tone: 'ok', text: 'הרשימה עודכנה — המוצר תוקן ב' + where + '. מה שכבר סימנת נשאר' + (carried ? ', ומה שסרקת מהם סומן' : '') + '.' };
+}
 function startReceiptLineCheck() {
   if (!canEditDraft('receiving')) return;
   // v417: התעודה עוד לא נקראה (או שאין תעודה) — החלון נפתח בכל זאת, וסורקים; השורות יעלו בו כשהקריאה תסתיים
@@ -10415,12 +10441,14 @@ function startReceiptLineCheck() {
   const r = receiptQuantityReview;
   const fromPending = !!r && r.mode === 'lines' && !!r.pending; // v417: כבר סרקו בחלון הזה, לפני שהרשימה עלתה
   const resume = !!r && r.mode === 'lines' && !r.pending && r.key === receiptQuantityPaperKey() && r.itemsKey === JSON.stringify(receiptList) && r.paperRows === receiptQuantityRowsSignature(found.paperRows);
+  // v419: הבדיקה כבר התחילה, והתעודה (או המוצר של שורה בה) השתנתה מאז — הספירה עצמה לא. (ספירה שהשתנתה בינתיים — השאלה של 410, כמו קודם.)
+  const rebuilt = !!r && r.mode === 'lines' && !r.pending && !resume && r.itemsKey === JSON.stringify(receiptList);
   const begin = () => {
     receiptCountingMode = 'manual';
     // הקליטה השתנתה מאז (תעודה נוספת נכנסה, למשל) — בדיקה חדשה, ומה שכבר סומן בשורות שנשארו כמו שהן — נשאר
     if (!resume) { receiptQuantityReview = receiptLineCheckFresh(found, r && r.mode === 'lines' ? r : null); receiptLineDropAsk = null; receiptLineSearchTerm = ''; }
     else receiptLineGroupsNormalize(receiptQuantityReview); // v412: טיוטה מגרסה קודמת — הקבוצות מיושרות גם בהמשך מאותו מקום
-    receiptLineNotice = fromPending ? receiptLineArrivedNotice(receiptQuantityReview) : null; receiptLineOpen.clear(); // v405: בפתיחה, מה שכבר סומן — מקופל
+    receiptLineNotice = fromPending ? receiptLineArrivedNotice(receiptQuantityReview) : rebuilt ? receiptLineRebuiltNotice(r, receiptQuantityReview) : null; receiptLineOpen.clear(); // v405: בפתיחה, מה שכבר סומן — מקופל
     saveReceiptDraft(); renderReceiving();
     if (receiptLineScannerOpen()) { receiptLineArrivedInScanner(); return; } // v417: המצלמה פתוחה — הרשימה מחכה מאחוריה
     renderReceiptQuantityReview();
@@ -10429,7 +10457,8 @@ function startReceiptLineCheck() {
   const counted = receiptList.reduce((a, l) => a + (Number(l && l.qty) || 0), 0);
   // v410: מה שנסרק עובר לרשימה (receiptLineCarryScanned), והספירה הסופית היא מה שסומן בשורות
   // v417: בלי השאלה כשהסריקה נעשתה בחלון הבדיקה עצמו (בדיקה ממתינה) — המשתמש כבר בתוך הבדיקה, והיא פשוט ממשיכה
-  if (counted > 0 && !resume && !fromPending) showConfirm('בדיקה שורה-שורה', 'כבר נספרו ' + counted + ' יח׳ — הם עוברים לרשימה: מוצר שנסרק בדיוק כמו בתעודה מסומן "הגיע", כמות אחרת מסומנת "אחרת" עם המספר, והשאר ממתינים לסימון. מה שנספר ואינו בתעודות יופיע ב"הגיע משהו נוסף". בסיום, הספירה היא מה שסומן בשורות.', 'התחל בדיקה', begin);
+  // v419: וגם לא כשבדיקה שכבר התחילה נבנית מחדש — המשתמש באמצע הבדיקה, ומה שסימן נשאר
+  if (counted > 0 && !resume && !fromPending && !rebuilt) showConfirm('בדיקה שורה-שורה', 'כבר נספרו ' + counted + ' יח׳ — הם עוברים לרשימה: מוצר שנסרק בדיוק כמו בתעודה מסומן "הגיע", כמות אחרת מסומנת "אחרת" עם המספר, והשאר ממתינים לסימון. מה שנספר ואינו בתעודות יופיע ב"הגיע משהו נוסף". בסיום, הספירה היא מה שסומן בשורות.', 'התחל בדיקה', begin);
   else begin();
 }
 function receiptLineCheckClick(e) {
@@ -15347,6 +15376,28 @@ function priceAuditQuantityProvenByArithmetic(doc, row) {
   const check = yotvataPaperCheck(priceAuditSource(doc) || doc, priceAuditDocumentPageCount(doc));
   return priceAuditQuantityArithmetic(row, check.ok && Number.isInteger(check.units) && check.units > 0).proven;
 }
+// ===== v419: הנחת שורה שהחשבון מוכיח לא דורשת אישור =====
+// מהשטח (17.11.2026, תעודה 9074000379, שורות 26, 29, 32 — שלוש שורות מבצע של 15%): הקריאה שנבחרה קראה ברוטו, הנחה ונטו (46.68 − 7.00
+// = 39.68). קריאה אחרת אישרה את מחיר היחידה ואת הברוטו אבל פספסה את עמודת ההנחה; קריאה שלישית קראה את המחיר נטו ואישרה את סכום
+// השורה. אף קריאה לא חזרה על מספר ההנחה עצמו, השרת החזיר needs_review עם issues ['lineDiscountExVat'], והאפליקציה ביקשה מהעובד
+// "בדוק את המחיר והסכום מול הנייר" — על מספר שהוא בדיוק ברוטו פחות נטו, ששניהם כבר אושרו. שלוש מתוך ארבע השורות שעצרו את הקליטה
+// ההיא היו כאלה.
+// הכלל (כמו הכמות ב-367): ההנחה נחשבת מאומתת בחשבון כאשר (1) הכמות שלמה וחיובית ומחיר היחידה חיובי; (2) למחיר היחידה, לברוטו ולנטו
+// של הקריאה שנבחרה יש קריאה תומכת אחת לפחות, והברוטו וההנחה נקראו כמספרים; (3) באגורות שלמות: round(כמות × מחיר) = ברוטו, וברוטו
+// − |הנחה| = נטו; (4) הנייר שנבחר עובר את בדיקת הנייר (Σ שורות = הסיכום המודפס). הנחה כזאת יוצאת מרשימת הבעיות (aiModelReviewIssues),
+// והשורה נחשבת מאושרת בהסכמה (priceAuditConsensusConfirmed). שום ערך אינו משתנה; שדה שקריאה 4 סגרה אינו "קריאה תומכת" (כמו בכמות);
+// שורת פיקדון — לא כאן; ושורה שהחשבון לא מוכיח נשארת לאישור העובד, כמו קודם.
+function priceAuditDiscountProvenByArithmetic(doc, row) {
+  const proof = row && row.modelVerification;
+  const support = proof && proof.version === 1 && proof.fieldSupport && typeof proof.fieldSupport === 'object' ? proof.fieldSupport : null;
+  if (!doc || !support || /פ.?קדון/.test(String(row.description || ''))) return false;
+  const number = v => typeof v === 'number' && Number.isFinite(v);
+  const supported = field => Array.isArray(support[field]) && support[field].some(Number.isInteger);
+  if (!number(row.grossLineTotalExVat) || !number(row.lineDiscountExVat)) return false;
+  if (!supported('unitPriceExVat') || !supported('grossLineTotalExVat') || !supported('lineTotalExVat')) return false;
+  if (!priceAuditRowArithmeticHolds(row)) return false;
+  return yotvataPaperCheck(priceAuditSource(doc) || doc, priceAuditDocumentPageCount(doc)).ok;
+}
 // v396: השם של קריאה בכרטיסים: "קריאה N", ולקריאות המודל החזק — "(המודל החזק)" לקריאת ההכרעה ו"(המודל
 // החזק, פעם שנייה)" לקריאה הרביעית של שירות 153 (AI_SCAN_SECOND_STRONG_READ). עד v395 שתיהן נקראו "(המודל
 // החזק)", והעובד לא יכול היה לדעת שאותו מודל קרא פעמיים. תצוגה בלבד.
@@ -15426,8 +15477,10 @@ function aiModelReviewIssues(row) {
   const financialFields = ['quantity', 'unitPriceExVat', 'grossLineTotalExVat', 'lineDiscountExVat', 'lineTotalExVat'];
   // v367: כמות בלי קריאה תומכת שהחשבון מוכיח על נייר מסתכם אינה בעיה (שרת v149; שרת v150 כבר הוריד אותה בעצמו).
   const quantityProven = (proof.issues || []).includes('quantity') && priceAuditQuantityProvenByArithmetic(doc, row);
+  // v419: וכך גם הנחת שורה שהיא בדיוק ברוטו פחות נטו, כששניהם אושרו בקריאה נוספת
+  const discountProven = (proof.issues || []).includes('lineDiscountExVat') && priceAuditDiscountProvenByArithmetic(doc, row);
   const issues = (proof.issues || []).filter(f => !(f === 'identity' && identityConfirmed) && !(financialFields.includes(f) && (corrected || approved))
-    && !(f === 'quantity' && quantityProven));
+    && !(f === 'quantity' && quantityProven) && !(f === 'lineDiscountExVat' && discountProven));
   if (!corrected && !approved && proof.evidence) for (const key of financialFields) {
     if (JSON.stringify(proof.evidence[key] ?? null) !== JSON.stringify(row[key] ?? null) && !issues.includes(key)) issues.push(key);
   }
@@ -15445,10 +15498,13 @@ function priceAuditConsensusConfirmed(row) {
   // v367: כמות שהחשבון הוכיח נחשבת מוסכמת — שרת v149 (needs_review, issues ['quantity'] בלבד:
   // arithmeticSettled) וגם לצד זהות שהעובד אישר. שרת v150 כבר מחזיר 'verified' עם הסמן.
   const quantityProven = !!proof && (proof.issues || []).includes('quantity') && priceAuditQuantityProvenByArithmetic(priceAuditRowDocument(row), row);
-  const settled = f => f === 'identity' || (f === 'quantity' && quantityProven);
+  // v419: וכך גם הנחת שורה שהחשבון הוכיח (priceAuditDiscountProvenByArithmetic)
+  const discountProven = !!proof && (proof.issues || []).includes('lineDiscountExVat') && priceAuditDiscountProvenByArithmetic(priceAuditRowDocument(row), row);
+  const proven = f => (f === 'quantity' && quantityProven) || (f === 'lineDiscountExVat' && discountProven);
+  const settled = f => f === 'identity' || proven(f);
   const identityReviewed = resolution && resolution.product && row.barcodeMatchMethod === 'user_confirmed'
     && (proof && proof.issues || []).every(settled);
-  const arithmeticSettled = quantityProven && proof.status === 'needs_review' && (proof.issues || []).every(f => f === 'quantity');
+  const arithmeticSettled = (quantityProven || discountProven) && proof.status === 'needs_review' && (proof.issues || []).every(proven);
   const priceMatched = resolution && resolution.verifiedPrice === true;
   return !!(proof && proof.version === 1 && (['agreed', 'verified'].includes(proof.status) || arithmeticSettled || identityReviewed || priceMatched)
     && proof.evidence && !aiModelReviewIssues(row).length
@@ -16682,7 +16738,8 @@ function priceAuditActionCardHtml(r, paperPromos) {
     aiSourceRowHtml(r.documentIndex, r.rowIndex, { uncertain: !r.productId }) + action + priceAuditTechnicalFoldHtml(dispute, 'data-row-dispute-fold') + calculation + '</article>';
 }
 function receiptPriceAuditHtml(report, options) { return aiResolveScope(() => receiptPriceAuditHtmlNow(report, options)); } // v419
-function receiptPriceAuditHtmlNow(report, { summary = false } = {}) {
+// quiet (v419): הכרטיס שמעל הפאנל כבר הסביר מה צריך לעשות — בלי פסקת ההסבר של הפאנל עצמו
+function receiptPriceAuditHtmlNow(report, { summary = false, quiet = false } = {}) {
   const a = report || receiptPriceAudit();
   if (a.state === 'empty') return '';
   const shell = '<section data-price-audit class="rounded-xl border-2 border-amber-300 bg-white p-3 mb-3 text-sm" dir="rtl" aria-label="בדיקת מחירים ומבצעים">';
@@ -16719,7 +16776,7 @@ function receiptPriceAuditHtmlNow(report, { summary = false } = {}) {
     '><summary class="flex items-center justify-between gap-2 cursor-pointer font-black ' +
     (openPanel ? 'text-amber-900' : 'text-emerald-800') + '">' +
     '<span role="status" aria-live="polite">' + title + '</span><i class="fa-solid fa-chevron-down hist-chevron shrink-0"></i></summary>' +
-    (pending.length ? '<p class="mt-2 text-slate-600">מוצגות רק השורות שנותרו לטיפול. לאחר זיהוי המוצר המחיר נבדק אוטומטית, ושורה תקינה יוצאת מהרשימה.</p>' : '') +
+    (pending.length && !quiet ? '<p class="mt-2 text-slate-600">מוצגות רק השורות שנותרו לטיפול. לאחר זיהוי המוצר המחיר נבדק אוטומטית, ושורה תקינה יוצאת מהרשימה.</p>' : '') +
     (correctionProblems.length && !gaps.length ? '<div role="alert" class="rounded-xl bg-amber-50 border-2 border-amber-300 p-3 mt-3"><b>התיקון נשמר, אבל השורות עדיין אינן תואמות לסיכום החשבונית.</b><p class="mt-1">בדוק את התיקון האחרון או תקן שורות נוספות לפי הנייר.</p>' + correctionProblems.map(d => '<p class="mt-1 text-xs">תעודה ' + htmlEscape(d.number || String(d.index + 1)) + ': ' + htmlEscape(d.problems.join(' · ')) + '</p>').join('') + '</div>' : '') +
     gaps.map(yotvataPaperGapCardHtml).join('') +
     tasks.map(r => priceAuditActionCardHtml(r, paperPromos)).join('') +
@@ -16797,6 +16854,9 @@ function refreshReconcilePriceAudit() {
 function refreshPriceAuditViews() {
   refreshPriceScannerNotice();
   refreshReconcilePriceAudit(); // v419
+  // v419: במסך הקליטה של הבדיקה הידנית — השער (שורות שמחכות לאישור לפני הבדיקה) מחושב פעם אחת, לפאנל ולכרטיס שמעליו
+  const gated = currentView === 'receiving' && receiptUsesManualQuantities() && !receivingPhotoGateShown();
+  const gate = gated ? receiptPaperGate() : null;
   ['rcPriceAudit', 'rsPriceAudit'].forEach(id => {
     const host = $(id); if (!host) return;
     const active = document.activeElement;
@@ -16807,13 +16867,13 @@ function refreshPriceAuditViews() {
     }
     const folds = ['[data-price-panel]'];
     const expanded = folds.map(sel => { const el = host.querySelector(sel); return !!(el && el.open); });
-    host.innerHTML = receiptPriceAuditHtml(undefined, { summary: id === 'rsPriceAudit' });
+    host.innerHTML = receiptPriceAuditHtml(gate && id === 'rcPriceAudit' ? gate.audit : undefined, { summary: id === 'rsPriceAudit', quiet: !!gate && id === 'rcPriceAudit' });
     folds.forEach((sel, i) => { const el = host.querySelector(sel); if (el && expanded[i]) el.open = true; });
   });
-  // v419: אחרי הכרעה בשורה — הכרטיס שמעל השורות ("נשארו 3 שורות להשלים לפני הבדיקה") מתעדכן, וכשהשורה האחרונה הושלמה הבדיקה שנבחרה
+  // v419: אחרי הכרעה בשורה — הכרטיס שמעל השורות ("צריך רק לאשר 3 שורות — ואז ממשיכים לקלוט") מתעדכן, וכשהשורה האחרונה הושלמה הבדיקה שנבחרה
   // נפתחת לבד (הבחירה נשארה כל הזמן שהשורות חיכו)
-  if (currentView === 'receiving' && receiptUsesManualQuantities() && !receivingPhotoGateShown()) {
-    const gate = receiptPaperGate(), options = $('rcQuantityOptions');
+  if (gated) {
+    const options = $('rcQuantityOptions');
     if (options) options.innerHTML = receiptQuantityButtonsHtml(gate);
     if (!gate && receiptQuantityIntent && receiptPaperScanState === 'ok' && !aiScanBusy) setTimeout(receiptQuantityIntentRun, 0);
   }

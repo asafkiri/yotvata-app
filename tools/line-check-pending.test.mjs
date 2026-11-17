@@ -348,8 +348,8 @@ test('5. התעודה נקראה אבל צריך להשלים זיהוי מוצ�
   assert.equal(c.run('reconcileData'), null);
   assert.equal(modalOpen(c), false, 'החלון נסגר — השורה להשלמה במסך שמאחוריו');
   assert.equal(c.run('receiptQuantityIntent'), 'lines', 'הבחירה נשארת — הרשימה תיפתח לבד אחרי הזיהוי');
-  assert.match(strip(app(c)), /התעודה נקראה · 2 שורות · 18 יח׳ נשארה שורה אחת להשלים לפני הבדיקה/);
-  assert.equal(c.toasts.at(-1), 'התעודה נקראה. נשארה שורה אחת להשלים לפני הבדיקה.');
+  assert.match(strip(app(c)), /התעודה נקראה · 2 שורות · 18 יח׳ צריך רק לאשר שורה אחת — ואז ממשיכים לקלוט/);
+  assert.equal(c.toasts.at(-1), 'התעודה נקראה. צריך רק לאשר שורה אחת — ואז ממשיכים לקלוט.');
   assert.deepEqual(readyBuzzes(c), [[60, 40, 60]]);
   assert.deepEqual(list(c), ['milk 12'], 'מה שנסרק נשמר');
 });
