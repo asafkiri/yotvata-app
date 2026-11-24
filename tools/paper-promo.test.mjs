@@ -350,7 +350,7 @@ test('5. בלי לפתוח: מסך ההשוואה אומר מה הבעיה, עם
   const b = await note();
   b.run('startReceiptLineCheck()'); markAll(b);
   b.run('finishReceiptLineCheck()'); await settle();
-  assert.match(strip(app(b)), /תעודת הספק ₪249\.44 סכום הפריטים שנסרקו ₪287\.49 עודף ₪38\.05/, 'לפני: הפער הוא בדיוק ההנחה');
+  assert.match(strip(app(b)), /תעודת הספק ₪249\.44 סכום הפריטים שנסרקו ₪287\.49 פער מחיר ₪38\.05/, 'לפני: הפער הוא בדיוק ההנחה'); // v420: "פער מחיר", לא "עודף" — לא עודפת שום סחורה
   b.click('paper-promo-open', 'avocado'); // הכפתור בכרטיס שבבדיקת המחירים / בתוצאות
   assert.equal(sheetShown(b), true);
   await sheetClick(b, 'save');

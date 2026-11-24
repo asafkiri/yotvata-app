@@ -18,7 +18,9 @@
 // 7. חוסר במוצר שקיבל את המבצע: הממצא הוא חוסר במחיר המבצע, סרגל הסכומים מראה את החוסר ולא את ההנחה, והתעודה נשמרת עם החוסר.
 // 8. שתי תעודות שיחד מגיעות למינימום: מבצע רגיל ("מבצע בתוקף"), בלי ההודעה ובלי "פערי מחיר" (ב-419: פער בכל תעודה).
 // 9. מסך ההשוואה כשנפתח בלי ההחלה האוטומטית: סרגל הסכומים מאוזן יחד עם "הכול תואם — המשך".
-// 10. הגרסה.
+// 10. מסך התוצאות אומר מה באמת נמצא (בעל העסק, אותו יום: "למה בסגירת תעודה הוצג לי שיש חוסר של מבצע?"): כשכל מה שנמצא הוא פער מחיר —
+//     "פער מחיר ₪…" בסרגל, מה שנמצא בתיבה, "פער המחיר נכון — אשר" ו"סגור תעודה עם פער המחיר"; "…עם החוסרים" רק כשיש חוסר; עודף; וכמה סוגים.
+// 11. הגרסה.
 // הרצה: node --test tools/promo-below-minimum.test.mjs
 import fs from 'node:fs';
 import test from 'node:test';
@@ -400,7 +402,90 @@ test('9. מסך ההשוואה כשנפתח בלי ההחלה האוטומטית
   assert.deepEqual([rc.status, rc.totalExVat, rc.items.find(l => l.productId === 'mocha').promoPct], ['ok', 192.43, 15]);
 });
 
-test('10. הגרסה עלתה ל-420, כולל הכותרת וה-service worker', () => {
+// הרשימה שורה-שורה עם כמות אחרת למוצרים שב-got ({ mocha: 4 }); כל השאר "הגיע"
+const checkWith = (r, got) => checkLines(r, c => review(c).docs.forEach((d, di) => d.lines.forEach((l, li) => {
+  if (!(l.productId in got)) { click(c, { lineMark: di + ':' + li + ':ok' }); return; }
+  click(c, { lineMark: di + ':' + li + ':other' });
+  c.run(`receiptLineCheckInput({ target: { dataset: { lineGot: '${di}:${li}' }, value: '${got[l.productId]}' } })`);
+})));
+const buttons = r => [...app(r).matchAll(/<button data-role="(ai-confirm-findings|ai-apply)"[^>]*>(?:<i [^>]*><\/i>)?\s*([^<]*)<\/button>/g)].map(m => m[1] + ': ' + m[2].trim());
+const bar = r => (strip(app(r)).match(/תעודת הספק ₪[\d.,]+ סכום הפריטים (?:שנסרקו|מהנייר) ₪[\d.,]+ (.+?) יחידות שנסרקו/) || [])[1];
+const priceNote = r => { const h = app(r), i = h.indexOf('<div data-price-only-note'); return i < 0 ? null : strip(h.slice(i, h.indexOf('</div></div>', i) + 12)); };
+
+test('10. מסך התוצאות אומר מה באמת נמצא: פער מחיר נקרא "פער מחיר" — בסרגל, בתיבה ובכפתורים; "עם החוסרים" רק כשיש חוסר', async () => {
+  // (א) כל היחידות הגיעו, והמוקה חויב ב-10% הנחה (לא המבצע): פער מחיר בלבד, לטובת החנות. עד 419: "עודף ₪5.32", תיבה ריקה,
+  //     "אלה אכן הבעיות — אשר" ו"סגור תעודה עם החוסרים"
+  const cheap = await scan([paper([['milk', 12], ['mocha', 6, 10]])], { intent: 'lines' });
+  await checkLines(cheap);
+  assert.equal(cheap.run('!!pendingReceipt'), false);
+  assert.equal(bar(cheap), 'פער מחיר ₪5.32');
+  assert.equal(priceNote(cheap), 'נמצא פער מחיר אחד — בסחורה לא חסר ולא עודף דבר מחיר שונה: משקה מוקה 1 ליטר — במערכת ₪8.86, בנייר ₪7.97 הפירוט המלא למעלה, בבדיקת המחירים. התעודה נקלטת לפי המחיר שבנייר.');
+  assert.deepEqual(buttons(cheap), ['ai-confirm-findings: פער המחיר נכון — אשר']);
+  assert.doesNotMatch(strip(app(cheap)), /אלה אכן הבעיות|עם החוסרים|עודף ₪|חסר ₪|אלה הבעיות שנמצאו/);
+  cheap.click('ai-confirm-findings'); await settle();
+  assert.deepEqual(buttons(cheap), ['ai-apply: סגור תעודה עם פער המחיר']);
+  assert.doesNotMatch(strip(app(cheap)), /עם החוסרים/);
+  cheap.click('ai-apply'); await settle();
+  const cheapRc = await save(cheap);
+  // התעודה עצמה נשמרת בדיוק כמו קודם: המחיר שבנייר, בלי מבצע, עם ממצא המחיר
+  assert.deepEqual(cheapRc.items.find(l => l.productId === 'mocha').promoPct, 0);
+  assert.deepEqual(cheapRc.aiAudit.findings.filter(f => f.type === 'price').map(f => [f.productId, f.amount]), [['mocha', -5.32]]);
+
+  // (ב) המינימום הושג והנייר חייב מחיר מלא — הספק לא נתן את המבצע. עד 419 הסרגל כתב "חסר ₪15.95": חסרה הנחה, לא סחורה
+  const missing = await scan([paper([['milk', 12], ['mocha', 12]])], { intent: 'lines' });
+  await checkLines(missing);
+  assert.equal(bar(missing), 'פער מחיר ₪15.95');
+  assert.equal(priceNote(missing), 'נמצא פער מחיר אחד — בסחורה לא חסר ולא עודף דבר המבצע לא מופיע אצל הספק: משקה מוקה 1 ליטר — במערכת ₪7.53, בנייר ₪8.86 הפירוט המלא למעלה, בבדיקת המחירים. התעודה נקלטת לפי המחיר שבנייר.');
+  assert.deepEqual(buttons(missing), ['ai-confirm-findings: פער המחיר נכון — אשר']);
+  missing.click('ai-confirm-findings'); await settle();
+  assert.deepEqual(buttons(missing), ['ai-apply: סגור תעודה עם פער המחיר']);
+
+  // (ג) חוסר בלבד — בדיוק כמו קודם: "חסר ₪…", רשימת החוסרים, "אלה אכן הבעיות — אשר" ו"סגור תעודה עם החוסרים"
+  const short = await scan([paper([['milk', 12], ['cottage', 6]])], { intent: 'lines' });
+  await checkWith(short, { cottage: 4 });
+  assert.equal(bar(short), 'חסר ₪14.00');
+  assert.equal(priceNote(short), null);
+  assert.match(strip(app(short)), /אלה הבעיות שנמצאו: חוסרים/);
+  assert.deepEqual(buttons(short), ['ai-confirm-findings: אלה אכן הבעיות — אשר']);
+  short.click('ai-confirm-findings'); await settle();
+  assert.deepEqual(buttons(short), ['ai-apply: סגור תעודה עם החוסרים']);
+
+  // (ד) עודף בלבד — "סגור תעודה עם העודפים"
+  const over = await scan([paper([['milk', 12], ['cottage', 6]])], { intent: 'lines' });
+  await checkWith(over, { cottage: 8 });
+  assert.equal(bar(over), 'עודף ₪14.00');
+  assert.deepEqual(buttons(over), ['ai-confirm-findings: אלה אכן הבעיות — אשר']);
+  over.click('ai-confirm-findings'); await settle();
+  assert.deepEqual(buttons(over), ['ai-apply: סגור תעודה עם העודפים']);
+
+  // (ה) חוסר וגם פער מחיר — הסרגל והרשימה כמו קודם, בלי הקופסה של "פער מחיר בלבד", והכפתור: "עם ההפרשים"
+  const both = await scan([paper([['milk', 12], ['cottage', 6], ['mocha', 6, 10]])], { intent: 'lines' });
+  await checkWith(both, { cottage: 4 });
+  assert.match(bar(both), /^חסר ₪/);
+  assert.equal(priceNote(both), null);
+  assert.deepEqual(buttons(both), ['ai-confirm-findings: אלה אכן הבעיות — אשר']);
+  both.click('ai-confirm-findings'); await settle();
+  assert.deepEqual(buttons(both), ['ai-apply: סגור תעודה עם ההפרשים']);
+
+  // (ו) השם של הכפתור, לכל צירוף
+  const label = list => both.run(`aiCloseFindingsLabel(${JSON.stringify(list.map(type => ({ type })))})`);
+  assert.equal(label(['shortage']), 'סגור תעודה עם החוסרים');
+  assert.equal(label(['shortage', 'shortage']), 'סגור תעודה עם החוסרים');
+  assert.equal(label(['surplus']), 'סגור תעודה עם העודפים');
+  assert.equal(label(['shortage', 'surplus']), 'סגור תעודה עם החוסרים והעודפים');
+  assert.equal(label(['price']), 'סגור תעודה עם פער המחיר');
+  assert.equal(label(['promo_missing']), 'סגור תעודה עם פער המחיר');
+  assert.equal(label(['price', 'promo_missing']), 'סגור תעודה עם פערי המחיר');
+  assert.equal(label(['price', 'shortage']), 'סגור תעודה עם ההפרשים');
+  assert.equal(label(['surplus', 'promo_missing']), 'סגור תעודה עם ההפרשים');
+  assert.equal(label(['printed_promo', 'promo_below_min']), 'סגור תעודה עם החוסרים', 'בלי ממצא לטיפול — השם הישן (למשל זיכוי מהנהג שמחכה)');
+  assert.equal(label([]), 'סגור תעודה עם החוסרים');
+  // "פער מחיר בלבד" — רק כשאין שום חוסר או עודף, גם לא כזה שכוסה
+  const only = list => both.run(`aiPriceOnlyFindings({ findings: ${JSON.stringify(list.map(type => ({ type })))} }).length`);
+  assert.deepEqual([only(['price']), only(['price', 'promo_missing', 'printed_promo']), only(['price', 'shortage']), only(['surplus']), only(['printed_promo']), only([])], [1, 2, 0, 0, 0, 0]);
+});
+
+test('11. הגרסה עלתה ל-420, כולל הכותרת וה-service worker', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   assert.match(html, /const APP_VERSION = '420'/);
   assert.match(html, /<title>הזמנות יטבתה - v420 מבצע שניתן בלי המינימום — כבר בקליטה<\/title>/);
