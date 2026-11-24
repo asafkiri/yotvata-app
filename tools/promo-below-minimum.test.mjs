@@ -1,25 +1,26 @@
-// v420 — מבצע שהספק נתן בתעודה בלי המינימום: נשפט כבר בקליטה כמו בתעודה השמורה. בעל העסק, 24.11.2026 (תעודה 407300217859 — צילום של
-// כרטיס התעודה, וגיבוי): "היה רשום לי שיש בעיה במבצע בתעודה הזאת על ה-6 יח׳ משקה חלב ליטר. בקיצור סגרתי את התעודה וזהו — זה מראה
-// כאילו הכל טוב בתעודה ושירד המבצע. למה?"
+// v420 — מבצע שהספק נתן בתעודה בלי המינימום נקלט כמבצע רגיל, בלי התראה. בעל העסק, 24.11.2026 (תעודה 407300217859 — צילום של כרטיס
+// התעודה, וגיבוי): "היה רשום לי שיש בעיה במבצע בתעודה הזאת על ה-6 יח׳ משקה חלב ליטר. בקיצור סגרתי את התעודה וזהו — זה מראה כאילו
+// הכל טוב בתעודה ושירד המבצע. למה?"; "למה בסגירת תעודה הוצג לי שיש חוסר של מבצע?"; ואחרי ההסבר: "מה אכפת לי שקיבלתי את המבצע? הרי
+// למרות שמוגדר 12 יח׳ למבצע קיבלתי אותו על 6 יח׳. מבחינתי פצצה — אין צורך להתריע על זה אפילו."
 // המבצע "משקאות חלב ליטר" (15%) מוגדר עם מינימום 12 יח׳ מהסל; בתעודה היו 6 יח׳ ("משקה מוקה 1 ליטר"), והספק נתן את ההנחה בכל זאת:
 // 6 × ₪8.86 = ₪53.16, חיוב ₪45.19. עד 419 בקליטה זה היה "פערי מחיר שאומתו ונשמרו (1)", "עודף ₪7.97", "אלה אכן הבעיות — אשר" ו"סגור
 // תעודה עם החוסרים" — ואחרי השמירה "מבצע 15%: המחיר בנייר תואם למבצע ✓". נתונים מומצאים עם המספרים של השורה ההיא: תעודה של 4 שורות —
 // חלב 12, קוטג׳ 6, משקה מוקה 6 (15%, מתחת למינימום 12) וחומוס 6 (15%, המינימום 6 הושג).
 // מה שנבדק:
 // 1. הכלל (promoPaperGranted): מחיר המבצע בדיוק, 2 האגורות של בדיקת המחיר, הנחה של ממש, ומה שאינו כזה.
-// 2. בדיקת המחירים: "המחיר תואם: מבצע בתוקף — ניתן בלי המינימום", בלי שורה לטיפול ובלי "פערי מחיר שאומתו ונשמרו"; ההודעה הירוקה.
-// 3. מנוע ההשוואה: המחיר הצפוי הוא מחיר המבצע, אין ממצא "מחיר שונה", ושורת מידע במקומו; החשבון נסגר.
-// 4. הקליטה, שורה-שורה ו"הכל הגיע": "סיום" → חלון הסיכום, בלי מסך "בעיות"; התעודה נשמרת בדיוק כמו קליטה שבה למבצע אין מינימום —
-//    שורת מבצע 15%, "אומתה" — ועוד שורת המידע. שום סכום לא השתנה מ-419.
-// 5. כרטיס התעודה השמורה: "· מבצע 15%" על השורה, והקופסה הסגולה אומרת למה; ותעודה שנשמרה ב-419 (ממצא "מחיר שונה") — אותה שורה ירוקה,
-//    עם הסיבה.
+// 2. בדיקת המחירים: המחיר תואם למבצע — בלי שורה לטיפול, בלי "פערי מחיר שאומתו ונשמרו", ובלי שום הודעה: המסך זהה למסך של אותה תעודה
+//    כשלמבצע אין מינימום. מה שנשאר הוא רק בנתוני הבדיקה (belowMinimum).
+// 3. מנוע ההשוואה: המחיר הצפוי הוא מחיר המבצע, אין ממצא "מחיר שונה" ואין שום ממצא אחר במקומו; החשבון נסגר.
+// 4. הקליטה, שורה-שורה ו"הכל הגיע": "סיום" → חלון הסיכום, בלי מסך "בעיות" ובלי הודעה; התעודה שנשמרת זהה לקליטה שבה למבצע אין
+//    מינימום — שורת מבצע 15%, "אומתה". שום סכום לא השתנה מ-419.
+// 5. כרטיס התעודה השמורה: "· מבצע 15%" על השורה, בלי שום הערה; ותעודה שנשמרה ב-419 (ממצא "מחיר שונה") — בדיוק כמו קודם.
 // 6. מה לא השתנה: מחיר שאינו מחיר המבצע (פער מחיר, כמו קודם); המינימום הושג והנייר לא נתן הנחה ("הנחת המבצע לא ניתנה" + דרישת זיכוי);
 //    המינימום לא הושג והנייר במחיר מלא (תואם, בלי מבצע); מוצר שחויב בשני מחירים; והספירה החיה בלי נייר.
 // 7. חוסר במוצר שקיבל את המבצע: הממצא הוא חוסר במחיר המבצע, סרגל הסכומים מראה את החוסר ולא את ההנחה, והתעודה נשמרת עם החוסר.
-// 8. שתי תעודות שיחד מגיעות למינימום: מבצע רגיל ("מבצע בתוקף"), בלי ההודעה ובלי "פערי מחיר" (ב-419: פער בכל תעודה).
+// 8. שתי תעודות שיחד מגיעות למינימום: מבצע רגיל ("מבצע בתוקף"), בלי "פערי מחיר" (ב-419: פער בכל תעודה); ואותו מוצר בשתי תעודות.
 // 9. מסך ההשוואה כשנפתח בלי ההחלה האוטומטית: סרגל הסכומים מאוזן יחד עם "הכול תואם — המשך".
-// 10. מסך התוצאות אומר מה באמת נמצא (בעל העסק, אותו יום: "למה בסגירת תעודה הוצג לי שיש חוסר של מבצע?"): כשכל מה שנמצא הוא פער מחיר —
-//     "פער מחיר ₪…" בסרגל, מה שנמצא בתיבה, "פער המחיר נכון — אשר" ו"סגור תעודה עם פער המחיר"; "…עם החוסרים" רק כשיש חוסר; עודף; וכמה סוגים.
+// 10. מסך התוצאות אומר מה באמת נמצא: כשכל מה שנמצא הוא פער מחיר — "פער מחיר ₪…" בסרגל, מה שנמצא בתיבה, "פער המחיר נכון — אשר"
+//     ו"סגור תעודה עם פער המחיר"; "…עם החוסרים" רק כשיש חוסר; עודף; וכמה סוגים.
 // 11. הגרסה.
 // הרצה: node --test tools/promo-below-minimum.test.mjs
 import fs from 'node:fs';
@@ -123,8 +124,10 @@ const plain = (r, id) => json(r, `receiptPlainStatus(receipts.find(x => x.id ===
 const itemsOf = rc => rc.items.map(l => [l.productId, l.qty, l.noteQty == null ? null : l.noteQty, l.unitPrice, l.basePrice, l.promoPct, l.lineTotal]);
 const MOCHA_UNIT = 45.19 / 6; // ₪7.53167 — מה שהנייר מחייב ליחידה
 const GRANTED = 'מבצע בתוקף — ניתן בלי המינימום';
-const NOTICE = 'הספק נתן מבצע בלי המינימום — לטובתך מבצע "משקאות חלב ליטר" · 15% — בתעודה 6 יח׳ מהמבצע, והמינימום 12 יח׳. ההנחה ניתנה בכל זאת: משקה מוקה 1 ליטר · ₪7.53 ליח׳ במקום ₪8.86 השורה נקלטת כמבצע, לפי התעודה. אין מה לאשר ואין מה לתקן.';
-const FINDING = 'משקה מוקה 1 ליטר — הספק נתן את המבצע "משקאות חלב ליטר" (15%) בלי המינימום: בתעודה 6 יח׳ מהמבצע, והמינימום 12 יח׳';
+// אין התראה: שום מילה על המינימום, בשום מסך
+const ALERT = /בלי המינימום|לטובתך|ניתנה בכל זאת|data-price-granted|data-promo-below-min|promo_below_min/;
+// אותה תעודה כשלמבצע של משקאות הליטר אין מינימום — מה שהמסכים והתעודה השמורה צריכים להיות זהים לו
+const NO_MINIMUM = promos.map(p => p.id === 'p-liter' ? { ...p, minQty: 1 } : p);
 
 test('1. הכלל: המבצע חל כשהנייר מחייב בדיוק במחיר שלו — 2 האגורות של בדיקת המחיר, הנחה של ממש, ולא מרכזת', async () => {
   const r = await note();
@@ -141,15 +144,12 @@ test('1. הכלל: המבצע חל כשהנייר מחייב בדיוק במחי
   assert.equal(granted({ ...pr, type: 'monthEnd' }, 8.86, MOCHA_UNIT), false, 'מבצע מרכזת אינו בתעודה');
   assert.equal(granted(pr, 0.1, 0.085), false, 'הנחה של פחות מ-2 אגורות ליחידה אינה ראיה למבצע');
   assert.equal(granted(pr, 0, 0), false); assert.equal(granted(null, 8.86, 7.531), false); assert.equal(granted(pr, 8.86, 0), false);
-  // המילים: תעודה אחת / כמה תעודות, ומינימום בארגזים
-  assert.equal(r.run('promoBelowMinText(6, promos[0])'), 'בתעודה 6 יח׳ מהמבצע, והמינימום 12 יח׳');
-  assert.equal(r.run('promoBelowMinText(6, promos[0], true)'), 'בתעודות יחד 6 יח׳ מהמבצע, והמינימום 12 יח׳');
-  assert.equal(r.run(`promoBelowMinText(6, { minQty: 2, minUnit: 'carton', cartonSize: 12 })`), 'בתעודה 6 יח׳ מהמבצע, והמינימום 2 ארגז (24 יח׳)');
 });
 
-test('2. בדיקת המחירים: "מבצע בתוקף — ניתן בלי המינימום" — בלי שורה לטיפול, בלי "פערי מחיר שאומתו ונשמרו", עם ההודעה הירוקה', async () => {
+test('2. בדיקת המחירים: המחיר תואם למבצע — בלי שורה לטיפול, בלי "פערי מחיר שאומתו ונשמרו", ובלי שום הודעה', async () => {
   const r = await note();
   const a = audit(r);
+  // בנתוני הבדיקה (לא על המסך): השורה תואמת למבצע, ומסומן שהמינימום לא הושג — למי שיקרא גיבוי וישאל למה 6 יח׳ הן מבצע
   assert.deepEqual(a.rows.map(x => [x.productId, x.result, x.matchedForms]), [['milk', 'match', ['מחיר רגיל']], ['cottage', 'match', ['מחיר רגיל']], ['mocha', 'match', [GRANTED]], ['hummus', 'match', ['מבצע בתוקף']]]);
   const row = a.rows[2];
   assert.equal(row.reason, 'המחיר תואם: ' + GRANTED);
@@ -162,50 +162,47 @@ test('2. בדיקת המחירים: "מבצע בתוקף — ניתן בלי ה�
   assert.equal(a.complete, true);
   assert.equal(r.run('priceAuditPendingRows(receiptPriceAudit()).length'), 0);
   assert.deepEqual(json(r, 'receiptPaperPromos()'), [], 'זה לא "מבצע שלא קיים במערכת" — המבצע קיים');
-  assert.deepEqual(json(r, 'priceAuditGrantedRows(receiptPriceAudit()).map(x => x.productId)'), ['mocha']);
-  // הפאנל: הכותרת הירוקה של תעודה תואמת, ההודעה מחוץ לקיפול, ושום דבר מהמסך של 419
+  // על המסך: הכותרת הירוקה של תעודה תואמת, ושום דבר אחר — לא המסך של 419 ולא הודעה על המינימום. הפאנל, חלון הסיכום ומסך הקליטה
+  // זהים לאלה של אותה תעודה כשלמבצע אין מינימום
+  const same = await note({ system: NO_MINIMUM });
   const panel = r.run('receiptPriceAuditHtml()');
   assert.match(panel, /<details data-price-panel><summary class="[^"]*text-emerald-800"><span role="status" aria-live="polite">המחירים שנבדקו תואמים · 4 שורות · אין מה לאשר<\/span>/);
-  assert.match(panel, /<\/details><div data-price-granted class="rounded-xl border border-emerald-300 bg-emerald-50 p-2\.5 mt-2 text-right">/);
-  assert.equal(strip(panel.slice(panel.indexOf('<div data-price-granted'))), NOTICE);
   assert.doesNotMatch(panel, /data-price-reviewed|פערי מחיר|data-price-row=|המחיר בתעודה שונה|פער לשורה|data-price-paper-promo/);
-  // בחלון הסיכום — אותה הודעה, מתחת לכותרת
+  assert.doesNotMatch(panel, ALERT);
+  assert.equal(panel, same.run('receiptPriceAuditHtml()'));
   const brief = r.run('receiptPriceAuditHtml(undefined, { summary: true })');
-  assert.equal(strip(brief), 'המחירים שנבדקו תואמים · 4 שורות · אין מה לאשר ' + NOTICE);
-  assert.doesNotMatch(brief, /price-open-review/);
-  // מסך הקליטה: אותו פאנל, והכפתור הקטן שבמסך הסריקה אינו מתריע על פער
-  r.run('renderReceiving()');
-  assert.match(app(r), /data-price-granted/);
+  assert.equal(strip(brief), 'המחירים שנבדקו תואמים · 4 שורות · אין מה לאשר');
+  assert.equal(brief, same.run('receiptPriceAuditHtml(undefined, { summary: true })'));
+  r.run('renderReceiving()'); same.run('renderReceiving()');
+  assert.doesNotMatch(app(r), ALERT);
   assert.doesNotMatch(strip(app(r)), /פערי מחיר|פער מחיר/);
-  // בלי המבצע במערכת — "מבצע שלא קיים במערכת" (418), לא ההודעה הזאת
+  assert.equal(strip(app(r)), strip(app(same)));
+  // בלי המבצע במערכת — "מבצע שלא קיים במערכת" (418), כמו קודם
   const none = await note({ system: promos.filter(p => p.id !== 'p-liter') });
   assert.deepEqual(json(none, 'receiptPaperPromos().map(x => [x.productId, x.pct])'), [['mocha', 15]]);
-  assert.equal(none.run('priceAuditGrantedRows(receiptPriceAudit()).length'), 0);
-  assert.doesNotMatch(none.run('receiptPriceAuditHtml()'), /data-price-granted/);
+  assert.match(none.run('receiptPriceAuditHtml()'), /data-price-paper-promo="mocha"/);
 });
 
-test('3. מנוע ההשוואה: המחיר הצפוי הוא מחיר המבצע — בלי ממצא "מחיר שונה", עם שורת מידע; החשבון נסגר והקליטה ניתנת להחלה', async () => {
+test('3. מנוע ההשוואה: המחיר הצפוי הוא מחיר המבצע — בלי ממצא "מחיר שונה" ובלי שום ממצא במקומו; החשבון נסגר והקליטה ניתנת להחלה', async () => {
   const r = await note();
   await checkLines(r);
   const ev = json(r, `({ valid: aiScanEvaluation.valid, closure: aiScanEvaluation.closure.ok, errors: aiScanEvaluation.errors, findings: aiScanEvaluation.findings,
-    granted: Array.from(aiScanEvaluation.grantedPromos.entries()), received: Array.from(aiScanEvaluation.receivedUnitPrices.keys()) })`);
+    granted: Array.from(aiScanEvaluation.grantedPromos.entries()) })`);
   assert.deepEqual([ev.valid, ev.closure, ev.errors], [true, true, []]);
   assert.deepEqual(ev.granted, [['mocha', { id: 'p-liter', name: 'משקאות חלב ליטר', pct: 15, minUnits: 12, basketUnits: 6 }]]);
-  assert.deepEqual(ev.findings.map(f => [f.type, f.productId]), [['printed_promo', 'mocha'], ['promo_below_min', 'mocha'], ['printed_promo', 'hummus']]);
-  const info = ev.findings[1];
-  assert.equal(info.text, FINDING);
-  assert.deepEqual([info.name, info.qty, r2(info.expectedPrice * 1000) / 1000, info.amount], ['משקה מוקה 1 ליטר', 6, 7.531, undefined]);
-  assert.equal(r.run('aiScanAllGood(aiScanEvaluation)'), true, 'שורת המידע אינה ממצא לטיפול');
-  assert.equal(r.run(`aiIsActionableFinding({ type: 'promo_below_min' })`), false);
-  // אותה תעודה כשהמבצע בלי מינימום — אותה הערכה, בלי שורת המידע
-  const plainPromo = await note({ system: promos.map(p => p.id === 'p-liter' ? { ...p, minQty: 1 } : p) });
-  await checkLines(plainPromo);
-  assert.deepEqual(json(plainPromo, 'aiScanEvaluation.findings.map(f => [f.type, f.productId])'), [['printed_promo', 'mocha'], ['printed_promo', 'hummus']]);
-  assert.equal(plainPromo.run('aiScanEvaluation.grantedPromos.size'), 0);
+  // רק הכוכביות שנקראו מהנייר (כמו בכל שורת מבצע) — בלי ממצא מחיר ובלי שורת מידע על המינימום
+  assert.deepEqual(ev.findings.map(f => [f.type, f.productId]), [['printed_promo', 'mocha'], ['printed_promo', 'hummus']]);
+  assert.doesNotMatch(JSON.stringify(ev.findings), ALERT);
+  assert.equal(r.run('aiScanAllGood(aiScanEvaluation)'), true);
+  // אותה תעודה כשלמבצע אין מינימום — אותם ממצאים בדיוק
+  const same = await note({ system: NO_MINIMUM });
+  await checkLines(same);
+  assert.deepEqual(json(same, 'aiScanEvaluation.findings'), ev.findings);
+  assert.equal(same.run('aiScanEvaluation.grantedPromos.size'), 0);
 });
 
 for (const [intent, name] of [['lines', 'שורה-שורה'], ['all', '"הכל הגיע כמו בתעודה"']]) {
-  test('4. הקליטה, ' + name + ': "סיום" → חלון הסיכום, בלי מסך "בעיות"; התעודה נשמרת כמו קליטה שבה למבצע אין מינימום, ועוד שורת המידע', async () => {
+  test('4. הקליטה, ' + name + ': "סיום" → חלון הסיכום, בלי מסך "בעיות" ובלי הודעה; התעודה שנשמרת זהה לקליטה שבה למבצע אין מינימום', async () => {
     async function receive(system) {
       const r = await note({ system, intent });
       if (intent === 'lines') await checkLines(r);
@@ -218,34 +215,37 @@ for (const [intent, name] of [['lines', 'שורה-שורה'], ['all', '"הכל �
     assert.equal(r.run('!!pendingReceipt'), true); assert.equal(summaryShown(r), true);
     assert.equal(r.run('testConfirms.length'), 0);
     const screen = strip(app(r));
-    assert.doesNotMatch(screen, /אלה אכן הבעיות|סגור תעודה עם החוסרים|פערי מחיר|עודף ₪/);
+    assert.doesNotMatch(screen, /אלה אכן הבעיות|סגור תעודה עם החוסרים|פערי מחיר|פער מחיר|עודף ₪/);
     assert.match(screen, /תעודת הספק ₪192\.43 סכום הפריטים (שנסרקו|מהנייר) ₪192\.43 מאוזן ✓/);
-    // חלון הסיכום: ההודעה בראשו, והשורה כמבצע
+    // חלון הסיכום: כמו בכל תעודה תואמת, השורה כמבצע — ושום הודעה על המינימום, לא בחלון ולא במסך שמאחוריו
     const text = strip(summary(r));
-    assert.ok(text.startsWith('המחירים שנבדקו תואמים · 4 שורות · אין מה לאשר ' + NOTICE), text.slice(0, 200));
+    assert.ok(text.startsWith('המחירים שנבדקו תואמים · 4 שורות · אין מה לאשר חלב 3% בקרטון 1 ליטר התקבל 12 × ₪5.00 ₪60.00'), text.slice(0, 200));
     assert.match(text, /משקה מוקה 1 ליטר התקבל 6 × ₪7\.53167 · מבצע 15% ₪45\.19/);
     assert.match(text, /לא נמצא פער נוסף\./);
     assert.match(text, /לתשלום — מה שהתקבל \(ללא מע״מ\) ₪192\.43 סכום התעודה מהספק: ₪192\.43$/);
+    assert.doesNotMatch(summary(r), ALERT); assert.doesNotMatch(app(r), ALERT);
     const pending = json(r, 'pendingReceipt');
     assert.deepEqual([pending.status, pending.ex, pending.supplierCreditClaim, pending.supplierPromoMismatchItems], ['ok', 192.43, null, []]);
-    const rc = await save(r);
+    // אותה תעודה כשלמבצע אין מינימום: אותו חלון סיכום, מילה במילה
+    const same = await receive(NO_MINIMUM);
+    assert.equal(text, strip(summary(same)));
+    const rc = await save(r), expected = await save(same);
     assert.deepEqual([rc.status, rc.totalExVat, rc.aiAudit.hasDiscrepancy, rc.unresolvedAmountGap, rc.unresolvedUnitsGap], ['ok', 192.43, false, 0, 0]);
     const mocha = rc.items.find(l => l.productId === 'mocha');
     assert.deepEqual([mocha.qty, mocha.basePrice, mocha.promoPct, mocha.lineTotal], [6, 8.86, 15, 45.19]);
     assert.ok(Math.abs(mocha.unitPrice - MOCHA_UNIT) < 1e-9, 'המחיר שבנייר, כמו ב-419');
-    assert.deepEqual(rc.aiAudit.findings.filter(f => f.productId === 'mocha').map(f => [f.type, f.text]), [['printed_promo', 'מבצע מודפס ליד משקה מוקה 1 ליטר: *'], ['promo_below_min', FINDING]]);
-    assert.equal(rc.priceAudit.rows.find(x => x.productId === 'mocha').promo.belowMinimum, true);
-    // בדיוק כמו קליטה של אותה תעודה כשלמבצע אין מינימום — חוץ משורת המידע
-    const same = await receive(promos.map(p => p.id === 'p-liter' ? { ...p, minQty: 1 } : p));
-    const expected = await save(same);
+    // והתעודה השמורה זהה: השורות, הסכומים והממצאים. ההבדל היחיד הוא בנתוני בדיקת המחירים — הסימון שהמינימום לא הושג
     assert.deepEqual(itemsOf(rc), itemsOf(expected));
     assert.deepEqual([rc.status, rc.totalExVat, rc.calculatedExVat, rc.grossExVat, rc.supplierDiscount, rc.roundingAdjustment, rc.noteTotalInc], [expected.status, expected.totalExVat, expected.calculatedExVat, expected.grossExVat, expected.supplierDiscount, expected.roundingAdjustment, expected.noteTotalInc]);
-    assert.deepEqual(rc.aiAudit.findings.filter(f => f.type !== 'promo_below_min'), expected.aiAudit.findings);
+    assert.deepEqual(rc.aiAudit.findings, expected.aiAudit.findings);
+    assert.deepEqual(rc.aiAudit.findings.filter(f => f.productId === 'mocha').map(f => [f.type, f.text]), [['printed_promo', 'מבצע מודפס ליד משקה מוקה 1 ליטר: *']]);
     assert.equal(rc.aiAudit.hasDiscrepancy, expected.aiAudit.hasDiscrepancy);
+    assert.equal(rc.priceAudit.rows.find(x => x.productId === 'mocha').promo.belowMinimum, true);
+    assert.equal(expected.priceAudit.rows.find(x => x.productId === 'mocha').promo.belowMinimum, undefined);
   });
 }
 
-test('5. כרטיס התעודה השמורה: "מבצע 15%" על השורה והסיבה בקופסה הסגולה; תעודה שנשמרה ב-419 — אותה שורה ירוקה, עם הסיבה', async () => {
+test('5. כרטיס התעודה השמורה: "מבצע 15%" על השורה, בלי שום הערה; תעודה שנשמרה ב-419 — בדיוק כמו קודם', async () => {
   const r = await note({ intent: 'lines' });
   await checkLines(r);
   const rc = await save(r);
@@ -253,7 +253,7 @@ test('5. כרטיס התעודה השמורה: "מבצע 15%" על השורה ו
   const legacy = structuredClone(rc); legacy.id = 'rc-419';
   legacy.items.find(l => l.productId === 'mocha').promoPct = 0;
   legacy.aiAudit.hasDiscrepancy = true;
-  legacy.aiAudit.findings = legacy.aiAudit.findings.filter(f => f.type !== 'promo_below_min').concat([{ type: 'price', productId: 'mocha', name: 'משקה מוקה 1 ליטר', qty: 6, amount: -7.97, expectedPrice: 8.86, paperPrice: MOCHA_UNIT,
+  legacy.aiAudit.findings = legacy.aiAudit.findings.concat([{ type: 'price', productId: 'mocha', name: 'משקה מוקה 1 ליטר', qty: 6, amount: -7.97, expectedPrice: 8.86, paperPrice: MOCHA_UNIT,
     text: 'מחיר שונה: משקה מוקה 1 ליטר — במערכת ₪8.86, בנייר ₪7.53' }]);
   history(r, [rc, legacy]);
   for (const id of [rc.id, 'rc-419']) {
@@ -262,20 +262,14 @@ test('5. כרטיס התעודה השמורה: "מבצע 15%" על השורה ו
     assert.match(c, /data-plain-status="balanced">נקלטה ומאוזנת ✓<\/div>/, id);
     assert.match(c, /<div class="text-sm font-bold text-slate-700 truncate">משקה מוקה 1 ליטר<\/div><div class="text-\[11px\] text-slate-400">6 × ₪7\.53167 · מבצע 15%<\/div>/, id);
     assert.doesNotMatch(c, /תקן הפרשים|data-plain-action|data-paper-promo|מחיר שונה: /, id);
+    assert.doesNotMatch(c, ALERT, id);
     assert.equal(plain(r, id).state, 'balanced');
   }
-  // התעודה מ-420: שורת המידע שנשמרה, ירוקה
-  assert.match(card(r, rc.id), /<div data-promo-below-min="mocha" class="font-black mt-1 text-emerald-700">• משקה מוקה 1 ליטר — הספק נתן את המבצע &quot;משקאות חלב ליטר&quot; \(15%\) בלי המינימום: בתעודה 6 יח׳ מהמבצע, והמינימום 12 יח׳ ✓<\/div>/);
-  assert.doesNotMatch(card(r, rc.id), /המחיר בנייר תואם למבצע/);
-  // התעודה מ-419: "המחיר בנייר תואם למבצע ✓" כמו קודם, ועכשיו גם למה בקליטה הוצג פער
-  assert.match(card(r, 'rc-419'), /<div class="font-black mt-1 text-emerald-700">• משקה מוקה 1 ליטר — מבצע 15%: המחיר בנייר תואם למבצע ✓ · הספק נתן אותו בלי המינימום \(בתעודה 6 יח׳ מהמבצע, והמינימום 12 יח׳\)<\/div>/);
-  assert.doesNotMatch(card(r, 'rc-419'), /data-promo-below-min/);
-  // התוספת נגזרת מהמבצע כפי שהוא מוגדר עכשיו: מינימום שתוקן ל-6, או מבצע שנמחק — בלי התוספת (והשורה הירוקה נשארת כל עוד המבצע קיים)
-  r.run(`promos.find(p => p.id === 'p-liter').minQty = 6; renderReceiptsHistory();`);
-  assert.match(card(r, 'rc-419'), /• משקה מוקה 1 ליטר — מבצע 15%: המחיר בנייר תואם למבצע ✓<\/div>/);
-  assert.match(card(r, rc.id), /data-promo-below-min="mocha"/, 'מה שנשמר בתעודה אינו תלוי במבצע');
-  assert.equal(r.run(`savedPromoBelowMinText(receipts[1], { id: 'gone', pct: 15 })`), '');
-  assert.equal(r.run(`savedPromoBelowMinText(receipts[1], null)`), '');
+  // התעודה מ-420: שורת מבצע רגילה. אין ממצא מחיר, ולכן גם אין קופסה סגולה — כמו בכל תעודה שהכול תאם בה
+  assert.doesNotMatch(card(r, rc.id), /bg-violet-50 border border-violet-200|המחיר בנייר תואם למבצע/);
+  assert.match(card(r, 'rc-419'), /bg-violet-50 border border-violet-200/);
+  // התעודה מ-419: בדיוק כמו ב-419 — "המחיר בנייר תואם למבצע ✓", בלי תוספת
+  assert.match(card(r, 'rc-419'), /<div class="font-black mt-1 text-emerald-700">• משקה מוקה 1 ליטר — מבצע 15%: המחיר בנייר תואם למבצע ✓<\/div>/);
   assert.equal(r.writes.filter(w => w.op !== 'set' || !w.path.includes('receipts')).length, 0, 'הכרטיס הוא תצוגה בלבד — שום דבר לא נכתב');
 });
 
@@ -284,7 +278,6 @@ test('6. מה לא השתנה: מחיר שאינו מחיר המבצע; המינ
   const other = await scan([paper([['milk', 12], ['mocha', 6, 10]])], { intent: 'lines' });
   assert.deepEqual([auditRow(other, 'mocha').result, auditRow(other, 'mocha').promo, auditRow(other, 'mocha').expectedOptions[0].label], ['difference', null, 'מחיר רגיל']);
   assert.match(other.run('receiptPriceAuditHtml()'), /פערי מחיר שאומתו ונשמרו \(1\)/);
-  assert.doesNotMatch(other.run('receiptPriceAuditHtml()'), /data-price-granted/);
   await checkLines(other);
   assert.equal(other.run('!!pendingReceipt'), false, 'בלי החלה אוטומטית');
   assert.deepEqual(json(other, `aiScanEvaluation.findings.filter(f => f.productId === 'mocha' && f.type !== 'printed_promo').map(f => [f.type, f.expectedPrice, f.amount])`), [['price', 8.86, -5.32]]);
@@ -299,7 +292,7 @@ test('6. מה לא השתנה: מחיר שאינו מחיר המבצע; המינ
   // (ג) המינימום לא הושג והנייר במחיר מלא — תואם, בלי מבצע ובלי הודעה
   const full = await scan([paper([['milk', 12], ['mocha', 6]])], { intent: 'lines' });
   assert.deepEqual([auditRow(full, 'mocha').result, auditRow(full, 'mocha').promo, auditRow(full, 'mocha').matchedForms], ['match', null, ['מחיר רגיל']]);
-  assert.doesNotMatch(full.run('receiptPriceAuditHtml()'), /data-price-granted/);
+  assert.doesNotMatch(full.run('receiptPriceAuditHtml()'), ALERT);
   await checkLines(full);
   assert.equal(full.run('!!pendingReceipt'), true);
   const plainRc = await save(full);
@@ -332,7 +325,7 @@ test('7. חוסר במוצר שקיבל את המבצע: חוסר במחיר ה�
   assert.deepEqual(json(r, `receiptList.filter(l => l.productId === 'mocha').map(l => l.qty)`), [4]);
   assert.equal(r.run('!!pendingReceipt'), false, 'חוסר — הקליטה עוצרת במסך ההשוואה, כמו תמיד');
   const findings = json(r, `aiScanEvaluation.findings.filter(f => f.productId === 'mocha' && f.type !== 'printed_promo')`);
-  assert.deepEqual(findings.map(f => [f.type, f.qty, r2(f.expectedPrice * 1000) / 1000]), [['shortage', 2, 7.531], ['promo_below_min', 6, 7.531]]);
+  assert.deepEqual(findings.map(f => [f.type, f.qty, r2(f.expectedPrice * 1000) / 1000]), [['shortage', 2, 7.531]]);
   assert.deepEqual(json(r, '[aiScanEvaluation.valid, aiScanEvaluation.closure.ok]'), [true, true]);
   // שורת ההשוואה של המוקה כבר במחיר המבצע, ולכן הסרגל מראה את שווי החוסר (2 × ₪7.531 = ₪15.06) ולא ₪9.75 (החוסר פחות ההנחה, כמו ב-419)
   assert.deepEqual(json(r, `reconcileData.filter(l => l.productId === 'mocha').map(l => [l.received, l.promoPct, l.promoOn, Math.round(l.price * 1000) / 1000])`), [[4, 15, true, 7.531]]);
@@ -340,7 +333,7 @@ test('7. חוסר במוצר שקיבל את המבצע: חוסר במחיר ה�
   assert.match(screen, /תעודת הספק ₪192\.43 סכום הפריטים שנסרקו ₪177\.36 חסר ₪15\.07/);
   assert.match(screen, /חוסרים/); assert.match(app(r), /data-role="ai-confirm-findings"/);
   assert.doesNotMatch(screen, /בעיות מחיר|פערי מחיר|מחיר שונה/);
-  assert.ok(screen.includes(NOTICE), 'ההודעה על המבצע נשארת בראש המסך, בבדיקת המחירים');
+  assert.doesNotMatch(app(r), ALERT, 'גם כאן — בלי הודעה על המינימום');
   r.click('ai-confirm-findings'); await settle();
   r.click('ai-apply'); await settle();
   const rc = await save(r);
@@ -348,17 +341,17 @@ test('7. חוסר במוצר שקיבל את המבצע: חוסר במחיר ה�
   assert.deepEqual([mocha.qty, mocha.noteQty, mocha.promoPct, mocha.basePrice, mocha.lineTotal], [4, 6, 15, 8.86, 30.13]);
   assert.ok(Math.abs(mocha.unitPrice - MOCHA_UNIT) < 1e-9);
   assert.deepEqual([rc.status, rc.aiAudit.hasDiscrepancy], ['open', true]);
-  assert.deepEqual(rc.aiAudit.findings.filter(f => f.productId === 'mocha').map(f => f.type), ['shortage', 'printed_promo', 'promo_below_min']);
+  assert.deepEqual(rc.aiAudit.findings.filter(f => f.productId === 'mocha').map(f => f.type), ['shortage', 'printed_promo']);
 });
 
-test('8. שתי תעודות שיחד מגיעות למינימום: מבצע רגיל — "מבצע בתוקף", בלי ההודעה ובלי "פערי מחיר" (ב-419: פער מחיר בכל תעודה)', async () => {
+test('8. שתי תעודות שיחד מגיעות למינימום: מבצע רגיל — "מבצע בתוקף", בלי "פערי מחיר" (ב-419: פער מחיר בכל תעודה); ואותו מוצר בשתי תעודות', async () => {
   const r = await scan([paper([['milk', 12], ['mocha', 6, 15]], '9074025069'), paper([['cottage', 6], ['banana', 6, 15]], '407300217859')], { intent: 'lines' });
   const rows = audit(r).rows.filter(x => ['mocha', 'banana'].includes(x.productId));
   assert.deepEqual(rows.map(x => [x.productId, x.result, x.matchedForms, x.reason, x.expectedOptions[0].label, x.promo.belowMinimum, x.promo.basketUnits, x.promo.minUnits]),
     [['mocha', 'match', ['מבצע בתוקף'], 'המחיר תואם: מבצע בתוקף', 'מבצע בתוקף', undefined, 12, 12], ['banana', 'match', ['מבצע בתוקף'], 'המחיר תואם: מבצע בתוקף', 'מבצע בתוקף', undefined, 12, 12]]);
   const panel = r.run('receiptPriceAuditHtml()');
   assert.match(panel, /המחירים שנבדקו תואמים · 4 שורות · אין מה לאשר/);
-  assert.doesNotMatch(panel, /data-price-granted|פערי מחיר|data-price-reviewed/);
+  assert.doesNotMatch(panel, /פערי מחיר|data-price-reviewed/); assert.doesNotMatch(panel, ALERT);
   await checkLines(r);
   assert.equal(r.run('aiScanEvaluation.grantedPromos.size'), 0, 'במנוע המינימום הושג (12 יח׳ בשתי התעודות)');
   assert.deepEqual(json(r, `aiScanEvaluation.findings.map(f => f.type)`), ['printed_promo', 'printed_promo']);
@@ -366,16 +359,17 @@ test('8. שתי תעודות שיחד מגיעות למינימום: מבצע ר
   const rc = await save(r);
   assert.deepEqual(rc.items.filter(l => ['mocha', 'banana'].includes(l.productId)).map(l => [l.productId, l.promoPct, l.lineTotal]).sort(), [['banana', 15, 45.19], ['mocha', 15, 45.19]]);
   assert.deepEqual([rc.status, rc.aiAudit.hasDiscrepancy], ['ok', false]);
-  // ואותו מוצר בשתי התעודות, 3 + 3 (מתחת למינימום גם יחד): מבצע שניתן בלי המינימום, פעם אחת בהודעה — "בתעודות יחד 6 יח׳"
+  // ואותו מוצר בשתי התעודות, 3 + 3 (מתחת למינימום גם יחד): המבצע חל על שתי השורות — בנתוני הבדיקה הסל נמדד על שתי התעודות יחד
   const split = await scan([paper([['milk', 12], ['mocha', 3, 15]], '9074025069'), paper([['cottage', 6], ['mocha', 3, 15]], '407300217859')], { intent: 'lines' });
-  assert.deepEqual(audit(split).rows.filter(x => x.productId === 'mocha').map(x => [x.matchedForms[0], x.promo.belowMinimum, x.promo.basketUnits]), [[GRANTED, true, 6], [GRANTED, true, 6]]);
-  assert.equal(strip(split.run('receiptPriceAuditHtml()').split('<div data-price-granted')[1].replace(/^[^>]*>/, '')),
-    'הספק נתן מבצע בלי המינימום — לטובתך מבצע "משקאות חלב ליטר" · 15% — בתעודות יחד 6 יח׳ מהמבצע, והמינימום 12 יח׳. ההנחה ניתנה בכל זאת: משקה מוקה 1 ליטר · ₪7.53 ליח׳ במקום ₪8.86 השורות נקלטות כמבצע, לפי התעודה. אין מה לאשר ואין מה לתקן.');
+  assert.deepEqual(audit(split).rows.filter(x => x.productId === 'mocha').map(x => [x.result, x.matchedForms[0], x.promo.belowMinimum, x.promo.basketUnits]), [['match', GRANTED, true, 6], ['match', GRANTED, true, 6]]);
+  assert.doesNotMatch(split.run('receiptPriceAuditHtml()'), ALERT);
   await checkLines(split);
   assert.deepEqual(json(split, 'Array.from(aiScanEvaluation.grantedPromos.values()).map(g => [g.id, g.basketUnits])'), [['p-liter', 6]]);
-  assert.equal(json(split, `aiScanEvaluation.findings.filter(f => f.type === 'promo_below_min').map(f => f.text)`)[0],
-    'משקה מוקה 1 ליטר — הספק נתן את המבצע "משקאות חלב ליטר" (15%) בלי המינימום: בתעודות יחד 6 יח׳ מהמבצע, והמינימום 12 יח׳');
+  assert.deepEqual(json(split, `aiScanEvaluation.findings.map(f => f.type)`), ['printed_promo']);
   assert.equal(split.run('!!pendingReceipt'), true);
+  const splitRc = await save(split);
+  // (כל שורה בנייר מעוגלת בנפרד: 2 × ₪22.59)
+  assert.deepEqual(splitRc.items.filter(l => l.productId === 'mocha').map(l => [l.qty, l.promoPct, l.lineTotal]), [[6, 15, 45.18]]);
 });
 
 test('9. מסך ההשוואה כשנפתח בלי ההחלה האוטומטית: שורת המוצר במחיר המבצע, והסרגל מאוזן יחד עם "הכול תואם — המשך"', async () => {
@@ -478,7 +472,7 @@ test('10. מסך התוצאות אומר מה באמת נמצא: פער מחיר
   assert.equal(label(['price', 'promo_missing']), 'סגור תעודה עם פערי המחיר');
   assert.equal(label(['price', 'shortage']), 'סגור תעודה עם ההפרשים');
   assert.equal(label(['surplus', 'promo_missing']), 'סגור תעודה עם ההפרשים');
-  assert.equal(label(['printed_promo', 'promo_below_min']), 'סגור תעודה עם החוסרים', 'בלי ממצא לטיפול — השם הישן (למשל זיכוי מהנהג שמחכה)');
+  assert.equal(label(['printed_promo']), 'סגור תעודה עם החוסרים', 'בלי ממצא לטיפול — השם הישן (למשל זיכוי מהנהג שמחכה)');
   assert.equal(label([]), 'סגור תעודה עם החוסרים');
   // "פער מחיר בלבד" — רק כשאין שום חוסר או עודף, גם לא כזה שכוסה
   const only = list => both.run(`aiPriceOnlyFindings({ findings: ${JSON.stringify(list.map(type => ({ type })))} }).length`);
@@ -488,7 +482,7 @@ test('10. מסך התוצאות אומר מה באמת נמצא: פער מחיר
 test('11. הגרסה עלתה ל-420, כולל הכותרת וה-service worker', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   assert.match(html, /const APP_VERSION = '420'/);
-  assert.match(html, /<title>הזמנות יטבתה - v420 מבצע שניתן בלי המינימום — כבר בקליטה<\/title>/);
-  assert.match(html, /id="verBadge"[^>]*>v420 מבצע שניתן בלי המינימום — כבר בקליטה</);
+  assert.match(html, /<title>הזמנות יטבתה - v420 מבצע שניתן בלי המינימום נקלט כמבצע — בלי התראה<\/title>/);
+  assert.match(html, /id="verBadge"[^>]*>v420 מבצע שניתן בלי המינימום נקלט כמבצע — בלי התראה</);
   assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v420/);
 });

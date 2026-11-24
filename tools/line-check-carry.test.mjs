@@ -183,7 +183,7 @@ test('4. שוויון: בדיקה שהתחילה מסריקה ובדיקה שס�
 
 test('5. הגרסה עלתה ל-420, כולל ה-service worker', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /const APP_VERSION = '420'/); // גרסה 420: מבצע שניתן בלי המינימום — כבר בקליטה
+  assert.match(html, /const APP_VERSION = '420'/); // גרסה 420: מבצע שניתן בלי המינימום נקלט כמבצע — בלי התראה
   assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_line_clear'/);
   assert.match(html, /<title>הזמנות יטבתה - v420 /); assert.match(html, /id="verBadge"[^>]*>v420 /);
   assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v420/);
