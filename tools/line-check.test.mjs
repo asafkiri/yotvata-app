@@ -483,9 +483,9 @@ test('11. הכרטיס של "הגיע משהו נוסף" כמו שורת תעו�
   assert.deepEqual(json(r, 'receiptList.map(l => l.productId + " " + l.qty).sort()'), ['butter 4', 'cottage 6', 'cream 2', 'milk 17', 'yogurt 4']);
 });
 
-test('הגרסה עלתה ל-419, כולל ה-service worker', () => {
+test('הגרסה עלתה ל-420, כולל ה-service worker', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /const APP_VERSION = '419'/); // גרסה 419: שורות להשלמה לפני הבדיקה — בלי מסך חוסרים
+  assert.match(html, /const APP_VERSION = '420'/); // גרסה 420: מבצע שניתן בלי המינימום — כבר בקליטה
   assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_line_clear'/);
-  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v419/);
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v420/);
 });

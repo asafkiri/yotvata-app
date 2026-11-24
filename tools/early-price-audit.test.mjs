@@ -90,7 +90,13 @@ test(supplier+': explicit document date selects active vs expired promotion, loc
 test(supplier+': quantity promotion uses paper basket, never counted basket',async()=>{
  const data=fixture({unit:4,qty:10,promo:{minQty:10,...(supplier==='berman'?{fixedPrice:4}:{})}}),c=create(data);await scan(c,data);
  assert.equal(report(c).rows[0].result,'match');c.run("receiptList=[{productId:'milk',qty:1}];saveReceiptDraft();renderReceiving()");assert.equal(report(c).rows[0].result,'match');
- c.run('promos[0].minQty=11;renderReceiving()');assert.equal(report(c).rows[0].result,'difference');assert.equal(requests(c),1);
+ // v420: המינימום נמדד על הנייר (10 יח׳ מול מינימום 11). הנייר מחייב בדיוק במחיר המבצע — הספק נתן אותו בלי המינימום, ובדיקת המחירים אומרת
+ // זאת בשמה (עד 419: "פער מחיר", והתעודה השמורה אמרה מיד אחר כך "תואם למבצע"). מחיר שאינו מחיר המבצע נשאר פער, בלי מבצע.
+ c.run('promos[0].minQty=11;renderReceiving()');
+ const granted=report(c).rows[0];assert.equal(granted.result,'match');assert.deepEqual(granted.matchedForms,['מבצע בתוקף — ניתן בלי המינימום']);
+ assert.equal(granted.promo.belowMinimum,true);assert.equal(granted.promo.minUnits,11);assert.equal(granted.promo.basketUnits,10);
+ c.run('products[0].price=6;products[0].listPrice=6;renderReceiving()');
+ assert.equal(report(c).rows[0].result,'difference');assert.equal(report(c).rows[0].promo,null);assert.equal(requests(c),1);
 });
 if(supplier!=='berman'){
  test(supplier+': one attributable summary discount derives charge once and labels it',async()=>{

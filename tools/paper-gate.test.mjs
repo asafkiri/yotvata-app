@@ -723,10 +723,10 @@ test('17. בדיקה שכבר התחילה ונבנית מחדש כי המוצר
   assert.equal(e.run('receiptLineNotice'), null); assert.deepEqual(marks(e), ['milk:ok,cottage:,cream:']);
 });
 
-test('18. הגרסה עלתה ל-419, כולל הכותרת וה-service worker', () => {
+test('18. הגרסה עלתה ל-420, כולל הכותרת וה-service worker', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /const APP_VERSION = '419'/);
-  assert.match(html, /<title>הזמנות יטבתה - v419 שורות להשלמה לפני הבדיקה — בלי מסך חוסרים<\/title>/);
-  assert.match(html, /id="verBadge"[^>]*>v419 שורות להשלמה לפני הבדיקה — בלי מסך חוסרים</);
-  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v419/);
+  assert.match(html, /const APP_VERSION = '420'/);
+  assert.match(html, /<title>הזמנות יטבתה - v420 מבצע שניתן בלי המינימום — כבר בקליטה<\/title>/);
+  assert.match(html, /id="verBadge"[^>]*>v420 מבצע שניתן בלי המינימום — כבר בקליטה</);
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v420/);
 });
