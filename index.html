@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v419 שורות להשלמה לפני הבדיקה — בלי מסך חוסרים</title>
+    <title>הזמנות יטבתה - v420 מבצע שניתן בלי המינימום נקלט כמבצע — בלי התראה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -127,7 +127,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v419 שורות להשלמה לפני הבדיקה — בלי מסך חוסרים</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v420 מבצע שניתן בלי המינימום נקלט כמבצע — בלי התראה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -698,7 +698,7 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '419'; // שורות שמחכות לאישור לפני הבדיקה — כרטיס אחד במקום מסך ההשוואה; הנחה שהחשבון מוכיח אינה נשלחת לאישור; בחירת מוצר מהמאגר לשורה שלא זוהתה; ספרות שנקראו גוברות על השם; מהירות
+const APP_VERSION = '420'; // מבצע שהספק נתן בתעודה בלי המינימום נקלט כמבצע רגיל כבר בקליטה — בלי "פער מחיר", בלי מסך "בעיות" ובלי התראה; ומסך ההשוואה אומר מה באמת נמצא — "חוסר" רק כשחסרה סחורה
 // v398: תווית הגרסה ביומן הפעולות ובקובץ הגיבוי (עד כאן מחרוזת קבועה שנשארה 'v396_second_strong_read')
 const APP_VERSION_LABEL = 'v' + APP_VERSION + '_line_clear';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
@@ -4108,7 +4108,9 @@ function backupPlainSummary(payload) {
       'status': 'הסטטוס השמור של הקליטה. מגרסה 398 הוא מתעדכן גם כשחוסר נסגר (קיזוז, השלמת סחורה או זיכוי); ברשומות שנסגרו לפני כן הוא עשוי להישאר "open" גם כשהתעודה מאוזנת.',
       'aiAudit.hasDiscrepancy': 'הסריקה מצאה חוסר, עודף או פער מחיר ברגע הקליטה. הממצאים (aiAudit.findings) נשמרים להיסטוריה גם אחרי שנסגרו.',
       'scanAudit.perDocument[].verification.status = "needs_review"': 'בשורה אחת לפחות הקריאות לא הסכימו (בדרך כלל ברקוד שלא הצביע על מוצר יחיד) והעובד בחר בעצמו בזמן הקליטה. זה לא כישלון סריקה: סכום השורות וסך היחידות נבדקו מול הנייר.',
-      'priceAudit.rows[].result': '"match" — מחיר השורה תואם למחירון; "difference" — פער מחיר שאושר לפי הנייר.'
+      'priceAudit.rows[].result': '"match" — מחיר השורה תואם למחירון; "difference" — פער מחיר שאושר לפי הנייר.',
+      // v420
+      'priceAudit.rows[].promo.belowMinimum': 'המינימום של המבצע לא הושג בתעודה, והספק נתן את ההנחה בכל זאת (מחיר השורה הוא בדיוק מחיר המבצע). השורה נקלטה כמבצע רגיל (promoPct), בלי התראה ובלי ממצא. בתעודות שנשמרו לפני גרסה 420 אותו מקרה שמור כממצא "price" שהמבצע מסביר.'
     }
   };
 }
@@ -8413,6 +8415,49 @@ function aiPriceFindingPromoMatch(f, dateStr) {
   if (Math.abs(discountedUnitPrice(base, pct) - paper) > 0.02) return null;
   return pr;
 }
+// ===== v420: מבצע שהספק נתן בתעודה בלי המינימום — נקלט כמבצע רגיל, בלי התראה =====
+// בעל העסק, 24.11.2026 (תעודה 407300217859 — צילום של כרטיס התעודה, וגיבוי): "היה רשום לי שיש בעיה במבצע בתעודה הזאת על ה-6 יח׳ משקה
+// חלב ליטר. בקיצור סגרתי את התעודה וזהו — זה מראה כאילו הכל טוב בתעודה ושירד המבצע. למה?" ואחרי ההסבר: "מה אכפת לי שקיבלתי את
+// המבצע? הרי למרות שמוגדר 12 יח׳ למבצע קיבלתי אותו על 6 יח׳. מבחינתי פצצה — אין צורך להתריע על זה אפילו."
+// מה קרה: המבצע "משקאות חלב ליטר" (15%, 1.11–30.11) מוגדר במערכת עם מינימום 12 יח׳ מהסל. בתעודה היו רק 6 יח׳ מהסל ("משקה מוקה 1 ליטר"),
+// והספק נתן את ההנחה בכל זאת: 6 × ₪8.86 = ₪53.16, חיוב ₪45.19 (₪7.53 ליח׳, עם כוכבית). עד 419 אותה שורה נשפטה בשני כללים שונים:
+// - בזמן הקליטה המבצע "לא הופעל" (המינימום לא הושג), ולכן המחיר הצפוי היה המחיר המלא: "פערי מחיר שאומתו ונשמרו (1)" — "בתעודה ₪7.53 ·
+//   צפוי ₪8.86 · פער לשורה ₪-7.97", סרגל הסכומים "עודף ₪7.97", "אלה אכן הבעיות — אשר" בלי שמוצגת בעיה, ו"סגור תעודה עם החוסרים" בלי חוסר.
+// - אחרי השמירה, כרטיס התעודה בדק את אותו ממצא בכלל של 201 (aiPriceFindingPromoMatch, כאן למעלה): מבצע שבתוקף ביום התעודה, שהאחוז שלו
+//   נותן בדיוק את המחיר שבנייר — בלי קשר למינימום. לכן "מבצע 15%: המחיר בנייר תואם למבצע ✓", "אומתה", "נקלטה ומאוזנת ✓".
+// הכלל של 201 הוא הנכון גם בקליטה: הספק הוא שמחליט אם ההנחה ניתנה, והנייר מראה שניתנה — בדיוק באחוז של המבצע. מכאן, כלל אחד לכל
+// מקום שמכריע בקליטה אם מבצע חל על מוצר (promoPaperGranted): מבצע בתעודה (לא מרכזת) שבתוקף ביום התעודה והמינימום שלו לא הושג — חל בכל
+// זאת על מוצר שהנייר מחייב בדיוק במחיר המבצע (אותן 2 אגורות ליחידה של בדיקת המחיר), כשזו הנחה של ממש (יותר מ-2 אגורות ליחידה) והמוצר
+// חויב במחיר אחד. משתמשים בו מנוע ההשוואה (aiEvaluateInvoiceScan: המחיר הצפוי, בלי ממצא "מחיר שונה"), ההחלה (aiApplyInvoiceResult:
+// השורה נקלטת "מבצע X%"), שורות ההשוואה שלפני ההחלה (receiptPromoOnProduct — סרגל הסכומים) ובדיקת המחירים (receiptPriceAuditNow:
+// המחיר תואם). הקליטה ממשיכה בדיוק כמו קליטה שבה המינימום הושג: בלי פער, בלי שאלה ובלי הודעה — מי שקיבל את ההנחה אינו צריך
+// שיתריעו לו על כך. שום סכום אינו משתנה: השורה נשמרה גם קודם במחיר שבנייר. מה שנשאר מהמקרה הוא רק בנתונים השמורים של בדיקת המחירים
+// (priceAudit.rows[].promo.belowMinimum, וצורת המחיר PRICE_AUDIT_GRANTED_LABEL) — למי שיקרא גיבוי וישאל למה שורה של 6 יח׳ היא מבצע.
+// מה לא משתנה: מבצע שהמינימום שלו הושג והנייר לא נתן אותו ("הנחת המבצע לא ניתנה בתעודה" / דרישת זיכוי); מחיר בנייר שאינו מחיר המבצע
+// (נשאר "מחיר שונה"); מבצע שאינו קיים במערכת ("פתח מבצע", 418); והספירה החיה שלפני קריאת הנייר ("עוד 6 יח׳ להנחה").
+const PRICE_AUDIT_GRANTED_LABEL = 'מבצע בתוקף — ניתן בלי המינימום'; // שם צורת המחיר בנתוני בדיקת המחירים (expectedOptions / matchedForms) — אינו מוצג למשתמש
+function promoPaperGranted(pr, base, charged) {
+  const pct = Number(pr && pr.pct) || 0;
+  base = Number(base); charged = Number(charged);
+  if (!pr || pr.type === 'monthEnd' || !(pct > 0) || !(base > 0) || !(charged > 0) || !(charged < base - 0.02)) return false;
+  return Math.abs(discountedUnitPrice(base, pct) - charged) <= 0.02;
+}
+// המבצעים שהנייר שנקרא נותן בלי המינימום (productId → המבצע) — מההערכה שעל המסך. בצילום תחילה ההערכה נבנית רק כשמסך ההשוואה נפתח,
+// אחרי השורות שלו; לכן, כשהיא עוד איננה, היא מחושבת כאן פעם אחת מול הנייר בלבד (המבצעים האלה תלויים בנייר, לא בספירה). בלי נייר — אין.
+function receiptGrantedPromoMap() {
+  if (aiScanEvaluation && aiScanEvaluation.grantedPromos instanceof Map) return aiScanEvaluation.grantedPromos;
+  if (!aiScanResponse || aiScanBusy) return null;
+  try { const ev = aiEvaluateInvoiceScan(aiScanResponse, []); return ev && ev.grantedPromos instanceof Map ? ev.grantedPromos : null; } catch (e) { return null; }
+}
+// שורת ההשוואה של מוצר, לפני שהנייר הוחל עליה: המבצע חל כשהמינימום הושג בספירה (promoTriggered, כמו תמיד) — או כשהנייר שכבר נקרא נותן
+// אותו למוצר בלי המינימום. כך סרגל הסכומים שבראש מסך ההשוואה מאוזן יחד עם "הכול תואם", ולא מראה את ההנחה כ"עודף". בלי נייר שנקרא —
+// בדיוק כמו קודם. granted — המפה של receiptGrantedPromoMap, כשהיא כבר ביד (שורות רבות בבת אחת).
+function receiptPromoOnProduct(productId, pr, day, granted) {
+  if (promoTriggered(pr, day)) return true;
+  if (!pr || !promoActive(pr, day)) return false;
+  const map = granted === undefined ? receiptGrantedPromoMap() : granted, hit = map instanceof Map ? map.get(String(productId)) : null;
+  return !!(hit && hit.id === pr.id);
+}
 // ===== v418: מבצע בתעודה שלא קיים במערכת — מוצג על המוצר, עם "פתח מבצע" =====
 // בעל העסק, 15.11.2026 (תעודה 407300217817, "ממרח אבוקדו אחלה 200": בנייר 8 × ₪11.89 = ₪95.12 וחיוב של ₪57.07 — 40% הנחה; במערכת
 // המבצע האחרון על המוצר נגמר ב-31.10): "יש מבצע בתעודה שלא קיים במערכת. זה לא הציג את זה בצורה ברורה גם במהלך קליטת התעודה וגם
@@ -11321,11 +11366,12 @@ function hideReceiptSummary() { const m = $('receiptSummaryModal'); m.classList.
 // ===== מסך השוואת תעודה (חוסר/עודף) =====
 function receiptReconcileRows() {
   const day = receiptPromoDay();
+  const granted = receiptGrantedPromoMap(); // v420: פעם אחת לכל השורות
   const rows = receiptList.map(it => {
     const p = products.find(x => x.id === it.productId);
     const base = r2(Number(p && p.price) || 0);
     const pr = promoForProduct(it.productId, day);
-    const on = promoTriggered(pr, day);
+    const on = receiptPromoOnProduct(it.productId, pr, day, granted); // v420: גם מבצע שהנייר שנקרא נותן למוצר בלי המינימום
     const pct = on ? (Number(pr.pct) || 0) : 0;
     return { productId: it.productId, name: it.name || (p ? p.name : ''), barcode: it.barcode || (p ? p.barcode : '') || '', received: Number(it.qty) || 0, noteQty: Number(it.qty) || 0, price: (on ? discountedUnitPrice(base, pct) : base), basePrice: base, promoPct: pct, promoOn: on, checked: false };
   });
@@ -11412,7 +11458,7 @@ function restoreReceiptReconcile() {
     if (line) { line.received = qty; }
     else {
       const p = products.find(p => String(p.id) === id), base = r2(Number(p && p.price) || 0);
-      const promo = promoForProduct(item.productId, activeReceiptDate()), on = promoTriggered(promo, activeReceiptDate());
+      const promo = promoForProduct(item.productId, activeReceiptDate()), on = receiptPromoOnProduct(item.productId, promo, activeReceiptDate()); // v420
       const pct = on ? Number(promo.pct) || 0 : 0;
       reconcileData.push({ productId: item.productId, name: item.name || (p && p.name) || '', barcode: item.barcode || '',
         received: qty, noteQty: reconcilePaperEntered ? 0 : qty, price: on ? discountedUnitPrice(base, pct) : base,
@@ -16332,7 +16378,14 @@ function receiptPriceAuditNow() {
         row.chargedUnitPrice = total != null ? total / row.quantity : (row.originalUnitPrice != null && discount != null ? row.originalUnitPrice - Math.abs(discount) / row.quantity : row.originalUnitPrice);
         row.chargeDerivation = total != null ? 'מחושב: סכום שורה ₪' + fmtMoney(total) + ' ÷ ' + row.quantity : discount ? 'מחושב: המחיר המודפס פחות הנחת השורה חלקי הכמות' : 'המחיר המודפס; לא נקראה הנחת שורה';
         row.comparisonPrice = row.chargedUnitPrice;
-        row.expectedOptions = [{ label: pr ? 'מבצע בתוקף' : 'מחיר רגיל', price: pr ? discountedUnitPrice(row.catalogBasePrice, pr.pct) : row.catalogBasePrice }];
+        // v420: המינימום של המבצע לא הושג בתעודה, אבל השורה מחויבת בדיוק במחיר שלו — הספק נתן אותו (promoPaperGranted). המחיר תואם למבצע,
+        // בלי שום הודעה (השם והסימון belowMinimum נשמרים בנתוני הבדיקה בלבד); עד 419 השורה הייתה "המחיר בתעודה שונה מהמחיר שבמאגר",
+        // והתעודה השמורה אמרה מיד אחר כך "תואם למבצע".
+        const granted = pr ? null : active.find(x => promoPaperGranted(x, row.catalogBasePrice, row.chargedUnitPrice)) || null;
+        if (granted) row.promo = { id: granted.id || null, name: granted.name || '', pct: Number(granted.pct) || 0, fixedPrice: Number(granted.fixedPrice) || null, start: granted.start, end: granted.end, minUnits: promoMinUnitsP(granted), belowMinimum: true,
+          basketUnits: entries.reduce((sum, x) => sum + (x.product && granted.productIds.includes(x.product.id) ? (x.row.quantity || 0) : 0), 0) };
+        row.expectedOptions = granted ? [{ label: PRICE_AUDIT_GRANTED_LABEL, price: discountedUnitPrice(row.catalogBasePrice, granted.pct) }]
+          : [{ label: pr ? 'מבצע בתוקף' : 'מחיר רגיל', price: pr ? discountedUnitPrice(row.catalogBasePrice, pr.pct) : row.catalogBasePrice }];
         if (aiRowArithmeticError(raw, row.quantity)) { row.capability = 'partial'; row.reason = 'מחיר, הנחה וסכום שורה אינם מתיישבים בפענוח'; }
         if (gross != null && total != null && total > gross + .02) { row.capability = 'partial'; row.reason = 'סכום הנטו גבוה מהברוטו בשורה'; }
       }
@@ -16380,6 +16433,18 @@ function receiptPriceAuditNow() {
         selectedRead: mapped.modelVerification.selectedRead, identitySupport: mapped.modelVerification.identitySupport };
       out.rows.push(row);
     });
+  });
+  // v420: "בלי המינימום" נמדד על כל התעודות של הקליטה יחד, כמו במנוע ההשוואה (aiBilledBasketQty): שתי תעודות שיחד מגיעות למינימום הן
+  // מבצע רגיל ("מבצע בתוקף"), ולא מבצע שניתן בלי המינימום. המחיר הצפוי והתוצאה אינם משתנים — רק השם שנשמר בנתוני הבדיקה.
+  out.rows.forEach(r => {
+    if (!r.promo || !r.promo.belowMinimum) return;
+    const pr = promos.find(x => x && x.id === r.promo.id), ids = pr && Array.isArray(pr.productIds) ? pr.productIds : [];
+    r.promo.basketUnits = out.rows.reduce((sum, x) => sum + (x.productId && ids.includes(x.productId) ? (Number(x.quantity) || 0) : 0), 0);
+    if (r.promo.basketUnits < r.promo.minUnits) return;
+    delete r.promo.belowMinimum;
+    r.expectedOptions = r.expectedOptions.map(o => o.label === PRICE_AUDIT_GRANTED_LABEL ? { ...o, label: 'מבצע בתוקף' } : o);
+    if (Array.isArray(r.matchedForms)) r.matchedForms = r.matchedForms.map(label => label === PRICE_AUDIT_GRANTED_LABEL ? 'מבצע בתוקף' : label);
+    if (r.reason === 'המחיר תואם: ' + PRICE_AUDIT_GRANTED_LABEL) r.reason = 'המחיר תואם: מבצע בתוקף';
   });
   out.complete = allComplete && out.rows.length > 0 && out.rows.every(r => r.capability === 'checkable') && !out.documents.some(d => d.reviewRequired);
   return out;
@@ -18048,6 +18113,7 @@ function aiEvaluateInvoiceScanNow(payload, receivedRows) {
   const scan = payload && payload.scan;
   const errors = [], warnings = [], findings = [], promoCandidates = [], barcodeSuggestions = [], aggregates = new Map(), docSummaries = [], residuals = [], pendings = [], autoResolutions = [], depositRows = [];
   const receivedUnitPrices = new Map(); // v272: productId → מחיר מבצע שהנייר מוכיח שחויב
+  const grantedPromos = new Map(); // v420: productId → { id, name, pct, minUnits, basketUnits } — מבצע שהנייר נותן למוצר בלי המינימום
   let unresolvedBarcodeRows = 0, unusableRows = 0;
   // v272: תעודה בלי סך יחידות שהוקלד נספרת לפי מה שיש: עוגן מודפס שנקרא
   // מהנייר, או שום עוגן כמות בכלל. בלי הספירה הזאת המעריך הכריז
@@ -18373,6 +18439,15 @@ function aiEvaluateInvoiceScanNow(payload, receivedRows) {
     // נקרא מאותו מקור שממנו קוראת בדיקת המחירים.
     const day = promoDay;
     const paperPromoTriggered = pr => aiBilledPromoTriggered(pr, aggregates, day);
+    // v420: מבצע שהמינימום שלו לא הושג בנייר, אבל הנייר עצמו מחייב את המוצר בדיוק במחיר המבצע (promoPaperGranted) — הספק נתן אותו,
+    // ולכן הוא המחיר הצפוי של המוצר. בלי זה השורה הייתה "מחיר שונה: במערכת ₪8.86, בנייר ₪7.53", והתעודה השמורה אמרה מיד אחר כך "תואם למבצע".
+    aggregates.forEach(a => {
+      const pr = promoForProduct(a.product.id, day);
+      if (!pr || !promoActive(pr, day) || paperPromoTriggered(pr) || !(a.qty > 0) || (a.priceVariants && a.priceVariants.size > 1)) return;
+      if (!promoPaperGranted(pr, Number(a.product.price) || 0, a.totalCents / 100 / a.qty)) return;
+      grantedPromos.set(String(a.product.id), { id: pr.id || null, name: pr.name || '', pct: Number(pr.pct) || 0, minUnits: promoMinUnitsP(pr), basketUnits: aiBilledBasketQty(pr, aggregates) });
+    });
+    const paperPromoApplies = (pr, productId) => !!pr && (paperPromoTriggered(pr) || grantedPromos.has(String(productId)));
     // v272: מחיר הסחורה שהתקבלה, מתוקן לפי המבצע שהנייר מוכיח שחויב. שורה
     // שנשארה במחיר מלא רק מפני שהחוסר עצמו שחק את הסל מתומחרת מחדש כאן —
     // אחרת aiFindingsClosure משווה נייר במחיר מבצע מול סחורה במחיר מלא,
@@ -18383,7 +18458,7 @@ function aiEvaluateInvoiceScanNow(payload, receivedRows) {
       const product = products.find(x => x.id === line.productId);
       if (!product) return;
       const pr = promoForProduct(line.productId, day);
-      if (!pr || !paperPromoTriggered(pr)) return;
+      if (!paperPromoApplies(pr, line.productId)) return; // v420: גם מבצע שהנייר נותן בלי המינימום
       const base = r2(Number(product.price) || 0);
       if (Math.abs((Number(line.price) || 0) - base) > 0.005) return;
       receivedUnitPrices.set(String(line.productId), { base, promo: discountedUnitPrice(base, Number(pr.pct) || 0) });
@@ -18395,7 +18470,7 @@ function aiEvaluateInvoiceScanNow(payload, receivedRows) {
     const line = receivedRows.find(l => l.productId === a.product.id);
     const received = Number(line && line.received) || 0;
     const productPromo = promoForProduct(a.product.id, day);
-    const expected = paperPromoTriggered(productPromo)
+    const expected = paperPromoApplies(productPromo, a.product.id)
       ? discountedUnitPrice(Number(a.product.price) || 0, Number(productPromo.pct) || 0)
       : r2(Number(a.product.price) || 0);
     const quantityDiff = a.qty - received;
@@ -18455,7 +18530,7 @@ function aiEvaluateInvoiceScanNow(payload, receivedRows) {
   const uniqueWarnings = Array.from(new Set(warnings.concat(Array.isArray(scan.warnings) ? scan.warnings : [])));
   // v272: unitsAnchorless הוא בדיוק ההקלה של v270 — תעודה שאין בה שום עוגן
   // כמות עדיין ניתנת להחלה. מה שהשתנה: היא כבר לא מתחזה ל"מאומתת".
-  return { promoDay, valid: uniqueErrors.length === 0 && barcodeSuggestions.length === 0 && findingsReady && aggregates.size > 0 && totalVerified && (unitsVerified || unitsAnchorless) && closure.ok, totalVerified, unitsVerified, unitsAnchorless, closure, errors: uniqueErrors, warnings: uniqueWarnings, findings, barcodeSuggestions, allRowsMapped, findingsReady, basketComplete, missingDocuments, residuals, autoResolutions, aggregates, receivedUnitPrices, docSummaries, extractedTotal: extractedTotalCents / 100, extractedUnits, rowTotal: rowTotalCents / 100, supplierDiscount, depositRows };
+  return { promoDay, valid: uniqueErrors.length === 0 && barcodeSuggestions.length === 0 && findingsReady && aggregates.size > 0 && totalVerified && (unitsVerified || unitsAnchorless) && closure.ok, totalVerified, unitsVerified, unitsAnchorless, closure, errors: uniqueErrors, warnings: uniqueWarnings, findings, barcodeSuggestions, allRowsMapped, findingsReady, basketComplete, missingDocuments, residuals, autoResolutions, aggregates, receivedUnitPrices, grantedPromos, docSummaries, extractedTotal: extractedTotalCents / 100, extractedUnits, rowTotal: rowTotalCents / 100, supplierDiscount, depositRows };
 }
 function aiRotationRetryDocumentIndexes(evaluation) {
   if (!evaluation || !Array.isArray(evaluation.docSummaries)) return [];
@@ -19627,7 +19702,7 @@ function aiSetFindingReceived(productId, value) {
     const p = products.find(x => String(x.id) === pid);
     if (!p) { showToast('המוצר לא נמצא במאגר', null, null, 2600); return false; }
     const day = activeReceiptDate(), base = r2(Number(p.price) || 0);
-    const promo = promoForProduct(p.id, day), on = promoTriggered(promo, day), pct = on ? (Number(promo.pct) || 0) : 0;
+    const promo = promoForProduct(p.id, day), on = receiptPromoOnProduct(p.id, promo, day), pct = on ? (Number(promo.pct) || 0) : 0; // v420
     line = { productId: p.id, name: p.name || '', barcode: p.barcode || '', received: 0, noteQty: reconcilePaperEntered ? 0 : qty, price: on ? discountedUnitPrice(base, pct) : base, basePrice: base, promoPct: pct, promoOn: on, checked: false }; // v400: "בנייר" משקף את הספירה עד שהנייר מוזן — כמו בשחזור ההשוואה
     reconcileData.unshift(line);
   }
@@ -19903,6 +19978,41 @@ function aiPaperPromoGroupHtml(list) {
 function aiOnlyPaperPromoFindings(findings, list) {
   const open = (Array.isArray(findings) ? findings : []).filter(aiIsActionableFinding);
   return open.length > 0 && open.every(f => f.type === 'price' && list.some(x => String(x.productId) === String(f.productId)));
+}
+// ===== v420: מסך התוצאות אומר מה באמת נמצא — "חוסר" רק כשחסרה סחורה =====
+// בעל העסק, 24.11.2026, על אותה קליטה (ראו promoPaperGranted): "למה בסגירת תעודה הוצג לי שיש חוסר של מבצע?" כל 311 היחידות הגיעו, וכל מה
+// שנמצא היה פער מחיר בשורה אחת — אבל המסך דיבר בשפה של סחורה: סרגל הסכומים כתב "עודף ₪7.97" (וכשהנייר יקר מהצפוי — "חסר ₪…"), התיבה
+// "תוצאות הסריקה החכמה" נשארה ריקה מעל "אלה אכן הבעיות — אשר" (פער שבדיקת המחירים כבר שפטה אינו חוזר ברשימה, priceAuditLegacyVisible),
+// והכפתור שסוגר את התעודה נקרא תמיד "סגור תעודה עם החוסרים". מ-420 המקרה ההוא (מבצע שניתן בלי המינימום) כבר אינו מגיע למסך הזה, אבל
+// כל פער מחיר אחר בלי חוסר היה ממשיך לקבל את אותן מילים. לכן:
+// - aiPriceOnlyFindings — כל מה שנמצא הוא פער מחיר / מבצע שלא ניתן, בלי חוסר ובלי עודף (גם לא כזה שזיכוי מהנהג כיסה).
+// - הסרגל כותב "פער מחיר ₪…" (renderReconcile); התיבה אומרת מה נמצא ובאיזה מוצר, ושבסחורה לא חסר ולא עודף דבר (aiPriceOnlyNoteHtml);
+//   כפתור האישור הוא "פער המחיר נכון — אשר"; והכפתור שסוגר נקרא לפי מה שנמצא (aiCloseFindingsLabel): "…עם פער המחיר", "…עם העודפים",
+//   "…עם החוסרים והעודפים", "…עם ההפרשים" (כמות ומחיר יחד) — ו"…עם החוסרים" רק כשיש חוסר.
+// תצוגה בלבד: הממצאים, החשבון, ההחלה והתעודה שנשמרת אינם משתנים. מבצע שבתעודה ואינו במערכת (418) — הקבוצה והכפתור שלו, כמו קודם.
+function aiPriceOnlyFindings(ev) {
+  const all = ev && Array.isArray(ev.findings) ? ev.findings.filter(aiIsActionableFinding) : [];
+  return all.length > 0 && all.every(f => f.type === 'price' || f.type === 'promo_missing') ? all : [];
+}
+function aiCloseFindingsLabel(findings) {
+  const open = (Array.isArray(findings) ? findings : []).filter(aiIsActionableFinding);
+  const short = open.some(f => f.type === 'shortage'), over = open.some(f => f.type === 'surplus');
+  const prices = open.filter(f => f.type === 'price' || f.type === 'promo_missing').length;
+  if (prices && (short || over)) return 'סגור תעודה עם ההפרשים';
+  if (prices) return prices === 1 ? 'סגור תעודה עם פער המחיר' : 'סגור תעודה עם פערי המחיר';
+  if (short && over) return 'סגור תעודה עם החוסרים והעודפים';
+  if (over) return 'סגור תעודה עם העודפים';
+  return 'סגור תעודה עם החוסרים';
+}
+// הפערים עצמם, כפי שהמנוע ניסח אותם ("מחיר שונה: … — במערכת ₪X, בנייר ₪Y"), למי שעומד לאשר אותם — רק אלה שאינם מוצגים כבר בתיבה:
+// לא ברשימת הבעיות (priceAuditLegacyVisible) ולא בקבוצת "מבצע בתעודה שלא קיים במערכת" (paperPromoList)
+function aiPriceOnlyNoteHtml(ev, paperPromoList) {
+  const hidden = aiPriceOnlyFindings(ev).filter(f => !priceAuditLegacyVisible(f) && !(paperPromoList || []).some(x => String(x.productId) === String(f.productId)));
+  if (!hidden.length) return '';
+  return '<div data-price-only-note class="mt-3 rounded-xl border border-blue-200 bg-blue-50 p-3 text-blue-900">' +
+    '<div class="font-black"><i class="fa-solid fa-shekel-sign ml-1" aria-hidden="true"></i>' + (hidden.length === 1 ? 'נמצא פער מחיר אחד' : 'נמצאו ' + hidden.length + ' פערי מחיר') + ' — בסחורה לא חסר ולא עודף דבר</div>' +
+    hidden.map(f => '<div class="text-sm font-black text-slate-800 mt-1.5">' + htmlEscape(tidyAiMoneyText(f.text || f.name || '')) + '</div>').join('') +
+    '<div class="text-[11px] font-bold text-slate-600 mt-1.5">הפירוט המלא למעלה, בבדיקת המחירים. התעודה נקלטת לפי המחיר שבנייר.</div></div>';
 }
 function aiInformationalFindingsHtml(findings) {
   const informational = (Array.isArray(findings) ? findings : []).filter(finding => !aiIsActionableFinding(finding));
@@ -20372,7 +20482,8 @@ function aiInvoiceCaptureHtml(priceReport) {
     // the remaining findings, without offering to claim that credit again.
     const analyzerLed = !(credit && credit.amount) && ev.analyzerLed === true && aiAnalyzeResult && aiAnalyzeResult.accepted === true;
     const paperPromoList = receiptPaperPromos(priceReport); // v418: מבצע שבתעודה ואינו במערכת — ראשון ברשימה (מאותה בדיקת מחירים של ראש המסך)
-    const findingsHtml = aiPaperPromoGroupHtml(paperPromoList) + aiActionableFindingsHtml(actionableFindings, { openRows: !analyzerLed }) + residualLines + unknownCards + (credit && credit.amount ? '' : aiAnalyzeHtml(ev)) + aiScanDiagnosticsHtml(ev);
+    const priceOnly = ev.valid ? aiPriceOnlyFindings(ev) : []; // v420: כל מה שנמצא הוא פער מחיר — בלי חוסר ובלי עודף
+    const findingsHtml = aiPaperPromoGroupHtml(paperPromoList) + aiActionableFindingsHtml(actionableFindings, { openRows: !analyzerLed }) + (priceOnly.length ? aiPriceOnlyNoteHtml(ev, paperPromoList) : '') + residualLines + unknownCards + (credit && credit.amount ? '' : aiAnalyzeHtml(ev)) + aiScanDiagnosticsHtml(ev);
     const allGood = aiScanAllGood(ev) && !(credit && (credit.pending || credit.invalid.length));
     const statusHtml = deliveryCreditStatusHtml(credit) + (allGood
       ? '<div class="rounded-xl bg-emerald-50 border border-emerald-200 p-3 font-black text-emerald-800"><i class="fa-solid fa-circle-check ml-1"></i>הכול תואם — לא נמצאו חוסר, עודף או בעיית מחיר/מבצע.</div>'
@@ -20405,13 +20516,15 @@ function aiInvoiceCaptureHtml(priceReport) {
         '<button data-role="ai-apply" class="btn-tap w-full bg-white border-2 border-violet-300 text-violet-700 rounded-xl py-3 px-2 leading-tight font-black">המשך בלי לפתוח את המבצע — התעודה תיקלט כפתוחה</button>' +
         '<button data-role="ai-edit-images" class="btn-tap w-full bg-white border border-slate-200 text-slate-500 rounded-xl py-2.5 font-black text-xs"><i class="fa-solid fa-camera-rotate"></i> תיקון תעודה — חזרה לצילומים</button></div>';
     } else if (!confirmed) {
+      // v420: כשכל מה שנמצא הוא פער מחיר — הכפתור אומר זאת ("הבעיות" נקראו כחוסר, כשלא חסר דבר)
       actionsHtml = '<div class="mt-4 space-y-2">' +
-        '<button data-role="ai-confirm-findings" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-3.5 font-black"><i class="fa-solid fa-check-double"></i> אלה אכן הבעיות — אשר</button>' +
+        '<button data-role="ai-confirm-findings" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-3.5 font-black"><i class="fa-solid fa-check-double"></i> ' + (priceOnly.length === 1 ? 'פער המחיר נכון — אשר' : priceOnly.length ? 'פערי המחיר נכונים — אשר' : 'אלה אכן הבעיות — אשר') + '</button>' +
         '<button data-role="ai-edit-images" class="btn-tap w-full bg-white border border-slate-200 text-slate-500 rounded-xl py-2.5 font-black text-xs"><i class="fa-solid fa-camera-rotate"></i> תיקון תעודה — חזרה לצילומים</button></div>';
     } else {
+      // v420: הכפתור נקרא לפי מה שנמצא (aiCloseFindingsLabel) — "עם החוסרים" רק כשיש חוסר
       actionsHtml = '<div class="mt-4 space-y-2">' +
         (ev.valid
-          ? '<button data-role="ai-apply" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-3.5 font-black"><i class="fa-solid fa-file-circle-check"></i> סגור תעודה עם החוסרים</button>'
+          ? '<button data-role="ai-apply" class="btn-tap w-full bg-violet-600 text-white rounded-xl py-3.5 font-black"><i class="fa-solid fa-file-circle-check"></i> ' + aiCloseFindingsLabel(priceOnly.length ? priceOnly : actionableFindings) + '</button>'
           : '<div class="rounded-xl bg-slate-100 text-slate-400 text-center py-3.5 font-black text-sm"><i class="fa-solid fa-lock ml-1"></i>סגירת תעודה תיפתח אחרי שכל השורות ייסגרו</div>' +
             '<button data-role="ai-edit-images" class="btn-tap w-full bg-white border-2 border-violet-300 text-violet-700 rounded-xl py-3 font-black"><i class="fa-solid fa-camera-rotate"></i> תיקון תעודה — חזרה לצילומים</button>') +
         '<button data-role="rc-recon-cancel" class="btn-tap w-full bg-white border border-slate-200 text-slate-500 rounded-xl py-2.5 font-black text-xs"><i class="fa-solid fa-rotate-right"></i> ביטול — חזרה לסריקה לתיקון הכמויות</button></div>';
@@ -20592,7 +20705,10 @@ function aiApplyInvoiceResult() {
     // promoTriggered מדד את הסל החי, ולכן חוסר שהפיל אותו מתחת למינימום
     // סימן את השורה "בלי מבצע" בזמן שמחיר הנייר שנכתב לתוכה הוא מחיר מבצע.
     // אותו יום שהמעריך פסק לפיו — תאריך התעודה כפי שהוזן, לא היום.
-    const base = r2(Number(a.product.price) || 0), pr = promoForProduct(a.product.id, promoDay), on = aiBilledPromoTriggered(pr, ev.aggregates, promoDay), pct = on ? (Number(pr.pct) || 0) : 0;
+    // v420: וגם מבצע שהנייר נותן למוצר בלי המינימום (ev.grantedPromos) — השורה נקלטת "מבצע X%", כמו שורת מבצע רגילה
+    const base = r2(Number(a.product.price) || 0), pr = promoForProduct(a.product.id, promoDay);
+    const granted = pr && ev.grantedPromos instanceof Map ? ev.grantedPromos.get(String(a.product.id)) : null;
+    const on = aiBilledPromoTriggered(pr, ev.aggregates, promoDay) || !!(granted && granted.id === pr.id), pct = on ? (Number(pr.pct) || 0) : 0;
     if (!line) { line = { productId: a.product.id, name: a.product.name, barcode: a.product.barcode || '', received: 0, noteQty: 0, price: a.paperUnitPrice, basePrice: base, promoPct: pct, promoOn: on, checked: true }; reconcileData.unshift(line); }
     line.noteQty = a.qty; line.price = a.paperUnitPrice; line.basePrice = base; line.promoPct = pct; line.promoOn = on; line.checked = true; line.aiPaperPriceOnly = true;
   });
@@ -20657,7 +20773,10 @@ function renderReconcile() {
   const uG = reconcileUnitsGap();
   const balanced = reconcileIsBalanced();
   const hasMoneyGap = !reconcileMoneyBalanced();
-  const dir = hasMoneyGap ? (gap > 0 ? 'חסר' : 'עודף') : (uG > 0 ? 'חסר ביחידות' : 'עודף ביחידות');
+  // v420: כל היחידות תואמות וכל מה שהסריקה מצאה הוא פער מחיר — הסרגל כותב "פער מחיר", ולא "חסר" / "עודף" (שנקראים כסחורה שחסרה או עודפת).
+  // רק לפני ההחלה: אחריה השורות כבר במחיר שבנייר, והסרגל מאוזן.
+  const priceOnlyGap = hasMoneyGap && !uG && !reconcilePaperEntered && !!(aiScanEvaluation && aiScanEvaluation.valid) && aiPriceOnlyFindings(aiScanEvaluation).length > 0;
+  const dir = priceOnlyGap ? 'פער מחיר' : hasMoneyGap ? (gap > 0 ? 'חסר' : 'עודף') : (uG > 0 ? 'חסר ביחידות' : 'עודף ביחידות');
 
   const needsPaperReview = receiptEntryMode === 'photo' && receiptAnchorSource === 'paper'
     && !reconcilePaperEntered && !!aiScanResponse;

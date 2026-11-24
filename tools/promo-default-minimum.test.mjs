@@ -4,17 +4,18 @@ import {runtime, fixture} from './receipt-scan-harness.mjs';
 
 const json = (c, expr) => JSON.parse(c.run('JSON.stringify(' + expr + ')'));
 const audit = c => json(c, 'receiptPriceAudit().rows[0]');
-function setup(minimum = {minQty: 1, minUnit: 'carton', cartonSize: 0}) {
+// total — מה שהנייר מחייב על היחידה: 4 (ברירת המחדל — 20% הנחה מודפסת) או 5 (מחיר מלא, בלי הנחה)
+function setup(minimum = {minQty: 1, minUnit: 'carton', cartonSize: 0}, total = 4) {
   const data = fixture('yotvata'), doc = data.paper.scan.documents[0], row = doc.rows[0];
   data.products[0].boxSize = 12;
   data.items[0].qty = 1;
-  Object.assign(row, {quantity: 1, unitPriceExVat: 5, grossLineTotalExVat: 5, lineDiscountExVat: 1, lineTotalExVat: 4});
-  Object.assign(doc, {subtotalExVat: 4, printedUnits: 1, itemsSectionTotalExVat: 4});
+  Object.assign(row, {quantity: 1, unitPriceExVat: 5, grossLineTotalExVat: 5, lineDiscountExVat: 5 - total, lineTotalExVat: total});
+  Object.assign(doc, {subtotalExVat: total, printedUnits: 1, itemsSectionTotalExVat: total});
   data.promos = [{id: 'p', name: 'מבצע בדיקה', pct: 20, productIds: ['milk'], start: '2026-09-01', end: '2026-09-30', type: 'receipt', ...minimum}];
   doc.__pricePaper = structuredClone(doc); doc.__priceSourceId = 'default-minimum-fixture';
   const c = runtime('yotvata', {data});
-  c.context.savedMinimumScan = {...data.paper, docInputs: [{amount: 4, units: 1, pageCount: 1}]};
-  c.run("receiptOpened=true;receiptDupConfirmed=true;restoreDraftScan(savedMinimumScan);receiptPaperScanState='ok';priceAuditSetDate(0,'2026-09-20');receiptDocDate='2026-09-20';receiptNotes=[{amount:4,units:1}];recomputeNoteTotal();receiptList=structuredClone(testData.items);saveReceiptDraft();renderReceiving()");
+  c.context.savedMinimumScan = {...data.paper, docInputs: [{amount: total, units: 1, pageCount: 1}]};
+  c.run("receiptOpened=true;receiptDupConfirmed=true;restoreDraftScan(savedMinimumScan);receiptPaperScanState='ok';priceAuditSetDate(0,'2026-09-20');receiptDocDate='2026-09-20';receiptNotes=[{amount:" + total + ",units:1}];recomputeNoteTotal();receiptList=structuredClone(testData.items);saveReceiptDraft();renderReceiving()");
   return {c, data};
 }
 
@@ -45,10 +46,23 @@ test('the legacy default one-carton record without a size has no minimum and sur
 
 test('explicit unit and complete carton thresholds still determine whether the discount is due', () => {
   for (const minimum of [{minQty: 5, minUnit: 'unit'}, {minQty: 1, minUnit: 'carton', cartonSize: 12}, {minQty: 2, minUnit: 'carton', cartonSize: 6}]) {
+    // הנייר מחייב מחיר מלא: המינימום לא הושג, ההנחה אינה מגיעה, והמחיר המלא תואם — בלי מבצע צפוי
+    const full = setup(minimum, 5).c;
+    assert.equal(audit(full).promo, null);
+    assert.equal(audit(full).expectedOptions[0].price, 5);
+    assert.equal(audit(full).result, 'match');
+    assert.deepEqual(audit(full).matchedForms, ['מחיר רגיל']);
+    assert.equal(full.run('promoTriggered(promos[0],receiptDocDate)'), false);
+    // v420: הנייר נותן את ההנחה למרות שהמינימום לא הושג — היא עדיין לא "מגיעה" (promoTriggered), אבל הספק נתן אותה, ובדיקת המחירים
+    // אומרת זאת בשמה במקום "פער מחיר" (עד 419: promo null, מחיר צפוי 5, "המחיר בתעודה שונה מהמחיר שבמאגר")
     const {c} = setup(minimum);
-    assert.equal(audit(c).promo, null);
-    assert.equal(audit(c).expectedOptions[0].price, 5);
+    const row = audit(c), need = c.run('promoMinUnitsP(promos[0])');
     assert.equal(c.run('promoTriggered(promos[0],receiptDocDate)'), false);
+    assert.equal(row.result, 'match');
+    assert.deepEqual(row.matchedForms, ['מבצע בתוקף — ניתן בלי המינימום']);
+    assert.equal(row.expectedOptions[0].price, 4);
+    assert.deepEqual([row.promo.id, row.promo.pct, row.promo.belowMinimum, row.promo.basketUnits, row.promo.minUnits], ['p', 20, true, 1, need]);
+    assert.equal(c.run('priceAuditPendingRows(receiptPriceAudit()).length'), 0);
   }
 });
 

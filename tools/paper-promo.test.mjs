@@ -350,7 +350,7 @@ test('5. בלי לפתוח: מסך ההשוואה אומר מה הבעיה, עם
   const b = await note();
   b.run('startReceiptLineCheck()'); markAll(b);
   b.run('finishReceiptLineCheck()'); await settle();
-  assert.match(strip(app(b)), /תעודת הספק ₪249\.44 סכום הפריטים שנסרקו ₪287\.49 עודף ₪38\.05/, 'לפני: הפער הוא בדיוק ההנחה');
+  assert.match(strip(app(b)), /תעודת הספק ₪249\.44 סכום הפריטים שנסרקו ₪287\.49 פער מחיר ₪38\.05/, 'לפני: הפער הוא בדיוק ההנחה'); // v420: "פער מחיר", לא "עודף" — לא עודפת שום סחורה
   b.click('paper-promo-open', 'avocado'); // הכפתור בכרטיס שבבדיקת המחירים / בתוצאות
   assert.equal(sheetShown(b), true);
   await sheetClick(b, 'save');
@@ -620,12 +620,12 @@ test('11. הרשימה אינה מריצה את בדיקת המחירים המל
   assert.equal(r.run('auditCalls'), 3);
 });
 
-test('12. הגרסה עלתה ל-419, כולל ה-service worker; החלון החדש בדף, מעל חלון הבדיקה ומתחת לחיווי השמירה', () => {
+test('12. הגרסה עלתה ל-420, כולל ה-service worker; החלון החדש בדף, מעל חלון הבדיקה ומתחת לחיווי השמירה', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /const APP_VERSION = '419'/);
-  assert.match(html, /<title>הזמנות יטבתה - v419 שורות להשלמה לפני הבדיקה — בלי מסך חוסרים<\/title>/);
-  assert.match(html, /id="verBadge"[^>]*>v419 שורות להשלמה לפני הבדיקה — בלי מסך חוסרים</);
-  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v419/);
+  assert.match(html, /const APP_VERSION = '420'/);
+  assert.match(html, /<title>הזמנות יטבתה - v420 מבצע שניתן בלי המינימום נקלט כמבצע — בלי התראה<\/title>/);
+  assert.match(html, /id="verBadge"[^>]*>v420 מבצע שניתן בלי המינימום נקלט כמבצע — בלי התראה</);
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v420/);
   assert.match(html, /<div id="paperPromoModal" role="dialog" aria-modal="true" aria-label="פתיחת מבצע מהתעודה" class="hidden fixed inset-0 bg-slate-900\/60 backdrop-blur-sm items-center justify-center p-4 z-\[90\]" dir="rtl">/);
   assert.match(html, /<div id="receiptQuantityModal"[^>]* z-\[70\]"/); assert.match(html, /cloudBusyEl\.className = 'fixed inset-0 bg-black\/40 z-\[100\]/);
 });
