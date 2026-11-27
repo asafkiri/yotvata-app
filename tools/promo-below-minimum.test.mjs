@@ -479,10 +479,10 @@ test('10. מסך התוצאות אומר מה באמת נמצא: פער מחיר
   assert.deepEqual([only(['price']), only(['price', 'promo_missing', 'printed_promo']), only(['price', 'shortage']), only(['surplus']), only(['printed_promo']), only([])], [1, 2, 0, 0, 0, 0]);
 });
 
-test('11. הגרסה עלתה ל-420, כולל הכותרת וה-service worker', () => {
+test('11. הגרסה עלתה ל-421, כולל הכותרת וה-service worker', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /const APP_VERSION = '420'/);
-  assert.match(html, /<title>הזמנות יטבתה - v420 מבצע שניתן בלי המינימום נקלט כמבצע — בלי התראה<\/title>/);
-  assert.match(html, /id="verBadge"[^>]*>v420 מבצע שניתן בלי המינימום נקלט כמבצע — בלי התראה</);
-  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v420/);
+  assert.match(html, /const APP_VERSION = '421'/);
+  assert.match(html, /<title>הזמנות יטבתה - v421 שמירה שלא אושרה אינה נועלת את הקליטה<\/title>/);
+  assert.match(html, /id="verBadge"[^>]*>v421 שמירה שלא אושרה אינה נועלת את הקליטה</);
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v421/);
 });

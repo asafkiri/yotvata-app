@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>הזמנות יטבתה - v420 מבצע שניתן בלי המינימום נקלט כמבצע — בלי התראה</title>
+    <title>הזמנות יטבתה - v421 שמירה שלא אושרה אינה נועלת את הקליטה</title>
 
     <!-- PWA: התקנה כאפליקציה במסך מלא (אנדרואיד + אייפון) -->
     <meta name="mobile-web-app-capable" content="yes">
@@ -127,7 +127,7 @@
     <!-- תוכן ראשי -->
     <div id="draftHandoffBanner" class="max-w-3xl mx-auto px-4" aria-live="polite"></div>
     <main id="app" class="max-w-3xl mx-auto p-4"></main>
-    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v420 מבצע שניתן בלי המינימום נקלט כמבצע — בלי התראה</div>
+    <div id="verBadge" class="fixed bottom-1 left-2 text-[10px] font-black text-slate-300 z-[45] pointer-events-none select-none">v421 שמירה שלא אושרה אינה נועלת את הקליטה</div>
 
     <!-- כפתור סיום הזמנה (צף) -->
     <div id="cartWrap" class="fixed bottom-6 inset-x-0 flex justify-center pointer-events-none px-4 z-20">
@@ -698,7 +698,7 @@ const draftHandoffs = {}, handoffFinalizing = {}, handoffFinishPlans = {};
 let handoffApplying = false, handoffUserEdit = false, receiptFinalizing = false;
 let localReceivingFinalizer = null, receiptLocalEpoch = 0, qtyReceiptEpoch = null, scanReceiptEpoch = null, scannerEpoch = 0;
 let orderDraftId = null, orderDraftNote = '';
-const APP_VERSION = '420'; // מבצע שהספק נתן בתעודה בלי המינימום נקלט כמבצע רגיל כבר בקליטה — בלי "פער מחיר", בלי מסך "בעיות" ובלי התראה; ומסך ההשוואה אומר מה באמת נמצא — "חוסר" רק כשחסרה סחורה
+const APP_VERSION = '421'; // שמירה שלא אושרה אינה נועלת את הקליטה בלי הסבר — "אשר וקלוט" בודק ומנסה שוב בעצמו, וגם אחרי סגירה ופתיחה של האפליקציה; והשמירה אינה מחכה למנתח (כמו תנובה 166, ברמן 176)
 // v398: תווית הגרסה ביומן הפעולות ובקובץ הגיבוי (עד כאן מחרוזת קבועה שנשארה 'v396_second_strong_read')
 const APP_VERSION_LABEL = 'v' + APP_VERSION + '_line_clear';
 let receiptAnalysisCache = null, receiptAnalysisPending = null;
@@ -1640,9 +1640,21 @@ async function yotvataStartPaperScan(opts = {}) {
   if (runId !== aiScanRunId || receiptEntryMode !== 'photo') return;
   yotvataAdoptPaperAnchors();
 }
+// v421: נתוני הצילום (מספר העמודים, החיתוך, החלוקה, האיכות) מחושבים מהצילומים שבזיכרון — ואחרי סגירה ופתיחה של האפליקציה
+// הצילומים אינם (הם לא נשמרים), אז עד 420 הנתונים האלה ירדו מהקריאה אף שנשמרו בטיוטה. שתי תוצאות: קליטה שנשמרה אחרי
+// פתיחה מחדש איבדה אותם; וטביעת הקליטה (handoffFingerprint) השתנתה בעצם הפתיחה — ולכן ניסיון שמירה שלא אושר לא יכול היה
+// להישלח שוב אחריה ("יש שינוי בטיוטה לעומת בקשת השמירה הקודמת", לנצח). מעכשיו, כשאין צילומים בזיכרון, נשאר מה שנשמר.
+const SCAN_PAGE_AUDIT_FIELDS = ['pageCount', 'cropReasons', 'splitReasons', 'photoQuality', 'qualityAdvice'];
+function aiScanPageAuditKept(result) {
+  const live = aiScanPageAudit(result.docIndex);
+  if (Object.keys(live).length) return live;
+  const kept = {};
+  SCAN_PAGE_AUDIT_FIELDS.forEach(field => { if (result[field] !== undefined) kept[field] = result[field]; });
+  return kept;
+}
 function yotvataScanMetadata(result) {
   return { docIndex: result.docIndex, ok: !!result.ok, attempts: result.attempts || 1,
-    ...aiScanPageAudit(result.docIndex),
+    ...aiScanPageAuditKept(result),
     serviceVersion: result.serviceVersion || null, requestId: result.requestId || null,
     model: result.model || null, usage: result.usage || null,
     barcodeRetry: result.retryAudit || null, scanAudit: result.scanAudit || null,
@@ -2773,7 +2785,9 @@ function canEditDraft(kind, quiet=false) {
   return true;
 }
 function handoffBlockedText(kind,st) {
-  if(kind==='receiving')return localReceiptPending()?'בקשת הסיום עדיין לא אושרה — לחץ ״בדוק ושמור שוב״ למעלה. הטיוטה נשמרה בטלפון.':'התעודה נשמרת — המתן לאישור השמירה.';
+  // v421: קודם שמירה שרצה עכשיו (גם כשיש ניסיון תלוי — הבדיקה החוזרת), ואחר כך הנעילה — במילים פשוטות, ומה לוחצים.
+  // עד 420: "בקשת הסיום עדיין לא אושרה — לחץ ״בדוק ושמור שוב״ למעלה. הטיוטה נשמרה בטלפון." גם בזמן הבדיקה החוזרת.
+  if(kind==='receiving')return (receiptFinalizing||handoffFinalizing.receiving)?'הקליטה נשמרת עכשיו — רגע אחד.':'הקליטה נעולה עד שהשמירה תאושר. לחץ ״בדוק ושמור שוב״ בפס שלמעלה.';
   const label=handoffLabels[kind]||'הטיוטה', a=st&&st.away;
   if(a) return a.away==='moved' ? label+' ממשיכה בטלפון '+(a.by||'אחר')+' — ״החזר אותה לכאן״ למעלה.' : a.away==='saved'?label+' כבר נשמרה — כאן עותק ישן. ״נקה״ למעלה.':label+' בוטלה בטלפון אחר. ״נקה״ למעלה.';
   return st&&st.checking==='take'?'בודק אם הטיוטה עברה לטלפון הזה…':'בודק אם התעודה נשמרה בענן…';
@@ -2840,16 +2854,48 @@ function archivePendingLocalReceipt() {
   archive.allowReadOnly=true;
   showConfirm('לשמור את הקליטה בצד?', 'בקשת הסיום הקודמת עשויה כבר להיות שמורה בענן. כל הנתונים יישמרו בטלפון לבדיקה מול ההיסטוריה; אין לקלוט שוב את אותה תעודה.', 'שמור עותק בצד', archive);
 }
-async function retryLocalReceiptFinal() {
-  if(receiptFinalizing||handoffFinalizing.receiving)return false;
+// v421 (כמו תנובה 166 וברמן 156–157): retryLocalReceiptFinalResult מחזיר את התוצאה — "אשר וקלוט" ממשיך לשמור כשהניסיון
+// הישן ירד; retryLocalReceiptFinal ("בדוק ושמור שוב" בפס) נשאר true/false. מה שהשתנה:
+// - pending-changed עם gone (חדש ב-local-receiving.js: קריאה מהשרת ענתה ואין שם רשומה) — הניסיון הישן לא הגיע, והקליטה
+//   השתנתה מאז: הוא יורד, הקליטה נפתחת שוב, ו"אשר וקלוט" שומר את מה שיש עכשיו (אותו מזהה תעודה — גם אם הישן ינחת
+//   בסוף, לא תהיה כפילות). עד 420 הניסיון לא ירד אף פעם, והדרך היחידה החוצה הייתה "שמור עותק בצד לבדיקה".
+// - בלי תשובה מהשרת — לא מוותרים על הניסיון. saved-late — הענן מחזיק בדיוק את מה שנשלח; הניסיון נשאר, וההודעה מפנה
+//   ל"שמור עותק בצד לבדיקה" שבפס (כאן הכפתור הזה קיים רק ליד ניסיון תלוי).
+// - בזמן הבדיקה הפס אומר "בודק ושומר…" (עד 420 שום דבר לא השתנה על המסך — עד חצי דקה ויותר).
+// - שאר הסיבות (כבר קיימת, השתנתה בענן…) — באותן הודעות כמו בשמירה עצמה, במקום "לא התקבל אישור שמירה" לכולן.
+async function retryLocalReceiptFinalResult() {
+  if(receiptFinalizing||handoffFinalizing.receiving)return null;
   const f=getLocalReceivingFinalizer(),sid=handoffSession({draftId:receiptDraftId,attach:receiptAttachTarget}),attempt=f&&f.attempt(sid);
-  if(!attempt){showToast('בקשת השמירה אינה זמינה. הטיוטה נשארה בטלפון לבדיקה.');return false;}
-  receiptFinalizing=true;
+  if(!attempt){showToast('בקשת השמירה אינה זמינה. הטיוטה נשארה בטלפון לבדיקה.');return null;}
+  receiptFinalizing=true;renderDraftHandoffBanner();
   try {
     const r=await f.finish({...attempt,fingerprint:handoffFingerprint('receiving')});
-    if(!r.ok){showToast(r.reason==='saved-late'?'התעודה נשמרה עם נתונים קודמים. השינויים כאן נשמרו בטלפון — בדוק אותם מול ההיסטוריה.':r.reason==='pending-changed'?'יש שינוי בטיוטה לעומת בקשת השמירה הקודמת. שני העותקים נשמרו בטלפון לבדיקה; לא נשלחה בקשה אחרת.':'לא התקבל אישור שמירה. הטיוטה נשארה בטלפון — נסה שוב כשיש חיבור.',null,null,6500);return false;}
-    receiptFinalizing=false;if(!completeLocalReceiptSave(sid))return false;setView('receiptsHistory');showToast('התעודה נשמרה ✓');return true;
+    if(!r.ok){
+      const gone=r.reason==='pending-changed'&&r.gone;
+      if(gone)f.forget(sid);
+      showToast(gone?'השמירה הקודמת לא הגיעה לענן, והקליטה השתנתה מאז. הקליטה פתוחה שוב — בדוק ולחץ ״אשר וקלוט״.'
+        :r.reason==='saved-late'?'התעודה כבר נשמרה בענן, בלי מה ששונה כאן אחר כך. ״שמור עותק בצד לבדיקה״ בפס שלמעלה מפנה את המסך; את השינויים בדוק מול ההיסטוריה.'
+        :r.reason==='pending-changed'?'לא ניתן לאמת מול הענן את השמירה הקודמת, והקליטה השתנתה מאז. שום דבר לא אבד — נסה שוב כשיש חיבור, או ״שמור עותק בצד לבדיקה״.'
+        :localReceiptFinalMessage(r),null,null,6500);
+      return r;
+    }
+    receiptFinalizing=false;if(!completeLocalReceiptSave(sid))return {...r,cleanupFailed:true};setView('receiptsHistory');showToast('התעודה נשמרה ✓');return r;
   }finally{receiptFinalizing=false;renderDraftHandoffBanner();}
+}
+async function retryLocalReceiptFinal() {const r=await retryLocalReceiptFinalResult();return !!(r&&r.ok&&!r.cleanupFailed);}
+// ההודעות של שמירה שלא אושרה — לשמירה עצמה (finishLocalReceiving) ולבדיקה החוזרת
+function localReceiptFinalMessage(r) {
+  const messages={
+    'pending-changed':'יש שינוי בטיוטה לעומת בקשת השמירה הקודמת. שני העותקים נשמרו בטלפון לבדיקה; לא נשלחה בקשה אחרת.',
+    'saved-late':'התעודה כבר נשמרה עם נתונים קודמים. השינויים הנוספים נשארו בטלפון — בדוק אותם מול ההיסטוריה.',
+    'moved':'הקליטה הישנה הועברה בעבר לטלפון אחר. העותק כאן נשמר לבדיקה; סיים אותה בטלפון שאליו הועברה.',
+    'saved':'התעודה הזאת כבר נשמרה. העותק בטלפון נשאר לבדיקה מול ההיסטוריה.',
+    'exists':'התעודה הזאת כבר נשמרה. העותק בטלפון נשאר לבדיקה מול ההיסטוריה.',
+    'changed':'התעודה או מחיר מוצר השתנו בענן. השינויים כאן נשמרו בטלפון; בדוק מול ההיסטוריה לפני ניסיון נוסף.',
+    'storage':'אין מקום בטלפון לשמור את בקשת הסיום. לא בוצעה שמירה בענן; הטיוטה נשארה פתוחה.',
+    'busy':'שמירה קודמת עדיין נבדקת — המתן רגע.',
+    'offline':'אין חיבור — הטיוטה נשארה בטלפון הזה. נסה לסיים שוב כשיש רשת.'};
+  return messages[r.reason]||'לא התקבל אישור שמירה. הטיוטה נשארה בטלפון הזה; נסה לסיים שוב כשיש חיבור.';
 }
 
 // Receiving drafts are local. No start/listen/flush/take API exists for them.
@@ -2884,17 +2930,7 @@ async function finishLocalReceiving(id,data,preparingReceipt=false) {
       expected:receiptAttachTarget&&receiptAttachTarget.expectedReceipt,prices:handoffFinishPlans.receiving?.prices||[],
       fingerprint:handoffFingerprint('receiving')});
     if(r.ok)return true;
-    const messages={
-      'pending-changed':'יש שינוי בטיוטה לעומת בקשת השמירה הקודמת. שני העותקים נשמרו בטלפון לבדיקה; לא נשלחה בקשה אחרת.',
-      'saved-late':'התעודה כבר נשמרה עם נתונים קודמים. השינויים הנוספים נשארו בטלפון — בדוק אותם מול ההיסטוריה.',
-      'moved':'הקליטה הישנה הועברה בעבר לטלפון אחר. העותק כאן נשמר לבדיקה; סיים אותה בטלפון שאליו הועברה.',
-      'saved':'התעודה הזאת כבר נשמרה. העותק בטלפון נשאר לבדיקה מול ההיסטוריה.',
-      'exists':'התעודה הזאת כבר נשמרה. העותק בטלפון נשאר לבדיקה מול ההיסטוריה.',
-      'changed':'התעודה או מחיר מוצר השתנו בענן. השינויים כאן נשמרו בטלפון; בדוק מול ההיסטוריה לפני ניסיון נוסף.',
-      'storage':'אין מקום בטלפון לשמור את בקשת הסיום. לא בוצעה שמירה בענן; הטיוטה נשארה פתוחה.',
-      'busy':'שמירה קודמת עדיין נבדקת — המתן רגע.',
-      'offline':'אין חיבור — הטיוטה נשארה בטלפון הזה. נסה לסיים שוב כשיש רשת.'};
-    showToast(messages[r.reason]||'לא התקבל אישור שמירה. הטיוטה נשארה בטלפון הזה; נסה לסיים שוב כשיש חיבור.',null,null,6000);
+    showToast(localReceiptFinalMessage(r),null,null,6000); // v421: ההודעות עצמן לא השתנו — עברו לפונקציה, גם לבדיקה החוזרת
     return false;
   } finally {handoffFinalizing.receiving=false;renderDraftHandoffBanner();}
 }
@@ -2912,7 +2948,15 @@ function localReceiptCopies() {
 function localReceivingBannerHtml() {
   const copies=localReceiptCopies();
   return '<div class="rounded-xl border border-blue-200 bg-blue-50 text-blue-900 p-3 mb-2 text-sm">הקליטה נשמרת בטלפון הזה בלבד עד הסיום. יש להשלים אותה באותו טלפון.</div>'+
-    (localReceiptPending()?'<div class="rounded-xl border border-amber-300 bg-amber-50 text-amber-900 p-3 mb-2 text-sm">בקשת הסיום ממתינה לאישור. הטיוטה נשארה בטלפון.<button class="btn-tap block w-full border rounded-lg bg-white p-2 mt-2 font-bold" data-handoff="retry-final" data-kind="receiving">בדוק ושמור שוב</button><button class="btn-tap block w-full p-2 mt-1 underline" data-handoff="archive-final" data-kind="receiving">שמור עותק בצד לבדיקה</button></div>':'')+
+    // v421 (כמו תנובה 166): מה קרה, שלא אבד כלום, שהקליטה נעולה עד האישור ומה לוחצים; ובזמן הבדיקה עצמה — "בודק ושומר…"
+    // בלי כפתורים. עד 420: "בקשת הסיום ממתינה לאישור. הטיוטה נשארה בטלפון."
+    (localReceiptPending()?'<div class="rounded-xl border border-amber-300 bg-amber-50 text-amber-900 p-3 mb-2 text-sm">'+
+      (receiptFinalizing||handoffFinalizing.receiving
+        ?'<div class="font-black">בודק ושומר…</div><div class="mt-1">זה לוקח פחות מדקה. שום דבר לא אבד — הקליטה שמורה בטלפון הזה.</div>'
+        :'<div class="font-black">השמירה נשלחה, ועוד לא הגיע אישור מהענן.</div><div class="mt-1">שום דבר לא אבד — הקליטה שמורה בטלפון הזה. עד שהשמירה תאושר, הקליטה נעולה.</div>'+
+          '<button class="btn-tap block w-full border rounded-lg bg-white p-2 mt-2 font-bold" data-handoff="retry-final" data-kind="receiving">בדוק ושמור שוב</button>'+
+          '<div class="mt-2 text-xs">לא עובר? סגור את האפליקציה, פתח אותה שוב ולחץ כאן שוב.</div>'+
+          '<button class="btn-tap block w-full p-2 mt-1 underline" data-handoff="archive-final" data-kind="receiving">שמור עותק בצד לבדיקה</button>')+'</div>':'')+
     (copies.length?'<details class="rounded-xl border border-amber-300 bg-amber-50 text-amber-900 p-3 mb-2 text-sm"><summary>עותקי קליטה קודמים שנשמרו בטלפון ('+copies.length+')</summary>'+copies.map((x,i)=>'<div class="mt-2">עותק '+(i+1)+(x.savedAt?' · '+new Date(x.savedAt).toLocaleString('he-IL'):'')+'<button class="btn-tap block w-full border rounded-lg bg-white p-2 mt-1 font-bold" data-handoff="local-open" data-kind="receiving" data-session="'+htmlEscape(x.key)+'">פתח לבדיקה בטלפון הזה</button></div>').join('')+'</details>':'');
 }
 async function localReceiptCopyPayload(copy) {
@@ -3052,6 +3096,9 @@ function guardDraftEvent(e) {
   const role=t.closest('[data-role]')?.dataset.role||'',id=t.closest('[id]')?.id||'';
   if(['rc-history','rc-recon-cancel','ret-slot'].includes(role)||['scanClose','rs_cancel','qty_cancel','confirmCancel'].includes(id))return;
   if(id==='confirmOk'&&confirmCb&&confirmCb.allowReadOnly)return;
+  // v421: "אשר וקלוט" עם ניסיון שמירה תלוי עובר — confirmReceipt בודק אותו בעצמו ומנסה שוב. בזמן שמירה שרצה עכשיו — נעצר
+  // כמו קודם, כדי שלחיצה כפולה לא תשמור פעמיים.
+  if(id==='rs_ok'&&kind==='receiving'&&!receiptFinalizing&&!handoffFinalizing.receiving&&localReceiptPending())return;
   if(!canEditDraft(kind)){e.preventDefault();e.stopImmediatePropagation();return;}
   if(e.type==='input'&&id==='orderNote'){handoffUserEdit=true;if(kind==='order'){orderDraftNote=t.value;saveDraft();}queueMicrotask(()=>{handoffUserEdit=false;});}
   if(['input','change','click'].includes(e.type)) {
@@ -19255,6 +19302,15 @@ async function aiRunInvoiceScan({ background = false } = {}) {
 let aiAnalyzeBusy = false;
 let aiAnalyzeError = '';
 let aiAnalyzeResult = null;
+// v421 (כמו תנובה 166): שמירת התעודה אינה מחכה למנתח. כל ריצה מקבלת מספר; aiAnalyzeDetach מנתק את הריצה
+// שבדרך (הבקשה ממשיכה ברקע), ותשובה של ריצה שנותקה — כשתגיע — אינה נוגעת בדבר: לא בממצאים, לא בטיוטה ולא במסך.
+let aiAnalyzeRunId = 0;
+function aiAnalyzeDetach() {
+  if (!aiAnalyzeBusy) return false;
+  aiAnalyzeRunId++;
+  aiAnalyzeBusy = false;
+  return true;
+}
 
 function aiAnalyzeRowProductIndex(ev) {
   // כל שורה שהמנוע כבר שייך למוצר בוודאות, לפי תעודה/שורה/עמוד.
@@ -19424,6 +19480,7 @@ async function aiRunAnalyzer(options) {
   const ev = aiScanEvaluation;
   if (!ev) { if (!auto) showToast('אין עדיין תוצאות סריקה לנתח', null, null, 2600); return; }
   if (!auth || !auth.currentUser) { if (!auto) showToast('עדיין אין חיבור מאובטח — המתן רגע ונסה שוב', null, null, 3000); return; }
+  const analyzeRun = ++aiAnalyzeRunId; // v421
   aiAnalyzeBusy = true; handoffChanged('receiving'); aiAnalyzeError = ''; aiAnalyzeResult = null;
   if (currentView === 'reconcile') renderReconcile();
   try {
@@ -19457,7 +19514,7 @@ async function aiRunAnalyzer(options) {
       try { payload = await pending.promise; }
       finally { if (receiptAnalysisPending === pending) receiptAnalysisPending = null; }
     }
-    if (scanRun !== aiScanRunId || ev !== aiScanEvaluation || key !== receiptDraftId + '\n' + JSON.stringify(aiAnalyzePayload(ev))) return;
+    if (analyzeRun !== aiAnalyzeRunId || scanRun !== aiScanRunId || ev !== aiScanEvaluation || key !== receiptDraftId + '\n' + JSON.stringify(aiAnalyzePayload(ev))) return;
     receiptAnalysisCache = { key, payload }; saveReceiptDraft();
     const analysis = payload.analysis || {};
     const claims = Array.isArray(analysis.claims) ? analysis.claims : [];
@@ -19473,11 +19530,14 @@ async function aiRunAnalyzer(options) {
     };
     if (aiAnalyzeResult.accepted) aiAdoptAnalyzerResult(ev, aiAnalyzeResult);
   } catch (error) {
-    if (ev === aiScanEvaluation) aiAnalyzeError = (error && error.message) || 'הניתוח נכשל';
+    if (analyzeRun === aiAnalyzeRunId && ev === aiScanEvaluation) aiAnalyzeError = (error && error.message) || 'הניתוח נכשל';
   } finally {
-    if (ev === aiScanEvaluation) aiAnalyzeBusy = false;
-    handoffChanged('receiving');
-    if (currentView === 'reconcile') renderReconcile();
+    // v421: ריצה שנותקה (התעודה נשמרה בלעדיה) אינה מאפסת ריצה חדשה ואינה מציירת את המסך.
+    if (analyzeRun === aiAnalyzeRunId) {
+      if (ev === aiScanEvaluation) aiAnalyzeBusy = false;
+      handoffChanged('receiving');
+      if (currentView === 'reconcile') renderReconcile();
+    }
   }
 }
 // v188: אימוץ. כשההסבר של המנתח נסגר על הכסף ועל היחידות, הטענות שלו הן
@@ -19555,7 +19615,11 @@ function aiAnalyzeClaimEditorHtml(claim, detail) {
 function aiAnalyzeHtml(ev) {
   if (!ev || !ev.findingsReady) return '';
   if (aiAnalyzeBusy) {
-    return '<div class="mt-3 rounded-2xl border-2 border-violet-200 bg-violet-50 p-3 text-center"><i class="fa-solid fa-spinner fa-spin text-violet-600"></i> <span class="font-black text-violet-800 text-sm">המנתח מסביר את הפער…</span></div>';
+    // v421 (כמו תנובה 166): כשהממצאים שעל המסך כבר סוגרים את החשבון (ev.valid — הכפתור לסגירה פתוח), אומרים שאין צורך
+    // לחכות. כשהסגירה נעולה, ייתכן שדווקא המנתח יפתח אותה — ולכן בלי השורה.
+    return '<div class="mt-3 rounded-2xl border-2 border-violet-200 bg-violet-50 p-3 text-center"><i class="fa-solid fa-spinner fa-spin text-violet-600"></i> <span class="font-black text-violet-800 text-sm">המנתח מסביר את הפער…</span>' +
+      (ev.valid === true ? '<div data-analyzer-no-wait class="text-xs font-bold text-violet-700 mt-1">אפשר לסגור את התעודה בלי לחכות לו</div>' : '') +
+      '</div>';
   }
   const result = aiAnalyzeResult;
   if (result && result.accepted) {
@@ -22172,6 +22236,16 @@ function receiptPriceChanges() {
 }
 async function confirmReceipt() {
   if (!pendingReceipt) { hideReceiptSummary(); return; }
+  // v421 (כמו תנובה 166 וברמן 157): ניסיון שמירה תלוי מלחיצה קודמת — "אשר וקלוט" בודק אותו בעצמו, כמו "בדוק ושמור שוב"
+  // בפס שלמעלה (שמוסתר מאחורי חלון הסיכום). לפני הבדיקות של הקליטה הנוכחית: הניסיון התלוי כבר עבר אותן כשנשלח.
+  // נשמר — נסגר משם. הענן כבר שמר (saved-late) — ההודעה אומרת, ולא שומרים שוב. הניסיון הישן לא הגיע
+  // (pending-changed+gone) או כבר לא תואם את הענן (changed) — הוא ירד, וממשיכים באותה לחיצה לשמור את מה שיש עכשיו.
+  // בלי תשובה מהשרת — נשאר תלוי, עם ההודעה. עד 420 הלחיצה נבלעה: "לחץ ״בדוק ושמור שוב״ למעלה".
+  if (!receiptFinalizing && !handoffFinalizing.receiving && localReceiptPending()) {
+    const res = await retryLocalReceiptFinalResult();
+    if (!res || res.ok || res.saved || localReceiptPending() || !canEditDraft('receiving', true) || !pendingReceipt) return;
+    if (!['pending-changed', 'changed'].includes(res.reason)) return;
+  }
   if (!paperRowEnsureBalanced()) return;
   if (!deliveryCreditReady()) { deliveryCreditOpenWork('פרטי הזיכוי השתנו. אשר אותם ובדוק שוב את סיכום הקליטה.'); return; }
   if (receiptDeliveryCredits.length && JSON.stringify(pendingReceipt.shortCreditNotes || []) !== JSON.stringify(deliveryCreditNotes())) {
@@ -22180,6 +22254,10 @@ async function confirmReceipt() {
   if (receiptFinalizing) return;
   if (!canEditDraft('receiving'))return;
   if(!saveReceiptDraft())return;
+  // v421 (כמו תנובה 166): המנתח הוא הסבר מעל ממצאים שכבר נסגרו ואושרו — מה שנשמר (pendingReceipt) נבנה מהם, והוא אינו
+  // נוגע בכמויות. עד 420, כשהוא רץ ("הרץ את המנתח", או אחרי סריקה ממסך ההשוואה), השמירה נדחתה: "קריאת התעודה עדיין
+  // רצה — המתן לסיומה" (scanRunning ב-finishLocalReceiving). מכאן התשובה שלו, אם תגיע, לא תשנה כלום בתעודה שנשמרת.
+  aiAnalyzeDetach();
   const finalEpoch=receiptLocalEpoch, finalFingerprint=handoffFingerprint('receiving'), finalSession=handoffSession({draftId:receiptDraftId,attach:receiptAttachTarget});
   receiptFinalizing=true;
   try {
@@ -22209,7 +22287,9 @@ async function confirmReceipt() {
   else if (noDoc && !attach) showToast('נקלט לפי ספירה — התעודה פתוחה עד שיגיע הנייר', null, null, 3600);
   else if (attach) showToast('התעודה צורפה ונבדקה ✓', null, null, 2600);
   else showToast('התעודה נקלטה ✓', null, null, 2200);
-  }finally{receiptFinalizing=false;}
+  // v421: הפס מצויר שוב אחרי שהדגל ירד. finishLocalReceiving מצייר אותו בזמן שהדגל עוד דולק — ובלי הציור הזה, אחרי
+  // שמירה שלא אושרה הפס נשאר על "בודק ושומר…" בלי הכפתור, עד שעוברים מסך.
+  }finally{receiptFinalizing=false;renderDraftHandoffBanner();}
 }
 async function delReceipt(id) {
   const rc = receipts.find(x => x.id === id);

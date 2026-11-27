@@ -49,10 +49,15 @@
         }
         // Never submit an earlier unresolved payload after the user has changed this draft.
         if (attempt.fingerprint !== input.fingerprint || !current(attempt)) {
-          try { const previous = await bounded(fs.getDocFromServer(ref('receipts', attempt.recordId)));
+          let previous = null;
+          try { previous = await bounded(fs.getDocFromServer(ref('receipts', attempt.recordId)));
             if (previous.exists() && exact(previous.data(), attempt)) return { ok: false, reason: 'saved-late', saved: true };
           } catch (_) {}
-          return { ok: false, reason: 'pending-changed' };
+          // gone (as in Berman v156) — a SERVER read answered and holds nothing for this record: the earlier payload never
+          // landed. The app may then drop the stale attempt and let the user finish the draft as it is now. Should that
+          // earlier transaction still land afterwards, it writes the same record id and the next attempt reports 'exists' —
+          // never a second receipt. A failed read (null) keeps the attempt pending, as before.
+          return { ok: false, reason: 'pending-changed', gone: !!(previous && !previous.exists()) };
         }
         const transaction = fs.runTransaction(o.db, async tx => {
           const recordRef = ref('receipts', attempt.recordId), snap = await tx.get(recordRef), record = snap.exists() ? snap.data() : null;
