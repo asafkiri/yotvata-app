@@ -257,11 +257,11 @@ test('7. הכרטיס שמעל המצלמה — בלי "בטל סימון"; אח
   assert.doesNotMatch(card, /data-line-clear|בטל סימון/);
 });
 
-test('8. הגרסה עלתה ל-420, כולל ה-service worker', () => {
+test('8. הגרסה עלתה ל-421, כולל ה-service worker', () => {
   const html = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-  assert.match(html, /const APP_VERSION = '420'/);
+  assert.match(html, /const APP_VERSION = '421'/);
   assert.match(html, /APP_VERSION_LABEL = 'v' \+ APP_VERSION \+ '_line_clear'/);
-  assert.match(html, /<title>הזמנות יטבתה - v420 מבצע שניתן בלי המינימום נקלט כמבצע — בלי התראה<\/title>/);
-  assert.match(html, /id="verBadge"[^>]*>v420 מבצע שניתן בלי המינימום נקלט כמבצע — בלי התראה</);
-  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v420/);
+  assert.match(html, /<title>הזמנות יטבתה - v421 שמירה שלא אושרה אינה נועלת את הקליטה<\/title>/);
+  assert.match(html, /id="verBadge"[^>]*>v421 שמירה שלא אושרה אינה נועלת את הקליטה</);
+  assert.match(fs.readFileSync(new URL('../sw.js', import.meta.url), 'utf8'), /yotvata-v421/);
 });
